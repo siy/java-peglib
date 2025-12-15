@@ -126,7 +126,7 @@ class Java25GrammarExample {
         Literal <- 'null' / 'true' / 'false' / CharLit / StringLit / NumLit
         CharLit <- < '\\'' ([^'\\\\] / '\\\\' .)* '\\'' >
         StringLit <- < '"' ([^"\\\\] / '\\\\' .)* '"' > / < '\"\"\"' (!'\"\"\"' .)* '\"\"\"' >
-        NumLit <- < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9]+ ('.' [0-9]*)? ([eE] [+\\-]? [0-9]+)? [fFdDlL]? > / < '.' [0-9]+ ([eE] [+\\-]? [0-9]+)? [fFdD]? >
+        NumLit <- < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\\-]? [0-9_]+)? [fFdD]? >
 
         Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'do' / 'double' / 'else' / 'enum' / 'extends' / 'false' / 'final' / 'finally' / 'float' / 'for' / 'goto' / 'if' / 'implements' / 'import' / 'instanceof' / 'int' / 'interface' / 'long' / 'native' / 'new' / 'non-sealed' / 'null' / 'package' / 'permits' / 'private' / 'protected' / 'public' / 'record' / 'return' / 'sealed' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throw' / 'throws' / 'transient' / 'true' / 'try' / 'var' / 'void' / 'volatile' / 'when' / 'while' / 'yield' / '_') ![a-zA-Z0-9_$]
 
