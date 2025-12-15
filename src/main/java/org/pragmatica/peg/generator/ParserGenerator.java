@@ -1023,11 +1023,15 @@ public final class ParserGenerator {
                 var savedChildren = "savedChildrenAnd" + id;
                 var andElem = "andElem" + id;
                 sb.append(pad).append("var ").append(andStart).append(" = location();\n");
-                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                if (addToChildren) {
+                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                }
                 generateCstExpressionCode(sb, and.expression(), andElem, indent, false, counter);
                 sb.append(pad).append("restoreLocation(").append(andStart).append(");\n");
-                sb.append(pad).append("children.clear();\n");
-                sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                if (addToChildren) {
+                    sb.append(pad).append("children.clear();\n");
+                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                }
                 sb.append(pad).append("var ").append(resultVar).append(" = ").append(andElem).append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ").append(andElem).append(";\n");
             }
             case Expression.Not not -> {
@@ -1035,11 +1039,15 @@ public final class ParserGenerator {
                 var savedChildren = "savedChildrenNot" + id;
                 var notElem = "notElem" + id;
                 sb.append(pad).append("var ").append(notStart).append(" = location();\n");
-                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                if (addToChildren) {
+                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                }
                 generateCstExpressionCode(sb, not.expression(), notElem, indent, false, counter);
                 sb.append(pad).append("restoreLocation(").append(notStart).append(");\n");
-                sb.append(pad).append("children.clear();\n");
-                sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                if (addToChildren) {
+                    sb.append(pad).append("children.clear();\n");
+                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                }
                 sb.append(pad).append("var ").append(resultVar).append(" = ").append(notElem).append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.success(null, \"\", location());\n");
             }
             case Expression.TokenBoundary tb -> {
@@ -1048,11 +1056,15 @@ public final class ParserGenerator {
                 var tbElem = "tbElem" + id;
                 sb.append(pad).append("var ").append(tbStart).append(" = location();\n");
                 sb.append(pad).append("inTokenBoundary = true;\n");
-                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                if (addToChildren) {
+                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                }
                 generateCstExpressionCode(sb, tb.expression(), tbElem, indent, false, counter);
                 sb.append(pad).append("inTokenBoundary = false;\n");
-                sb.append(pad).append("children.clear();\n");
-                sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                if (addToChildren) {
+                    sb.append(pad).append("children.clear();\n");
+                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                }
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(";\n");
                 sb.append(pad).append("if (").append(tbElem).append(".isSuccess()) {\n");
                 sb.append(pad).append("    var tbText").append(id).append(" = substring(").append(tbStart).append(".offset(), pos);\n");
@@ -1069,10 +1081,14 @@ public final class ParserGenerator {
             case Expression.Ignore ign -> {
                 var savedChildren = "savedChildrenIgn" + id;
                 var ignElem = "ignElem" + id;
-                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                if (addToChildren) {
+                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                }
                 generateCstExpressionCode(sb, ign.expression(), ignElem, indent, false, counter);
-                sb.append(pad).append("children.clear();\n");
-                sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                if (addToChildren) {
+                    sb.append(pad).append("children.clear();\n");
+                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                }
                 sb.append(pad).append("var ").append(resultVar).append(" = ").append(ignElem).append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ").append(ignElem).append(";\n");
             }
             case Expression.Capture cap -> {
