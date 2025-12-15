@@ -848,6 +848,20 @@ public final class ParserGenerator {
         };
     }
 
+    /**
+     * Extract inner expression from ZeroOrMore/OneOrMore for trivia matching.
+     * The whitespace rule is typically `(spaces / comments)*` - we want to match
+     * one element at a time for proper trivia classification.
+     */
+    private Expression extractInnerExpression(Expression expr) {
+        return switch (expr) {
+            case Expression.ZeroOrMore zom -> zom.expression();
+            case Expression.OneOrMore oom -> oom.expression();
+            case Expression.Group grp -> extractInnerExpression(grp.expression());
+            default -> expr;  // If not wrapped in repetition, use as-is
+        };
+    }
+
     private void generateCstExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent, boolean addToChildren, int[] counter, boolean inWhitespaceRule) {
         var pad = "    ".repeat(indent);
         var id = counter[0]++;  // Get unique ID for this expression
@@ -1142,19 +1156,33 @@ public final class ParserGenerator {
             """);
 
         if (grammar.whitespace().isPresent()) {
+            // Extract inner expression from ZeroOrMore/OneOrMore to match one element at a time
+            var wsExpr = grammar.whitespace().unwrap();
+            var innerExpr = extractInnerExpression(wsExpr);
+
             sb.append("        while (!isAtEnd()) {\n");
             sb.append("            var wsStartLoc = location();\n");
             sb.append("            var wsStartPos = pos;\n");
-            generateCstExpressionCode(sb, grammar.whitespace().unwrap(), "wsResult", 3, false, new int[]{0}, true);
+            generateCstExpressionCode(sb, innerExpr, "wsResult", 3, false, new int[]{0}, true);
             sb.append("            if (wsResult.isFailure() || pos == wsStartPos) break;\n");
             sb.append("            var wsText = substring(wsStartPos, pos);\n");
             sb.append("            var wsSpan = SourceSpan.of(wsStartLoc, location());\n");
-            sb.append("            trivia.add(new Trivia.Whitespace(wsSpan, wsText));\n");
+            sb.append("            trivia.add(classifyTrivia(wsSpan, wsText));\n");
             sb.append("        }\n");
         }
 
         sb.append("""
                     return trivia;
+                }
+
+                private Trivia classifyTrivia(SourceSpan span, String text) {
+                    if (text.startsWith("//")) {
+                        return new Trivia.LineComment(span, text);
+                    } else if (text.startsWith("/*")) {
+                        return new Trivia.BlockComment(span, text);
+                    } else {
+                        return new Trivia.Whitespace(span, text);
+                    }
                 }
 
                 private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {

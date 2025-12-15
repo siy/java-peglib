@@ -16,7 +16,7 @@ class Java25GrammarExample {
     static final String JAVA_GRAMMAR = """
         CompilationUnit <- PackageDecl? ImportDecl* TypeDecl*
         PackageDecl <- 'package' QualifiedName ';'
-        ImportDecl  <- 'import' 'static'? QualifiedName ('.' '*')? ';'
+        ImportDecl  <- 'import' 'module' QualifiedName ';' / 'import' 'static'? QualifiedName ('.' '*')? ';'
 
         TypeDecl <- Annotation* Modifier* TypeKind
         TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
@@ -27,7 +27,7 @@ class Java25GrammarExample {
         AnnotationMember <- Annotation* Modifier* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
         AnnotationElemDecl <- Type Identifier '(' ')' ('default' AnnotationElem)? ';'
         EnumDecl <- 'enum' Identifier ImplementsClause? EnumBody
-        RecordDecl <- 'record' Identifier '(' RecordComponents? ')' ImplementsClause? RecordBody
+        RecordDecl <- 'record' Identifier TypeParams? '(' RecordComponents? ')' ImplementsClause? RecordBody
         ImplementsClause <- 'implements' TypeList
         PermitsClause <- 'permits' TypeList
         TypeList <- Type (',' Type)*
@@ -35,15 +35,17 @@ class Java25GrammarExample {
         TypeParam <- Identifier ('extends' Type ('&' Type)*)?
 
         ClassBody <- '{' ClassMember* '}'
-        ClassMember <- Annotation* Modifier* Member / StaticBlock / ';'
+        ClassMember <- Annotation* Modifier* Member / InitializerBlock / ';'
         Member <- ConstructorDecl / MethodDecl / FieldDecl / TypeKind
-        StaticBlock <- 'static' Block
+        InitializerBlock <- 'static'? Block
         EnumBody <- '{' EnumConsts? (';' ClassMember*)? '}'
         EnumConsts <- EnumConst (',' EnumConst)* ','?
         EnumConst <- Identifier ('(' Args? ')')? ClassBody?
         RecordComponents <- RecordComp (',' RecordComp)*
         RecordComp <- Annotation* Type Identifier
-        RecordBody <- '{' ClassMember* '}'
+        RecordBody <- '{' RecordMember* '}'
+        RecordMember <- CompactConstructor / ClassMember
+        CompactConstructor <- Annotation* Modifier* Identifier Block
 
         FieldDecl <- Type VarDecls ';'
         VarDecls <- VarDecl (',' VarDecl)*
@@ -72,6 +74,7 @@ class Java25GrammarExample {
              / 'assert' Expr (':' Expr)? ';'
              / 'synchronized' '(' Expr ')' Block
              / 'yield' Expr ';'
+             / Identifier ':' Stmt
              / Expr ';'
              / ';'
         ForCtrl <- ForInit? ';' Expr? ';' ExprList? / Type Identifier ':' Expr
@@ -83,10 +86,13 @@ class Java25GrammarExample {
         Finally <- 'finally' Block
         SwitchBlock <- '{' SwitchRule* '}'
         SwitchRule <- SwitchLabel '->' (Expr ';' / Block / 'throw' Expr ';') / SwitchLabel ':' BlockStmt*
-        SwitchLabel <- 'case' CaseItem (',' CaseItem)* / 'default'
-        CaseItem <- Type Identifier / Expr
+        SwitchLabel <- 'case' 'null' (',' 'default')? / 'case' CaseItem (',' CaseItem)* Guard? / 'default'
+        CaseItem <- Pattern / Expr
+        Pattern <- Type Identifier
+        Guard <- 'when' Expr
 
-        Expr <- Ternary
+        Expr <- Assignment
+        Assignment <- Ternary (('=' / '>>>=' / '>>=' / '<<=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Assignment)?
         Ternary <- LogOr ('?' Expr ':' Ternary)?
         LogOr <- LogAnd ('||' LogAnd)*
         LogAnd <- BitOr ('&&' BitOr)*
@@ -103,8 +109,8 @@ class Java25GrammarExample {
         PostOp <- '.' Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
         Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / '(' Expr ')' / Lambda / 'switch' '(' Expr ')' SwitchBlock / QualifiedName
         Lambda <- LambdaParams '->' (Expr / Block)
-        LambdaParams <- Identifier / '(' LambdaParam? (',' LambdaParam)* ')'
-        LambdaParam <- Modifier* Type? Identifier
+        LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
+        LambdaParam <- Modifier* Type? (Identifier / '_') / Modifier* Type '...' (Identifier / '_')
         Args <- Expr (',' Expr)*
         ExprList <- Expr (',' Expr)*
 
@@ -128,7 +134,7 @@ class Java25GrammarExample {
         StringLit <- < '"' ([^"\\\\] / '\\\\' .)* '"' > / < '\"\"\"' (!'\"\"\"' .)* '\"\"\"' >
         NumLit <- < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\\-]? [0-9_]+)? [fFdD]? >
 
-        Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'do' / 'double' / 'else' / 'enum' / 'extends' / 'false' / 'final' / 'finally' / 'float' / 'for' / 'goto' / 'if' / 'implements' / 'import' / 'instanceof' / 'int' / 'interface' / 'long' / 'native' / 'new' / 'non-sealed' / 'null' / 'package' / 'permits' / 'private' / 'protected' / 'public' / 'record' / 'return' / 'sealed' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throw' / 'throws' / 'transient' / 'true' / 'try' / 'var' / 'void' / 'volatile' / 'when' / 'while' / 'yield' / '_') ![a-zA-Z0-9_$]
+        Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'do' / 'double' / 'else' / 'enum' / 'extends' / 'false' / 'final' / 'finally' / 'float' / 'for' / 'goto' / 'if' / 'implements' / 'import' / 'instanceof' / 'int' / 'interface' / 'long' / 'module' / 'native' / 'new' / 'non-sealed' / 'null' / 'package' / 'permits' / 'private' / 'protected' / 'public' / 'record' / 'return' / 'sealed' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throw' / 'throws' / 'transient' / 'true' / 'try' / 'var' / 'void' / 'volatile' / 'when' / 'while' / 'yield' / '_') ![a-zA-Z0-9_$]
 
         %whitespace <- ([ \\t\\r\\n] / '//' [^\\n]* / '/*' (!'*/' .)* '*/')*
         """;
