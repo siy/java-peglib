@@ -810,7 +810,7 @@ public final class ParserGenerator {
         sb.append("        \n");
 
         var counter = new int[]{0}; // Mutable counter for unique variable names
-        generateCstExpressionCode(sb, rule.expression(), "result", 2, true, counter);
+        generateCstExpressionCode(sb, rule.expression(), "result", 2, true, counter, false);
 
         sb.append("        \n");
         sb.append("        CstParseResult finalResult;\n");
@@ -848,7 +848,7 @@ public final class ParserGenerator {
         };
     }
 
-    private void generateCstExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent, boolean addToChildren, int[] counter) {
+    private void generateCstExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent, boolean addToChildren, int[] counter, boolean inWhitespaceRule) {
         var pad = "    ".repeat(indent);
         var id = counter[0]++;  // Get unique ID for this expression
 
@@ -883,7 +883,11 @@ public final class ParserGenerator {
             }
             case Expression.Reference ref -> {
                 var triviaVar = "trivia" + id;
-                sb.append(pad).append("var ").append(triviaVar).append(" = inTokenBoundary ? List.<Trivia>of() : skipWhitespace();\n");
+                if (inWhitespaceRule) {
+                    sb.append(pad).append("var ").append(triviaVar).append(" = List.<Trivia>of();\n");
+                } else {
+                    sb.append(pad).append("var ").append(triviaVar).append(" = inTokenBoundary ? List.<Trivia>of() : skipWhitespace();\n");
+                }
                 sb.append(pad).append("var ").append(resultVar).append(" = parse_")
                     .append(sanitize(ref.ruleName())).append("(").append(triviaVar).append(");\n");
                 if (addToChildren) {
@@ -898,11 +902,11 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(seqStart).append(" = location();\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
-                    if (i > 0) {
+                    if (i > 0 && !inWhitespaceRule) {
                         sb.append(pad).append("if (!inTokenBoundary) skipWhitespace();\n");
                     }
                     var elemVar = "elem" + id + "_" + i;
-                    generateCstExpressionCode(sb, elem, elemVar, indent, addToChildren, counter);
+                    generateCstExpressionCode(sb, elem, elemVar, indent, addToChildren, counter, inWhitespaceRule);
                     sb.append(pad).append("if (").append(elemVar).append(".isFailure()) {\n");
                     sb.append(pad).append("    restoreLocation(").append(seqStart).append(");\n");
                     sb.append(pad).append("    ").append(resultVar).append(" = ").append(elemVar).append(";\n");
@@ -928,7 +932,7 @@ public final class ParserGenerator {
                         sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
                     }
                     var altVar = "alt" + id + "_" + i;
-                    generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter);
+                    generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter, inWhitespaceRule);
                     sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
                     sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
                     sb.append(pad).append("} else {\n");
@@ -954,8 +958,10 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(zomStart).append(" = location();\n");
                 sb.append(pad).append("while (true) {\n");
                 sb.append(pad).append("    var ").append(beforeLoc).append(" = location();\n");
-                sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
-                generateCstExpressionCode(sb, zom.expression(), zomElem, indent + 1, addToChildren, counter);
+                if (!inWhitespaceRule) {
+                    sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
+                }
+                generateCstExpressionCode(sb, zom.expression(), zomElem, indent + 1, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("    if (").append(zomElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
                 sb.append(pad).append("        restoreLocation(").append(beforeLoc).append(");\n");
                 sb.append(pad).append("        break;\n");
@@ -968,14 +974,16 @@ public final class ParserGenerator {
                 var oomStart = "oomStart" + id;
                 var beforeLoc = "beforeLoc" + id;
                 var oomElem = "oomElem" + id;
-                generateCstExpressionCode(sb, oom.expression(), oomFirst, indent, addToChildren, counter);
+                generateCstExpressionCode(sb, oom.expression(), oomFirst, indent, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("var ").append(resultVar).append(" = ").append(oomFirst).append(";\n");
                 sb.append(pad).append("if (").append(oomFirst).append(".isSuccess()) {\n");
                 sb.append(pad).append("    var ").append(oomStart).append(" = location();\n");
                 sb.append(pad).append("    while (true) {\n");
                 sb.append(pad).append("        var ").append(beforeLoc).append(" = location();\n");
-                sb.append(pad).append("        if (!inTokenBoundary) skipWhitespace();\n");
-                generateCstExpressionCode(sb, oom.expression(), oomElem, indent + 2, addToChildren, counter);
+                if (!inWhitespaceRule) {
+                    sb.append(pad).append("        if (!inTokenBoundary) skipWhitespace();\n");
+                }
+                generateCstExpressionCode(sb, oom.expression(), oomElem, indent + 2, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("        if (").append(oomElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
                 sb.append(pad).append("            restoreLocation(").append(beforeLoc).append(");\n");
                 sb.append(pad).append("            break;\n");
@@ -987,7 +995,7 @@ public final class ParserGenerator {
                 var optStart = "optStart" + id;
                 var optElem = "optElem" + id;
                 sb.append(pad).append("var ").append(optStart).append(" = location();\n");
-                generateCstExpressionCode(sb, opt.expression(), optElem, indent, addToChildren, counter);
+                generateCstExpressionCode(sb, opt.expression(), optElem, indent, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("var ").append(resultVar).append(" = ").append(optElem).append(".isSuccess() ? ").append(optElem).append(" : CstParseResult.success(null, \"\", location());\n");
                 sb.append(pad).append("if (").append(optElem).append(".isFailure()) {\n");
                 sb.append(pad).append("    restoreLocation(").append(optStart).append(");\n");
@@ -1003,8 +1011,10 @@ public final class ParserGenerator {
                 var maxStr = rep.max().isPresent() ? String.valueOf(rep.max().unwrap()) : "Integer.MAX_VALUE";
                 sb.append(pad).append("while (").append(repCount).append(" < ").append(maxStr).append(") {\n");
                 sb.append(pad).append("    var ").append(beforeLoc).append(" = location();\n");
-                sb.append(pad).append("    if (").append(repCount).append(" > 0 && !inTokenBoundary) skipWhitespace();\n");
-                generateCstExpressionCode(sb, rep.expression(), repElem, indent + 1, addToChildren, counter);
+                if (!inWhitespaceRule) {
+                    sb.append(pad).append("    if (").append(repCount).append(" > 0 && !inTokenBoundary) skipWhitespace();\n");
+                }
+                generateCstExpressionCode(sb, rep.expression(), repElem, indent + 1, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("    if (").append(repElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
                 sb.append(pad).append("        restoreLocation(").append(beforeLoc).append(");\n");
                 sb.append(pad).append("        break;\n");
@@ -1026,7 +1036,7 @@ public final class ParserGenerator {
                 if (addToChildren) {
                     sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
                 }
-                generateCstExpressionCode(sb, and.expression(), andElem, indent, false, counter);
+                generateCstExpressionCode(sb, and.expression(), andElem, indent, false, counter, inWhitespaceRule);
                 sb.append(pad).append("restoreLocation(").append(andStart).append(");\n");
                 if (addToChildren) {
                     sb.append(pad).append("children.clear();\n");
@@ -1042,7 +1052,7 @@ public final class ParserGenerator {
                 if (addToChildren) {
                     sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
                 }
-                generateCstExpressionCode(sb, not.expression(), notElem, indent, false, counter);
+                generateCstExpressionCode(sb, not.expression(), notElem, indent, false, counter, inWhitespaceRule);
                 sb.append(pad).append("restoreLocation(").append(notStart).append(");\n");
                 if (addToChildren) {
                     sb.append(pad).append("children.clear();\n");
@@ -1059,7 +1069,7 @@ public final class ParserGenerator {
                 if (addToChildren) {
                     sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
                 }
-                generateCstExpressionCode(sb, tb.expression(), tbElem, indent, false, counter);
+                generateCstExpressionCode(sb, tb.expression(), tbElem, indent, false, counter, inWhitespaceRule);
                 sb.append(pad).append("inTokenBoundary = false;\n");
                 if (addToChildren) {
                     sb.append(pad).append("children.clear();\n");
@@ -1084,7 +1094,7 @@ public final class ParserGenerator {
                 if (addToChildren) {
                     sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
                 }
-                generateCstExpressionCode(sb, ign.expression(), ignElem, indent, false, counter);
+                generateCstExpressionCode(sb, ign.expression(), ignElem, indent, false, counter, inWhitespaceRule);
                 if (addToChildren) {
                     sb.append(pad).append("children.clear();\n");
                     sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
@@ -1095,7 +1105,7 @@ public final class ParserGenerator {
                 var capStart = "capStart" + id;
                 var capElem = "capElem" + id;
                 sb.append(pad).append("var ").append(capStart).append(" = location();\n");
-                generateCstExpressionCode(sb, cap.expression(), capElem, indent, addToChildren, counter);
+                generateCstExpressionCode(sb, cap.expression(), capElem, indent, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("if (").append(capElem).append(".isSuccess()) {\n");
                 sb.append(pad).append("    captures.put(\"").append(cap.name()).append("\", substring(").append(capStart).append(".offset(), pos));\n");
                 sb.append(pad).append("}\n");
@@ -1115,7 +1125,7 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(resultVar).append(" = CstParseResult.success(null, \"\", location());\n");
             }
             case Expression.Group grp -> {
-                generateCstExpressionCode(sb, grp.expression(), resultVar, indent, addToChildren, counter);
+                generateCstExpressionCode(sb, grp.expression(), resultVar, indent, addToChildren, counter, inWhitespaceRule);
             }
         }
     }
@@ -1133,7 +1143,7 @@ public final class ParserGenerator {
             sb.append("        while (!isAtEnd()) {\n");
             sb.append("            var wsStartLoc = location();\n");
             sb.append("            var wsStartPos = pos;\n");
-            generateCstExpressionCode(sb, grammar.whitespace().unwrap(), "wsResult", 3, false, new int[]{0});
+            generateCstExpressionCode(sb, grammar.whitespace().unwrap(), "wsResult", 3, false, new int[]{0}, true);
             sb.append("            if (wsResult.isFailure() || pos == wsStartPos) break;\n");
             sb.append("            var wsText = substring(wsStartPos, pos);\n");
             sb.append("            var wsSpan = SourceSpan.of(wsStartLoc, location());\n");
