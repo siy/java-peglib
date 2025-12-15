@@ -918,11 +918,15 @@ public final class ParserGenerator {
                 var savedChildren = "savedChildren" + id;
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(" = null;\n");
                 sb.append(pad).append("var ").append(choiceStart).append(" = location();\n");
-                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                if (addToChildren) {
+                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                }
                 int i = 0;
                 for (var alt : choice.alternatives()) {
-                    sb.append(pad).append("children.clear();\n");
-                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                    if (addToChildren) {
+                        sb.append(pad).append("children.clear();\n");
+                        sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                    }
                     var altVar = "alt" + id + "_" + i;
                     generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter);
                     sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
@@ -935,8 +939,10 @@ public final class ParserGenerator {
                     sb.append(pad).append("}\n");
                 }
                 sb.append(pad).append("if (").append(resultVar).append(" == null) {\n");
-                sb.append(pad).append("    children.clear();\n");
-                sb.append(pad).append("    children.addAll(").append(savedChildren).append(");\n");
+                if (addToChildren) {
+                    sb.append(pad).append("    children.clear();\n");
+                    sb.append(pad).append("    children.addAll(").append(savedChildren).append(");\n");
+                }
                 sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.failure(\"one of alternatives\");\n");
                 sb.append(pad).append("}\n");
             }
