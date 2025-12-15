@@ -340,4 +340,50 @@ class SourceGenerationExample {
             );
             """);
     }
+
+    // === JBCT Compliance Tests ===
+
+    /**
+     * Verify generated parsers use typed Cause instead of RuntimeException.
+     * This is a JBCT requirement: no business exceptions, use Cause types.
+     */
+    @Test
+    void generatedParser_usesCauseNotException() {
+        var grammar = "Number <- [0-9]+";
+
+        var result = PegParser.generateParser(grammar, "com.example", "TestParser");
+        assertTrue(result.isSuccess());
+
+        var source = result.unwrap();
+
+        // Should not use RuntimeException
+        assertFalse(source.contains("new RuntimeException"), "Generated code should not use RuntimeException");
+
+        // Should define ParseError implementing Cause
+        assertTrue(source.contains("record ParseError"), "Should have ParseError record");
+        assertTrue(source.contains("implements Cause"), "ParseError should implement Cause");
+
+        // Should import Cause
+        assertTrue(source.contains("import org.pragmatica.lang.Cause;"), "Should import Cause");
+    }
+
+    /**
+     * Verify CST parser uses typed Cause instead of RuntimeException.
+     */
+    @Test
+    void generatedCstParser_usesCauseNotException() {
+        var grammar = "Number <- [0-9]+";
+
+        var result = PegParser.generateCstParser(grammar, "com.example", "TestParser");
+        assertTrue(result.isSuccess());
+
+        var source = result.unwrap();
+
+        // Should not use RuntimeException
+        assertFalse(source.contains("new RuntimeException"), "Generated CST code should not use RuntimeException");
+
+        // Should define ParseError implementing Cause
+        assertTrue(source.contains("record ParseError"), "Should have ParseError record");
+        assertTrue(source.contains("implements Cause"), "ParseError should implement Cause");
+    }
 }

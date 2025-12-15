@@ -68,6 +68,7 @@ public final class ParserGenerator {
 
     private void generateImports(StringBuilder sb) {
         sb.append("""
+            import org.pragmatica.lang.Cause;
             import org.pragmatica.lang.Option;
             import org.pragmatica.lang.Result;
 
@@ -85,6 +86,19 @@ public final class ParserGenerator {
         sb.append(" * This parser was generated from a PEG grammar and depends only on pragmatica-lite:core.\n");
         sb.append(" */\n");
         sb.append("public final class ").append(className).append(" {\n\n");
+
+        // Add ParseError type
+        sb.append("""
+                // === Parse Error ===
+
+                public record ParseError(int line, int column, String reason) implements Cause {
+                    @Override
+                    public String message() {
+                        return reason + " at " + line + ":" + column;
+                    }
+                }
+
+            """);
     }
 
     private void generateParseContext(StringBuilder sb) {
@@ -156,12 +170,10 @@ public final class ParserGenerator {
                     init(input);
                     var result = parse_%s();
                     if (result.isFailure()) {
-                        return Result.failure(new RuntimeException(
-                            "Parse error at " + line + ":" + column + ": " + result.expected));
+                        return Result.failure(new ParseError(line, column, "expected " + result.expected));
                     }
                     if (!isAtEnd()) {
-                        return Result.failure(new RuntimeException(
-                            "Unexpected input at " + line + ":" + column));
+                        return Result.failure(new ParseError(line, column, "unexpected input"));
                     }
                     return Result.success(result.value);
                 }
@@ -601,6 +613,7 @@ public final class ParserGenerator {
 
     private void generateCstImports(StringBuilder sb) {
         sb.append("""
+            import org.pragmatica.lang.Cause;
             import org.pragmatica.lang.Result;
 
             import java.util.ArrayList;
@@ -663,6 +676,13 @@ public final class ParserGenerator {
 
                     record Token(SourceSpan span, String rule, String text,
                                  List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
+                }
+
+                public record ParseError(SourceLocation location, String reason) implements Cause {
+                    @Override
+                    public String message() {
+                        return reason + " at " + location;
+                    }
                 }
 
             """);
@@ -750,13 +770,11 @@ public final class ParserGenerator {
                     var leadingTrivia = skipWhitespace();
                     var result = parse_%s(leadingTrivia);
                     if (result.isFailure()) {
-                        return Result.failure(new RuntimeException(
-                            "Parse error at " + line + ":" + column + ": " + result.expected));
+                        return Result.failure(new ParseError(location(), "expected " + result.expected));
                     }
                     skipWhitespace(); // Consume trailing whitespace
                     if (!isAtEnd()) {
-                        return Result.failure(new RuntimeException(
-                            "Unexpected input at " + line + ":" + column));
+                        return Result.failure(new ParseError(location(), "unexpected input"));
                     }
                     return Result.success(result.node);
                 }
@@ -791,7 +809,8 @@ public final class ParserGenerator {
         sb.append("        var children = new ArrayList<CstNode>();\n");
         sb.append("        \n");
 
-        generateCstExpressionCode(sb, rule.expression(), "result", 2, true);
+        var counter = new int[]{0}; // Mutable counter for unique variable names
+        generateCstExpressionCode(sb, rule.expression(), "result", 2, true, counter);
 
         sb.append("        \n");
         sb.append("        CstParseResult finalResult;\n");
@@ -829,8 +848,9 @@ public final class ParserGenerator {
         };
     }
 
-    private void generateCstExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent, boolean addToChildren) {
+    private void generateCstExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent, boolean addToChildren, int[] counter) {
         var pad = "    ".repeat(indent);
+        var id = counter[0]++;  // Get unique ID for this expression
 
         switch (expr) {
             case Expression.Literal lit -> {
@@ -862,9 +882,10 @@ public final class ParserGenerator {
                 }
             }
             case Expression.Reference ref -> {
-                sb.append(pad).append("var triviaFor").append(resultVar).append(" = inTokenBoundary ? List.<Trivia>of() : skipWhitespace();\n");
+                var triviaVar = "trivia" + id;
+                sb.append(pad).append("var ").append(triviaVar).append(" = inTokenBoundary ? List.<Trivia>of() : skipWhitespace();\n");
                 sb.append(pad).append("var ").append(resultVar).append(" = parse_")
-                    .append(sanitize(ref.ruleName())).append("(triviaFor").append(resultVar).append(");\n");
+                    .append(sanitize(ref.ruleName())).append("(").append(triviaVar).append(");\n");
                 if (addToChildren) {
                     sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
                     sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
@@ -872,166 +893,196 @@ public final class ParserGenerator {
                 }
             }
             case Expression.Sequence seq -> {
+                var seqStart = "seqStart" + id;
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(" = CstParseResult.success(null, \"\", location());\n");
-                sb.append(pad).append("var seqStartLoc = location();\n");
+                sb.append(pad).append("var ").append(seqStart).append(" = location();\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
                     if (i > 0) {
                         sb.append(pad).append("if (!inTokenBoundary) skipWhitespace();\n");
                     }
-                    generateCstExpressionCode(sb, elem, "elem" + i, indent, addToChildren);
-                    sb.append(pad).append("if (elem").append(i).append(".isFailure()) {\n");
-                    sb.append(pad).append("    restoreLocation(seqStartLoc);\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = elem").append(i).append(";\n");
+                    var elemVar = "elem" + id + "_" + i;
+                    generateCstExpressionCode(sb, elem, elemVar, indent, addToChildren, counter);
+                    sb.append(pad).append("if (").append(elemVar).append(".isFailure()) {\n");
+                    sb.append(pad).append("    restoreLocation(").append(seqStart).append(");\n");
+                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(elemVar).append(";\n");
                     sb.append(pad).append("}\n");
                     i++;
                 }
-                // Update result text to combined text
                 sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
-                sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.success(null, substring(seqStartLoc.offset(), pos), location());\n");
+                sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.success(null, substring(").append(seqStart).append(".offset(), pos), location());\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.Choice choice -> {
+                var choiceStart = "choiceStart" + id;
+                var savedChildren = "savedChildren" + id;
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(" = null;\n");
-                sb.append(pad).append("var choiceStartLoc = location();\n");
-                sb.append(pad).append("var savedChildren = new ArrayList<>(children);\n");
+                sb.append(pad).append("var ").append(choiceStart).append(" = location();\n");
+                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
                 int i = 0;
                 for (var alt : choice.alternatives()) {
                     sb.append(pad).append("children.clear();\n");
-                    sb.append(pad).append("children.addAll(savedChildren);\n");
-                    generateCstExpressionCode(sb, alt, "alt" + i, indent, addToChildren);
-                    sb.append(pad).append("if (alt").append(i).append(".isSuccess()) {\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = alt").append(i).append(";\n");
+                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                    var altVar = "alt" + id + "_" + i;
+                    generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter);
+                    sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
+                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
                     sb.append(pad).append("} else {\n");
-                    sb.append(pad).append("    restoreLocation(choiceStartLoc);\n");
+                    sb.append(pad).append("    restoreLocation(").append(choiceStart).append(");\n");
                     i++;
                 }
-                // Close all else blocks
                 for (int j = 0; j < choice.alternatives().size(); j++) {
                     sb.append(pad).append("}\n");
                 }
                 sb.append(pad).append("if (").append(resultVar).append(" == null) {\n");
                 sb.append(pad).append("    children.clear();\n");
-                sb.append(pad).append("    children.addAll(savedChildren);\n");
+                sb.append(pad).append("    children.addAll(").append(savedChildren).append(");\n");
                 sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.failure(\"one of alternatives\");\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.ZeroOrMore zom -> {
+                var zomStart = "zomStart" + id;
+                var beforeLoc = "beforeLoc" + id;
+                var zomElem = "zomElem" + id;
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(" = CstParseResult.success(null, \"\", location());\n");
-                sb.append(pad).append("var zomStartLoc = location();\n");
+                sb.append(pad).append("var ").append(zomStart).append(" = location();\n");
                 sb.append(pad).append("while (true) {\n");
-                sb.append(pad).append("    var beforeLoc = location();\n");
+                sb.append(pad).append("    var ").append(beforeLoc).append(" = location();\n");
                 sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
-                generateCstExpressionCode(sb, zom.expression(), "zomElem", indent + 1, addToChildren);
-                sb.append(pad).append("    if (zomElem.isFailure() || location().offset() == beforeLoc.offset()) {\n");
-                sb.append(pad).append("        restoreLocation(beforeLoc);\n");
+                generateCstExpressionCode(sb, zom.expression(), zomElem, indent + 1, addToChildren, counter);
+                sb.append(pad).append("    if (").append(zomElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
+                sb.append(pad).append("        restoreLocation(").append(beforeLoc).append(");\n");
                 sb.append(pad).append("        break;\n");
                 sb.append(pad).append("    }\n");
                 sb.append(pad).append("}\n");
-                sb.append(pad).append(resultVar).append(" = CstParseResult.success(null, substring(zomStartLoc.offset(), pos), location());\n");
+                sb.append(pad).append(resultVar).append(" = CstParseResult.success(null, substring(").append(zomStart).append(".offset(), pos), location());\n");
             }
             case Expression.OneOrMore oom -> {
-                generateCstExpressionCode(sb, oom.expression(), "oomFirst", indent, addToChildren);
-                sb.append(pad).append("var ").append(resultVar).append(" = oomFirst;\n");
-                sb.append(pad).append("if (oomFirst.isSuccess()) {\n");
-                sb.append(pad).append("    var oomStartLoc = location();\n");
+                var oomFirst = "oomFirst" + id;
+                var oomStart = "oomStart" + id;
+                var beforeLoc = "beforeLoc" + id;
+                var oomElem = "oomElem" + id;
+                generateCstExpressionCode(sb, oom.expression(), oomFirst, indent, addToChildren, counter);
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(oomFirst).append(";\n");
+                sb.append(pad).append("if (").append(oomFirst).append(".isSuccess()) {\n");
+                sb.append(pad).append("    var ").append(oomStart).append(" = location();\n");
                 sb.append(pad).append("    while (true) {\n");
-                sb.append(pad).append("        var beforeLoc = location();\n");
+                sb.append(pad).append("        var ").append(beforeLoc).append(" = location();\n");
                 sb.append(pad).append("        if (!inTokenBoundary) skipWhitespace();\n");
-                generateCstExpressionCode(sb, oom.expression(), "oomElem", indent + 2, addToChildren);
-                sb.append(pad).append("        if (oomElem.isFailure() || location().offset() == beforeLoc.offset()) {\n");
-                sb.append(pad).append("            restoreLocation(beforeLoc);\n");
+                generateCstExpressionCode(sb, oom.expression(), oomElem, indent + 2, addToChildren, counter);
+                sb.append(pad).append("        if (").append(oomElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
+                sb.append(pad).append("            restoreLocation(").append(beforeLoc).append(");\n");
                 sb.append(pad).append("            break;\n");
                 sb.append(pad).append("        }\n");
                 sb.append(pad).append("    }\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.Optional opt -> {
-                sb.append(pad).append("var optStartLoc = location();\n");
-                generateCstExpressionCode(sb, opt.expression(), "optElem", indent, addToChildren);
-                sb.append(pad).append("var ").append(resultVar).append(" = optElem.isSuccess() ? optElem : CstParseResult.success(null, \"\", location());\n");
-                sb.append(pad).append("if (optElem.isFailure()) {\n");
-                sb.append(pad).append("    restoreLocation(optStartLoc);\n");
+                var optStart = "optStart" + id;
+                var optElem = "optElem" + id;
+                sb.append(pad).append("var ").append(optStart).append(" = location();\n");
+                generateCstExpressionCode(sb, opt.expression(), optElem, indent, addToChildren, counter);
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(optElem).append(".isSuccess() ? ").append(optElem).append(" : CstParseResult.success(null, \"\", location());\n");
+                sb.append(pad).append("if (").append(optElem).append(".isFailure()) {\n");
+                sb.append(pad).append("    restoreLocation(").append(optStart).append(");\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.Repetition rep -> {
-                sb.append(pad).append("int repCount = 0;\n");
-                sb.append(pad).append("var repStartLoc = location();\n");
+                var repCount = "repCount" + id;
+                var repStart = "repStart" + id;
+                var beforeLoc = "beforeLoc" + id;
+                var repElem = "repElem" + id;
+                sb.append(pad).append("int ").append(repCount).append(" = 0;\n");
+                sb.append(pad).append("var ").append(repStart).append(" = location();\n");
                 var maxStr = rep.max().isPresent() ? String.valueOf(rep.max().unwrap()) : "Integer.MAX_VALUE";
-                sb.append(pad).append("while (repCount < ").append(maxStr).append(") {\n");
-                sb.append(pad).append("    var beforeLoc = location();\n");
-                sb.append(pad).append("    if (repCount > 0 && !inTokenBoundary) skipWhitespace();\n");
-                generateCstExpressionCode(sb, rep.expression(), "repElem", indent + 1, addToChildren);
-                sb.append(pad).append("    if (repElem.isFailure() || location().offset() == beforeLoc.offset()) {\n");
-                sb.append(pad).append("        restoreLocation(beforeLoc);\n");
+                sb.append(pad).append("while (").append(repCount).append(" < ").append(maxStr).append(") {\n");
+                sb.append(pad).append("    var ").append(beforeLoc).append(" = location();\n");
+                sb.append(pad).append("    if (").append(repCount).append(" > 0 && !inTokenBoundary) skipWhitespace();\n");
+                generateCstExpressionCode(sb, rep.expression(), repElem, indent + 1, addToChildren, counter);
+                sb.append(pad).append("    if (").append(repElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
+                sb.append(pad).append("        restoreLocation(").append(beforeLoc).append(");\n");
                 sb.append(pad).append("        break;\n");
                 sb.append(pad).append("    }\n");
-                sb.append(pad).append("    repCount++;\n");
+                sb.append(pad).append("    ").append(repCount).append("++;\n");
                 sb.append(pad).append("}\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = repCount >= ").append(rep.min())
-                    .append(" ? CstParseResult.success(null, substring(repStartLoc.offset(), pos), location()) : CstParseResult.failure(\"at least ")
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(repCount).append(" >= ").append(rep.min())
+                    .append(" ? CstParseResult.success(null, substring(").append(repStart).append(".offset(), pos), location()) : CstParseResult.failure(\"at least ")
                     .append(rep.min()).append(" repetitions\");\n");
                 sb.append(pad).append("if (").append(resultVar).append(".isFailure()) {\n");
-                sb.append(pad).append("    restoreLocation(repStartLoc);\n");
+                sb.append(pad).append("    restoreLocation(").append(repStart).append(");\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.And and -> {
-                sb.append(pad).append("var andStartLoc = location();\n");
-                sb.append(pad).append("var savedChildrenAnd = new ArrayList<>(children);\n");
-                generateCstExpressionCode(sb, and.expression(), "andElem", indent, false);
-                sb.append(pad).append("restoreLocation(andStartLoc);\n");
+                var andStart = "andStart" + id;
+                var savedChildren = "savedChildrenAnd" + id;
+                var andElem = "andElem" + id;
+                sb.append(pad).append("var ").append(andStart).append(" = location();\n");
+                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                generateCstExpressionCode(sb, and.expression(), andElem, indent, false, counter);
+                sb.append(pad).append("restoreLocation(").append(andStart).append(");\n");
                 sb.append(pad).append("children.clear();\n");
-                sb.append(pad).append("children.addAll(savedChildrenAnd);\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = andElem.isSuccess() ? CstParseResult.success(null, \"\", location()) : andElem;\n");
+                sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(andElem).append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ").append(andElem).append(";\n");
             }
             case Expression.Not not -> {
-                sb.append(pad).append("var notStartLoc = location();\n");
-                sb.append(pad).append("var savedChildrenNot = new ArrayList<>(children);\n");
-                generateCstExpressionCode(sb, not.expression(), "notElem", indent, false);
-                sb.append(pad).append("restoreLocation(notStartLoc);\n");
+                var notStart = "notStart" + id;
+                var savedChildren = "savedChildrenNot" + id;
+                var notElem = "notElem" + id;
+                sb.append(pad).append("var ").append(notStart).append(" = location();\n");
+                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                generateCstExpressionCode(sb, not.expression(), notElem, indent, false, counter);
+                sb.append(pad).append("restoreLocation(").append(notStart).append(");\n");
                 sb.append(pad).append("children.clear();\n");
-                sb.append(pad).append("children.addAll(savedChildrenNot);\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = notElem.isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.success(null, \"\", location());\n");
+                sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(notElem).append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.success(null, \"\", location());\n");
             }
             case Expression.TokenBoundary tb -> {
-                sb.append(pad).append("var tbStartLoc = location();\n");
+                var tbStart = "tbStart" + id;
+                var savedChildren = "savedChildrenTb" + id;
+                var tbElem = "tbElem" + id;
+                sb.append(pad).append("var ").append(tbStart).append(" = location();\n");
                 sb.append(pad).append("inTokenBoundary = true;\n");
-                sb.append(pad).append("var savedChildrenTb = new ArrayList<>(children);\n");
-                generateCstExpressionCode(sb, tb.expression(), "tbElem", indent, false);
+                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                generateCstExpressionCode(sb, tb.expression(), tbElem, indent, false, counter);
                 sb.append(pad).append("inTokenBoundary = false;\n");
                 sb.append(pad).append("children.clear();\n");
-                sb.append(pad).append("children.addAll(savedChildrenTb);\n");
+                sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(";\n");
-                sb.append(pad).append("if (tbElem.isSuccess()) {\n");
-                sb.append(pad).append("    var tbText = substring(tbStartLoc.offset(), pos);\n");
-                sb.append(pad).append("    var tbSpan = SourceSpan.of(tbStartLoc, location());\n");
-                sb.append(pad).append("    var tbNode = new CstNode.Token(tbSpan, \"token\", tbText, List.of(), List.of());\n");
+                sb.append(pad).append("if (").append(tbElem).append(".isSuccess()) {\n");
+                sb.append(pad).append("    var tbText").append(id).append(" = substring(").append(tbStart).append(".offset(), pos);\n");
+                sb.append(pad).append("    var tbSpan").append(id).append(" = SourceSpan.of(").append(tbStart).append(", location());\n");
+                sb.append(pad).append("    var tbNode").append(id).append(" = new CstNode.Token(tbSpan").append(id).append(", \"token\", tbText").append(id).append(", List.of(), List.of());\n");
                 if (addToChildren) {
-                    sb.append(pad).append("    children.add(tbNode);\n");
+                    sb.append(pad).append("    children.add(tbNode").append(id).append(");\n");
                 }
-                sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.success(tbNode, tbText, location());\n");
+                sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.success(tbNode").append(id).append(", tbText").append(id).append(", location());\n");
                 sb.append(pad).append("} else {\n");
-                sb.append(pad).append("    ").append(resultVar).append(" = tbElem;\n");
+                sb.append(pad).append("    ").append(resultVar).append(" = ").append(tbElem).append(";\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.Ignore ign -> {
-                sb.append(pad).append("var savedChildrenIgn = new ArrayList<>(children);\n");
-                generateCstExpressionCode(sb, ign.expression(), "ignElem", indent, false);
+                var savedChildren = "savedChildrenIgn" + id;
+                var ignElem = "ignElem" + id;
+                sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                generateCstExpressionCode(sb, ign.expression(), ignElem, indent, false, counter);
                 sb.append(pad).append("children.clear();\n");
-                sb.append(pad).append("children.addAll(savedChildrenIgn);\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ignElem.isSuccess() ? CstParseResult.success(null, \"\", location()) : ignElem;\n");
+                sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(ignElem).append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ").append(ignElem).append(";\n");
             }
             case Expression.Capture cap -> {
-                sb.append(pad).append("var capStartLoc = location();\n");
-                generateCstExpressionCode(sb, cap.expression(), "capElem", indent, addToChildren);
-                sb.append(pad).append("if (capElem.isSuccess()) {\n");
-                sb.append(pad).append("    captures.put(\"").append(cap.name()).append("\", substring(capStartLoc.offset(), pos));\n");
+                var capStart = "capStart" + id;
+                var capElem = "capElem" + id;
+                sb.append(pad).append("var ").append(capStart).append(" = location();\n");
+                generateCstExpressionCode(sb, cap.expression(), capElem, indent, addToChildren, counter);
+                sb.append(pad).append("if (").append(capElem).append(".isSuccess()) {\n");
+                sb.append(pad).append("    captures.put(\"").append(cap.name()).append("\", substring(").append(capStart).append(".offset(), pos));\n");
                 sb.append(pad).append("}\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = capElem;\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(capElem).append(";\n");
             }
             case Expression.BackReference br -> {
-                sb.append(pad).append("var captured = captures.get(\"").append(br.name()).append("\");\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = captured != null ? matchLiteralCst(captured, false) : CstParseResult.failure(\"capture '\");\n");
+                var captured = "captured" + id;
+                sb.append(pad).append("var ").append(captured).append(" = captures.get(\"").append(br.name()).append("\");\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(captured).append(" != null ? matchLiteralCst(").append(captured).append(", false) : CstParseResult.failure(\"capture '\");\n");
                 if (addToChildren) {
                     sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
                     sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
@@ -1042,7 +1093,7 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(resultVar).append(" = CstParseResult.success(null, \"\", location());\n");
             }
             case Expression.Group grp -> {
-                generateCstExpressionCode(sb, grp.expression(), resultVar, indent, addToChildren);
+                generateCstExpressionCode(sb, grp.expression(), resultVar, indent, addToChildren, counter);
             }
         }
     }
@@ -1060,7 +1111,7 @@ public final class ParserGenerator {
             sb.append("        while (!isAtEnd()) {\n");
             sb.append("            var wsStartLoc = location();\n");
             sb.append("            var wsStartPos = pos;\n");
-            generateCstExpressionCode(sb, grammar.whitespace().unwrap(), "wsResult", 3, false);
+            generateCstExpressionCode(sb, grammar.whitespace().unwrap(), "wsResult", 3, false, new int[]{0});
             sb.append("            if (wsResult.isFailure() || pos == wsStartPos) break;\n");
             sb.append("            var wsText = substring(wsStartPos, pos);\n");
             sb.append("            var wsSpan = SourceSpan.of(wsStartLoc, location());\n");
