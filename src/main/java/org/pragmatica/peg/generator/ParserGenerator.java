@@ -802,7 +802,7 @@ public final class ParserGenerator {
         sb.append("        long key = cacheKey(").append(ruleId).append(", startLoc.offset());\n");
         sb.append("        var cached = cache.get(key);\n");
         sb.append("        if (cached != null) {\n");
-        sb.append("            restoreLocation(cached.endLocation);\n");
+        sb.append("            if (cached.isSuccess()) restoreLocation(cached.endLocation);\n");
         sb.append("            return cached;\n");
         sb.append("        }\n");
         sb.append("        \n");
