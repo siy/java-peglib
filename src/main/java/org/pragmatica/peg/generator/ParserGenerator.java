@@ -902,14 +902,16 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(seqStart).append(" = location();\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
+                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
                     if (i > 0 && !inWhitespaceRule) {
-                        sb.append(pad).append("if (!inTokenBoundary) skipWhitespace();\n");
+                        sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
                     }
                     var elemVar = "elem" + id + "_" + i;
-                    generateCstExpressionCode(sb, elem, elemVar, indent, addToChildren, counter, inWhitespaceRule);
-                    sb.append(pad).append("if (").append(elemVar).append(".isFailure()) {\n");
-                    sb.append(pad).append("    restoreLocation(").append(seqStart).append(");\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(elemVar).append(";\n");
+                    generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
+                    sb.append(pad).append("    if (").append(elemVar).append(".isFailure()) {\n");
+                    sb.append(pad).append("        restoreLocation(").append(seqStart).append(");\n");
+                    sb.append(pad).append("        ").append(resultVar).append(" = ").append(elemVar).append(";\n");
+                    sb.append(pad).append("    }\n");
                     sb.append(pad).append("}\n");
                     i++;
                 }
