@@ -68,6 +68,7 @@ public final class PegParser {
 
     /**
      * Generate standalone parser source code from grammar text.
+     * The generated parser returns Object values.
      *
      * @param grammarText the PEG grammar
      * @param packageName target package for generated class
@@ -78,6 +79,21 @@ public final class PegParser {
         return GrammarParser.parse(grammarText)
             .flatMap(Grammar::validate)
             .map(grammar -> ParserGenerator.create(grammar, packageName, className).generate());
+    }
+
+    /**
+     * Generate standalone CST parser source code from grammar text.
+     * The generated parser returns CstNode with full tree structure and trivia.
+     *
+     * @param grammarText the PEG grammar
+     * @param packageName target package for generated class
+     * @param className name of generated parser class
+     * @return generated Java source code, or error if grammar is invalid
+     */
+    public static Result<String> generateCstParser(String grammarText, String packageName, String className) {
+        return GrammarParser.parse(grammarText)
+            .flatMap(Grammar::validate)
+            .map(grammar -> ParserGenerator.create(grammar, packageName, className).generateCst());
     }
 
     /**

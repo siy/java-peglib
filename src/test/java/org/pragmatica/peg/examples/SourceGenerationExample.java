@@ -197,6 +197,102 @@ class SourceGenerationExample {
         assertTrue(source.contains("skipWhitespace"));
     }
 
+    // === CST Parser Generation Tests ===
+
+    /**
+     * Generate a CST parser that preserves tree structure and trivia.
+     */
+    @Test
+    void generateCstCalculatorParser() {
+        var grammar = """
+            Expr   <- Term (('+' / '-') Term)*
+            Term   <- Factor (('*' / '/') Factor)*
+            Factor <- '(' Expr ')' / Number
+            Number <- < [0-9]+ >
+            %whitespace <- [ \\t]*
+            """;
+
+        var result = PegParser.generateCstParser(
+            grammar,
+            "com.example.calc",
+            "CstCalculator"
+        );
+
+        assertTrue(result.isSuccess(), () -> "Generation failed: " + result);
+
+        var source = result.unwrap();
+
+        // Verify package declaration
+        assertTrue(source.contains("package com.example.calc;"));
+
+        // Verify class declaration
+        assertTrue(source.contains("public final class CstCalculator"));
+
+        // Verify CST types are included
+        assertTrue(source.contains("public sealed interface CstNode"));
+        assertTrue(source.contains("record Terminal"));
+        assertTrue(source.contains("record NonTerminal"));
+        assertTrue(source.contains("record Token"));
+        assertTrue(source.contains("public record SourceSpan"));
+        assertTrue(source.contains("public record SourceLocation"));
+        assertTrue(source.contains("public sealed interface Trivia"));
+
+        // Verify parse returns CstNode
+        assertTrue(source.contains("public Result<CstNode> parse(String input)"));
+
+        // Verify trivia collection
+        assertTrue(source.contains("skipWhitespace()"));
+        assertTrue(source.contains("List<Trivia>"));
+
+        // Verify only pragmatica-lite imports
+        assertTrue(source.contains("import org.pragmatica.lang.Result;"));
+        assertFalse(source.contains("import org.pragmatica.peg."));
+
+        // Print stats
+        var lines = source.split("\n");
+        System.out.println("=== Generated CST Calculator Parser ===");
+        System.out.println("Total lines: " + lines.length);
+    }
+
+    /**
+     * Generate a CST JSON parser with trivia support.
+     */
+    @Test
+    void generateCstJsonParser() {
+        var grammar = """
+            Value   <- Object / Array / String / Number / True / False / Null
+            Object  <- '{' (Pair (',' Pair)*)? '}'
+            Pair    <- String ':' Value
+            Array   <- '[' (Value (',' Value)*)? ']'
+            String  <- '"' [^"]* '"'
+            Number  <- '-'? [0-9]+ ('.' [0-9]+)?
+            True    <- 'true'
+            False   <- 'false'
+            Null    <- 'null'
+            %whitespace <- [ \\t\\r\\n]*
+            """;
+
+        var result = PegParser.generateCstParser(
+            grammar,
+            "com.example.json",
+            "CstJsonParser"
+        );
+
+        assertTrue(result.isSuccess(), () -> "Generation failed: " + result);
+
+        var source = result.unwrap();
+
+        assertTrue(source.contains("public final class CstJsonParser"));
+        assertTrue(source.contains("parse_Value"));
+        assertTrue(source.contains("CstNode"));
+        assertTrue(source.contains("Trivia"));
+
+        // Print snippet
+        var lines = source.split("\n");
+        System.out.println("=== Generated CST JSON Parser ===");
+        System.out.println("Total lines: " + lines.length);
+    }
+
     /**
      * Usage example showing how to use generated parser.
      *
