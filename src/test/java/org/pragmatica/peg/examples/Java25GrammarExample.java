@@ -19,9 +19,13 @@ class Java25GrammarExample {
         ImportDecl  <- 'import' 'static'? QualifiedName ('.' '*')? ';'
 
         TypeDecl <- Annotation* Modifier* TypeKind
-        TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl
+        TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
         ClassDecl <- 'class' Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
         InterfaceDecl <- 'interface' Identifier TypeParams? ('extends' TypeList)? ClassBody
+        AnnotationDecl <- '@' 'interface' Identifier AnnotationBody
+        AnnotationBody <- '{' AnnotationMember* '}'
+        AnnotationMember <- Annotation* Modifier* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
+        AnnotationElemDecl <- Type Identifier '(' ')' ('default' AnnotationElem)? ';'
         EnumDecl <- 'enum' Identifier ImplementsClause? EnumBody
         RecordDecl <- 'record' Identifier '(' RecordComponents? ')' ImplementsClause? RecordBody
         ImplementsClause <- 'implements' TypeList
