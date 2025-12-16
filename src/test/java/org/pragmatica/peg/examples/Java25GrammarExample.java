@@ -153,7 +153,7 @@ class Java25GrammarExample {
         RefType <- AnnotatedTypeName ('.' AnnotatedTypeName)*
         AnnotatedTypeName <- Annotation* Identifier TypeArgs?
         Dims <- (Annotation* '[' ']')+
-        TypeArgs <- '<' TypeArg (',' TypeArg)* '>'
+        TypeArgs <- '<' '>' / '<' TypeArg (',' TypeArg)* '>'
         TypeArg <- Type / '?' (Annotation* ('extends' / 'super') Type)?
 
         QualifiedName <- Identifier ('.' Identifier)*
