@@ -863,6 +863,7 @@ public final class ParserGenerator {
         return switch (expr) {
             case Expression.Optional o -> true;
             case Expression.ZeroOrMore z -> true;
+            case Expression.Choice c -> true;  // Choice saves position and may restore on failure
             case Expression.Group g -> isOptionalLike(g.expression());
             default -> false;
         };
@@ -960,6 +961,10 @@ public final class ParserGenerator {
                 var savedChildren = "savedChildren" + id;
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(" = null;\n");
                 sb.append(pad).append("var ").append(choiceStart).append(" = location();\n");
+                // Skip whitespace after saving start - so restore goes back to pre-whitespace position
+                if (!inWhitespaceRule) {
+                    sb.append(pad).append("if (!inTokenBoundary) skipWhitespace();\n");
+                }
                 if (addToChildren) {
                     sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
                 }
