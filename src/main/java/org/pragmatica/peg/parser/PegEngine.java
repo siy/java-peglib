@@ -192,6 +192,10 @@ public final class PegEngine implements Parser {
 
         // Restore position on failure
         ctx.restoreLocation(startLoc);
+        // Use custom error message if available
+        if (rule.hasErrorMessage()) {
+            return ParseResult.Failure.at(startLoc, rule.errorMessage().unwrap());
+        }
         return result;
     }
 
@@ -212,6 +216,10 @@ public final class PegEngine implements Parser {
 
         if (result.isFailure()) {
             ctx.restoreLocation(startLoc);
+            // Use custom error message if available
+            if (rule.hasErrorMessage()) {
+                return ParseResult.Failure.at(startLoc, rule.errorMessage().unwrap());
+            }
             return result;
         }
 
@@ -263,6 +271,8 @@ public final class PegEngine implements Parser {
             case Expression.TokenBoundary tb -> parseTokenBoundaryWithActions(ctx, tb, ruleName, values, tokenCapture);
             case Expression.Ignore ign -> parseIgnore(ctx, ign, ruleName);
             case Expression.Capture cap -> parseCaptureWithActions(ctx, cap, ruleName, values, tokenCapture);
+            case Expression.CaptureScope cs -> parseCaptureScopeWithActions(ctx, cs, ruleName, values, tokenCapture);
+            case Expression.Dictionary dict -> parseDictionary(ctx, dict);
             case Expression.BackReference br -> parseBackReference(ctx, br);
             case Expression.Cut cut -> parseCut(ctx, cut);
             case Expression.Group grp -> parseExpressionWithActions(ctx, grp.expression(), ruleName, values, tokenCapture);
@@ -520,6 +530,17 @@ public final class PegEngine implements Parser {
         return result;
     }
 
+    /**
+     * Parse capture scope with actions - isolates captures within the expression.
+     */
+    private ParseResult parseCaptureScopeWithActions(ParsingContext ctx, Expression.CaptureScope cs,
+                                                      String ruleName, List<Object> values, String[] tokenCapture) {
+        var savedCaptures = ctx.saveCaptures();
+        var result = parseExpressionWithActions(ctx, cs.expression(), ruleName, values, tokenCapture);
+        ctx.restoreCaptures(savedCaptures);
+        return result;
+    }
+
     // === Expression Parsing ===
 
     private ParseResult parseExpression(ParsingContext ctx, Expression expr, String ruleName) {
@@ -539,6 +560,8 @@ public final class PegEngine implements Parser {
             case Expression.TokenBoundary tb -> parseTokenBoundary(ctx, tb, ruleName);
             case Expression.Ignore ign -> parseIgnore(ctx, ign, ruleName);
             case Expression.Capture cap -> parseCapture(ctx, cap, ruleName);
+            case Expression.CaptureScope cs -> parseCaptureScope(ctx, cs, ruleName);
+            case Expression.Dictionary dict -> parseDictionary(ctx, dict);
             case Expression.BackReference br -> parseBackReference(ctx, br);
             case Expression.Cut cut -> parseCut(ctx, cut);
             case Expression.Group grp -> parseExpression(ctx, grp.expression(), ruleName);
@@ -579,6 +602,66 @@ public final class PegEngine implements Parser {
         var span = ctx.spanFrom(startLoc);
         var node = new CstNode.Terminal(span, "", text, List.of(), List.of());
         return ParseResult.Success.of(node, ctx.location());
+    }
+
+    /**
+     * Parse dictionary using Trie-based longest match.
+     */
+    private ParseResult parseDictionary(ParsingContext ctx, Expression.Dictionary dict) {
+        var startLoc = ctx.location();
+        var words = dict.words();
+        var caseInsensitive = dict.caseInsensitive();
+
+        // Build Trie and find longest match
+        String longestMatch = null;
+        int longestLen = 0;
+
+        for (var word : words) {
+            if (matchesWord(ctx, word, caseInsensitive)) {
+                if (word.length() > longestLen) {
+                    longestMatch = word;
+                    longestLen = word.length();
+                }
+            }
+        }
+
+        if (longestMatch == null) {
+            var expected = String.join(" | ", words.stream().map(w -> "'" + w + "'").toList());
+            ctx.updateFurthest(expected);
+            return ParseResult.Failure.at(ctx.location(), expected);
+        }
+
+        // Consume the matched text
+        for (int i = 0; i < longestLen; i++) {
+            ctx.advance();
+        }
+
+        var span = ctx.spanFrom(startLoc);
+        var node = new CstNode.Terminal(span, "", longestMatch, List.of(), List.of());
+        return ParseResult.Success.of(node, ctx.location());
+    }
+
+    /**
+     * Check if word matches at current position.
+     */
+    private boolean matchesWord(ParsingContext ctx, String word, boolean caseInsensitive) {
+        if (ctx.remaining() < word.length()) {
+            return false;
+        }
+        for (int i = 0; i < word.length(); i++) {
+            char expected = word.charAt(i);
+            char actual = ctx.peek(i);
+            if (caseInsensitive) {
+                if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
+                    return false;
+                }
+            } else {
+                if (expected != actual) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private ParseResult parseCharClass(ParsingContext ctx, Expression.CharClass cc) {
@@ -966,6 +1049,16 @@ public final class PegEngine implements Parser {
         return result;
     }
 
+    /**
+     * Parse capture scope - isolates captures within the expression.
+     */
+    private ParseResult parseCaptureScope(ParsingContext ctx, Expression.CaptureScope cs, String ruleName) {
+        var savedCaptures = ctx.saveCaptures();
+        var result = parseExpression(ctx, cs.expression(), ruleName);
+        ctx.restoreCaptures(savedCaptures);
+        return result;
+    }
+
     private ParseResult parseBackReference(ParsingContext ctx, Expression.BackReference br) {
         var captured = ctx.getCapture(br.name());
         if (captured.isEmpty()) {
@@ -1080,6 +1173,8 @@ public final class PegEngine implements Parser {
             case Expression.TokenBoundary tb -> parseTokenBoundary(ctx, tb, ruleName);
             case Expression.Ignore ign -> parseIgnore(ctx, ign, ruleName);
             case Expression.Capture cap -> parseCapture(ctx, cap, ruleName);
+            case Expression.CaptureScope cs -> parseCaptureScope(ctx, cs, ruleName);
+            case Expression.Dictionary dict -> parseDictionary(ctx, dict);
             case Expression.BackReference br -> parseBackReference(ctx, br);
             case Expression.Cut cut -> parseCut(ctx, cut);
             case Expression.Group grp -> parseExpressionNoWs(ctx, grp.expression(), ruleName);

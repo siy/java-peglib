@@ -20,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li><b>Records</b> - record declarations with components</li>
  *   <li><b>Sealed classes</b> - sealed, non-sealed, permits</li>
  *   <li><b>Switch expressions</b> - arrow syntax, yield</li>
+ *   <li><b>Type-use annotations (JSR 308)</b> - {@code @NonNull String}, {@code List<@NonNull String>},
+ *       {@code String @NonNull []}, {@code Outer.@Nullable Inner}</li>
  * </ul>
  *
  * @see <a href="https://docs.oracle.com/javase/specs/jls/se25/html/jls-19.html">JLS SE 25 Chapter 19</a>
@@ -145,12 +147,14 @@ class Java25GrammarExample {
         Args <- Expr (',' Expr)*
         ExprList <- Expr (',' Expr)*
 
-        Type <- (PrimType / RefType) Dims?
+        # === Types with Type-Use Annotations (JSR 308 / JLS 4.11) ===
+        Type <- Annotation* (PrimType / RefType) Dims?
         PrimType <- 'boolean' / 'byte' / 'short' / 'int' / 'long' / 'float' / 'double' / 'char' / 'void'
-        RefType <- QualifiedName TypeArgs?
-        Dims <- ('[' ']')+
+        RefType <- AnnotatedTypeName ('.' AnnotatedTypeName)*
+        AnnotatedTypeName <- Annotation* Identifier TypeArgs?
+        Dims <- (Annotation* '[' ']')+
         TypeArgs <- '<' TypeArg (',' TypeArg)* '>'
-        TypeArg <- Type / '?' (('extends' / 'super') Type)?
+        TypeArg <- Type / '?' (Annotation* ('extends' / 'super') Type)?
 
         QualifiedName <- Identifier ('.' Identifier)*
         Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
@@ -474,6 +478,88 @@ class Java25GrammarExample {
         var code = "import module java.base;";
         var result = parser.parseCst(code, "ImportDecl");
         assertTrue(result.isSuccess(), () -> "Import module failed: " + result);
+    }
+
+    // === Type-Use Annotations (JSR 308) ===
+
+    @Test
+    void parseTypeUseAnnotation_simpleType() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // @NonNull String
+        var result = parser.parseCst("@NonNull String", "Type");
+        assertTrue(result.isSuccess(), () -> "Type-use annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_arrayType() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // String @NonNull [] - annotation on array dimension
+        var result = parser.parseCst("String @NonNull []", "Type");
+        assertTrue(result.isSuccess(), () -> "Array type-use annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_multiDimArray() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // String @NonNull [] @Nullable [] - annotations on each dimension
+        var result = parser.parseCst("String @NonNull [] @Nullable []", "Type");
+        assertTrue(result.isSuccess(), () -> "Multi-dim array type-use annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_typeArgument() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // List<@NonNull String>
+        var result = parser.parseCst("List<@NonNull String>", "Type");
+        assertTrue(result.isSuccess(), () -> "Type argument annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_wildcard() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // List<? extends @NonNull Object>
+        var result = parser.parseCst("List<? extends @NonNull Object>", "Type");
+        assertTrue(result.isSuccess(), () -> "Wildcard type annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_nestedType() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Outer.@Nullable Inner
+        var result = parser.parseCst("Outer.@Nullable Inner", "Type");
+        assertTrue(result.isSuccess(), () -> "Nested type annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_complex() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Map<@NonNull String, @Nullable List<@NonNull Integer>>
+        var result = parser.parseCst("Map<@NonNull String, @Nullable List<@NonNull Integer>>", "Type");
+        assertTrue(result.isSuccess(), () -> "Complex type annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_fieldDecl() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "class C { @NonNull String name; }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Field with type annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_methodReturn() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "class C { @NonNull String getName() { return null; } }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Method return type annotation failed: " + result);
+    }
+
+    @Test
+    void parseTypeUseAnnotation_parameter() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "class C { void set(@NonNull String value) { } }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Parameter type annotation failed: " + result);
     }
 
     // === Standalone Parser Generation ===

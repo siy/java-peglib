@@ -248,6 +248,7 @@ public final class GrammarLexer {
             case '}' -> new GrammarToken.RBrace(span(start));
             case ',' -> new GrammarToken.Comma(span(start));
             case '$' -> new GrammarToken.Dollar(span(start));
+            case '|' -> new GrammarToken.Pipe(span(start));
             default -> new GrammarToken.Error(span(start), "Unexpected character: " + c);
         };
     }

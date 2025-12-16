@@ -119,15 +119,27 @@ public final class GrammarParser {
         }
         var expression = exprResult.unwrap();
 
-        // Check for action
+        // Check for action and/or error_message
         Option<String> action = Option.none();
-        if (peek() instanceof GrammarToken.ActionCode actionCode) {
+        Option<String> errorMessage = Option.none();
+
+        while (peek() instanceof GrammarToken.ActionCode actionCode) {
             advance();
-            action = Option.some(actionCode.code());
+            var code = actionCode.code().trim();
+            if (code.startsWith("error_message")) {
+                // Parse: error_message "message text"
+                var msgStart = code.indexOf('"');
+                var msgEnd = code.lastIndexOf('"');
+                if (msgStart != -1 && msgEnd > msgStart) {
+                    errorMessage = Option.some(code.substring(msgStart + 1, msgEnd));
+                }
+            } else {
+                action = Option.some(actionCode.code());
+            }
         }
 
         var span = SourceSpan.of(start, currentLocation());
-        return Result.success(new Rule(span, id.name(), expression, action));
+        return Result.success(new Rule(span, id.name(), expression, action, errorMessage));
     }
 
     private Result<Expression> parseExpression() {
@@ -250,6 +262,36 @@ public final class GrammarParser {
             return result;
         }
         var expr = result.unwrap();
+
+        // Check for dictionary operator: 'word1' | 'word2' | 'word3'
+        if (expr instanceof Expression.Literal firstLit && peek() instanceof GrammarToken.Pipe) {
+            var words = new ArrayList<String>();
+            words.add(firstLit.text());
+            boolean caseInsensitive = firstLit.caseInsensitive();
+
+            while (peek() instanceof GrammarToken.Pipe) {
+                advance(); // skip |
+                var nextPrimary = parsePrimary();
+                if (nextPrimary.isFailure()) {
+                    return nextPrimary;
+                }
+                if (!(nextPrimary.unwrap() instanceof Expression.Literal nextLit)) {
+                    return Result.failure(new ParseError.UnexpectedInput(
+                        peek().span().start(),
+                        "non-literal",
+                        "string literal for dictionary"
+                    ));
+                }
+                words.add(nextLit.text());
+                // If any literal is case-insensitive, the whole dictionary is
+                if (nextLit.caseInsensitive()) {
+                    caseInsensitive = true;
+                }
+            }
+
+            var span = SourceSpan.of(start, currentLocation());
+            expr = new Expression.Dictionary(span, words, caseInsensitive);
+        }
 
         while (true) {
             if (peek() instanceof GrammarToken.Star) {
@@ -381,15 +423,33 @@ public final class GrammarParser {
             return Result.success(new Expression.TokenBoundary(span, inner.unwrap()));
         }
 
-        // Named capture $name< >
+        // Capture scope $(...), Named capture $name< >, or Back-reference $name
         if (token instanceof GrammarToken.Dollar) {
             advance();
+
+            // Capture scope: $(...)
+            if (peek() instanceof GrammarToken.LParen) {
+                advance();
+                var inner = parseExpression();
+                if (inner.isFailure()) return inner;
+                if (!(peek() instanceof GrammarToken.RParen)) {
+                    return Result.failure(new ParseError.UnexpectedInput(
+                        peek().span().start(),
+                        tokenDescription(peek()),
+                        "')'"
+                    ));
+                }
+                advance();
+                var span = SourceSpan.of(start, currentLocation());
+                return Result.success(new Expression.CaptureScope(span, inner.unwrap()));
+            }
+
+            // Named capture or back-reference requires identifier
             if (!(peek() instanceof GrammarToken.Identifier nameId)) {
-                // Back-reference would need lookahead
                 return Result.failure(new ParseError.UnexpectedInput(
                     peek().span().start(),
                     tokenDescription(peek()),
-                    "capture name"
+                    "capture name or '('"
                 ));
             }
             advance();
@@ -473,6 +533,7 @@ public final class GrammarParser {
             case GrammarToken.RBrace r -> "'}'";
             case GrammarToken.Comma c -> "','";
             case GrammarToken.Dollar d -> "'$'";
+            case GrammarToken.Pipe p -> "'|'";
             case GrammarToken.Directive d -> "directive '%" + d.name() + "'";
             case GrammarToken.Eof e -> "end of input";
             case GrammarToken.Error e -> "error";

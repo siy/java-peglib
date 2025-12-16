@@ -164,6 +164,21 @@ public final class ParsingContext {
         captures.clear();
     }
 
+    /**
+     * Save current captures for later restoration (used by capture scope).
+     */
+    public Map<String, String> saveCaptures() {
+        return new HashMap<>(captures);
+    }
+
+    /**
+     * Restore captures from a previously saved state.
+     */
+    public void restoreCaptures(Map<String, String> saved) {
+        captures.clear();
+        captures.putAll(saved);
+    }
+
     // === Packrat Cache ===
 
     public Option<ParseResult> getCached(String ruleName) {

@@ -101,9 +101,19 @@ public sealed interface Expression {
     record Capture(SourceSpan span, String name, Expression expression) implements Expression {}
 
     /**
+     * Capture scope: $( e ) - isolates captures within the expression
+     */
+    record CaptureScope(SourceSpan span, Expression expression) implements Expression {}
+
+    /**
      * Back-reference: $name
      */
     record BackReference(SourceSpan span, String name) implements Expression {}
+
+    /**
+     * Dictionary: 'word1' | 'word2' | 'word3' - efficient Trie-based string matching
+     */
+    record Dictionary(SourceSpan span, List<String> words, boolean caseInsensitive) implements Expression {}
 
     /**
      * Cut operator: ↑ - commits to current choice

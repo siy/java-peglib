@@ -234,6 +234,10 @@ public final class ParserGenerator {
         sb.append("            pos = startPos;\n");
         sb.append("            line = startLine;\n");
         sb.append("            column = startColumn;\n");
+        // Use custom error message if available
+        if (rule.hasErrorMessage()) {
+            sb.append("            result = ParseResult.failure(\"").append(escape(rule.errorMessage().unwrap())).append("\");\n");
+        }
         sb.append("        }\n");
         sb.append("        \n");
         sb.append("        cache.put(key, result);\n");
@@ -254,6 +258,15 @@ public final class ParserGenerator {
                     .append(escape(cc.pattern())).append("\", ")
                     .append(cc.negated()).append(", ")
                     .append(cc.caseInsensitive()).append(");\n");
+            }
+            case Expression.Dictionary dict -> {
+                sb.append(pad).append("var ").append(resultVar).append(" = matchDictionary(List.of(");
+                var words = dict.words();
+                for (int i = 0; i < words.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append("\"").append(escape(words.get(i))).append("\"");
+                }
+                sb.append("), ").append(dict.caseInsensitive()).append(");\n");
             }
             case Expression.Any any -> {
                 sb.append(pad).append("var ").append(resultVar).append(" = matchAny();\n");
@@ -426,6 +439,13 @@ public final class ParserGenerator {
                 sb.append(pad).append("}\n");
                 sb.append(pad).append("var ").append(resultVar).append(" = capElem;\n");
             }
+            case Expression.CaptureScope cs -> {
+                sb.append(pad).append("var savedCaptures = new HashMap<>(captures);\n");
+                generateExpressionCode(sb, cs.expression(), "csElem", indent);
+                sb.append(pad).append("captures.clear();\n");
+                sb.append(pad).append("captures.putAll(savedCaptures);\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = csElem;\n");
+            }
             case Expression.BackReference br -> {
                 sb.append(pad).append("var captured = captures.get(\"").append(br.name()).append("\");\n");
                 sb.append(pad).append("var ").append(resultVar).append(" = captured != null ? matchLiteral(captured, false) : ParseResult.failure(\"capture '\");\n");
@@ -478,6 +498,38 @@ public final class ParserGenerator {
                         advance();
                     }
                     return ParseResult.success(text, pos, line, column);
+                }
+
+                private ParseResult matchDictionary(List<String> words, boolean caseInsensitive) {
+                    String longestMatch = null;
+                    int longestLen = 0;
+                    for (var word : words) {
+                        if (matchesWord(word, caseInsensitive) && word.length() > longestLen) {
+                            longestMatch = word;
+                            longestLen = word.length();
+                        }
+                    }
+                    if (longestMatch == null) {
+                        return ParseResult.failure("dictionary word");
+                    }
+                    for (int i = 0; i < longestLen; i++) {
+                        advance();
+                    }
+                    return ParseResult.success(longestMatch, pos, line, column);
+                }
+
+                private boolean matchesWord(String word, boolean caseInsensitive) {
+                    if (remaining() < word.length()) return false;
+                    for (int i = 0; i < word.length(); i++) {
+                        char expected = word.charAt(i);
+                        char actual = peek(i);
+                        if (caseInsensitive) {
+                            if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) return false;
+                        } else {
+                            if (expected != actual) return false;
+                        }
+                    }
+                    return true;
                 }
 
                 private ParseResult matchCharClass(String pattern, boolean negated, boolean caseInsensitive) {
@@ -852,7 +904,12 @@ public final class ParserGenerator {
         sb.append("            finalResult = CstParseResult.success(node, result.text, endLoc);\n");
         sb.append("        } else {\n");
         sb.append("            restoreLocation(startLoc);\n");
-        sb.append("            finalResult = result;\n");
+        // Use custom error message if available
+        if (rule.hasErrorMessage()) {
+            sb.append("            finalResult = CstParseResult.failure(\"").append(escape(rule.errorMessage().unwrap())).append("\");\n");
+        } else {
+            sb.append("            finalResult = result;\n");
+        }
         sb.append("        }\n");
         sb.append("        \n");
         sb.append("        cache.put(key, finalResult);\n");
@@ -925,6 +982,20 @@ public final class ParserGenerator {
                     .append(escape(cc.pattern())).append("\", ")
                     .append(cc.negated()).append(", ")
                     .append(cc.caseInsensitive()).append(");\n");
+                if (addToChildren) {
+                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
+                    sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
+                    sb.append(pad).append("}\n");
+                }
+            }
+            case Expression.Dictionary dict -> {
+                sb.append(pad).append("var ").append(resultVar).append(" = matchDictionaryCst(List.of(");
+                var words = dict.words();
+                for (int i = 0; i < words.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append("\"").append(escape(words.get(i))).append("\"");
+                }
+                sb.append("), ").append(dict.caseInsensitive()).append(");\n");
                 if (addToChildren) {
                     sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
                     sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
@@ -1181,6 +1252,15 @@ public final class ParserGenerator {
                 sb.append(pad).append("}\n");
                 sb.append(pad).append("var ").append(resultVar).append(" = ").append(capElem).append(";\n");
             }
+            case Expression.CaptureScope cs -> {
+                var savedCapturesVar = "savedCaptures" + id;
+                var csElem = "csElem" + id;
+                sb.append(pad).append("var ").append(savedCapturesVar).append(" = new HashMap<>(captures);\n");
+                generateCstExpressionCode(sb, cs.expression(), csElem, indent, addToChildren, counter, inWhitespaceRule);
+                sb.append(pad).append("captures.clear();\n");
+                sb.append(pad).append("captures.putAll(").append(savedCapturesVar).append(");\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(csElem).append(";\n");
+            }
             case Expression.BackReference br -> {
                 var captured = "captured" + id;
                 sb.append(pad).append("var ").append(captured).append(" = captures.get(\"").append(br.name()).append("\");\n");
@@ -1280,6 +1360,41 @@ public final class ParserGenerator {
                     var span = SourceSpan.of(startLoc, location());
                     var node = new CstNode.Terminal(span, "literal", text, List.of(), List.of());
                     return CstParseResult.success(node, text, location());
+                }
+
+                private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {
+                    String longestMatch = null;
+                    int longestLen = 0;
+                    for (var word : words) {
+                        if (matchesWord(word, caseInsensitive) && word.length() > longestLen) {
+                            longestMatch = word;
+                            longestLen = word.length();
+                        }
+                    }
+                    if (longestMatch == null) {
+                        return CstParseResult.failure("dictionary word");
+                    }
+                    var startLoc = location();
+                    for (int i = 0; i < longestLen; i++) {
+                        advance();
+                    }
+                    var span = SourceSpan.of(startLoc, location());
+                    var node = new CstNode.Terminal(span, "literal", longestMatch, List.of(), List.of());
+                    return CstParseResult.success(node, longestMatch, location());
+                }
+
+                private boolean matchesWord(String word, boolean caseInsensitive) {
+                    if (remaining() < word.length()) return false;
+                    for (int i = 0; i < word.length(); i++) {
+                        char expected = word.charAt(i);
+                        char actual = peek(i);
+                        if (caseInsensitive) {
+                            if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) return false;
+                        } else {
+                            if (expected != actual) return false;
+                        }
+                    }
+                    return true;
                 }
 
                 private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {

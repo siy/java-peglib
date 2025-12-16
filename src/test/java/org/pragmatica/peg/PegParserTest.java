@@ -354,4 +354,143 @@ class PegParserTest {
         assertTrue(result.isSuccess());
         assertInstanceOf(CstNode.class, result.unwrap());
     }
+
+    // === Custom Error Message Tests ===
+
+    @Test
+    void customErrorMessage_usedOnFailure() {
+        var parser = PegParser.fromGrammar("""
+            Statement <- Semicolon
+            Semicolon <- ';' { error_message "expected semicolon" }
+            """).unwrap();
+
+        var result = parser.parseCst("x");
+        assertTrue(result.isFailure());
+        var error = result.fold(err -> err.message(), _ -> "");
+        assertTrue(error.contains("expected semicolon"), "Error should contain custom message: " + error);
+    }
+
+    @Test
+    void customErrorMessage_successNotAffected() {
+        var parser = PegParser.fromGrammar("""
+            Semicolon <- ';' { error_message "expected semicolon" }
+            """).unwrap();
+
+        var result = parser.parseCst(";");
+        assertTrue(result.isSuccess());
+    }
+
+    @Test
+    void customErrorMessage_withAction() {
+        var parser = PegParser.fromGrammar("""
+            Number <- < [0-9]+ > { return sv.toInt(); } { error_message "expected number" }
+            """).unwrap();
+
+        // Success case - action works
+        var success = parser.parse("42");
+        assertTrue(success.isSuccess());
+        assertEquals(42, success.unwrap());
+
+        // Failure case - custom error message
+        var failure = parser.parse("abc");
+        assertTrue(failure.isFailure());
+        var errorMsg = failure.fold(err -> err.message(), _ -> "");
+        assertTrue(errorMsg.contains("expected number"), "Error should contain custom message: " + errorMsg);
+    }
+
+    // === Capture Scope Tests ===
+
+    @Test
+    void captureScope_isolatesCaptures() {
+        // Without capture scope, the second $tag would fail because 'tag' captures different value
+        // With capture scope, each element gets its own isolated capture
+        var parser = PegParser.fromGrammar("""
+            Doc <- Element Element
+            Element <- $('<' $tag< [a-z]+ > '>' Content '</' $tag '>')
+            Content <- < [^<]* >
+            %whitespace <- [ ]*
+            """).unwrap();
+
+        // Both elements use same capture name, but are isolated
+        assertTrue(parser.parseCst("<div>hello</div><span>world</span>").isSuccess());
+    }
+
+    @Test
+    void captureScope_doesNotLeakOutward() {
+        var parser = PegParser.fromGrammar("""
+            Root <- $( $name< [a-z]+ > '=' $name ) $name
+            """).unwrap();
+
+        // After capture scope, $name should not be defined
+        assertTrue(parser.parseCst("foo=foo bar").isFailure());
+    }
+
+    @Test
+    void captureScope_innerBackrefWorks() {
+        var parser = PegParser.fromGrammar("""
+            Match <- $( $tag< [a-z]+ > '-' $tag )
+            """).unwrap();
+
+        // Inside scope, backreference works
+        assertTrue(parser.parseCst("abc-abc").isSuccess());
+        assertTrue(parser.parseCst("abc-xyz").isFailure());
+    }
+
+    // === Dictionary Tests ===
+
+    @Test
+    void dictionary_matchesAnyWord() {
+        var parser = PegParser.fromGrammar("""
+            Keyword <- 'if' | 'else' | 'while' | 'for'
+            """).unwrap();
+
+        assertTrue(parser.parseCst("if").isSuccess());
+        assertTrue(parser.parseCst("else").isSuccess());
+        assertTrue(parser.parseCst("while").isSuccess());
+        assertTrue(parser.parseCst("for").isSuccess());
+        assertTrue(parser.parseCst("then").isFailure());
+    }
+
+    @Test
+    void dictionary_longestMatch() {
+        var parser = PegParser.fromGrammar("""
+            Op <- '+' | '++' | '+='
+            """).unwrap();
+
+        // Should match longest: '++'
+        var result = parser.parseCst("++");
+        assertTrue(result.isSuccess());
+        assertEquals("++", ((CstNode.Terminal) result.unwrap()).text());
+
+        // Should match longest: '+='
+        var result2 = parser.parseCst("+=");
+        assertTrue(result2.isSuccess());
+        assertEquals("+=", ((CstNode.Terminal) result2.unwrap()).text());
+    }
+
+    @Test
+    void dictionary_caseInsensitive() {
+        var parser = PegParser.fromGrammar("""
+            Keyword <- 'SELECT'i | 'FROM'i | 'WHERE'i
+            """).unwrap();
+
+        assertTrue(parser.parseCst("select").isSuccess());
+        assertTrue(parser.parseCst("SELECT").isSuccess());
+        assertTrue(parser.parseCst("SeLeCt").isSuccess());
+        assertTrue(parser.parseCst("from").isSuccess());
+        assertTrue(parser.parseCst("where").isSuccess());
+    }
+
+    @Test
+    void dictionary_inSequence() {
+        var parser = PegParser.fromGrammar("""
+            Statement <- ('if' | 'while') Identifier
+            Identifier <- < [a-z]+ >
+            %whitespace <- [ ]*
+            """).unwrap();
+
+        assertTrue(parser.parseCst("if condition").isSuccess());
+        assertTrue(parser.parseCst("while running").isSuccess());
+        assertTrue(parser.parseCst("for loop").isFailure());
+    }
 }
