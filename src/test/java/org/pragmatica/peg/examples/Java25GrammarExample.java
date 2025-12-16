@@ -160,7 +160,7 @@ class Java25GrammarExample {
         Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
 
         Modifier <- 'public' / 'protected' / 'private' / 'static' / 'final' / 'abstract' / 'native' / 'synchronized' / 'transient' / 'volatile' / 'strictfp' / 'default' / 'sealed' / 'non-sealed'
-        Annotation <- '@' QualifiedName ('(' AnnotationValue? ')')?
+        Annotation <- '@' !'interface' QualifiedName ('(' AnnotationValue? ')')?
         AnnotationValue <- Identifier '=' AnnotationElem (',' Identifier '=' AnnotationElem)* / AnnotationElem
         AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)* ','?)? '}' / Ternary
 
