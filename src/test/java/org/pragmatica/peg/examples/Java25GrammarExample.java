@@ -143,7 +143,7 @@ class Java25GrammarExample {
         Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / '(' Expr ')' / Lambda / 'switch' '(' Expr ')' SwitchBlock / QualifiedName
         Lambda <- LambdaParams '->' (Expr / Block)
         LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
-        LambdaParam <- Modifier* Type? (Identifier / '_') / Modifier* Type '...' (Identifier / '_')
+        LambdaParam <- Modifier* (Type &('...' / Identifier / '_'))? '...'? (Identifier / '_')
         Args <- Expr (',' Expr)*
         ExprList <- Expr (',' Expr)*
 
