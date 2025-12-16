@@ -852,6 +852,9 @@ public final class ParserGenerator {
         return switch (expr) {
             case Expression.Reference ref -> true;
             case Expression.Group grp -> isReference(grp.expression());
+            case Expression.Optional opt -> isReference(opt.expression());
+            case Expression.ZeroOrMore zom -> isReference(zom.expression());
+            case Expression.OneOrMore oom -> isReference(oom.expression());
             default -> false;
         };
     }
