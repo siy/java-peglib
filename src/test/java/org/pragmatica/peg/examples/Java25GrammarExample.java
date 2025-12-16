@@ -134,7 +134,7 @@ class Java25GrammarExample {
         StringLit <- < '"' ([^"\\\\] / '\\\\' .)* '"' > / < '\"\"\"' (!'\"\"\"' .)* '\"\"\"' >
         NumLit <- < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\\-]? [0-9_]+)? [fFdD]? >
 
-        Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'do' / 'double' / 'else' / 'enum' / 'extends' / 'false' / 'final' / 'finally' / 'float' / 'for' / 'goto' / 'if' / 'implements' / 'import' / 'instanceof' / 'int' / 'interface' / 'long' / 'module' / 'native' / 'new' / 'non-sealed' / 'null' / 'package' / 'permits' / 'private' / 'protected' / 'public' / 'record' / 'return' / 'sealed' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throw' / 'throws' / 'transient' / 'true' / 'try' / 'var' / 'void' / 'volatile' / 'when' / 'while' / 'yield' / '_') ![a-zA-Z0-9_$]
+        Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'double' / 'do' / 'else' / 'enum' / 'extends' / 'false' / 'finally' / 'final' / 'float' / 'for' / 'goto' / 'implements' / 'import' / 'instanceof' / 'interface' / 'int' / 'if' / 'long' / 'module' / 'native' / 'new' / 'non-sealed' / 'null' / 'package' / 'permits' / 'private' / 'protected' / 'public' / 'record' / 'return' / 'sealed' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throws' / 'throw' / 'transient' / 'true' / 'try' / 'var' / 'void' / 'volatile' / 'when' / 'while' / 'yield' / '_') ![a-zA-Z0-9_$]
 
         %whitespace <- ([ \\t\\r\\n] / '//' [^\\n]* / '/*' (!'*/' .)* '*/')*
         """;
@@ -151,6 +151,18 @@ class Java25GrammarExample {
     void parsePublicClass() {
         var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
         assertTrue(parser.parseCst("public class Foo { }").isSuccess());
+    }
+
+    @Test
+    void parseAnnotationInterface() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+
+        var r1 = parser.parseCst("@interface Foo { }");
+        assertTrue(r1.isSuccess(), () -> "Test 1 failed: " + r1);
+        var r2 = parser.parseCst("public @interface Test { }");
+        assertTrue(r2.isSuccess(), () -> "Test 2 failed: " + r2);
+        var r3 = parser.parseCst("@interface MyAnnotation { int value(); }");
+        assertTrue(r3.isSuccess(), () -> "Test 3 failed: " + r3);
     }
 
     @Test

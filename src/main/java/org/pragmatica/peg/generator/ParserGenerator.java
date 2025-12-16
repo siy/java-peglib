@@ -848,6 +848,14 @@ public final class ParserGenerator {
         };
     }
 
+    private boolean isReference(Expression expr) {
+        return switch (expr) {
+            case Expression.Reference ref -> true;
+            case Expression.Group grp -> isReference(grp.expression());
+            default -> false;
+        };
+    }
+
     /**
      * Extract inner expression from ZeroOrMore/OneOrMore for trivia matching.
      * The whitespace rule is typically `(spaces / comments)*` - we want to match
@@ -917,6 +925,10 @@ public final class ParserGenerator {
                 int i = 0;
                 for (var elem : seq.elements()) {
                     sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
+                    // Skip whitespace before non-Reference elements (References capture trivia themselves)
+                    if (i > 0 && !inWhitespaceRule && !isReference(elem)) {
+                        sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
+                    }
                     var elemVar = "elem" + id + "_" + i;
                     generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
                     sb.append(pad).append("    if (").append(elemVar).append(".isFailure()) {\n");
@@ -971,6 +983,10 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(zomStart).append(" = location();\n");
                 sb.append(pad).append("while (true) {\n");
                 sb.append(pad).append("    var ").append(beforeLoc).append(" = location();\n");
+                // Skip whitespace before non-Reference elements (References capture trivia themselves)
+                if (!inWhitespaceRule && !isReference(zom.expression())) {
+                    sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
+                }
                 generateCstExpressionCode(sb, zom.expression(), zomElem, indent + 1, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("    if (").append(zomElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
                 sb.append(pad).append("        restoreLocation(").append(beforeLoc).append(");\n");
@@ -990,6 +1006,10 @@ public final class ParserGenerator {
                 sb.append(pad).append("    var ").append(oomStart).append(" = location();\n");
                 sb.append(pad).append("    while (true) {\n");
                 sb.append(pad).append("        var ").append(beforeLoc).append(" = location();\n");
+                // Skip whitespace before non-Reference elements (References capture trivia themselves)
+                if (!inWhitespaceRule && !isReference(oom.expression())) {
+                    sb.append(pad).append("        if (!inTokenBoundary) skipWhitespace();\n");
+                }
                 generateCstExpressionCode(sb, oom.expression(), oomElem, indent + 2, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("        if (").append(oomElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
                 sb.append(pad).append("            restoreLocation(").append(beforeLoc).append(");\n");

@@ -285,7 +285,10 @@ public final class PegEngine implements Parser {
         var children = new ArrayList<CstNode>();
 
         for (var element : seq.elements()) {
-            skipWhitespace(ctx);
+            // Skip whitespace between elements, but NOT before predicates
+            if (!isPredicate(element)) {
+                skipWhitespace(ctx);
+            }
             var result = parseExpressionWithActions(ctx, element, ruleName, values, tokenCapture);
             if (result.isFailure()) {
                 ctx.restoreLocation(startLoc);
@@ -680,8 +683,11 @@ public final class PegEngine implements Parser {
         var children = new ArrayList<CstNode>();
 
         for (var element : seq.elements()) {
-            // Skip whitespace between elements
-            skipWhitespace(ctx);
+            // Skip whitespace between elements, but NOT before predicates
+            // Predicates are used for boundary checking and must see actual characters
+            if (!isPredicate(element)) {
+                skipWhitespace(ctx);
+            }
 
             var result = parseExpression(ctx, element, ruleName);
             if (result.isFailure()) {
@@ -698,6 +704,15 @@ public final class PegEngine implements Parser {
         var span = ctx.spanFrom(startLoc);
         var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
         return ParseResult.Success.of(node, ctx.location());
+    }
+
+    private boolean isPredicate(Expression expr) {
+        return switch (expr) {
+            case Expression.And ignored -> true;
+            case Expression.Not ignored -> true;
+            case Expression.Group grp -> isPredicate(grp.expression());
+            default -> false;
+        };
     }
 
     private ParseResult parseChoice(ParsingContext ctx, Expression.Choice choice, String ruleName) {
