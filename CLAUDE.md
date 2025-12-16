@@ -74,7 +74,7 @@ src/test/java/org/pragmatica/peg/
     ├── SExpressionExample.java  # 11 tests - Lisp-like syntax
     ├── CsvParserExample.java    # 8 tests - CSV data format
     ├── SourceGenerationExample.java # 9 tests - standalone parser
-    └── Java25GrammarExample.java # 22 tests - Java syntax parsing
+    └── Java25GrammarExample.java # 32 tests - Java 25 syntax (modules, var, patterns)
 ```
 
 ## Grammar Syntax (cpp-peglib compatible)
@@ -129,7 +129,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Action compilation (runtime) - JDK Compiler API
 - [x] Source generator - standalone parser Java file
 - [x] Trivia handling (whitespace/comments) for lossless CST
-- [x] 160 passing tests
+- [x] 170 passing tests
 
 ### Remaining Work
 - [ ] Advanced error recovery
@@ -175,13 +175,15 @@ Result<String> source = PegParser.generateParser(
 ## Action API
 
 Actions have access to `SemanticValues sv`:
-- `sv.token()` / `$0` - matched text
-- `sv.get(0)` / `$1` - first child value (0-indexed as $1)
-- `sv.get(1)` / `$2` - second child value
+- `sv.token()` / `$0` - matched text (the raw input that was parsed)
+- `sv.get(0)` / `$1` - first child's semantic value
+- `sv.get(1)` / `$2` - second child's semantic value
 - `sv.toInt()` - parse matched text as integer
 - `sv.toDouble()` - parse as double
 - `sv.size()` - number of child values
 - `sv.values()` - all child values as List
+
+Note: `$1`, `$2`, etc. use 1-based indexing (like regex groups), while `sv.get()` uses 0-based indexing.
 
 ## Trivia Handling
 
@@ -210,7 +212,7 @@ Trivia is classified based on content:
 - Starts with `/*` → BlockComment
 - Otherwise → Whitespace
 
-## Test Coverage (160 tests)
+## Test Coverage (170 tests)
 
 ### Grammar Parser Tests (14 tests)
 - Simple rules, actions, sequences, choices
@@ -240,12 +242,13 @@ Trivia is classified based on content:
 - All quantifiers generate loops
 - Only depends on pragmatica-lite
 
-### Example Tests (41 tests)
+### Example Tests (77 tests)
 - **Calculator** (6 tests): Number parsing, addition, multiplication, boolean/double types
 - **JSON** (11 tests): CST parsing of JSON values, objects, arrays, nested structures
 - **S-Expression** (11 tests): Lisp-like syntax, nested lists, atoms, symbols
 - **CSV** (8 tests): Field parsing, empty fields, spaces preserved
 - **Source Generation** (9 tests): Standalone parser generation, all operators
+- **Java25Grammar** (32 tests): Full Java 25 syntax including modules, var, patterns, text blocks
 
 ### Trivia Tests (19 tests)
 - **TriviaTest** (13 tests): Runtime trivia - leading, trailing, mixed, comments
@@ -287,6 +290,6 @@ Trivia is classified based on content:
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (160 passing)
+mvn test             # Run tests (170 passing)
 mvn verify           # Full verification
 ```

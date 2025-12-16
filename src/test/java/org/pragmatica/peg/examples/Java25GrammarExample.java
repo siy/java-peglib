@@ -8,8 +8,19 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Java 25 grammar based on JLS SE 25 Chapter 19.
  *
- * This is a practical PEG grammar for Java CST parsing. Some JLS rules are
+ * <p>This is a practical PEG grammar for Java CST parsing. Some JLS rules are
  * simplified to avoid left recursion (which PEG doesn't support).
+ *
+ * <h2>Java 25 Features Supported</h2>
+ * <ul>
+ *   <li><b>Module declarations</b> - module, open module, requires, exports, opens, uses, provides</li>
+ *   <li><b>Local variable type inference</b> - var keyword</li>
+ *   <li><b>Pattern matching</b> - instanceof patterns, record patterns, switch patterns with guards</li>
+ *   <li><b>Text blocks</b> - triple-quoted strings</li>
+ *   <li><b>Records</b> - record declarations with components</li>
+ *   <li><b>Sealed classes</b> - sealed, non-sealed, permits</li>
+ *   <li><b>Switch expressions</b> - arrow syntax, yield</li>
+ * </ul>
  *
  * @see <a href="https://docs.oracle.com/javase/specs/jls/se25/html/jls-19.html">JLS SE 25 Chapter 19</a>
  */
