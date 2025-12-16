@@ -61,6 +61,9 @@ src/main/java/org/pragmatica/peg/
 
 src/test/java/org/pragmatica/peg/
 ├── PegParserTest.java          # 28 tests (parsing + actions)
+├── EdgeCaseTest.java           # 24 tests (edge cases)
+├── TriviaTest.java             # 13 tests (trivia handling)
+├── GeneratedParserTriviaTest.java # 6 tests (generated parser trivia)
 ├── grammar/
 │   └── GrammarParserTest.java  # 14 tests for grammar parser
 ├── generator/
@@ -70,7 +73,8 @@ src/test/java/org/pragmatica/peg/
     ├── JsonParserExample.java   # 11 tests - JSON CST parsing
     ├── SExpressionExample.java  # 11 tests - Lisp-like syntax
     ├── CsvParserExample.java    # 8 tests - CSV data format
-    └── SourceGenerationExample.java # 5 tests - standalone parser
+    ├── SourceGenerationExample.java # 9 tests - standalone parser
+    └── Java25GrammarExample.java # 22 tests - Java syntax parsing
 ```
 
 ## Grammar Syntax (cpp-peglib compatible)
@@ -124,12 +128,12 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Parsing engine with packrat memoization
 - [x] Action compilation (runtime) - JDK Compiler API
 - [x] Source generator - standalone parser Java file
-- [x] 50 passing tests
+- [x] Trivia handling (whitespace/comments) for lossless CST
+- [x] 160 passing tests
 
 ### Remaining Work
 - [ ] Advanced error recovery
 - [ ] Performance optimization
-- [ ] Documentation and examples
 
 ## API Usage
 
@@ -179,7 +183,34 @@ Actions have access to `SemanticValues sv`:
 - `sv.size()` - number of child values
 - `sv.values()` - all child values as List
 
-## Test Coverage (91 tests)
+## Trivia Handling
+
+Both runtime and generated parsers support trivia (whitespace/comments) collection for lossless CST:
+
+### Design
+- Each match of the INNER whitespace expression creates one Trivia item
+- For `%whitespace <- [ \t]+`, inner is `[ \t]`, so each char is separate trivia
+- For `%whitespace <- ([ \t]+ / Comment)+`, inner is `[ \t]+ / Comment`, so each run is one trivia
+
+### Trivia Types (sealed)
+- `Trivia.Whitespace` - spaces, tabs, newlines
+- `Trivia.LineComment` - `// ...` style comments
+- `Trivia.BlockComment` - `/* ... */` style comments
+
+### Access
+```java
+CstNode node = parser.parseCst("  42  ").unwrap();
+List<Trivia> leading = node.leadingTrivia();   // Before node
+List<Trivia> trailing = node.trailingTrivia(); // After node (at EOF)
+```
+
+### Classification
+Trivia is classified based on content:
+- Starts with `//` → LineComment
+- Starts with `/*` → BlockComment
+- Otherwise → Whitespace
+
+## Test Coverage (160 tests)
 
 ### Grammar Parser Tests (14 tests)
 - Simple rules, actions, sequences, choices
@@ -214,7 +245,16 @@ Actions have access to `SemanticValues sv`:
 - **JSON** (11 tests): CST parsing of JSON values, objects, arrays, nested structures
 - **S-Expression** (11 tests): Lisp-like syntax, nested lists, atoms, symbols
 - **CSV** (8 tests): Field parsing, empty fields, spaces preserved
-- **Source Generation** (5 tests): Standalone parser generation, all operators
+- **Source Generation** (9 tests): Standalone parser generation, all operators
+
+### Trivia Tests (19 tests)
+- **TriviaTest** (13 tests): Runtime trivia - leading, trailing, mixed, comments
+- **GeneratedParserTriviaTest** (6 tests): Generated parser trivia consistency
+
+### Edge Case Tests (24 tests)
+- Null actions, token boundaries, complex grammars
+- Recursive parsing, repetition, predicates
+- Character classes, unicode, ignore operator
 
 ## Type Summary
 
@@ -247,6 +287,6 @@ Actions have access to `SemanticValues sv`:
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (91 passing)
+mvn test             # Run tests (160 passing)
 mvn verify           # Full verification
 ```

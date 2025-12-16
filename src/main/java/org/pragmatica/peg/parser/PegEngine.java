@@ -80,8 +80,8 @@ public final class PegEngine implements Parser {
             ));
         }
 
-        // Skip trailing whitespace before checking end
-        skipWhitespace(ctx);
+        // Capture trailing trivia
+        var trailingTrivia = skipWhitespace(ctx);
 
         // Check if we consumed all input
         if (!ctx.isAtEnd()) {
@@ -93,7 +93,9 @@ public final class PegEngine implements Parser {
         }
 
         var success = (ParseResult.Success) result;
-        return Result.success(success.node());
+        // Attach trailing trivia to root node
+        var rootNode = attachTrailingTrivia(success.node(), trailingTrivia);
+        return Result.success(rootNode);
     }
 
     @Override
@@ -983,19 +985,54 @@ public final class PegEngine implements Parser {
 
         skippingWhitespace = true;
         try {
-            var ws = grammar.whitespace().unwrap();
+            var wsExpr = grammar.whitespace().unwrap();
+            // Extract inner expression from ZeroOrMore/OneOrMore to match one element at a time
+            var innerExpr = extractInnerExpression(wsExpr);
+
             while (!ctx.isAtEnd()) {
                 var startLoc = ctx.location();
-                var result = parseExpressionNoWs(ctx, ws, "%whitespace");
-                if (result.isFailure() || ctx.pos() == startLoc.offset()) {
+                var startPos = ctx.pos();
+                var result = parseExpressionNoWs(ctx, innerExpr, "%whitespace");
+                if (result.isFailure() || ctx.pos() == startPos) {
                     break;
                 }
-                // Could collect trivia here if needed
+                // Collect trivia if enabled
+                if (config.captureTrivia()) {
+                    var text = ctx.substring(startPos, ctx.pos());
+                    var span = ctx.spanFrom(startLoc);
+                    trivia.add(classifyTrivia(span, text));
+                }
             }
         } finally {
             skippingWhitespace = false;
         }
         return trivia;
+    }
+
+    /**
+     * Extract inner expression from repetition operators (ZeroOrMore, OneOrMore).
+     * This allows matching whitespace one element at a time for proper trivia collection.
+     */
+    private Expression extractInnerExpression(Expression expr) {
+        return switch (expr) {
+            case Expression.ZeroOrMore zom -> zom.expression();
+            case Expression.OneOrMore oom -> oom.expression();
+            case Expression.Optional opt -> opt.expression();
+            default -> expr;
+        };
+    }
+
+    /**
+     * Classify trivia based on its content.
+     */
+    private Trivia classifyTrivia(SourceSpan span, String text) {
+        if (text.startsWith("//")) {
+            return new Trivia.LineComment(span, text);
+        } else if (text.startsWith("/*")) {
+            return new Trivia.BlockComment(span, text);
+        } else {
+            return new Trivia.Whitespace(span, text);
+        }
     }
 
     // Parse expression without whitespace skipping (for whitespace rule itself)
@@ -1192,6 +1229,26 @@ public final class PegEngine implements Parser {
             );
             case CstNode.Token tok -> new CstNode.Token(
                 tok.span(), ruleName, tok.text(), leadingTrivia, tok.trailingTrivia()
+            );
+        };
+    }
+
+    /**
+     * Attach trailing trivia to a node.
+     */
+    private CstNode attachTrailingTrivia(CstNode node, List<Trivia> trailingTrivia) {
+        if (trailingTrivia.isEmpty()) {
+            return node;
+        }
+        return switch (node) {
+            case CstNode.Terminal t -> new CstNode.Terminal(
+                t.span(), t.rule(), t.text(), t.leadingTrivia(), trailingTrivia
+            );
+            case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
+                nt.span(), nt.rule(), nt.children(), nt.leadingTrivia(), trailingTrivia
+            );
+            case CstNode.Token tok -> new CstNode.Token(
+                tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
             );
         };
     }

@@ -74,12 +74,12 @@ public class Java25ParserTest {
 
             // Parser failed - check with javac
             if (javacAccepts(file)) {
-                return "FAILURE"; // Parser bug
+                return "FAILURE: " + result; // Parser bug - include error details
             } else {
                 return "ERROR"; // Legitimate syntax error
             }
         } catch (Exception e) {
-            return "FAILURE"; // Unexpected exception
+            return "FAILURE: " + e.getMessage(); // Unexpected exception
         }
     }
 

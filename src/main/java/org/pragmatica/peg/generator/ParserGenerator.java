@@ -772,11 +772,13 @@ public final class ParserGenerator {
                     if (result.isFailure()) {
                         return Result.failure(new ParseError(location(), "expected " + result.expected));
                     }
-                    skipWhitespace(); // Consume trailing whitespace
+                    var trailingTrivia = skipWhitespace(); // Capture trailing trivia
                     if (!isAtEnd()) {
                         return Result.failure(new ParseError(location(), "unexpected input"));
                     }
-                    return Result.success(result.node);
+                    // Attach trailing trivia to root node
+                    var rootNode = attachTrailingTrivia(result.node, trailingTrivia);
+                    return Result.success(rootNode);
                 }
 
             """.formatted(sanitize(startRuleName)));
@@ -939,7 +941,7 @@ public final class ParserGenerator {
                 for (var elem : seq.elements()) {
                     sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
                     // Skip whitespace before non-Reference elements (References capture trivia themselves)
-                    // Also don't skip for Optional/ZeroOrMore - they handle it after saving their start position
+                    // Also don't skip for Optional/ZeroOrMore/Choice - they handle trivia internally (isOptionalLike)
                     if (i > 0 && !inWhitespaceRule && !isReference(elem) && !isOptionalLike(elem)) {
                         sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
                     }
@@ -961,10 +963,7 @@ public final class ParserGenerator {
                 var savedChildren = "savedChildren" + id;
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(" = null;\n");
                 sb.append(pad).append("var ").append(choiceStart).append(" = location();\n");
-                // Skip whitespace after saving start - so restore goes back to pre-whitespace position
-                if (!inWhitespaceRule) {
-                    sb.append(pad).append("if (!inTokenBoundary) skipWhitespace();\n");
-                }
+                // Don't skip whitespace here - let alternatives capture trivia themselves
                 if (addToChildren) {
                     sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
                 }
@@ -1216,6 +1215,23 @@ public final class ParserGenerator {
                     } else {
                         return new Trivia.Whitespace(span, text);
                     }
+                }
+
+                private CstNode attachTrailingTrivia(CstNode node, List<Trivia> trailingTrivia) {
+                    if (trailingTrivia.isEmpty()) {
+                        return node;
+                    }
+                    return switch (node) {
+                        case CstNode.Terminal t -> new CstNode.Terminal(
+                            t.span(), t.rule(), t.text(), t.leadingTrivia(), trailingTrivia
+                        );
+                        case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
+                            nt.span(), nt.rule(), nt.children(), nt.leadingTrivia(), trailingTrivia
+                        );
+                        case CstNode.Token tok -> new CstNode.Token(
+                            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
+                        );
+                    };
                 }
 
                 private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {

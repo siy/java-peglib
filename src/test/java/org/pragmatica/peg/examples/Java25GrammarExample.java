@@ -21,7 +21,7 @@ class Java25GrammarExample {
         TypeDecl <- Annotation* Modifier* TypeKind
         TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
         ClassDecl <- 'class' Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
-        InterfaceDecl <- 'interface' Identifier TypeParams? ('extends' TypeList)? ClassBody
+        InterfaceDecl <- 'interface' Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
         AnnotationDecl <- '@' 'interface' Identifier AnnotationBody
         AnnotationBody <- '{' AnnotationMember* '}'
         AnnotationMember <- Annotation* Modifier* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
