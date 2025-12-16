@@ -138,7 +138,18 @@ public final class GrammarLexer {
             if (peek() == '\\' && pos + 1 < input.length()) {
                 advance(); // skip backslash
                 sb.append('\\');
-                sb.append(advance());
+                char escaped = advance();
+                sb.append(escaped);
+                // Preserve full hex/unicode escape sequences
+                if (escaped == 'x' && pos + 2 <= input.length()) {
+                    sb.append(advance());
+                    sb.append(advance());
+                } else if (escaped == 'u' && pos + 4 <= input.length()) {
+                    sb.append(advance());
+                    sb.append(advance());
+                    sb.append(advance());
+                    sb.append(advance());
+                }
             } else {
                 sb.append(advance());
             }
@@ -252,8 +263,25 @@ public final class GrammarLexer {
             case '\'' -> '\'';
             case '"' -> '"';
             case '0' -> '\0';
+            case 'x' -> scanHexEscape(2);  // hex escape
+            case 'u' -> scanHexEscape(4);  // unicode escape
             default -> c;
         };
+    }
+
+    private char scanHexEscape(int digits) {
+        if (pos + digits > input.length()) {
+            return (digits == 2) ? 'x' : 'u';  // Fallback if not enough chars
+        }
+        var hex = input.substring(pos, pos + digits);
+        try {
+            var value = Integer.parseInt(hex, 16);
+            pos += digits;
+            column += digits;
+            return (char) value;
+        } catch (NumberFormatException e) {
+            return (digits == 2) ? 'x' : 'u';  // Fallback on invalid hex
+        }
     }
 
     private void skipWhitespaceAndComments() {

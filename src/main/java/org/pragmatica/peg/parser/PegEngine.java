@@ -614,6 +614,7 @@ public final class PegEngine implements Parser {
             if (start == '\\' && i + 1 < pattern.length()) {
                 // Escape sequence
                 char escaped = pattern.charAt(i + 1);
+                int consumed = 2;
                 char expected = switch (escaped) {
                     case 'n' -> '\n';
                     case 'r' -> '\r';
@@ -621,6 +622,32 @@ public final class PegEngine implements Parser {
                     case '\\' -> '\\';
                     case ']' -> ']';
                     case '-' -> '-';
+                    case 'x' -> {
+                        // Hex escape (2 hex digits)
+                        if (i + 4 <= pattern.length()) {
+                            try {
+                                var hex = pattern.substring(i + 2, i + 4);
+                                consumed = 4;
+                                yield (char) Integer.parseInt(hex, 16);
+                            } catch (NumberFormatException e) {
+                                yield 'x';
+                            }
+                        }
+                        yield 'x';
+                    }
+                    case 'u' -> {
+                        // Unicode escape (4 hex digits)
+                        if (i + 6 <= pattern.length()) {
+                            try {
+                                var hex = pattern.substring(i + 2, i + 6);
+                                consumed = 6;
+                                yield (char) Integer.parseInt(hex, 16);
+                            } catch (NumberFormatException e) {
+                                yield 'u';
+                            }
+                        }
+                        yield 'u';
+                    }
                     default -> escaped;
                 };
                 if (caseInsensitive) {
@@ -629,7 +656,7 @@ public final class PegEngine implements Parser {
                 if (testChar == expected) {
                     return true;
                 }
-                i += 2;
+                i += consumed;
                 continue;
             }
 

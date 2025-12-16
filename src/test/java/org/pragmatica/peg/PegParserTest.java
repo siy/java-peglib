@@ -206,6 +206,55 @@ class PegParserTest {
     }
 
     @Test
+    void backReference_matchesXmlTags() {
+        var parser = PegParser.fromGrammar("""
+            Element <- '<' $tag< [a-z]+ > '>' Content '</' $tag '>'
+            Content <- < [^<]* >
+            %whitespace <- [ ]*
+            """).unwrap();
+
+        // Matching tags should succeed
+        assertTrue(parser.parseCst("<div>hello</div>").isSuccess());
+        assertTrue(parser.parseCst("<span>world</span>").isSuccess());
+        assertTrue(parser.parseCst("<p></p>").isSuccess());
+
+        // Mismatched tags should fail
+        assertTrue(parser.parseCst("<div>hello</span>").isFailure());
+        assertTrue(parser.parseCst("<b>text</i>").isFailure());
+    }
+
+    @Test
+    void hexEscape_inLiteral() {
+        // \x20 is space, \x41 is 'A'
+        var parser = PegParser.fromGrammar("Match <- '\\x41\\x42\\x43'").unwrap();
+        assertTrue(parser.parseCst("ABC").isSuccess());
+        assertTrue(parser.parseCst("abc").isFailure());
+    }
+
+    @Test
+    void hexEscape_inCharClass() {
+        // \x30\x31\x32 are 0, 1, 2 - test without range first
+        var parser = PegParser.fromGrammar("Digit <- [\\x30\\x31\\x32]+").unwrap();
+        assertTrue(parser.parseCst("012").isSuccess());
+        assertTrue(parser.parseCst("abc").isFailure());
+    }
+
+    @Test
+    void unicodeEscape_inLiteral() {
+        // \u0041 is 'A'
+        var parser = PegParser.fromGrammar("Match <- '\\u0041'").unwrap();
+        assertTrue(parser.parseCst("A").isSuccess());
+    }
+
+    @Test
+    void unicodeEscape_inCharClass() {
+        // Test single unicode chars without range
+        var parser = PegParser.fromGrammar("Alpha <- [\\u03B1\\u03B2\\u03B3]+").unwrap();
+        assertTrue(parser.parseCst("\u03B1\u03B2\u03B3").isSuccess());  // αβγ
+        assertTrue(parser.parseCst("abc").isFailure());
+    }
+
+    @Test
     void parseAst_convertsFromCst() {
         var parser = PegParser.fromGrammar("Number <- < [0-9]+ >").unwrap();
         var result = parser.parseAst("42");

@@ -501,6 +501,7 @@ public final class ParserGenerator {
                         char start = pattern.charAt(i);
                         if (start == '\\\\' && i + 1 < pattern.length()) {
                             char escaped = pattern.charAt(i + 1);
+                            int consumed = 2;
                             char expected = switch (escaped) {
                                 case 'n' -> '\\n';
                                 case 'r' -> '\\r';
@@ -508,11 +509,31 @@ public final class ParserGenerator {
                                 case '\\\\' -> '\\\\';
                                 case ']' -> ']';
                                 case '-' -> '-';
+                                case 'x' -> {
+                                    if (i + 4 <= pattern.length()) {
+                                        try {
+                                            var hex = pattern.substring(i + 2, i + 4);
+                                            consumed = 4;
+                                            yield (char) Integer.parseInt(hex, 16);
+                                        } catch (NumberFormatException e) { yield 'x'; }
+                                    }
+                                    yield 'x';
+                                }
+                                case 'u' -> {
+                                    if (i + 6 <= pattern.length()) {
+                                        try {
+                                            var hex = pattern.substring(i + 2, i + 6);
+                                            consumed = 6;
+                                            yield (char) Integer.parseInt(hex, 16);
+                                        } catch (NumberFormatException e) { yield 'u'; }
+                                    }
+                                    yield 'u';
+                                }
                                 default -> escaped;
                             };
                             if (caseInsensitive) expected = Character.toLowerCase(expected);
                             if (testChar == expected) return true;
-                            i += 2;
+                            i += consumed;
                             continue;
                         }
                         if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
@@ -1286,6 +1307,7 @@ public final class ParserGenerator {
                         char start = pattern.charAt(i);
                         if (start == '\\\\' && i + 1 < pattern.length()) {
                             char escaped = pattern.charAt(i + 1);
+                            int consumed = 2;
                             char expected = switch (escaped) {
                                 case 'n' -> '\\n';
                                 case 'r' -> '\\r';
@@ -1293,11 +1315,31 @@ public final class ParserGenerator {
                                 case '\\\\' -> '\\\\';
                                 case ']' -> ']';
                                 case '-' -> '-';
+                                case 'x' -> {
+                                    if (i + 4 <= pattern.length()) {
+                                        try {
+                                            var hex = pattern.substring(i + 2, i + 4);
+                                            consumed = 4;
+                                            yield (char) Integer.parseInt(hex, 16);
+                                        } catch (NumberFormatException e) { yield 'x'; }
+                                    }
+                                    yield 'x';
+                                }
+                                case 'u' -> {
+                                    if (i + 6 <= pattern.length()) {
+                                        try {
+                                            var hex = pattern.substring(i + 2, i + 6);
+                                            consumed = 6;
+                                            yield (char) Integer.parseInt(hex, 16);
+                                        } catch (NumberFormatException e) { yield 'u'; }
+                                    }
+                                    yield 'u';
+                                }
                                 default -> escaped;
                             };
                             if (caseInsensitive) expected = Character.toLowerCase(expected);
                             if (testChar == expected) return true;
-                            i += 2;
+                            i += consumed;
                             continue;
                         }
                         if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
