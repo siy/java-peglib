@@ -6,17 +6,31 @@ import org.pragmatica.peg.PegParser;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Java 25 grammar example demonstrating parsing of Java source code.
+ * Java 25 grammar based on JLS SE 25 Chapter 19.
  *
- * This is a practical subset of Java grammar for CST parsing.
+ * This is a practical PEG grammar for Java CST parsing. Some JLS rules are
+ * simplified to avoid left recursion (which PEG doesn't support).
+ *
+ * @see <a href="https://docs.oracle.com/javase/specs/jls/se25/html/jls-19.html">JLS SE 25 Chapter 19</a>
  */
 class Java25GrammarExample {
 
-    // Simplified Java Grammar for CST parsing
+    // Java 25 Grammar (PEG-compatible adaptation of JLS Chapter 19)
     static final String JAVA_GRAMMAR = """
-        CompilationUnit <- PackageDecl? ImportDecl* TypeDecl*
-        PackageDecl <- 'package' QualifiedName ';'
+        # === Compilation Units (JLS 7.3-7.8) ===
+        CompilationUnit <- ModuleDecl / OrdinaryUnit
+        OrdinaryUnit <- PackageDecl? ImportDecl* TypeDecl*
+        PackageDecl <- Annotation* 'package' QualifiedName ';'
         ImportDecl  <- 'import' 'module' QualifiedName ';' / 'import' 'static'? QualifiedName ('.' '*')? ';'
+
+        # === Module Declarations (JLS 7.7) ===
+        ModuleDecl <- Annotation* 'open'? 'module' QualifiedName '{' ModuleDirective* '}'
+        ModuleDirective <- RequiresDirective / ExportsDirective / OpensDirective / UsesDirective / ProvidesDirective
+        RequiresDirective <- 'requires' ('transitive' / 'static')* QualifiedName ';'
+        ExportsDirective <- 'exports' QualifiedName ('to' QualifiedName (',' QualifiedName)*)? ';'
+        OpensDirective <- 'opens' QualifiedName ('to' QualifiedName (',' QualifiedName)*)? ';'
+        UsesDirective <- 'uses' QualifiedName ';'
+        ProvidesDirective <- 'provides' QualifiedName 'with' QualifiedName (',' QualifiedName)* ';'
 
         TypeDecl <- Annotation* Modifier* TypeKind
         TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
@@ -57,9 +71,11 @@ class Java25GrammarExample {
         Throws <- 'throws' TypeList
         ConstructorDecl <- TypeParams? Identifier '(' Params? ')' Throws? Block
 
+        # === Blocks and Statements (JLS 14) ===
         Block <- '{' BlockStmt* '}'
         BlockStmt <- LocalVar / TypeKind / Stmt
-        LocalVar <- Modifier* Type VarDecls ';'
+        LocalVar <- Modifier* LocalVarType VarDecls ';'
+        LocalVarType <- 'var' / Type
         Stmt <- Block
              / 'if' '(' Expr ')' Stmt ('else' Stmt)?
              / 'while' '(' Expr ')' Stmt
@@ -77,18 +93,22 @@ class Java25GrammarExample {
              / Identifier ':' Stmt
              / Expr ';'
              / ';'
-        ForCtrl <- ForInit? ';' Expr? ';' ExprList? / Type Identifier ':' Expr
+        ForCtrl <- ForInit? ';' Expr? ';' ExprList? / LocalVarType Identifier ':' Expr
         ForInit <- LocalVarNoSemi / ExprList
-        LocalVarNoSemi <- Modifier* Type VarDecls
+        LocalVarNoSemi <- Modifier* LocalVarType VarDecls
         ResourceSpec <- '(' Resource (';' Resource)* ';'? ')'
         Resource <- Modifier* Type Identifier '=' Expr / QualifiedName
         Catch <- 'catch' '(' Modifier* Type ('|' Type)* Identifier ')' Block
         Finally <- 'finally' Block
         SwitchBlock <- '{' SwitchRule* '}'
         SwitchRule <- SwitchLabel '->' (Expr ';' / Block / 'throw' Expr ';') / SwitchLabel ':' BlockStmt*
+        # === Switch Labels and Patterns (JLS 14.11, 14.30) ===
         SwitchLabel <- 'case' 'null' (',' 'default')? / 'case' CaseItem (',' CaseItem)* Guard? / 'default'
         CaseItem <- Pattern / Expr
-        Pattern <- Type Identifier
+        Pattern <- RecordPattern / TypePattern
+        TypePattern <- LocalVarType Identifier / '_'
+        RecordPattern <- RefType '(' PatternList? ')'
+        PatternList <- Pattern (',' Pattern)*
         Guard <- 'when' Expr
 
         Expr <- Assignment
@@ -100,7 +120,7 @@ class Java25GrammarExample {
         BitXor <- BitAnd ('^' BitAnd)*
         BitAnd <- Equality ('&' Equality)*
         Equality <- Relational (('==' / '!=') Relational)*
-        Relational <- Shift (('<=' / '>=' / '<' / '>') Shift / 'instanceof' Type Identifier?)?
+        Relational <- Shift (('<=' / '>=' / '<' / '>') Shift / 'instanceof' (Pattern / Type))?
         Shift <- Additive (('<<' / '>>>' / '>>') Additive)*
         Additive <- Multiplicative (('+' / '-') Multiplicative)*
         Multiplicative <- Unary (('*' / '/' / '%') Unary)*
@@ -131,7 +151,7 @@ class Java25GrammarExample {
 
         Literal <- 'null' / 'true' / 'false' / CharLit / StringLit / NumLit
         CharLit <- < '\\'' ([^'\\\\] / '\\\\' .)* '\\'' >
-        StringLit <- < '"' ([^"\\\\] / '\\\\' .)* '"' > / < '\"\"\"' (!'\"\"\"' .)* '\"\"\"' >
+        StringLit <- < '\"\"\"' (!'\"\"\"' .)* '\"\"\"' > / < '"' ([^"\\\\] / '\\\\' .)* '"' >
         NumLit <- < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\\-]? [0-9_]+)? [fFdD]? >
 
         Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'double' / 'do' / 'else' / 'enum' / 'extends' / 'false' / 'finally' / 'final' / 'float' / 'for' / 'goto' / 'implements' / 'import' / 'instanceof' / 'interface' / 'int' / 'if' / 'long' / 'module' / 'native' / 'new' / 'non-sealed' / 'null' / 'package' / 'permits' / 'private' / 'protected' / 'public' / 'record' / 'return' / 'sealed' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throws' / 'throw' / 'transient' / 'true' / 'try' / 'var' / 'void' / 'volatile' / 'when' / 'while' / 'yield' / '_') ![a-zA-Z0-9_$]
@@ -337,6 +357,112 @@ class Java25GrammarExample {
         assertTrue(parser.parseCst("x > 0 ? x : -x", "Expr").isSuccess());
         assertTrue(parser.parseCst("obj.method()", "Expr").isSuccess());
         assertTrue(parser.parseCst("arr[i]", "Expr").isSuccess());
+    }
+
+    // === Java 25 Specific Features ===
+
+    @Test
+    void parseModuleDeclaration() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = """
+            module com.example {
+                requires java.base;
+                exports com.example.api;
+            }
+            """;
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Module declaration failed: " + result);
+    }
+
+    @Test
+    void parseOpenModule() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "open module com.example { }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Open module failed: " + result);
+    }
+
+    @Test
+    void parseModuleDirectives() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = """
+            module com.example {
+                requires transitive java.sql;
+                requires static java.compiler;
+                exports com.example.api to com.client;
+                opens com.example.internal to com.reflect;
+                uses java.util.ServiceLoader;
+                provides java.util.spi.ToolProvider with com.example.Tool;
+            }
+            """;
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Module directives failed: " + result);
+    }
+
+    @Test
+    void parseVarLocalVariable() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "class C { void m() { var x = 42; } }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "var failed: " + result);
+    }
+
+    @Test
+    void parsePatternMatchingInstanceof() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "class C { boolean f(Object o) { return o instanceof String s; } }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Pattern instanceof failed: " + result);
+    }
+
+    @Test
+    void parseRecordPattern() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        assertTrue(parser.parseCst("Point(int x, int y)", "RecordPattern").isSuccess());
+    }
+
+    @Test
+    void parseSwitchExpression() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = """
+            class C {
+                int f(int x) {
+                    return switch (x) {
+                        case 1 -> 10;
+                        case 2 -> 20;
+                        default -> 0;
+                    };
+                }
+            }
+            """;
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Switch expression failed: " + result);
+    }
+
+    @Test
+    void parseSwitchWithGuard() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Test guard syntax separately
+        var code = "case String s when true -> 1;";
+        var result = parser.parseCst(code, "SwitchRule");
+        assertTrue(result.isSuccess(), () -> "Switch with guard failed: " + result);
+    }
+
+    @Test
+    void parseTextBlockLiteral() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Text blocks - test the literal directly
+        var textBlock = "\"\"\"\nhello\n\"\"\"";
+        var result = parser.parseCst(textBlock, "StringLit");
+        assertTrue(result.isSuccess(), () -> "Text block literal failed: " + result);
+    }
+
+    @Test
+    void parseImportModule() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "import module java.base;";
+        var result = parser.parseCst(code, "ImportDecl");
+        assertTrue(result.isSuccess(), () -> "Import module failed: " + result);
     }
 
     // === Standalone Parser Generation ===
