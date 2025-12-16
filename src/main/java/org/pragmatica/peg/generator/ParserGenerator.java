@@ -1039,8 +1039,8 @@ public final class ParserGenerator {
                 var optStart = "optStart" + id;
                 var optElem = "optElem" + id;
                 sb.append(pad).append("var ").append(optStart).append(" = location();\n");
-                // Skip whitespace after saving start - so restore goes back to pre-whitespace position
-                if (!inWhitespaceRule) {
+                // Skip whitespace before non-Reference elements (References capture trivia themselves)
+                if (!inWhitespaceRule && !isReference(opt.expression())) {
                     sb.append(pad).append("if (!inTokenBoundary) skipWhitespace();\n");
                 }
                 generateCstExpressionCode(sb, opt.expression(), optElem, indent, addToChildren, counter, inWhitespaceRule);
@@ -1059,7 +1059,8 @@ public final class ParserGenerator {
                 var maxStr = rep.max().isPresent() ? String.valueOf(rep.max().unwrap()) : "Integer.MAX_VALUE";
                 sb.append(pad).append("while (").append(repCount).append(" < ").append(maxStr).append(") {\n");
                 sb.append(pad).append("    var ").append(beforeLoc).append(" = location();\n");
-                if (!inWhitespaceRule) {
+                // Skip whitespace before non-Reference elements (References capture trivia themselves)
+                if (!inWhitespaceRule && !isReference(rep.expression())) {
                     sb.append(pad).append("    if (").append(repCount).append(" > 0 && !inTokenBoundary) skipWhitespace();\n");
                 }
                 generateCstExpressionCode(sb, rep.expression(), repElem, indent + 1, addToChildren, counter, inWhitespaceRule);
