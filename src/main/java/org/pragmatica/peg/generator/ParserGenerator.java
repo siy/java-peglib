@@ -859,6 +859,15 @@ public final class ParserGenerator {
         };
     }
 
+    private boolean isOptionalLike(Expression expr) {
+        return switch (expr) {
+            case Expression.Optional o -> true;
+            case Expression.ZeroOrMore z -> true;
+            case Expression.Group g -> isOptionalLike(g.expression());
+            default -> false;
+        };
+    }
+
     /**
      * Extract inner expression from ZeroOrMore/OneOrMore for trivia matching.
      * The whitespace rule is typically `(spaces / comments)*` - we want to match
@@ -929,7 +938,8 @@ public final class ParserGenerator {
                 for (var elem : seq.elements()) {
                     sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
                     // Skip whitespace before non-Reference elements (References capture trivia themselves)
-                    if (i > 0 && !inWhitespaceRule && !isReference(elem)) {
+                    // Also don't skip for Optional/ZeroOrMore - they handle it after saving their start position
+                    if (i > 0 && !inWhitespaceRule && !isReference(elem) && !isOptionalLike(elem)) {
                         sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
                     }
                     var elemVar = "elem" + id + "_" + i;
@@ -1025,6 +1035,10 @@ public final class ParserGenerator {
                 var optStart = "optStart" + id;
                 var optElem = "optElem" + id;
                 sb.append(pad).append("var ").append(optStart).append(" = location();\n");
+                // Skip whitespace after saving start - so restore goes back to pre-whitespace position
+                if (!inWhitespaceRule) {
+                    sb.append(pad).append("if (!inTokenBoundary) skipWhitespace();\n");
+                }
                 generateCstExpressionCode(sb, opt.expression(), optElem, indent, addToChildren, counter, inWhitespaceRule);
                 sb.append(pad).append("var ").append(resultVar).append(" = ").append(optElem).append(".isSuccess() ? ").append(optElem).append(" : CstParseResult.success(null, \"\", location());\n");
                 sb.append(pad).append("if (").append(optElem).append(".isFailure()) {\n");
