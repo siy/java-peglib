@@ -72,12 +72,13 @@ src/test/java/org/pragmatica/peg/
 ├── generator/
 │   └── ParserGeneratorTest.java # 8 tests for source generation
 └── examples/
+    ├── ErrorRecoveryExample.java # 12 tests - error recovery patterns
     ├── CalculatorExample.java   # 6 tests - arithmetic with actions
     ├── JsonParserExample.java   # 11 tests - JSON CST parsing
     ├── SExpressionExample.java  # 11 tests - Lisp-like syntax
     ├── CsvParserExample.java    # 8 tests - CSV data format
     ├── SourceGenerationExample.java # 9 tests - standalone parser
-    └── Java25GrammarExample.java # 32 tests - Java 25 syntax (modules, var, patterns)
+    └── Java25GrammarExample.java # 59 tests - Java 25 syntax
 ```
 
 ## Grammar Syntax (cpp-peglib compatible)
@@ -133,7 +134,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Source generator - standalone parser Java file
 - [x] Trivia handling (whitespace/comments) for lossless CST
 - [x] Advanced error recovery with Rust-style diagnostics
-- [x] 220 passing tests
+- [x] 232 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -264,7 +265,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (220 tests)
+## Test Coverage (232 tests)
 
 ### Grammar Parser Tests (14 tests)
 - Simple rules, actions, sequences, choices
@@ -294,13 +295,14 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - All quantifiers generate loops
 - Only depends on pragmatica-lite
 
-### Example Tests (77 tests)
+### Example Tests (116 tests)
+- **ErrorRecovery** (12 tests): Recovery strategies, diagnostic formatting, CST error nodes
 - **Calculator** (6 tests): Number parsing, addition, multiplication, boolean/double types
 - **JSON** (11 tests): CST parsing of JSON values, objects, arrays, nested structures
 - **S-Expression** (11 tests): Lisp-like syntax, nested lists, atoms, symbols
 - **CSV** (8 tests): Field parsing, empty fields, spaces preserved
 - **Source Generation** (9 tests): Standalone parser generation, all operators
-- **Java25Grammar** (32 tests): Full Java 25 syntax including modules, var, patterns, text blocks
+- **Java25Grammar** (59 tests): Full Java 25 syntax including modules, var, patterns, text blocks
 
 ### Trivia Tests (19 tests)
 - **TriviaTest** (13 tests): Runtime trivia - leading, trailing, mixed, comments
@@ -350,6 +352,6 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (220 passing)
+mvn test             # Run tests (232 passing)
 mvn verify           # Full verification
 ```
