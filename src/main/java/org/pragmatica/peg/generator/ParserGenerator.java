@@ -766,21 +766,21 @@ public final class ParserGenerator {
             sb.append("        }\n");
         }
 
-        // Generate built-in types for anonymous terminals
+        // Generate built-in types for anonymous terminals (prefixed to avoid collision with grammar rules)
         sb.append("        // Built-in types for anonymous terminals\n");
-        sb.append("        record Literal() implements RuleId {\n");
+        sb.append("        record PegLiteral() implements RuleId {\n");
         sb.append("            public int ordinal() { return -1; }\n");
         sb.append("            public String name() { return \"literal\"; }\n");
         sb.append("        }\n");
-        sb.append("        record CharClass() implements RuleId {\n");
+        sb.append("        record PegCharClass() implements RuleId {\n");
         sb.append("            public int ordinal() { return -2; }\n");
         sb.append("            public String name() { return \"char\"; }\n");
         sb.append("        }\n");
-        sb.append("        record Any() implements RuleId {\n");
+        sb.append("        record PegAny() implements RuleId {\n");
         sb.append("            public int ordinal() { return -3; }\n");
         sb.append("            public String name() { return \"any\"; }\n");
         sb.append("        }\n");
-        sb.append("        record Token() implements RuleId {\n");
+        sb.append("        record PegToken() implements RuleId {\n");
         sb.append("            public int ordinal() { return -4; }\n");
         sb.append("            public String name() { return \"token\"; }\n");
         sb.append("        }\n");
@@ -795,10 +795,10 @@ public final class ParserGenerator {
               .append(" ").append(constName).append(" = new RuleId.").append(ruleClassName).append("();\n");
         }
         // Built-in singletons
-        sb.append("    private static final RuleId.Literal RULE_LITERAL = new RuleId.Literal();\n");
-        sb.append("    private static final RuleId.CharClass RULE_CHAR_CLASS = new RuleId.CharClass();\n");
-        sb.append("    private static final RuleId.Any RULE_ANY = new RuleId.Any();\n");
-        sb.append("    private static final RuleId.Token RULE_TOKEN = new RuleId.Token();\n");
+        sb.append("    private static final RuleId.PegLiteral RULE_LITERAL = new RuleId.PegLiteral();\n");
+        sb.append("    private static final RuleId.PegCharClass RULE_CHAR_CLASS = new RuleId.PegCharClass();\n");
+        sb.append("    private static final RuleId.PegAny RULE_ANY = new RuleId.PegAny();\n");
+        sb.append("    private static final RuleId.PegToken RULE_TOKEN = new RuleId.PegToken();\n");
         sb.append("\n");
     }
 
