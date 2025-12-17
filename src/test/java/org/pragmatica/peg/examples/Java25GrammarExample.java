@@ -841,6 +841,20 @@ class Java25GrammarExample {
                 case SATURDAY, SUNDAY -> "weekend";
             }""", "Expr");
         assertTrue(r3.isSuccess(), () -> "Multiple enum constants failed: " + r3);
+
+        // Full class with unqualified enum constants in switch
+        var r4 = parser.parseCst("""
+            class Foo {
+                enum Status { PENDING, ACTIVE }
+                String test(Status s) {
+                    return switch (s) {
+                        case PENDING -> "p";
+                        case ACTIVE -> "a";
+                    };
+                }
+            }
+            """);
+        assertTrue(r4.isSuccess(), () -> "Full class with enum switch failed: " + r4);
     }
 
     @Test
