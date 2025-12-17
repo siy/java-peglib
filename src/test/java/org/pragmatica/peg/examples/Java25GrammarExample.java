@@ -137,7 +137,7 @@ class Java25GrammarExample {
         Shift <- Additive (('<<' / '>>>' / '>>') Additive)*
         Additive <- Multiplicative (('+' / '-') Multiplicative)*
         Multiplicative <- Unary (('*' / '/' / '%') Unary)*
-        Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ')' Unary / Postfix
+        Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
         Postfix <- Primary PostOp*
         PostOp <- '.' Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
         Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / '(' Expr ')' / Lambda / 'switch' '(' Expr ')' SwitchBlock / QualifiedName
@@ -586,6 +586,72 @@ class Java25GrammarExample {
         var code = "class C { void set(@NonNull String value) { } }";
         var result = parser.parseCst(code);
         assertTrue(result.isSuccess(), () -> "Parameter type annotation failed: " + result);
+    }
+
+    // === Edge Cases ===
+
+    @Test
+    void parseMethodReference() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Simple method reference
+        var r1 = parser.parseCst("String::valueOf", "Expr");
+        assertTrue(r1.isSuccess(), () -> "Simple method ref failed: " + r1);
+        // Constructor reference
+        var r2 = parser.parseCst("ArrayList::new", "Expr");
+        assertTrue(r2.isSuccess(), () -> "Constructor ref failed: " + r2);
+    }
+
+    @Test
+    void parseAnonymousClassWithDiamond() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "class C { Object o = new ArrayList<>() { }; }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Anonymous class with diamond failed: " + result);
+    }
+
+    @Test
+    void parseNestedGenerics() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Nested wildcards
+        var r1 = parser.parseCst("Map<String, List<? extends Number>>", "Type");
+        assertTrue(r1.isSuccess(), () -> "Nested wildcards failed: " + r1);
+        // Multiple type params
+        var r2 = parser.parseCst("Function<String, List<Integer>>", "Type");
+        assertTrue(r2.isSuccess(), () -> "Multiple type params failed: " + r2);
+    }
+
+    @Test
+    void parseIntersectionCast() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Cast with intersection type (lambda target)
+        var code = "class C { Object f() { return (Runnable & Serializable) () -> {}; } }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Intersection cast failed: " + result);
+    }
+
+    @Test
+    void parseArrayCreationWithAnnotation() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = "class C { String[] arr = new String[10]; }";
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Array creation failed: " + result);
+    }
+
+    @Test
+    void parseYieldInSwitch() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var code = """
+            class C {
+                int f(int x) {
+                    return switch(x) {
+                        case 1 -> 10;
+                        default -> { yield 0; }
+                    };
+                }
+            }
+            """;
+        var result = parser.parseCst(code);
+        assertTrue(result.isSuccess(), () -> "Yield in switch failed: " + result);
     }
 
     // === Standalone Parser Generation ===
