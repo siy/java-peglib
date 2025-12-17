@@ -280,6 +280,32 @@ class Java25GrammarExample {
     }
 
     @Test
+    void parseLambdaParams() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Single param without type (the ambiguity case)
+        var r1 = parser.parseCst("(s) -> s", "Lambda");
+        assertTrue(r1.isSuccess(), () -> "Single param failed: " + r1);
+        // Single param with type
+        var r2 = parser.parseCst("(String s) -> s", "Lambda");
+        assertTrue(r2.isSuccess(), () -> "Typed param failed: " + r2);
+        // Multiple params without types
+        var r3 = parser.parseCst("(a, b) -> a", "Lambda");
+        assertTrue(r3.isSuccess(), () -> "Multi param failed: " + r3);
+        // Multiple params with types
+        var r4 = parser.parseCst("(String s, Integer i) -> s", "Lambda");
+        assertTrue(r4.isSuccess(), () -> "Multi typed param failed: " + r4);
+        // Varargs
+        var r5 = parser.parseCst("(String... args) -> args", "Lambda");
+        assertTrue(r5.isSuccess(), () -> "Varargs failed: " + r5);
+        // With modifier
+        var r6 = parser.parseCst("(final String s) -> s", "Lambda");
+        assertTrue(r6.isSuccess(), () -> "Modified param failed: " + r6);
+        // Underscore param
+        var r7 = parser.parseCst("(_) -> 42", "Lambda");
+        assertTrue(r7.isSuccess(), () -> "Underscore param failed: " + r7);
+    }
+
+    @Test
     void parseIfStatement() {
         var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
         assertTrue(parser.parseCst("if (x > 0) return x;", "Stmt").isSuccess());
