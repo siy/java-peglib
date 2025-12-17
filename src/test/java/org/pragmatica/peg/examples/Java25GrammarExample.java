@@ -319,6 +319,21 @@ class Java25GrammarExample {
         assertTrue(r3.isSuccess(), () -> "Paren expr failed: " + r3);
         var r4 = parser.parseCst("(x) + 1", "Expr");
         assertTrue(r4.isSuccess(), () -> "Paren expr in add failed: " + r4);
+        // Multi-line lambda with method chain
+        var r5 = parser.parseCst("""
+            s -> s.trim()
+                  .toUpperCase()""", "Expr");
+        assertTrue(r5.isSuccess(), () -> "Multi-line lambda failed: " + r5);
+        // Lambda in method call argument
+        var r6 = parser.parseCst("""
+            input.map(s -> s.trim()
+                           .toUpperCase())""", "Expr");
+        assertTrue(r6.isSuccess(), () -> "Lambda in method call failed: " + r6);
+        // Return statement with multi-line lambda
+        var r7 = parser.parseCst("""
+            return input.map(s -> s.trim()
+                                   .toUpperCase());""", "Stmt");
+        assertTrue(r7.isSuccess(), () -> "Return with lambda failed: " + r7);
     }
 
     @Test
