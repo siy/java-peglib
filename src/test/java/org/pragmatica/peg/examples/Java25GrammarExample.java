@@ -3,6 +3,10 @@ package org.pragmatica.peg.examples;
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.PegParser;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -110,7 +114,7 @@ class Java25GrammarExample {
         ForInit <- LocalVarNoSemi / ExprList
         LocalVarNoSemi <- Modifier* LocalVarType VarDecls
         ResourceSpec <- '(' Resource (';' Resource)* ';'? ')'
-        Resource <- Modifier* Type Identifier '=' Expr / QualifiedName
+        Resource <- Modifier* LocalVarType Identifier '=' Expr / QualifiedName
         Catch <- 'catch' '(' Modifier* Type ('|' Type)* Identifier ')' Block
         Finally <- 'finally' Block
         SwitchBlock <- '{' SwitchRule* '}'
@@ -143,7 +147,7 @@ class Java25GrammarExample {
         Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / Lambda / '(' Expr ')' / 'switch' '(' Expr ')' SwitchBlock / QualifiedName
         Lambda <- LambdaParams '->' (Expr / Block)
         LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
-        LambdaParam <- Annotation* Modifier* (Type &('...' / Identifier / '_'))? '...'? (Identifier / '_')
+        LambdaParam <- Annotation* Modifier* (('var' / Type) &('...' / Identifier / '_'))? '...'? (Identifier / '_')
         Args <- Expr (',' Expr)*
         ExprList <- Expr (',' Expr)*
 
@@ -734,5 +738,167 @@ class Java25GrammarExample {
         for (int i = 0; i < Math.min(50, lines.length); i++) {
             System.out.println(lines[i]);
         }
+    }
+
+    // === Additional Java 17-25 Feature Tests ===
+
+    @Test
+    void parseRecordDeclaration() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Simple record
+        assertTrue(parser.parseCst("record Point(int x, int y) {}", "TypeDecl").isSuccess());
+        // Record with body
+        assertTrue(parser.parseCst("record Person(String name, int age) { public String fullName() { return name; } }", "TypeDecl").isSuccess());
+        // Record with compact constructor
+        assertTrue(parser.parseCst("record Range(int lo, int hi) { Range { if (lo > hi) throw new IllegalArgumentException(); } }", "TypeDecl").isSuccess());
+        // Record with annotations
+        assertTrue(parser.parseCst("@Deprecated record OldPoint(int x, int y) {}", "TypeDecl").isSuccess());
+        // Record implementing interface
+        assertTrue(parser.parseCst("record Point(int x, int y) implements Serializable {}", "TypeDecl").isSuccess());
+    }
+
+    @Test
+    void parsePatternMatchingSwitch() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Type pattern in switch
+        var r1 = parser.parseCst("""
+            switch (obj) {
+                case Integer i -> i * 2;
+                case String s -> s.length();
+                default -> 0;
+            }""", "Expr");
+        assertTrue(r1.isSuccess(), () -> "Type pattern switch failed: " + r1);
+        // Guarded pattern
+        var r2 = parser.parseCst("""
+            switch (obj) {
+                case String s when s.isEmpty() -> "empty";
+                case String s -> s;
+                default -> "other";
+            }""", "Expr");
+        assertTrue(r2.isSuccess(), () -> "Guarded pattern failed: " + r2);
+        // Null case
+        var r3 = parser.parseCst("""
+            switch (obj) {
+                case null -> "null";
+                case String s -> s;
+                default -> "other";
+            }""", "Expr");
+        assertTrue(r3.isSuccess(), () -> "Null case failed: " + r3);
+    }
+
+    @Test
+    void parseTextBlock() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var r1 = parser.parseCst("""
+            var html = \"\"\"
+                <html>
+                    <body>Hello</body>
+                </html>
+                \"\"\";""", "LocalVar");
+        assertTrue(r1.isSuccess(), () -> "Text block failed: " + r1);
+    }
+
+    @Test
+    void parseVarTypeInference() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Local variable
+        var r1 = parser.parseCst("var x = 10;", "LocalVar");
+        assertTrue(r1.isSuccess(), () -> "Local var failed: " + r1);
+        // In for loop
+        var r2 = parser.parseCst("for (var i = 0; i < 10; i++) {}", "Stmt");
+        assertTrue(r2.isSuccess(), () -> "For loop var failed: " + r2);
+        // In enhanced for
+        var r3 = parser.parseCst("for (var item : list) {}", "Stmt");
+        assertTrue(r3.isSuccess(), () -> "Enhanced for var failed: " + r3);
+        // In try-with-resources
+        var r4 = parser.parseCst("try (var in = new FileInputStream(f)) {}", "Stmt");
+        assertTrue(r4.isSuccess(), () -> "Try-with-resources var failed: " + r4);
+        // Lambda with var (Java 11+)
+        var r5 = parser.parseCst("(@Nonnull var x) -> x", "Lambda");
+        assertTrue(r5.isSuccess(), () -> "Lambda with var failed: " + r5);
+    }
+
+    @Test
+    void parseDeconstructionPattern() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Record pattern in switch
+        var r1 = parser.parseCst("""
+            switch (obj) {
+                case Point(int x, int y) -> x + y;
+                default -> 0;
+            }""", "Expr");
+        assertTrue(r1.isSuccess(), () -> "Record pattern failed: " + r1);
+        // Nested record pattern
+        var r2 = parser.parseCst("""
+            switch (obj) {
+                case Line(Point(int x1, int y1), Point(int x2, int y2)) -> x1 + x2;
+                default -> 0;
+            }""", "Expr");
+        assertTrue(r2.isSuccess(), () -> "Nested record pattern failed: " + r2);
+    }
+
+    @Test
+    void parseStringTemplates() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // STR template (preview in Java 21+)
+        // Note: String templates have special syntax STR."..." which may need grammar extension
+        // For now, test that method calls with text blocks work
+        var r1 = parser.parseCst("""
+            String.format(\"\"\"
+                Hello %s!
+                \"\"\", name)""", "Expr");
+        assertTrue(r1.isSuccess(), () -> "Format with text block failed: " + r1);
+    }
+
+    @Test
+    void parseUnnamedPatterns() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Unnamed pattern in switch (Java 21+)
+        var r1 = parser.parseCst("""
+            switch (obj) {
+                case Point(int x, _) -> x;
+                default -> 0;
+            }""", "Expr");
+        assertTrue(r1.isSuccess(), () -> "Unnamed pattern failed: " + r1);
+        // Multiple underscores
+        var r2 = parser.parseCst("""
+            switch (box) {
+                case Box(_, _) -> "box";
+                default -> "other";
+            }""", "Expr");
+        assertTrue(r2.isSuccess(), () -> "Multiple unnamed failed: " + r2);
+    }
+
+    // === Source File Validation ===
+
+    @Test
+    void parseAllSourceFiles() throws IOException {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var srcDir = Path.of("src/main/java");
+
+        var javaFiles = Files.walk(srcDir)
+            .filter(p -> p.toString().endsWith(".java"))
+            .toList();
+
+        System.out.println("Parsing " + javaFiles.size() + " Java source files...");
+
+        int passed = 0;
+        int failed = 0;
+
+        for (var file : javaFiles) {
+            var source = Files.readString(file);
+            var result = parser.parseCst(source);
+
+            if (result.isSuccess()) {
+                passed++;
+                System.out.println("✓ " + srcDir.relativize(file));
+            } else {
+                failed++;
+                System.out.println("✗ " + srcDir.relativize(file) + ": " + result);
+            }
+        }
+
+        System.out.println("\nResults: " + passed + " passed, " + failed + " failed");
+        assertEquals(0, failed, "Some source files failed to parse");
     }
 }
