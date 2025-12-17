@@ -439,6 +439,11 @@ class Java25GrammarExample {
         assertTrue(parser.parseCst("x > 0 ? x : -x", "Expr").isSuccess());
         assertTrue(parser.parseCst("obj.method()", "Expr").isSuccess());
         assertTrue(parser.parseCst("arr[i]", "Expr").isSuccess());
+        // Assignment expressions
+        assertTrue(parser.parseCst("x = 5", "Expr").isSuccess());
+        assertTrue(parser.parseCst("this.name = name", "Expr").isSuccess());
+        assertTrue(parser.parseCst("x += 1", "Expr").isSuccess());
+        assertTrue(parser.parseCst("arr[i] = value", "Expr").isSuccess());
     }
 
     // === Java 25 Specific Features ===
