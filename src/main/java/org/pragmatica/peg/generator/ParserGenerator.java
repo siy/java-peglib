@@ -1,17 +1,92 @@
 package org.pragmatica.peg.generator;
 
-import org.pragmatica.lang.Option;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
-
-import java.util.stream.Collectors;
 
 /**
  * Generates standalone parser source code from a Grammar.
  * The generated parser depends only on pragmatica-lite:core.
  */
 public final class ParserGenerator {
+
+    // Shared generated code fragments
+    private static final String MATCHES_WORD_METHOD = """
+            private boolean matchesWord(String word, boolean caseInsensitive) {
+                if (remaining() < word.length()) return false;
+                for (int i = 0; i < word.length(); i++) {
+                    char expected = word.charAt(i);
+                    char actual = peek(i);
+                    if (caseInsensitive) {
+                        if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) return false;
+                    } else {
+                        if (expected != actual) return false;
+                    }
+                }
+                return true;
+            }
+        """;
+
+    private static final String MATCHES_PATTERN_METHOD = """
+            private boolean matchesPattern(char c, String pattern, boolean caseInsensitive) {
+                char testChar = caseInsensitive ? Character.toLowerCase(c) : c;
+                int i = 0;
+                while (i < pattern.length()) {
+                    char start = pattern.charAt(i);
+                    if (start == '\\\\' && i + 1 < pattern.length()) {
+                        char escaped = pattern.charAt(i + 1);
+                        int consumed = 2;
+                        char expected = switch (escaped) {
+                            case 'n' -> '\\n';
+                            case 'r' -> '\\r';
+                            case 't' -> '\\t';
+                            case '\\\\' -> '\\\\';
+                            case ']' -> ']';
+                            case '-' -> '-';
+                            case 'x' -> {
+                                if (i + 4 <= pattern.length()) {
+                                    try {
+                                        var hex = pattern.substring(i + 2, i + 4);
+                                        consumed = 4;
+                                        yield (char) Integer.parseInt(hex, 16);
+                                    } catch (NumberFormatException e) { yield 'x'; }
+                                }
+                                yield 'x';
+                            }
+                            case 'u' -> {
+                                if (i + 6 <= pattern.length()) {
+                                    try {
+                                        var hex = pattern.substring(i + 2, i + 6);
+                                        consumed = 6;
+                                        yield (char) Integer.parseInt(hex, 16);
+                                    } catch (NumberFormatException e) { yield 'u'; }
+                                }
+                                yield 'u';
+                            }
+                            default -> escaped;
+                        };
+                        if (caseInsensitive) expected = Character.toLowerCase(expected);
+                        if (testChar == expected) return true;
+                        i += consumed;
+                        continue;
+                    }
+                    if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
+                        char end = pattern.charAt(i + 2);
+                        if (caseInsensitive) {
+                            start = Character.toLowerCase(start);
+                            end = Character.toLowerCase(end);
+                        }
+                        if (testChar >= start && testChar <= end) return true;
+                        i += 3;
+                    } else {
+                        if (caseInsensitive) start = Character.toLowerCase(start);
+                        if (testChar == start) return true;
+                        i++;
+                    }
+                }
+                return false;
+            }
+        """;
 
     private final Grammar grammar;
     private final String packageName;
@@ -548,19 +623,9 @@ public final class ParserGenerator {
                     return ParseResult.success(longestMatch, pos, line, column);
                 }
 
-                private boolean matchesWord(String word, boolean caseInsensitive) {
-                    if (remaining() < word.length()) return false;
-                    for (int i = 0; i < word.length(); i++) {
-                        char expected = word.charAt(i);
-                        char actual = peek(i);
-                        if (caseInsensitive) {
-                            if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) return false;
-                        } else {
-                            if (expected != actual) return false;
-                        }
-                    }
-                    return true;
-                }
+            """);
+        sb.append(MATCHES_WORD_METHOD);
+        sb.append("""
 
                 private ParseResult matchCharClass(String pattern, boolean negated, boolean caseInsensitive) {
                     if (isAtEnd()) {
@@ -576,64 +641,9 @@ public final class ParserGenerator {
                     return ParseResult.success(String.valueOf(c), pos, line, column);
                 }
 
-                private boolean matchesPattern(char c, String pattern, boolean caseInsensitive) {
-                    char testChar = caseInsensitive ? Character.toLowerCase(c) : c;
-                    int i = 0;
-                    while (i < pattern.length()) {
-                        char start = pattern.charAt(i);
-                        if (start == '\\\\' && i + 1 < pattern.length()) {
-                            char escaped = pattern.charAt(i + 1);
-                            int consumed = 2;
-                            char expected = switch (escaped) {
-                                case 'n' -> '\\n';
-                                case 'r' -> '\\r';
-                                case 't' -> '\\t';
-                                case '\\\\' -> '\\\\';
-                                case ']' -> ']';
-                                case '-' -> '-';
-                                case 'x' -> {
-                                    if (i + 4 <= pattern.length()) {
-                                        try {
-                                            var hex = pattern.substring(i + 2, i + 4);
-                                            consumed = 4;
-                                            yield (char) Integer.parseInt(hex, 16);
-                                        } catch (NumberFormatException e) { yield 'x'; }
-                                    }
-                                    yield 'x';
-                                }
-                                case 'u' -> {
-                                    if (i + 6 <= pattern.length()) {
-                                        try {
-                                            var hex = pattern.substring(i + 2, i + 6);
-                                            consumed = 6;
-                                            yield (char) Integer.parseInt(hex, 16);
-                                        } catch (NumberFormatException e) { yield 'u'; }
-                                    }
-                                    yield 'u';
-                                }
-                                default -> escaped;
-                            };
-                            if (caseInsensitive) expected = Character.toLowerCase(expected);
-                            if (testChar == expected) return true;
-                            i += consumed;
-                            continue;
-                        }
-                        if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
-                            char end = pattern.charAt(i + 2);
-                            if (caseInsensitive) {
-                                start = Character.toLowerCase(start);
-                                end = Character.toLowerCase(end);
-                            }
-                            if (testChar >= start && testChar <= end) return true;
-                            i += 3;
-                        } else {
-                            if (caseInsensitive) start = Character.toLowerCase(start);
-                            if (testChar == start) return true;
-                            i++;
-                        }
-                    }
-                    return false;
-                }
+            """);
+        sb.append(MATCHES_PATTERN_METHOD);
+        sb.append("""
 
                 private ParseResult matchAny() {
                     if (isAtEnd()) {
@@ -741,13 +751,8 @@ public final class ParserGenerator {
 
         sb.append("    // === Rule ID Types ===\n\n");
 
-        // Generate permits clause (include built-in types for anonymous terminals)
-        var permittedTypes = rules.stream()
-            .map(r -> "RuleId." + toClassName(r.name()))
-            .collect(Collectors.joining(", "));
-        permittedTypes = permittedTypes + ", RuleId.Literal, RuleId.CharClass, RuleId.Any, RuleId.Token";
-
-        sb.append("    public sealed interface RuleId permits ").append(permittedTypes).append(" {\n");
+        // Nested records are implicitly permitted - no need for explicit permits clause
+        sb.append("    public sealed interface RuleId {\n");
         sb.append("        int ordinal();\n");
         sb.append("        String name();\n\n");
 
@@ -1513,19 +1518,9 @@ public final class ParserGenerator {
                     return CstParseResult.success(node, longestMatch, location());
                 }
 
-                private boolean matchesWord(String word, boolean caseInsensitive) {
-                    if (remaining() < word.length()) return false;
-                    for (int i = 0; i < word.length(); i++) {
-                        char expected = word.charAt(i);
-                        char actual = peek(i);
-                        if (caseInsensitive) {
-                            if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) return false;
-                        } else {
-                            if (expected != actual) return false;
-                        }
-                    }
-                    return true;
-                }
+            """);
+        sb.append(MATCHES_WORD_METHOD);
+        sb.append("""
 
                 private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
                     if (isAtEnd()) {
@@ -1545,64 +1540,9 @@ public final class ParserGenerator {
                     return CstParseResult.success(node, text, location());
                 }
 
-                private boolean matchesPattern(char c, String pattern, boolean caseInsensitive) {
-                    char testChar = caseInsensitive ? Character.toLowerCase(c) : c;
-                    int i = 0;
-                    while (i < pattern.length()) {
-                        char start = pattern.charAt(i);
-                        if (start == '\\\\' && i + 1 < pattern.length()) {
-                            char escaped = pattern.charAt(i + 1);
-                            int consumed = 2;
-                            char expected = switch (escaped) {
-                                case 'n' -> '\\n';
-                                case 'r' -> '\\r';
-                                case 't' -> '\\t';
-                                case '\\\\' -> '\\\\';
-                                case ']' -> ']';
-                                case '-' -> '-';
-                                case 'x' -> {
-                                    if (i + 4 <= pattern.length()) {
-                                        try {
-                                            var hex = pattern.substring(i + 2, i + 4);
-                                            consumed = 4;
-                                            yield (char) Integer.parseInt(hex, 16);
-                                        } catch (NumberFormatException e) { yield 'x'; }
-                                    }
-                                    yield 'x';
-                                }
-                                case 'u' -> {
-                                    if (i + 6 <= pattern.length()) {
-                                        try {
-                                            var hex = pattern.substring(i + 2, i + 6);
-                                            consumed = 6;
-                                            yield (char) Integer.parseInt(hex, 16);
-                                        } catch (NumberFormatException e) { yield 'u'; }
-                                    }
-                                    yield 'u';
-                                }
-                                default -> escaped;
-                            };
-                            if (caseInsensitive) expected = Character.toLowerCase(expected);
-                            if (testChar == expected) return true;
-                            i += consumed;
-                            continue;
-                        }
-                        if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
-                            char end = pattern.charAt(i + 2);
-                            if (caseInsensitive) {
-                                start = Character.toLowerCase(start);
-                                end = Character.toLowerCase(end);
-                            }
-                            if (testChar >= start && testChar <= end) return true;
-                            i += 3;
-                        } else {
-                            if (caseInsensitive) start = Character.toLowerCase(start);
-                            if (testChar == start) return true;
-                            i++;
-                        }
-                    }
-                    return false;
-                }
+            """);
+        sb.append(MATCHES_PATTERN_METHOD);
+        sb.append("""
 
                 private CstParseResult matchAnyCst() {
                     if (isAtEnd()) {
