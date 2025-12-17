@@ -795,10 +795,10 @@ public final class ParserGenerator {
               .append(" ").append(constName).append(" = new RuleId.").append(ruleClassName).append("();\n");
         }
         // Built-in singletons
-        sb.append("    private static final RuleId.PegLiteral RULE_LITERAL = new RuleId.PegLiteral();\n");
-        sb.append("    private static final RuleId.PegCharClass RULE_CHAR_CLASS = new RuleId.PegCharClass();\n");
-        sb.append("    private static final RuleId.PegAny RULE_ANY = new RuleId.PegAny();\n");
-        sb.append("    private static final RuleId.PegToken RULE_TOKEN = new RuleId.PegToken();\n");
+        sb.append("    private static final RuleId.PegLiteral RULE_PEG_LITERAL = new RuleId.PegLiteral();\n");
+        sb.append("    private static final RuleId.PegCharClass RULE_PEG_CHAR_CLASS = new RuleId.PegCharClass();\n");
+        sb.append("    private static final RuleId.PegAny RULE_PEG_ANY = new RuleId.PegAny();\n");
+        sb.append("    private static final RuleId.PegToken RULE_PEG_TOKEN = new RuleId.PegToken();\n");
         sb.append("\n");
     }
 
@@ -1355,7 +1355,7 @@ public final class ParserGenerator {
                 sb.append(pad).append("if (").append(tbElem).append(".isSuccess()) {\n");
                 sb.append(pad).append("    var tbText").append(id).append(" = substring(").append(tbStart).append(".offset(), pos);\n");
                 sb.append(pad).append("    var tbSpan").append(id).append(" = SourceSpan.of(").append(tbStart).append(", location());\n");
-                sb.append(pad).append("    var tbNode").append(id).append(" = new CstNode.Token(tbSpan").append(id).append(", RULE_TOKEN, tbText").append(id).append(", List.of(), List.of());\n");
+                sb.append(pad).append("    var tbNode").append(id).append(" = new CstNode.Token(tbSpan").append(id).append(", RULE_PEG_TOKEN, tbText").append(id).append(", List.of(), List.of());\n");
                 if (addToChildren) {
                     sb.append(pad).append("    children.add(tbNode").append(id).append(");\n");
                 }
@@ -1493,7 +1493,7 @@ public final class ParserGenerator {
                         advance();
                     }
                     var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_LITERAL, text, List.of(), List.of());
+                    var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, List.of(), List.of());
                     return CstParseResult.success(node, text, location());
                 }
 
@@ -1514,7 +1514,7 @@ public final class ParserGenerator {
                         advance();
                     }
                     var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_LITERAL, longestMatch, List.of(), List.of());
+                    var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, List.of(), List.of());
                     return CstParseResult.success(node, longestMatch, location());
                 }
 
@@ -1536,7 +1536,7 @@ public final class ParserGenerator {
                     advance();
                     var text = String.valueOf(c);
                     var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_CHAR_CLASS, text, List.of(), List.of());
+                    var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());
                     return CstParseResult.success(node, text, location());
                 }
 
@@ -1552,7 +1552,7 @@ public final class ParserGenerator {
                     char c = advance();
                     var text = String.valueOf(c);
                     var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_ANY, text, List.of(), List.of());
+                    var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());
                     return CstParseResult.success(node, text, location());
                 }
 
