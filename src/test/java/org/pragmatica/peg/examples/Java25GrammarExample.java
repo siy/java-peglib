@@ -140,7 +140,7 @@ class Java25GrammarExample {
         Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
         Postfix <- Primary PostOp*
         PostOp <- '.' Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
-        Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / '(' Expr ')' / Lambda / 'switch' '(' Expr ')' SwitchBlock / QualifiedName
+        Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / Lambda / '(' Expr ')' / 'switch' '(' Expr ')' SwitchBlock / QualifiedName
         Lambda <- LambdaParams '->' (Expr / Block)
         LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
         LambdaParam <- Modifier* (Type &('...' / Identifier / '_'))? '...'? (Identifier / '_')
@@ -303,6 +303,22 @@ class Java25GrammarExample {
         // Underscore param
         var r7 = parser.parseCst("(_) -> 42", "Lambda");
         assertTrue(r7.isSuccess(), () -> "Underscore param failed: " + r7);
+    }
+
+    @Test
+    void parseLambdaInExpression() {
+        // Single param lambda in expression context (goes through Primary)
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        var r1 = parser.parseCst("(s) -> s.length()", "Expr");
+        assertTrue(r1.isSuccess(), () -> "Lambda expr failed: " + r1);
+        // Lambda in field initializer
+        var r2 = parser.parseCst("Function<String, Integer> f = (s) -> s.length();", "Member");
+        assertTrue(r2.isSuccess(), () -> "Lambda field failed: " + r2);
+        // Ensure parenthesized expr still works
+        var r3 = parser.parseCst("(x)", "Expr");
+        assertTrue(r3.isSuccess(), () -> "Paren expr failed: " + r3);
+        var r4 = parser.parseCst("(x) + 1", "Expr");
+        assertTrue(r4.isSuccess(), () -> "Paren expr in add failed: " + r4);
     }
 
     @Test
