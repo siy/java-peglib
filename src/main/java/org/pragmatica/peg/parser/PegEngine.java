@@ -5,7 +5,9 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.peg.action.Action;
 import org.pragmatica.peg.action.ActionCompiler;
 import org.pragmatica.peg.action.SemanticValues;
+import org.pragmatica.peg.error.Diagnostic;
 import org.pragmatica.peg.error.ParseError;
+import org.pragmatica.peg.error.RecoveryStrategy;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
@@ -157,6 +159,121 @@ public final class PegEngine implements Parser {
         return Result.success(success.hasSemanticValue()
             ? success.unwrapSemanticValue()
             : success.node());
+    }
+
+    @Override
+    public ParseResultWithDiagnostics parseCstWithDiagnostics(String input) {
+        var startRule = grammar.effectiveStartRule();
+        if (startRule.isEmpty()) {
+            var diag = Diagnostic.error("no start rule defined in grammar",
+                SourceSpan.at(SourceLocation.START));
+            return ParseResultWithDiagnostics.withErrors(null, List.of(diag), input);
+        }
+        return parseCstWithDiagnostics(input, startRule.unwrap().name());
+    }
+
+    @Override
+    public ParseResultWithDiagnostics parseCstWithDiagnostics(String input, String startRule) {
+        var ruleOpt = grammar.rule(startRule);
+        if (ruleOpt.isEmpty()) {
+            var diag = Diagnostic.error("unknown rule: " + startRule,
+                SourceSpan.at(SourceLocation.START));
+            return ParseResultWithDiagnostics.withErrors(null, List.of(diag), input);
+        }
+
+        var ctx = ParsingContext.create(input, grammar, config);
+
+        // If not using advanced recovery, delegate to normal parsing
+        if (config.recoveryStrategy() != RecoveryStrategy.ADVANCED) {
+            var result = parseCst(input, startRule);
+            return result.fold(
+                cause -> {
+                    var parseError = (ParseError) cause;
+                    var loc = parseError.location();
+                    var span = SourceSpan.at(loc);
+                    var diag = Diagnostic.error("parse error", span)
+                        .withLabel(parseError.message());
+                    return ParseResultWithDiagnostics.withErrors(null, List.of(diag), input);
+                },
+                node -> ParseResultWithDiagnostics.success(node, input)
+            );
+        }
+
+        // Advanced recovery: try to parse fragments with error collection
+        return parseWithRecovery(ctx, ruleOpt.unwrap(), input);
+    }
+
+    /**
+     * Parse with error recovery - continues after errors to collect multiple diagnostics.
+     */
+    private ParseResultWithDiagnostics parseWithRecovery(ParsingContext ctx, Rule startRule, String input) {
+        var fragments = new ArrayList<CstNode>();
+
+        while (!ctx.isAtEnd()) {
+            // Skip leading whitespace
+            var leadingTrivia = skipWhitespace(ctx);
+            if (ctx.isAtEnd()) break;
+
+            var startLoc = ctx.location();
+            var result = parseRule(ctx, startRule);
+
+            if (result instanceof ParseResult.Success success) {
+                // Successfully parsed a fragment
+                var node = success.node();
+                if (!leadingTrivia.isEmpty()) {
+                    node = wrapWithRuleName(node, startRule.name(), leadingTrivia);
+                }
+                fragments.add(node);
+                ctx.exitRecovery();
+            } else {
+                // Parse failed - record error and skip to recovery point
+                var failure = (ParseResult.Failure) result;
+                var found = ctx.isAtEnd() ? "EOF" : String.valueOf(ctx.peek());
+
+                var errorSpan = SourceSpan.at(startLoc);
+                var diag = Diagnostic.error("unexpected input", errorSpan)
+                    .withLabel("found '" + found + "'")
+                    .withHelp("expected " + failure.expected());
+                ctx.addDiagnostic(diag);
+
+                // Skip to recovery point
+                ctx.enterRecovery();
+                var skippedSpan = ctx.skipToRecoveryPoint();
+                if (skippedSpan.length() > 0) {
+                    var skippedText = input.substring(skippedSpan.start().offset(), skippedSpan.end().offset());
+                    var errorNode = new CstNode.Error(
+                        skippedSpan, skippedText, failure.expected(), leadingTrivia, List.of()
+                    );
+                    fragments.add(errorNode);
+                }
+
+                // Skip the recovery character itself (;, }, newline, etc.)
+                if (!ctx.isAtEnd()) {
+                    ctx.advance();
+                }
+            }
+        }
+
+        // Capture trailing trivia
+        var trailingTrivia = skipWhitespace(ctx);
+
+        // Build result
+        CstNode rootNode = null;
+        if (!fragments.isEmpty()) {
+            if (fragments.size() == 1) {
+                rootNode = attachTrailingTrivia(fragments.get(0), trailingTrivia);
+            } else {
+                // Multiple fragments - wrap in a root node
+                var firstSpan = fragments.get(0).span();
+                var lastSpan = fragments.get(fragments.size() - 1).span();
+                var fullSpan = SourceSpan.of(firstSpan.start(), lastSpan.end());
+                rootNode = new CstNode.NonTerminal(
+                    fullSpan, startRule.name(), fragments, List.of(), trailingTrivia
+                );
+            }
+        }
+
+        return ParseResultWithDiagnostics.withErrors(rootNode, ctx.diagnostics(), input);
     }
 
     // === Rule Parsing ===
@@ -1116,6 +1233,9 @@ public final class PegEngine implements Parser {
             case CstNode.Token tok -> new CstNode.Token(
                 tok.span(), ruleName, tok.text(), leadingTrivia, tok.trailingTrivia()
             );
+            case CstNode.Error err -> new CstNode.Error(
+                err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia()
+            );
         };
     }
 
@@ -1135,6 +1255,9 @@ public final class PegEngine implements Parser {
             );
             case CstNode.Token tok -> new CstNode.Token(
                 tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
+            );
+            case CstNode.Error err -> new CstNode.Error(
+                err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia
             );
         };
     }
@@ -1161,6 +1284,9 @@ public final class PegEngine implements Parser {
                 nt.span(), nt.rule(),
                 nt.children().stream().map(this::toAst).toList(),
                 Option.none()
+            );
+            case CstNode.Error err -> new AstNode.Terminal(
+                err.span(), err.rule(), err.skippedText(), Option.none()
             );
         };
     }

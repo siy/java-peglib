@@ -42,6 +42,7 @@ src/main/java/org/pragmatica/peg/
 │   ├── ParserConfig.java       # Configuration record + builder
 │   ├── ParsingContext.java     # Mutable parsing state with packrat cache
 │   ├── ParseResult.java        # Parse result types (sealed)
+│   ├── ParseResultWithDiagnostics.java # Result with error recovery diagnostics
 │   └── PegEngine.java          # PEG parsing engine with action execution
 ├── tree/
 │   ├── SourceLocation.java     # Position in source (line, column, offset)
@@ -57,13 +58,15 @@ src/main/java/org/pragmatica/peg/
 │   └── ParserGenerator.java    # Generates standalone parser source
 └── error/
     ├── ParseError.java         # Parse errors (sealed interface extends Cause)
-    └── RecoveryStrategy.java   # Error recovery enum
+    ├── RecoveryStrategy.java   # Error recovery enum (NONE, BASIC, ADVANCED)
+    └── Diagnostic.java         # Rich error type for Rust-style messages
 
 src/test/java/org/pragmatica/peg/
-├── PegParserTest.java          # 28 tests (parsing + actions)
+├── PegParserTest.java          # 43 tests (parsing + actions)
 ├── EdgeCaseTest.java           # 24 tests (edge cases)
 ├── TriviaTest.java             # 13 tests (trivia handling)
 ├── GeneratedParserTriviaTest.java # 6 tests (generated parser trivia)
+├── ErrorRecoveryTest.java      # 8 tests (error recovery + diagnostics)
 ├── grammar/
 │   └── GrammarParserTest.java  # 14 tests for grammar parser
 ├── generator/
@@ -129,10 +132,10 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Action compilation (runtime) - JDK Compiler API
 - [x] Source generator - standalone parser Java file
 - [x] Trivia handling (whitespace/comments) for lossless CST
-- [x] 170 passing tests
+- [x] Advanced error recovery with Rust-style diagnostics
+- [x] 220 passing tests
 
 ### Remaining Work
-- [ ] Advanced error recovery
 - [ ] Performance optimization
 - [ ] Lambda action attachment (lowest priority) - attach actions programmatically using type-safe RuleId:
   ```java
@@ -217,7 +220,51 @@ Trivia is classified based on content:
 - Starts with `/*` → BlockComment
 - Otherwise → Whitespace
 
-## Test Coverage (170 tests)
+## Error Recovery
+
+Advanced error recovery with Rust-style diagnostic messages.
+
+### Recovery Strategies
+- `NONE` - Fail immediately on first error
+- `BASIC` - Report error with context but stop parsing
+- `ADVANCED` - Continue parsing, collect multiple errors, insert Error nodes
+
+### API Usage
+```java
+var parser = PegParser.builder(grammar)
+    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .build()
+    .unwrap();
+
+// Parse with diagnostics
+var result = parser.parseCstWithDiagnostics(input);
+
+if (result.hasErrors()) {
+    // Rust-style formatted output
+    System.out.println(result.formatDiagnostics("input.txt"));
+}
+
+// CST may contain Error nodes for unparseable regions
+if (result.hasNode()) {
+    CstNode cst = result.node();
+}
+```
+
+### Diagnostic Output (Rust-style)
+```
+error: unexpected input
+  --> input.txt:1:6
+   |
+ 1 | abc, @@@, def
+   |      ^ found '@'
+   |
+   = help: expected [a-z]+
+```
+
+### Recovery Points
+Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
+
+## Test Coverage (220 tests)
 
 ### Grammar Parser Tests (14 tests)
 - Simple rules, actions, sequences, choices
@@ -259,6 +306,13 @@ Trivia is classified based on content:
 - **TriviaTest** (13 tests): Runtime trivia - leading, trailing, mixed, comments
 - **GeneratedParserTriviaTest** (6 tests): Generated parser trivia consistency
 
+### Error Recovery Tests (8 tests)
+- Rust-style diagnostic formatting
+- Multiple error collection
+- Fragment recovery (valid/invalid/valid parsing)
+- Error nodes with skipped text
+- Recovery strategies (NONE, BASIC, ADVANCED)
+
 ### Edge Case Tests (24 tests)
 - Null actions, token boundaries, complex grammars
 - Recursive parsing, repetition, predicates
@@ -278,6 +332,7 @@ Trivia is classified based on content:
 - `Terminal` - leaf with text
 - `NonTerminal` - interior with children
 - `Token` - result of < > operator
+- `Error` - unparseable region (error recovery)
 
 ### ParseResult Types (sealed)
 - `Success` - matched with node and optional semantic value
@@ -295,6 +350,6 @@ Trivia is classified based on content:
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (170 passing)
+mvn test             # Run tests (220 passing)
 mvn verify           # Full verification
 ```

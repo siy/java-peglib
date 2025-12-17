@@ -1,6 +1,8 @@
 package org.pragmatica.peg.parser;
 
 import org.pragmatica.lang.Option;
+import org.pragmatica.peg.error.Diagnostic;
+import org.pragmatica.peg.error.RecoveryStrategy;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
@@ -29,17 +31,25 @@ public final class ParsingContext {
     private String furthestExpected;
     private int tokenBoundaryDepth;
 
+    // Error recovery state
+    private final List<Diagnostic> diagnostics;
+    private boolean inRecovery;
+    private int recoveryStartPos;
+
     private ParsingContext(String input, Grammar grammar, ParserConfig config) {
         this.input = input;
         this.grammar = grammar;
         this.config = config;
         this.packratCache = config.packratEnabled() ? new HashMap<>() : null;
         this.captures = new HashMap<>();
+        this.diagnostics = new ArrayList<>();
         this.pos = 0;
         this.line = 1;
         this.column = 1;
         this.furthestPos = 0;
         this.furthestExpected = "";
+        this.inRecovery = false;
+        this.recoveryStartPos = -1;
     }
 
     public static ParsingContext create(String input, Grammar grammar, ParserConfig config) {
@@ -122,6 +132,119 @@ public final class ParsingContext {
 
     public String furthestExpected() {
         return furthestExpected;
+    }
+
+    // === Diagnostic Collection (for advanced error recovery) ===
+
+    /**
+     * Add a diagnostic error and continue parsing if recovery is enabled.
+     */
+    public void addDiagnostic(Diagnostic diagnostic) {
+        diagnostics.add(diagnostic);
+    }
+
+    /**
+     * Create and add an error diagnostic at current position.
+     */
+    public void addError(String message, SourceSpan span, String label) {
+        var diag = Diagnostic.error(message, span).withLabel(label);
+        diagnostics.add(diag);
+    }
+
+    /**
+     * Create and add an error diagnostic with expected token info.
+     */
+    public void addUnexpectedError(String found, String expected) {
+        var span = SourceSpan.at(location());
+        var message = found.isEmpty() ? "unexpected end of input" : "unexpected input";
+        var diag = Diagnostic.error(message, span)
+            .withLabel("found '" + (found.isEmpty() ? "EOF" : found) + "'")
+            .withHelp("expected " + expected);
+        diagnostics.add(diag);
+    }
+
+    /**
+     * Get all accumulated diagnostics.
+     */
+    public List<Diagnostic> diagnostics() {
+        return List.copyOf(diagnostics);
+    }
+
+    /**
+     * Check if any errors were recorded.
+     */
+    public boolean hasErrors() {
+        return !diagnostics.isEmpty();
+    }
+
+    /**
+     * Clear all diagnostics (used when retrying with different strategy).
+     */
+    public void clearDiagnostics() {
+        diagnostics.clear();
+    }
+
+    // === Error Recovery State ===
+
+    /**
+     * Check if advanced recovery is enabled.
+     */
+    public boolean isRecoveryEnabled() {
+        return config.recoveryStrategy() == RecoveryStrategy.ADVANCED;
+    }
+
+    /**
+     * Enter recovery mode - skip input until we find something parseable.
+     */
+    public void enterRecovery() {
+        if (!inRecovery) {
+            inRecovery = true;
+            recoveryStartPos = pos;
+        }
+    }
+
+    /**
+     * Exit recovery mode after successfully parsing something.
+     */
+    public void exitRecovery() {
+        inRecovery = false;
+        recoveryStartPos = -1;
+    }
+
+    /**
+     * Check if currently in recovery mode.
+     */
+    public boolean isInRecovery() {
+        return inRecovery;
+    }
+
+    /**
+     * Skip one character during recovery.
+     * Returns the skipped character span for error node creation.
+     */
+    public SourceSpan skipForRecovery() {
+        var start = location();
+        if (!isAtEnd()) {
+            advance();
+        }
+        return spanFrom(start);
+    }
+
+    /**
+     * Skip characters until a recovery point is found.
+     * Recovery points are typically: newlines, semicolons, closing braces.
+     */
+    public SourceSpan skipToRecoveryPoint() {
+        var start = location();
+        while (!isAtEnd()) {
+            char c = peek();
+            // Stop at common synchronization points
+            if (c == '\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
+                break;
+            }
+            advance();
+        }
+        return spanFrom(start);
     }
 
     // === Token Boundary Tracking ===

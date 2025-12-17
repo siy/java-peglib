@@ -61,4 +61,27 @@ public sealed interface CstNode {
         List<Trivia> leadingTrivia,
         List<Trivia> trailingTrivia
     ) implements CstNode {}
+
+    /**
+     * Error node - represents unparseable input during error recovery.
+     * Contains the skipped text and what was expected at this position.
+     *
+     * @param span          Source span of the error region
+     * @param skippedText   The input that couldn't be parsed
+     * @param expected      What the parser expected at this position
+     * @param leadingTrivia Trivia before the error
+     * @param trailingTrivia Trivia after the error (usually empty)
+     */
+    record Error(
+        SourceSpan span,
+        String skippedText,
+        String expected,
+        List<Trivia> leadingTrivia,
+        List<Trivia> trailingTrivia
+    ) implements CstNode {
+        @Override
+        public String rule() {
+            return "<error>";
+        }
+    }
 }
