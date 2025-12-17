@@ -121,9 +121,9 @@ class Java25GrammarExample {
         SwitchRule <- SwitchLabel '->' (Expr ';' / Block / 'throw' Expr ';') / SwitchLabel ':' BlockStmt*
         # === Switch Labels and Patterns (JLS 14.11, 14.30) ===
         SwitchLabel <- 'case' 'null' (',' 'default')? / 'case' CaseItem (',' CaseItem)* Guard? / 'default'
-        CaseItem <- Pattern / Expr
+        CaseItem <- Pattern / QualifiedName &('->' / ',' / ':' / 'when') / Expr
         Pattern <- RecordPattern / TypePattern
-        TypePattern <- LocalVarType Identifier / '_'
+        TypePattern <- &(LocalVarType Identifier) LocalVarType Identifier / '_'
         RecordPattern <- RefType '(' PatternList? ')'
         PatternList <- Pattern (',' Pattern)*
         Guard <- 'when' Expr
@@ -144,7 +144,7 @@ class Java25GrammarExample {
         Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
         Postfix <- Primary PostOp*
         PostOp <- '.' Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
-        Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / Lambda / '(' Expr ')' / 'switch' '(' Expr ')' SwitchBlock / QualifiedName
+        Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / 'switch' '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / QualifiedName
         Lambda <- LambdaParams '->' (Expr / Block)
         LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
         LambdaParam <- Annotation* Modifier* (('var' / Type) &('...' / Identifier / '_'))? '...'? (Identifier / '_')
@@ -816,6 +816,31 @@ class Java25GrammarExample {
         // Lambda with var (Java 11+)
         var r5 = parser.parseCst("(@Nonnull var x) -> x", "Lambda");
         assertTrue(r5.isSuccess(), () -> "Lambda with var failed: " + r5);
+    }
+
+    @Test
+    void parseEnumConstantInSwitch() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+
+        // Simple enum constant (key fix: CaseItem now prefers QualifiedName over Lambda)
+        var r1 = parser.parseCst("case PENDING -> 0;", "SwitchRule");
+        assertTrue(r1.isSuccess(), () -> "Simple enum constant failed: " + r1);
+
+        // Qualified enum constant
+        var r2 = parser.parseCst("""
+            switch (status) {
+                case Status.PENDING -> "p";
+                default -> "x";
+            }""", "Expr");
+        assertTrue(r2.isSuccess(), () -> "Qualified enum constant failed: " + r2);
+
+        // Multiple enum constants
+        var r3 = parser.parseCst("""
+            switch (day) {
+                case MONDAY, TUESDAY, WEDNESDAY -> "weekday";
+                case SATURDAY, SUNDAY -> "weekend";
+            }""", "Expr");
+        assertTrue(r3.isSuccess(), () -> "Multiple enum constants failed: " + r3);
     }
 
     @Test
