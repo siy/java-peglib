@@ -52,6 +52,7 @@ public final class ParserGenerator {
         generatePackage(sb);
         generateCstImports(sb);
         generateCstClassStart(sb);
+        generateRuleIdInterface(sb);
         generateCstTypes(sb);
         generateCstParseContext(sb);
         generateCstParseMethods(sb);
@@ -735,6 +736,105 @@ public final class ParserGenerator {
         sb.append("public final class ").append(className).append(" {\n\n");
     }
 
+    private void generateRuleIdInterface(StringBuilder sb) {
+        var rules = grammar.rules();
+
+        sb.append("    // === Rule ID Types ===\n\n");
+
+        // Generate permits clause (include built-in types for anonymous terminals)
+        var permittedTypes = rules.stream()
+            .map(r -> "RuleId." + toClassName(r.name()))
+            .collect(Collectors.joining(", "));
+        permittedTypes = permittedTypes + ", RuleId.Literal, RuleId.CharClass, RuleId.Any, RuleId.Token";
+
+        sb.append("    public sealed interface RuleId permits ").append(permittedTypes).append(" {\n");
+        sb.append("        int ordinal();\n");
+        sb.append("        String name();\n\n");
+
+        // Generate record for each rule
+        int ordinal = 0;
+        for (var rule : rules) {
+            var ruleClassName = toClassName(rule.name());
+            sb.append("        record ").append(ruleClassName).append("() implements RuleId {\n");
+            sb.append("            public int ordinal() { return ").append(ordinal++).append("; }\n");
+            sb.append("            public String name() { return \"").append(rule.name()).append("\"; }\n");
+            sb.append("        }\n");
+        }
+
+        // Generate built-in types for anonymous terminals
+        sb.append("        // Built-in types for anonymous terminals\n");
+        sb.append("        record Literal() implements RuleId {\n");
+        sb.append("            public int ordinal() { return -1; }\n");
+        sb.append("            public String name() { return \"literal\"; }\n");
+        sb.append("        }\n");
+        sb.append("        record CharClass() implements RuleId {\n");
+        sb.append("            public int ordinal() { return -2; }\n");
+        sb.append("            public String name() { return \"char\"; }\n");
+        sb.append("        }\n");
+        sb.append("        record Any() implements RuleId {\n");
+        sb.append("            public int ordinal() { return -3; }\n");
+        sb.append("            public String name() { return \"any\"; }\n");
+        sb.append("        }\n");
+        sb.append("        record Token() implements RuleId {\n");
+        sb.append("            public int ordinal() { return -4; }\n");
+        sb.append("            public String name() { return \"token\"; }\n");
+        sb.append("        }\n");
+        sb.append("    }\n\n");
+
+        // Generate singleton instances
+        sb.append("    // Rule ID singleton instances\n");
+        for (var rule : rules) {
+            var ruleClassName = toClassName(rule.name());
+            var constName = toConstantName(rule.name());
+            sb.append("    private static final RuleId.").append(ruleClassName)
+              .append(" ").append(constName).append(" = new RuleId.").append(ruleClassName).append("();\n");
+        }
+        // Built-in singletons
+        sb.append("    private static final RuleId.Literal RULE_LITERAL = new RuleId.Literal();\n");
+        sb.append("    private static final RuleId.CharClass RULE_CHAR_CLASS = new RuleId.CharClass();\n");
+        sb.append("    private static final RuleId.Any RULE_ANY = new RuleId.Any();\n");
+        sb.append("    private static final RuleId.Token RULE_TOKEN = new RuleId.Token();\n");
+        sb.append("\n");
+    }
+
+    private String toClassName(String ruleName) {
+        // Convert rule name to valid Java class name (PascalCase)
+        if (ruleName.startsWith("%")) {
+            ruleName = ruleName.substring(1); // Remove % prefix
+        }
+        // Handle special characters
+        var sb = new StringBuilder();
+        boolean capitalizeNext = true;
+        for (char c : ruleName.toCharArray()) {
+            if (Character.isLetterOrDigit(c)) {
+                sb.append(capitalizeNext ? Character.toUpperCase(c) : c);
+                capitalizeNext = false;
+            } else {
+                capitalizeNext = true;
+            }
+        }
+        return sb.toString();
+    }
+
+    private String toConstantName(String ruleName) {
+        // Convert rule name to constant name (UPPER_SNAKE_CASE)
+        if (ruleName.startsWith("%")) {
+            ruleName = ruleName.substring(1); // Remove % prefix
+        }
+        var sb = new StringBuilder("RULE_");
+        for (char c : ruleName.toCharArray()) {
+            if (Character.isUpperCase(c) && sb.length() > 5) {
+                sb.append('_');
+            }
+            if (Character.isLetterOrDigit(c)) {
+                sb.append(Character.toUpperCase(c));
+            } else {
+                sb.append('_');
+            }
+        }
+        return sb.toString();
+    }
+
     private void generateCstTypes(StringBuilder sb) {
         sb.append("""
                 // === CST Types ===
@@ -766,17 +866,17 @@ public final class ParserGenerator {
 
                 public sealed interface CstNode {
                     SourceSpan span();
-                    String rule();
+                    RuleId rule();
                     List<Trivia> leadingTrivia();
                     List<Trivia> trailingTrivia();
 
-                    record Terminal(SourceSpan span, String rule, String text,
+                    record Terminal(SourceSpan span, RuleId rule, String text,
                                     List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
 
-                    record NonTerminal(SourceSpan span, String rule, List<CstNode> children,
+                    record NonTerminal(SourceSpan span, RuleId rule, List<CstNode> children,
                                        List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
 
-                    record Token(SourceSpan span, String rule, String text,
+                    record Token(SourceSpan span, RuleId rule, String text,
                                  List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
                 }
 
@@ -923,12 +1023,13 @@ public final class ParserGenerator {
         sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
 
         // Check if this rule contains only a token boundary or simple terminals
+        var ruleIdConst = toConstantName(ruleName);
         if (isTokenRule(rule.expression())) {
-            sb.append("            var node = new CstNode.Token(span, \"").append(ruleName)
-              .append("\", result.text, leadingTrivia, List.of());\n");
+            sb.append("            var node = new CstNode.Token(span, ").append(ruleIdConst)
+              .append(", result.text, leadingTrivia, List.of());\n");
         } else {
-            sb.append("            var node = new CstNode.NonTerminal(span, \"").append(ruleName)
-              .append("\", children, leadingTrivia, List.of());\n");
+            sb.append("            var node = new CstNode.NonTerminal(span, ").append(ruleIdConst)
+              .append(", children, leadingTrivia, List.of());\n");
         }
         sb.append("            finalResult = CstParseResult.success(node, result.text, endLoc);\n");
         sb.append("        } else {\n");
@@ -1249,7 +1350,7 @@ public final class ParserGenerator {
                 sb.append(pad).append("if (").append(tbElem).append(".isSuccess()) {\n");
                 sb.append(pad).append("    var tbText").append(id).append(" = substring(").append(tbStart).append(".offset(), pos);\n");
                 sb.append(pad).append("    var tbSpan").append(id).append(" = SourceSpan.of(").append(tbStart).append(", location());\n");
-                sb.append(pad).append("    var tbNode").append(id).append(" = new CstNode.Token(tbSpan").append(id).append(", \"token\", tbText").append(id).append(", List.of(), List.of());\n");
+                sb.append(pad).append("    var tbNode").append(id).append(" = new CstNode.Token(tbSpan").append(id).append(", RULE_TOKEN, tbText").append(id).append(", List.of(), List.of());\n");
                 if (addToChildren) {
                     sb.append(pad).append("    children.add(tbNode").append(id).append(");\n");
                 }
@@ -1387,7 +1488,7 @@ public final class ParserGenerator {
                         advance();
                     }
                     var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, "literal", text, List.of(), List.of());
+                    var node = new CstNode.Terminal(span, RULE_LITERAL, text, List.of(), List.of());
                     return CstParseResult.success(node, text, location());
                 }
 
@@ -1408,7 +1509,7 @@ public final class ParserGenerator {
                         advance();
                     }
                     var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, "literal", longestMatch, List.of(), List.of());
+                    var node = new CstNode.Terminal(span, RULE_LITERAL, longestMatch, List.of(), List.of());
                     return CstParseResult.success(node, longestMatch, location());
                 }
 
@@ -1440,7 +1541,7 @@ public final class ParserGenerator {
                     advance();
                     var text = String.valueOf(c);
                     var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, "char", text, List.of(), List.of());
+                    var node = new CstNode.Terminal(span, RULE_CHAR_CLASS, text, List.of(), List.of());
                     return CstParseResult.success(node, text, location());
                 }
 
@@ -1511,7 +1612,7 @@ public final class ParserGenerator {
                     char c = advance();
                     var text = String.valueOf(c);
                     var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, "any", text, List.of(), List.of());
+                    var node = new CstNode.Terminal(span, RULE_ANY, text, List.of(), List.of());
                     return CstParseResult.success(node, text, location());
                 }
 
