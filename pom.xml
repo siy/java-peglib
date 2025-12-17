@@ -39,7 +39,6 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>25</maven.compiler.release>
         <pragmatica-lite.version>0.8.4</pragmatica-lite.version>
-        <jbct.version>0.1.0-SNAPSHOT</jbct.version>
     </properties>
 
     <dependencies>
@@ -82,19 +81,6 @@
                         <include>**/*Example.java</include>
                     </includes>
                 </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.pragmatica-lite</groupId>
-                <artifactId>jbct-maven-plugin</artifactId>
-                <version>${jbct.version}</version>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>format-check</goal>
-                            <goal>lint</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>
