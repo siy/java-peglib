@@ -134,10 +134,10 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 ### Remaining Work
 - [ ] Advanced error recovery
 - [ ] Performance optimization
-- [ ] Lambda action attachment (lowest priority) - attach actions programmatically like cpp-peglib:
+- [ ] Lambda action attachment (lowest priority) - attach actions programmatically using type-safe RuleId:
   ```java
-  parser.rule("Number").action(sv -> sv.toInt());
-  parser.rule("Sum").action(sv -> (Integer)sv.get(0) + (Integer)sv.get(1));
+  parser.rule(RuleId.Number.class).action(sv -> sv.toInt());
+  parser.rule(RuleId.Sum.class).action(sv -> (Integer)sv.get(0) + (Integer)sv.get(1));
   ```
 
 ## API Usage
