@@ -106,9 +106,9 @@ class ParserGeneratorTest {
         var source = result.unwrap();
 
         assertTrue(source.contains("choiceStart"));
-        assertTrue(source.contains("alt0"));
-        assertTrue(source.contains("alt1"));
-        assertTrue(source.contains("alt2"));
+        assertTrue(source.contains("alt0_0"));
+        assertTrue(source.contains("alt0_1"));
+        assertTrue(source.contains("alt0_2"));
     }
 
     @Test

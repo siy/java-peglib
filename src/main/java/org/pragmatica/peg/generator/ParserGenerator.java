@@ -212,7 +212,8 @@ public final class ParserGenerator {
         sb.append("        var values = new ArrayList<Object>();\n");
         sb.append("        \n");
 
-        generateExpressionCode(sb, rule.expression(), "result", 2);
+        int[] counter = {0};
+        generateExpressionCode(sb, rule.expression(), "result", 2, counter);
 
         sb.append("        \n");
         sb.append("        if (result.isSuccess()) {\n");
@@ -245,8 +246,9 @@ public final class ParserGenerator {
         sb.append("    }\n\n");
     }
 
-    private void generateExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent) {
+    private void generateExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent, int[] counter) {
         var pad = "    ".repeat(indent);
+        int id = counter[0]++;  // Get unique ID for this expression
 
         switch (expr) {
             case Expression.Literal lit -> {
@@ -280,42 +282,45 @@ public final class ParserGenerator {
                 sb.append(pad).append("}\n");
             }
             case Expression.Sequence seq -> {
+                var seqStart = "seqStart" + id;
                 sb.append(pad).append("ParseResult ").append(resultVar).append(" = ParseResult.success(null, pos, line, column);\n");
-                sb.append(pad).append("int seqStart = pos;\n");
-                sb.append(pad).append("int seqStartLine = line;\n");
-                sb.append(pad).append("int seqStartColumn = column;\n");
+                sb.append(pad).append("int ").append(seqStart).append(" = pos;\n");
+                sb.append(pad).append("int ").append(seqStart).append("Line = line;\n");
+                sb.append(pad).append("int ").append(seqStart).append("Column = column;\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
                     sb.append(pad).append("skipWhitespace();\n");
-                    generateExpressionCode(sb, elem, "elem" + i, indent);
-                    sb.append(pad).append("if (elem").append(i).append(".isFailure()) {\n");
-                    sb.append(pad).append("    pos = seqStart;\n");
-                    sb.append(pad).append("    line = seqStartLine;\n");
-                    sb.append(pad).append("    column = seqStartColumn;\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = elem").append(i).append(";\n");
+                    generateExpressionCode(sb, elem, "elem" + id + "_" + i, indent, counter);
+                    sb.append(pad).append("if (elem").append(id).append("_").append(i).append(".isFailure()) {\n");
+                    sb.append(pad).append("    pos = ").append(seqStart).append(";\n");
+                    sb.append(pad).append("    line = ").append(seqStart).append("Line;\n");
+                    sb.append(pad).append("    column = ").append(seqStart).append("Column;\n");
+                    sb.append(pad).append("    ").append(resultVar).append(" = elem").append(id).append("_").append(i).append(";\n");
                     sb.append(pad).append("}\n");
                     i++;
                 }
             }
             case Expression.Choice choice -> {
+                var choiceStart = "choiceStart" + id;
+                var oldVals = "oldValues" + id;
                 sb.append(pad).append("ParseResult ").append(resultVar).append(" = null;\n");
-                sb.append(pad).append("int choiceStart = pos;\n");
-                sb.append(pad).append("int choiceStartLine = line;\n");
-                sb.append(pad).append("int choiceStartColumn = column;\n");
+                sb.append(pad).append("int ").append(choiceStart).append(" = pos;\n");
+                sb.append(pad).append("int ").append(choiceStart).append("Line = line;\n");
+                sb.append(pad).append("int ").append(choiceStart).append("Column = column;\n");
                 int i = 0;
                 for (var alt : choice.alternatives()) {
-                    sb.append(pad).append("var choiceValues").append(i).append(" = new ArrayList<Object>();\n");
-                    sb.append(pad).append("var oldValues = values;\n");
-                    sb.append(pad).append("values = choiceValues").append(i).append(";\n");
-                    generateExpressionCode(sb, alt, "alt" + i, indent);
-                    sb.append(pad).append("values = oldValues;\n");
-                    sb.append(pad).append("if (alt").append(i).append(".isSuccess()) {\n");
-                    sb.append(pad).append("    values.addAll(choiceValues").append(i).append(");\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = alt").append(i).append(";\n");
+                    sb.append(pad).append("var choiceValues").append(id).append("_").append(i).append(" = new ArrayList<Object>();\n");
+                    sb.append(pad).append("var ").append(oldVals).append("_").append(i).append(" = values;\n");
+                    sb.append(pad).append("values = choiceValues").append(id).append("_").append(i).append(";\n");
+                    generateExpressionCode(sb, alt, "alt" + id + "_" + i, indent, counter);
+                    sb.append(pad).append("values = ").append(oldVals).append("_").append(i).append(";\n");
+                    sb.append(pad).append("if (alt").append(id).append("_").append(i).append(".isSuccess()) {\n");
+                    sb.append(pad).append("    values.addAll(choiceValues").append(id).append("_").append(i).append(");\n");
+                    sb.append(pad).append("    ").append(resultVar).append(" = alt").append(id).append("_").append(i).append(";\n");
                     sb.append(pad).append("} else {\n");
-                    sb.append(pad).append("    pos = choiceStart;\n");
-                    sb.append(pad).append("    line = choiceStartLine;\n");
-                    sb.append(pad).append("    column = choiceStartColumn;\n");
+                    sb.append(pad).append("    pos = ").append(choiceStart).append(";\n");
+                    sb.append(pad).append("    line = ").append(choiceStart).append("Line;\n");
+                    sb.append(pad).append("    column = ").append(choiceStart).append("Column;\n");
                     i++;
                 }
                 // Close all else blocks
@@ -327,134 +332,157 @@ public final class ParserGenerator {
                 sb.append(pad).append("}\n");
             }
             case Expression.ZeroOrMore zom -> {
+                var zomElem = "zomElem" + id;
+                var beforePos = "beforePos" + id;
                 sb.append(pad).append("ParseResult ").append(resultVar).append(" = ParseResult.success(null, pos, line, column);\n");
                 sb.append(pad).append("while (true) {\n");
-                sb.append(pad).append("    int beforePos = pos;\n");
-                sb.append(pad).append("    int beforeLine = line;\n");
-                sb.append(pad).append("    int beforeColumn = column;\n");
+                sb.append(pad).append("    int ").append(beforePos).append(" = pos;\n");
+                sb.append(pad).append("    int ").append(beforePos).append("Line = line;\n");
+                sb.append(pad).append("    int ").append(beforePos).append("Column = column;\n");
                 sb.append(pad).append("    skipWhitespace();\n");
-                generateExpressionCode(sb, zom.expression(), "zomElem", indent + 1);
-                sb.append(pad).append("    if (zomElem.isFailure() || pos == beforePos) {\n");
-                sb.append(pad).append("        pos = beforePos;\n");
-                sb.append(pad).append("        line = beforeLine;\n");
-                sb.append(pad).append("        column = beforeColumn;\n");
+                generateExpressionCode(sb, zom.expression(), zomElem, indent + 1, counter);
+                sb.append(pad).append("    if (").append(zomElem).append(".isFailure() || pos == ").append(beforePos).append(") {\n");
+                sb.append(pad).append("        pos = ").append(beforePos).append(";\n");
+                sb.append(pad).append("        line = ").append(beforePos).append("Line;\n");
+                sb.append(pad).append("        column = ").append(beforePos).append("Column;\n");
                 sb.append(pad).append("        break;\n");
                 sb.append(pad).append("    }\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.OneOrMore oom -> {
-                generateExpressionCode(sb, oom.expression(), "oomFirst", indent);
-                sb.append(pad).append("var ").append(resultVar).append(" = oomFirst;\n");
-                sb.append(pad).append("if (oomFirst.isSuccess()) {\n");
+                var oomFirst = "oomFirst" + id;
+                var oomElem = "oomElem" + id;
+                var beforePos = "beforePos" + id;
+                generateExpressionCode(sb, oom.expression(), oomFirst, indent, counter);
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(oomFirst).append(";\n");
+                sb.append(pad).append("if (").append(oomFirst).append(".isSuccess()) {\n");
                 sb.append(pad).append("    while (true) {\n");
-                sb.append(pad).append("        int beforePos = pos;\n");
-                sb.append(pad).append("        int beforeLine = line;\n");
-                sb.append(pad).append("        int beforeColumn = column;\n");
+                sb.append(pad).append("        int ").append(beforePos).append(" = pos;\n");
+                sb.append(pad).append("        int ").append(beforePos).append("Line = line;\n");
+                sb.append(pad).append("        int ").append(beforePos).append("Column = column;\n");
                 sb.append(pad).append("        skipWhitespace();\n");
-                generateExpressionCode(sb, oom.expression(), "oomElem", indent + 2);
-                sb.append(pad).append("        if (oomElem.isFailure() || pos == beforePos) {\n");
-                sb.append(pad).append("            pos = beforePos;\n");
-                sb.append(pad).append("            line = beforeLine;\n");
-                sb.append(pad).append("            column = beforeColumn;\n");
+                generateExpressionCode(sb, oom.expression(), oomElem, indent + 2, counter);
+                sb.append(pad).append("        if (").append(oomElem).append(".isFailure() || pos == ").append(beforePos).append(") {\n");
+                sb.append(pad).append("            pos = ").append(beforePos).append(";\n");
+                sb.append(pad).append("            line = ").append(beforePos).append("Line;\n");
+                sb.append(pad).append("            column = ").append(beforePos).append("Column;\n");
                 sb.append(pad).append("            break;\n");
                 sb.append(pad).append("        }\n");
                 sb.append(pad).append("    }\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.Optional opt -> {
-                sb.append(pad).append("int optStart = pos;\n");
-                sb.append(pad).append("int optStartLine = line;\n");
-                sb.append(pad).append("int optStartColumn = column;\n");
-                generateExpressionCode(sb, opt.expression(), "optElem", indent);
-                sb.append(pad).append("var ").append(resultVar).append(" = optElem.isSuccess() ? optElem : ParseResult.success(null, pos, line, column);\n");
-                sb.append(pad).append("if (optElem.isFailure()) {\n");
-                sb.append(pad).append("    pos = optStart;\n");
-                sb.append(pad).append("    line = optStartLine;\n");
-                sb.append(pad).append("    column = optStartColumn;\n");
+                var optStart = "optStart" + id;
+                var optElem = "optElem" + id;
+                sb.append(pad).append("int ").append(optStart).append(" = pos;\n");
+                sb.append(pad).append("int ").append(optStart).append("Line = line;\n");
+                sb.append(pad).append("int ").append(optStart).append("Column = column;\n");
+                generateExpressionCode(sb, opt.expression(), optElem, indent, counter);
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(optElem).append(".isSuccess() ? ").append(optElem).append(" : ParseResult.success(null, pos, line, column);\n");
+                sb.append(pad).append("if (").append(optElem).append(".isFailure()) {\n");
+                sb.append(pad).append("    pos = ").append(optStart).append(";\n");
+                sb.append(pad).append("    line = ").append(optStart).append("Line;\n");
+                sb.append(pad).append("    column = ").append(optStart).append("Column;\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.Repetition rep -> {
-                sb.append(pad).append("int repCount = 0;\n");
-                sb.append(pad).append("int repStart = pos;\n");
-                sb.append(pad).append("int repStartLine = line;\n");
-                sb.append(pad).append("int repStartColumn = column;\n");
+                var repCount = "repCount" + id;
+                var repStart = "repStart" + id;
+                var repElem = "repElem" + id;
+                var beforePos = "beforePos" + id;
+                sb.append(pad).append("int ").append(repCount).append(" = 0;\n");
+                sb.append(pad).append("int ").append(repStart).append(" = pos;\n");
+                sb.append(pad).append("int ").append(repStart).append("Line = line;\n");
+                sb.append(pad).append("int ").append(repStart).append("Column = column;\n");
                 var maxStr = rep.max().isPresent() ? String.valueOf(rep.max().unwrap()) : "Integer.MAX_VALUE";
-                sb.append(pad).append("while (repCount < ").append(maxStr).append(") {\n");
-                sb.append(pad).append("    int beforePos = pos;\n");
-                sb.append(pad).append("    int beforeLine = line;\n");
-                sb.append(pad).append("    int beforeColumn = column;\n");
-                sb.append(pad).append("    if (repCount > 0) skipWhitespace();\n");
-                generateExpressionCode(sb, rep.expression(), "repElem", indent + 1);
-                sb.append(pad).append("    if (repElem.isFailure() || pos == beforePos) {\n");
-                sb.append(pad).append("        pos = beforePos;\n");
-                sb.append(pad).append("        line = beforeLine;\n");
-                sb.append(pad).append("        column = beforeColumn;\n");
+                sb.append(pad).append("while (").append(repCount).append(" < ").append(maxStr).append(") {\n");
+                sb.append(pad).append("    int ").append(beforePos).append(" = pos;\n");
+                sb.append(pad).append("    int ").append(beforePos).append("Line = line;\n");
+                sb.append(pad).append("    int ").append(beforePos).append("Column = column;\n");
+                sb.append(pad).append("    if (").append(repCount).append(" > 0) skipWhitespace();\n");
+                generateExpressionCode(sb, rep.expression(), repElem, indent + 1, counter);
+                sb.append(pad).append("    if (").append(repElem).append(".isFailure() || pos == ").append(beforePos).append(") {\n");
+                sb.append(pad).append("        pos = ").append(beforePos).append(";\n");
+                sb.append(pad).append("        line = ").append(beforePos).append("Line;\n");
+                sb.append(pad).append("        column = ").append(beforePos).append("Column;\n");
                 sb.append(pad).append("        break;\n");
                 sb.append(pad).append("    }\n");
-                sb.append(pad).append("    repCount++;\n");
+                sb.append(pad).append("    ").append(repCount).append("++;\n");
                 sb.append(pad).append("}\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = repCount >= ").append(rep.min())
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(repCount).append(" >= ").append(rep.min())
                     .append(" ? ParseResult.success(null, pos, line, column) : ParseResult.failure(\"at least ")
                     .append(rep.min()).append(" repetitions\");\n");
                 sb.append(pad).append("if (").append(resultVar).append(".isFailure()) {\n");
-                sb.append(pad).append("    pos = repStart;\n");
-                sb.append(pad).append("    line = repStartLine;\n");
-                sb.append(pad).append("    column = repStartColumn;\n");
+                sb.append(pad).append("    pos = ").append(repStart).append(";\n");
+                sb.append(pad).append("    line = ").append(repStart).append("Line;\n");
+                sb.append(pad).append("    column = ").append(repStart).append("Column;\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.And and -> {
-                sb.append(pad).append("int andStart = pos;\n");
-                sb.append(pad).append("int andStartLine = line;\n");
-                sb.append(pad).append("int andStartColumn = column;\n");
-                generateExpressionCode(sb, and.expression(), "andElem", indent);
-                sb.append(pad).append("pos = andStart;\n");
-                sb.append(pad).append("line = andStartLine;\n");
-                sb.append(pad).append("column = andStartColumn;\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = andElem.isSuccess() ? ParseResult.success(null, pos, line, column) : andElem;\n");
+                var andStart = "andStart" + id;
+                var andElem = "andElem" + id;
+                sb.append(pad).append("int ").append(andStart).append(" = pos;\n");
+                sb.append(pad).append("int ").append(andStart).append("Line = line;\n");
+                sb.append(pad).append("int ").append(andStart).append("Column = column;\n");
+                generateExpressionCode(sb, and.expression(), andElem, indent, counter);
+                sb.append(pad).append("pos = ").append(andStart).append(";\n");
+                sb.append(pad).append("line = ").append(andStart).append("Line;\n");
+                sb.append(pad).append("column = ").append(andStart).append("Column;\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(andElem).append(".isSuccess() ? ParseResult.success(null, pos, line, column) : ").append(andElem).append(";\n");
             }
             case Expression.Not not -> {
-                sb.append(pad).append("int notStart = pos;\n");
-                sb.append(pad).append("int notStartLine = line;\n");
-                sb.append(pad).append("int notStartColumn = column;\n");
-                generateExpressionCode(sb, not.expression(), "notElem", indent);
-                sb.append(pad).append("pos = notStart;\n");
-                sb.append(pad).append("line = notStartLine;\n");
-                sb.append(pad).append("column = notStartColumn;\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = notElem.isSuccess() ? ParseResult.failure(\"not match\") : ParseResult.success(null, pos, line, column);\n");
+                var notStart = "notStart" + id;
+                var notElem = "notElem" + id;
+                sb.append(pad).append("int ").append(notStart).append(" = pos;\n");
+                sb.append(pad).append("int ").append(notStart).append("Line = line;\n");
+                sb.append(pad).append("int ").append(notStart).append("Column = column;\n");
+                generateExpressionCode(sb, not.expression(), notElem, indent, counter);
+                sb.append(pad).append("pos = ").append(notStart).append(";\n");
+                sb.append(pad).append("line = ").append(notStart).append("Line;\n");
+                sb.append(pad).append("column = ").append(notStart).append("Column;\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(notElem).append(".isSuccess() ? ParseResult.failure(\"not match\") : ParseResult.success(null, pos, line, column);\n");
             }
             case Expression.TokenBoundary tb -> {
-                sb.append(pad).append("int tbStart = pos;\n");
-                generateExpressionCode(sb, tb.expression(), "tbElem", indent);
-                sb.append(pad).append("var ").append(resultVar).append(" = tbElem.isSuccess() ? ParseResult.success(substring(tbStart, pos), pos, line, column) : tbElem;\n");
+                var tbStart = "tbStart" + id;
+                var tbElem = "tbElem" + id;
+                sb.append(pad).append("int ").append(tbStart).append(" = pos;\n");
+                generateExpressionCode(sb, tb.expression(), tbElem, indent, counter);
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(tbElem).append(".isSuccess() ? ParseResult.success(substring(").append(tbStart).append(", pos), pos, line, column) : ").append(tbElem).append(";\n");
             }
             case Expression.Ignore ign -> {
-                generateExpressionCode(sb, ign.expression(), "ignElem", indent);
-                sb.append(pad).append("var ").append(resultVar).append(" = ignElem.isSuccess() ? ParseResult.success(null, pos, line, column) : ignElem;\n");
+                var ignElem = "ignElem" + id;
+                generateExpressionCode(sb, ign.expression(), ignElem, indent, counter);
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(ignElem).append(".isSuccess() ? ParseResult.success(null, pos, line, column) : ").append(ignElem).append(";\n");
             }
             case Expression.Capture cap -> {
-                sb.append(pad).append("int capStart = pos;\n");
-                generateExpressionCode(sb, cap.expression(), "capElem", indent);
-                sb.append(pad).append("if (capElem.isSuccess()) {\n");
-                sb.append(pad).append("    captures.put(\"").append(cap.name()).append("\", substring(capStart, pos));\n");
+                var capStart = "capStart" + id;
+                var capElem = "capElem" + id;
+                sb.append(pad).append("int ").append(capStart).append(" = pos;\n");
+                generateExpressionCode(sb, cap.expression(), capElem, indent, counter);
+                sb.append(pad).append("if (").append(capElem).append(".isSuccess()) {\n");
+                sb.append(pad).append("    captures.put(\"").append(cap.name()).append("\", substring(").append(capStart).append(", pos));\n");
                 sb.append(pad).append("}\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = capElem;\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(capElem).append(";\n");
             }
             case Expression.CaptureScope cs -> {
-                sb.append(pad).append("var savedCaptures = new HashMap<>(captures);\n");
-                generateExpressionCode(sb, cs.expression(), "csElem", indent);
+                var savedCaptures = "savedCaptures" + id;
+                var csElem = "csElem" + id;
+                sb.append(pad).append("var ").append(savedCaptures).append(" = new HashMap<>(captures);\n");
+                generateExpressionCode(sb, cs.expression(), csElem, indent, counter);
                 sb.append(pad).append("captures.clear();\n");
-                sb.append(pad).append("captures.putAll(savedCaptures);\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = csElem;\n");
+                sb.append(pad).append("captures.putAll(").append(savedCaptures).append(");\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(csElem).append(";\n");
             }
             case Expression.BackReference br -> {
-                sb.append(pad).append("var captured = captures.get(\"").append(br.name()).append("\");\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = captured != null ? matchLiteral(captured, false) : ParseResult.failure(\"capture '\");\n");
+                var captured = "captured" + id;
+                sb.append(pad).append("var ").append(captured).append(" = captures.get(\"").append(br.name()).append("\");\n");
+                sb.append(pad).append("var ").append(resultVar).append(" = ").append(captured).append(" != null ? matchLiteral(").append(captured).append(", false) : ParseResult.failure(\"capture '\");\n");
             }
             case Expression.Cut cut -> {
                 sb.append(pad).append("var ").append(resultVar).append(" = ParseResult.success(null, pos, line, column);\n");
             }
             case Expression.Group grp -> {
-                generateExpressionCode(sb, grp.expression(), resultVar, indent);
+                generateExpressionCode(sb, grp.expression(), resultVar, indent, counter);
             }
         }
     }
@@ -468,9 +496,10 @@ public final class ParserGenerator {
 
         if (grammar.whitespace().isPresent()) {
             sb.append("        while (!isAtEnd()) {\n");
-            sb.append("            int beforePos = pos;\n");
-            generateExpressionCode(sb, grammar.whitespace().unwrap(), "wsResult", 3);
-            sb.append("            if (wsResult.isFailure() || pos == beforePos) break;\n");
+            sb.append("            int wsBeforePos = pos;\n");
+            int[] wsCounter = {0};
+            generateExpressionCode(sb, grammar.whitespace().unwrap(), "wsResult", 3, wsCounter);
+            sb.append("            if (wsResult.isFailure() || pos == wsBeforePos) break;\n");
             sb.append("        }\n");
         }
 
