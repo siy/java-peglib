@@ -143,7 +143,7 @@ class Java25GrammarExample {
         Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / Lambda / '(' Expr ')' / 'switch' '(' Expr ')' SwitchBlock / QualifiedName
         Lambda <- LambdaParams '->' (Expr / Block)
         LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
-        LambdaParam <- Modifier* (Type &('...' / Identifier / '_'))? '...'? (Identifier / '_')
+        LambdaParam <- Annotation* Modifier* (Type &('...' / Identifier / '_'))? '...'? (Identifier / '_')
         Args <- Expr (',' Expr)*
         ExprList <- Expr (',' Expr)*
 
@@ -303,6 +303,12 @@ class Java25GrammarExample {
         // Underscore param
         var r7 = parser.parseCst("(_) -> 42", "Lambda");
         assertTrue(r7.isSuccess(), () -> "Underscore param failed: " + r7);
+        // Annotated param
+        var r8 = parser.parseCst("(@SuppressWarnings(\"unused\") String s) -> s", "Lambda");
+        assertTrue(r8.isSuccess(), () -> "Annotated param failed: " + r8);
+        // Annotation without parens
+        var r9 = parser.parseCst("(@Nullable String s) -> s", "Lambda");
+        assertTrue(r9.isSuccess(), () -> "Simple annotation param failed: " + r9);
     }
 
     @Test
