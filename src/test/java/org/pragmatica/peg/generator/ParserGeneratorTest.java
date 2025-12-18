@@ -3,6 +3,7 @@ package org.pragmatica.peg.generator;
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.PegParser;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ParserGeneratorTest {
@@ -150,5 +151,155 @@ class ParserGeneratorTest {
 
         // Should NOT import peglib types
         assertFalse(source.contains("import org.pragmatica.peg."));
+    }
+
+    // === Advanced Error Reporting Tests ===
+
+    @Test
+    void generateCst_basicMode_doesNotIncludeDiagnostics() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "BasicParser",
+            ErrorReporting.BASIC
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Should NOT include advanced diagnostic types
+        assertFalse(source.contains("enum Severity"));
+        assertFalse(source.contains("record Diagnostic"));
+        assertFalse(source.contains("record DiagnosticLabel"));
+        assertFalse(source.contains("parseWithDiagnostics"));
+        assertFalse(source.contains("ParseResultWithDiagnostics"));
+    }
+
+    @Test
+    void generateCst_advancedMode_includesDiagnosticTypes() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "AdvancedParser",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Should include advanced diagnostic types
+        assertThat(source).contains("enum Severity");
+        assertThat(source).contains("ERROR(\"error\")");
+        assertThat(source).contains("WARNING(\"warning\")");
+        assertThat(source).contains("record DiagnosticLabel");
+        assertThat(source).contains("record Diagnostic");
+        assertThat(source).contains("record ParseResultWithDiagnostics");
+    }
+
+    @Test
+    void generateCst_advancedMode_includesParseWithDiagnosticsMethod() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "AdvancedParser",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Should include parseWithDiagnostics method
+        assertThat(source).contains("public ParseResultWithDiagnostics parseWithDiagnostics(String input)");
+        assertThat(source).contains("ParseResultWithDiagnostics.success");
+        assertThat(source).contains("ParseResultWithDiagnostics.withErrors");
+    }
+
+    @Test
+    void generateCst_advancedMode_includesRustStyleFormatting() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "AdvancedParser",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Should include Rust-style formatting method
+        assertThat(source).contains("public String format(String source, String filename)");
+        assertThat(source).contains("formatDiagnostics");
+        assertThat(source).contains("formatUnderlines");
+        assertThat(source).contains("getLabelsOnLine");
+    }
+
+    @Test
+    void generateCst_advancedMode_includesErrorRecoveryHelpers() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "AdvancedParser",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Should include error recovery helpers
+        assertThat(source).contains("skipToRecoveryPoint");
+        assertThat(source).contains("trackFailure");
+        assertThat(source).contains("addDiagnostic");
+        assertThat(source).contains("furthestFailure");
+    }
+
+    @Test
+    void generateCst_advancedMode_includesErrorNodeType() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "AdvancedParser",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Should include Error node type for CST
+        assertThat(source).contains("record Error(SourceSpan span, String skippedText");
+    }
+
+    @Test
+    void generateCst_advancedMode_diagnosticHasHelperMethods() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "AdvancedParser",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Should include Diagnostic helper methods
+        assertThat(source).contains("Diagnostic withLabel(String labelMessage)");
+        assertThat(source).contains("Diagnostic withSecondaryLabel(SourceSpan labelSpan, String labelMessage)");
+        assertThat(source).contains("Diagnostic withNote(String note)");
+        assertThat(source).contains("Diagnostic withHelp(String help)");
+    }
+
+    @Test
+    void generateCst_defaultMode_isBasic() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "DefaultParser"
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Default should be BASIC - no advanced features
+        assertFalse(source.contains("parseWithDiagnostics"));
+        assertFalse(source.contains("enum Severity"));
     }
 }

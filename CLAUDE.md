@@ -55,7 +55,8 @@ src/main/java/org/pragmatica/peg/
 │   ├── SemanticValues.java     # Values passed to actions ($0, $1, etc.)
 │   └── ActionCompiler.java     # JDK Compiler API based action compiler
 ├── generator/
-│   └── ParserGenerator.java    # Generates standalone parser source
+│   ├── ParserGenerator.java    # Generates standalone parser source
+│   └── ErrorReporting.java     # BASIC/ADVANCED enum for generated parser diagnostics
 └── error/
     ├── ParseError.java         # Parse errors (sealed interface extends Cause)
     ├── RecoveryStrategy.java   # Error recovery enum (NONE, BASIC, ADVANCED)
@@ -70,7 +71,7 @@ src/test/java/org/pragmatica/peg/
 ├── grammar/
 │   └── GrammarParserTest.java  # 14 tests for grammar parser
 ├── generator/
-│   └── ParserGeneratorTest.java # 8 tests for source generation
+│   └── ParserGeneratorTest.java # 16 tests for source generation (8 basic + 8 ErrorReporting)
 └── examples/
     ├── ErrorRecoveryExample.java # 12 tests - error recovery patterns
     ├── CalculatorExample.java   # 6 tests - arithmetic with actions
@@ -134,7 +135,8 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Source generator - standalone parser Java file
 - [x] Trivia handling (whitespace/comments) for lossless CST
 - [x] Advanced error recovery with Rust-style diagnostics
-- [x] 232 passing tests
+- [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
+- [x] 240 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -179,6 +181,16 @@ Result<String> source = PegParser.generateParser(
     "MyParser"
 );
 // Write source to file, compile with javac
+
+// Source generation with ADVANCED error reporting (Rust-style diagnostics)
+import org.pragmatica.peg.generator.ErrorReporting;
+
+Result<String> source = PegParser.generateCstParser(
+    grammarText,
+    "com.example.parser",
+    "MyParser",
+    ErrorReporting.ADVANCED  // Enables parseWithDiagnostics() method
+);
 ```
 
 ## Action API
@@ -265,7 +277,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (232 tests)
+## Test Coverage (240 tests)
 
 ### Grammar Parser Tests (14 tests)
 - Simple rules, actions, sequences, choices
@@ -288,12 +300,15 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - List building
 - No action returns CST node
 
-### Generator Tests (8 tests)
+### Generator Tests (16 tests)
 - Simple literal generates valid Java
 - Whitespace handling
 - Action code inclusion
 - All quantifiers generate loops
 - Only depends on pragmatica-lite
+- ErrorReporting.BASIC mode (no diagnostics)
+- ErrorReporting.ADVANCED mode (Rust-style diagnostics)
+- parseWithDiagnostics() method generation
 
 ### Example Tests (116 tests)
 - **ErrorRecovery** (12 tests): Recovery strategies, diagnostic formatting, CST error nodes
@@ -352,6 +367,6 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (232 passing)
+mvn test             # Run tests (240 passing)
 mvn verify           # Full verification
 ```

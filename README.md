@@ -249,6 +249,54 @@ Generated parsers:
 - Support trivia collection
 - Have type-safe `RuleId` for each grammar rule
 
+### Generated Parser with Advanced Diagnostics
+
+Generate parsers with Rust-style error reporting:
+
+```java
+import org.pragmatica.peg.generator.ErrorReporting;
+
+// Generate CST parser with advanced diagnostics
+Result<String> source = PegParser.generateCstParser(
+    grammarText,
+    "com.example.parser",
+    "MyParser",
+    ErrorReporting.ADVANCED  // Enable Rust-style diagnostics
+);
+```
+
+| ErrorReporting | Description |
+|----------------|-------------|
+| `BASIC` | Simple `ParseError(line, column, reason)` - minimal code |
+| `ADVANCED` | Full diagnostics with source context, underlines, labels |
+
+When `ADVANCED` is enabled, the generated parser includes:
+
+```java
+// Parse with diagnostics
+var result = parser.parseWithDiagnostics(input);
+
+if (result.hasErrors()) {
+    // Format as Rust-style diagnostics
+    System.err.println(result.formatDiagnostics("input.txt"));
+}
+
+// Access individual diagnostics
+for (var diag : result.diagnostics()) {
+    System.out.println(diag.formatSimple()); // file:line:col: severity: message
+}
+```
+
+Output example:
+```
+error: expected Number
+  --> input.txt:1:5
+   |
+ 1 | 3 + @invalid
+   |     ^ found '@'
+   |
+```
+
 ## Examples
 
 See the [examples](src/test/java/org/pragmatica/peg/examples/) directory:
@@ -278,7 +326,7 @@ public sealed interface CstNode {
 
 ```bash
 mvn compile    # Compile
-mvn test       # Run tests (232 tests)
+mvn test       # Run tests (240 tests)
 mvn verify     # Full verification
 ```
 

@@ -2,6 +2,7 @@ package org.pragmatica.peg;
 
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.error.RecoveryStrategy;
+import org.pragmatica.peg.generator.ErrorReporting;
 import org.pragmatica.peg.generator.ParserGenerator;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
@@ -94,6 +95,23 @@ public final class PegParser {
         return GrammarParser.parse(grammarText)
             .flatMap(Grammar::validate)
             .map(grammar -> ParserGenerator.create(grammar, packageName, className).generateCst());
+    }
+
+    /**
+     * Generate standalone CST parser source code from grammar text with configurable error reporting.
+     * The generated parser returns CstNode with full tree structure and trivia.
+     *
+     * @param grammarText the PEG grammar
+     * @param packageName target package for generated class
+     * @param className name of generated parser class
+     * @param errorReporting BASIC for simple errors, ADVANCED for Rust-style diagnostics
+     * @return generated Java source code, or error if grammar is invalid
+     */
+    public static Result<String> generateCstParser(String grammarText, String packageName, String className,
+                                                   ErrorReporting errorReporting) {
+        return GrammarParser.parse(grammarText)
+            .flatMap(Grammar::validate)
+            .map(grammar -> ParserGenerator.create(grammar, packageName, className, errorReporting).generateCst());
     }
 
     /**

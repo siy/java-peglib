@@ -2,7 +2,9 @@ package org.pragmatica.peg.examples;
 
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.generator.ErrorReporting;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -385,5 +387,122 @@ class SourceGenerationExample {
         // Should define ParseError implementing Cause
         assertTrue(source.contains("record ParseError"), "Should have ParseError record");
         assertTrue(source.contains("implements Cause"), "ParseError should implement Cause");
+    }
+
+    // === Advanced Error Reporting Tests ===
+
+    /**
+     * Generate CST parser with ADVANCED error reporting (Rust-style diagnostics).
+     *
+     * When ErrorReporting.ADVANCED is used, the generated parser includes:
+     * - Severity enum (ERROR, WARNING, INFO, HINT)
+     * - Diagnostic record with Rust-style formatting
+     * - DiagnosticLabel for primary/secondary labels
+     * - ParseResultWithDiagnostics for collecting multiple errors
+     * - parseWithDiagnostics() method
+     * - Error recovery helpers
+     */
+    @Test
+    void generateCstParser_withAdvancedErrorReporting() {
+        var grammar = """
+            Expr   <- Term (('+' / '-') Term)*
+            Term   <- Factor (('*' / '/') Factor)*
+            Factor <- '(' Expr ')' / Number
+            Number <- < [0-9]+ >
+            %whitespace <- [ \\t]*
+            """;
+
+        var result = PegParser.generateCstParser(
+            grammar,
+            "com.example.calc",
+            "AdvancedCalculator",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess(), () -> "Generation failed: " + result);
+
+        var source = result.unwrap();
+
+        // Verify Severity enum
+        assertThat(source).contains("public enum Severity");
+        assertThat(source).contains("ERROR(\"error\")");
+        assertThat(source).contains("WARNING(\"warning\")");
+        assertThat(source).contains("INFO(\"info\")");
+        assertThat(source).contains("HINT(\"hint\")");
+
+        // Verify Diagnostic record with Rust-style formatting
+        assertThat(source).contains("public record Diagnostic");
+        assertThat(source).contains("public String format(String source, String filename)");
+        assertThat(source).contains("formatSimple()");
+
+        // Verify DiagnosticLabel for labeling source spans
+        assertThat(source).contains("public record DiagnosticLabel");
+        assertThat(source).contains("DiagnosticLabel.primary");
+        assertThat(source).contains("DiagnosticLabel.secondary");
+
+        // Verify ParseResultWithDiagnostics
+        assertThat(source).contains("public record ParseResultWithDiagnostics");
+        assertThat(source).contains("formatDiagnostics");
+        assertThat(source).contains("hasErrors()");
+        assertThat(source).contains("errorCount()");
+
+        // Verify parseWithDiagnostics method
+        assertThat(source).contains("public ParseResultWithDiagnostics parseWithDiagnostics(String input)");
+
+        // Verify Error node type for CST
+        assertThat(source).contains("record Error(SourceSpan span, String skippedText");
+
+        // Verify error recovery helpers
+        assertThat(source).contains("skipToRecoveryPoint");
+        assertThat(source).contains("trackFailure");
+        assertThat(source).contains("addDiagnostic");
+
+        // Print stats
+        var lines = source.split("\n");
+        System.out.println("=== Generated CST Calculator with ADVANCED Error Reporting ===");
+        System.out.println("Total lines: " + lines.length);
+        System.out.println("(BASIC mode would be ~200 lines smaller)");
+    }
+
+    /**
+     * Demonstrate the difference between BASIC and ADVANCED modes.
+     */
+    @Test
+    void compareBasicVsAdvancedErrorReporting() {
+        var grammar = """
+            Number <- < [0-9]+ >
+            %whitespace <- [ ]*
+            """;
+
+        var basicResult = PegParser.generateCstParser(grammar, "com.example", "BasicParser", ErrorReporting.BASIC);
+        var advancedResult = PegParser.generateCstParser(grammar, "com.example", "AdvancedParser", ErrorReporting.ADVANCED);
+
+        assertTrue(basicResult.isSuccess());
+        assertTrue(advancedResult.isSuccess());
+
+        var basicSource = basicResult.unwrap();
+        var advancedSource = advancedResult.unwrap();
+
+        // BASIC mode should NOT have advanced features
+        assertFalse(basicSource.contains("enum Severity"));
+        assertFalse(basicSource.contains("parseWithDiagnostics"));
+        assertFalse(basicSource.contains("ParseResultWithDiagnostics"));
+
+        // ADVANCED mode should have all features
+        assertTrue(advancedSource.contains("enum Severity"));
+        assertTrue(advancedSource.contains("parseWithDiagnostics"));
+        assertTrue(advancedSource.contains("ParseResultWithDiagnostics"));
+
+        // Both should have basic parse method
+        assertTrue(basicSource.contains("public Result<CstNode> parse(String input)"));
+        assertTrue(advancedSource.contains("public Result<CstNode> parse(String input)"));
+
+        var basicLines = basicSource.split("\n").length;
+        var advancedLines = advancedSource.split("\n").length;
+
+        System.out.println("=== BASIC vs ADVANCED Error Reporting ===");
+        System.out.println("BASIC mode:    " + basicLines + " lines");
+        System.out.println("ADVANCED mode: " + advancedLines + " lines");
+        System.out.println("Difference:    " + (advancedLines - basicLines) + " lines");
     }
 }
