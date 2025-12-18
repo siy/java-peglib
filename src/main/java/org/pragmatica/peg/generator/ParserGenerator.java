@@ -1844,6 +1844,18 @@ public final class ParserGenerator {
                         case CstNode.Token tok -> new CstNode.Token(
                             tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
                         );
+            """);
+
+        // Add Error case only for ADVANCED mode
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("""
+                            case CstNode.Error err -> new CstNode.Error(
+                                err.span(), err.skippedText(), err.leadingTrivia(), trailingTrivia
+                            );
+                """);
+        }
+
+        sb.append("""
                     };
                 }
 
