@@ -1,0 +1,56 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2025-12-19
+
+### Added
+
+- **Core PEG Parsing Engine**
+  - Full PEG grammar support compatible with cpp-peglib syntax
+  - Packrat memoization for O(n) parsing complexity
+  - Both CST (lossless) and AST (optimized) tree output
+
+- **Grammar Features**
+  - Sequences, ordered choice, quantifiers (`*`, `+`, `?`, `{n,m}`)
+  - Lookahead predicates (`&e`, `!e`)
+  - Character classes with negation and case-insensitivity
+  - Token boundaries (`< e >`) for text capture
+  - Named captures and back-references (`$name<e>`, `$name`)
+  - Whitespace directive (`%whitespace`)
+
+- **Inline Actions**
+  - Java code blocks in grammar rules (`{ return sv.toInt(); }`)
+  - SemanticValues API (`$0`, `$1`, `sv.token()`, `sv.get()`)
+  - Runtime compilation via JDK Compiler API
+
+- **Trivia Handling**
+  - Whitespace and comments preserved as Trivia nodes
+  - Leading and trailing trivia on all CST nodes
+  - Line comments (`//`) and block comments (`/* */`) classification
+
+- **Error Recovery**
+  - Three strategies: NONE, BASIC, ADVANCED
+  - Rust-style diagnostic formatting with source context
+  - Multi-error collection with Error nodes in CST
+  - Recovery at synchronization points (`,`, `;`, `}`, `)`, `]`, newline)
+
+- **Source Code Generation**
+  - Generate standalone parser Java files
+  - Self-contained single file output
+  - Only depends on pragmatica-lite:core
+  - Type-safe RuleId sealed interface hierarchy
+  - Optional ErrorReporting mode (BASIC/ADVANCED)
+  - ADVANCED mode includes Rust-style diagnostics in generated parser
+
+- **Test Suite**
+  - 242 tests covering all features
+  - Examples: Calculator, JSON, S-Expression, CSV, Java 25 grammar
+
+### Dependencies
+
+- Java 25
+- pragmatica-lite:core 0.8.4

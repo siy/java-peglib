@@ -22,7 +22,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
