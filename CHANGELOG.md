@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-12-20
+
+### Fixed
+
+- **Trivia Preservation**
+  - Fixed trivia loss when Choice fails in sequence
+  - Fixed trivia loss when Optional/ZeroOrMore fails in sequence
+  - Extended `isReference` to handle wrapper expressions (Optional, ZeroOrMore, OneOrMore)
+  - Fixed whitespace handling around predicates and references
+  - Removed redundant `skipWhitespace()` calls that discard trivia
+
+- **Java 25 Grammar**
+  - Added `LocalTypeDecl` rule to support annotated and modified local type declarations
+  - Local records/classes with `@Deprecated`, `final`, etc. now parse correctly
+
+### Changed
+
+- Test count: 242 → 243
+
 ## [0.1.0] - 2025-12-19
 
 ### Added
