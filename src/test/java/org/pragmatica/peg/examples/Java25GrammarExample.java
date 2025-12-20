@@ -90,7 +90,8 @@ class Java25GrammarExample {
 
         # === Blocks and Statements (JLS 14) ===
         Block <- '{' BlockStmt* '}'
-        BlockStmt <- LocalVar / TypeKind / Stmt
+        BlockStmt <- LocalVar / LocalTypeDecl / Stmt
+        LocalTypeDecl <- Annotation* Modifier* TypeKind
         LocalVar <- Modifier* LocalVarType VarDecls ';'
         LocalVarType <- 'var' / Type
         Stmt <- Block
@@ -760,6 +761,56 @@ class Java25GrammarExample {
         assertTrue(parser.parseCst("@Deprecated record OldPoint(int x, int y) {}", "TypeDecl").isSuccess());
         // Record implementing interface
         assertTrue(parser.parseCst("record Point(int x, int y) implements Serializable {}", "TypeDecl").isSuccess());
+    }
+
+    @Test
+    void parseLocalTypeDeclarations() {
+        var parser = PegParser.fromGrammar(JAVA_GRAMMAR).unwrap();
+        // Simple local record
+        var r1 = parser.parseCst("""
+            class Test {
+                void method() {
+                    record LocalRecord(int x) {}
+                }
+            }
+            """);
+        assertTrue(r1.isSuccess(), () -> "Simple local record failed: " + r1);
+        // Local record with implements
+        var r2 = parser.parseCst("""
+            class Test {
+                void method() {
+                    record LocalRecord(int x) implements Comparable<LocalRecord> {}
+                }
+            }
+            """);
+        assertTrue(r2.isSuccess(), () -> "Local record with implements failed: " + r2);
+        // Annotated local record
+        var r3 = parser.parseCst("""
+            class Test {
+                void method() {
+                    @Deprecated record DeprecatedRecord(int x) {}
+                }
+            }
+            """);
+        assertTrue(r3.isSuccess(), () -> "Annotated local record failed: " + r3);
+        // Final local class
+        var r4 = parser.parseCst("""
+            class Test {
+                void method() {
+                    final class FinalClass {}
+                }
+            }
+            """);
+        assertTrue(r4.isSuccess(), () -> "Final local class failed: " + r4);
+        // Annotated local class
+        var r5 = parser.parseCst("""
+            class Test {
+                void method() {
+                    @SuppressWarnings("deprecation") class LocalClass {}
+                }
+            }
+            """);
+        assertTrue(r5.isSuccess(), () -> "Annotated local class failed: " + r5);
     }
 
     @Test
