@@ -302,4 +302,43 @@ class ParserGeneratorTest {
         assertFalse(source.contains("parseWithDiagnostics"));
         assertFalse(source.contains("enum Severity"));
     }
+
+    @Test
+    void generateCst_advancedMode_includesErrorCaseInSwitch() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "AdvancedParser",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // CstNode.Error should be defined
+        assertThat(source).contains("record Error(SourceSpan span, String skippedText, String expected,");
+
+        // attachTrailingTrivia switch should handle Error case
+        assertThat(source).contains("case CstNode.Error err -> new CstNode.Error(");
+        assertThat(source).contains("err.expected()");
+    }
+
+    @Test
+    void generateCst_basicMode_noErrorCaseInSwitch() {
+        var result = PegParser.generateCstParser(
+            "Root <- 'hello'",
+            "com.example",
+            "BasicParser",
+            ErrorReporting.BASIC
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // CstNode.Error should NOT be defined in BASIC mode
+        assertFalse(source.contains("record Error(SourceSpan span, String skippedText"));
+
+        // No Error case in switch
+        assertFalse(source.contains("case CstNode.Error"));
+    }
 }
