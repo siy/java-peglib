@@ -357,6 +357,37 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - `PredicateSuccess` - predicate matched (no consumption)
 - `Ignored` - matched but no node
 
+## Java 25 Grammar: Contextual Keywords
+
+Java has two types of reserved words:
+
+### Hard Keywords (always reserved)
+These can NEVER be used as identifiers:
+```
+abstract, assert, boolean, break, byte, case, catch, char, class, const,
+continue, default, do, double, else, enum, extends, false, final, finally,
+float, for, goto, if, implements, import, instanceof, int, interface, long,
+native, new, null, package, private, protected, public, return, short,
+static, strictfp, super, switch, synchronized, this, throw, throws,
+transient, true, try, void, volatile, while
+```
+
+### Contextual Keywords (context-dependent)
+These are only reserved in specific syntactic positions and CAN be used as identifiers elsewhere:
+
+| Keyword | Reserved Context | Can be identifier in |
+|---------|-----------------|---------------------|
+| `var` | Local variable type inference | Method/field names, parameters |
+| `yield` | Switch expression | Method/field names, parameters |
+| `record` | Type declaration | Method/field names, parameters |
+| `sealed`, `non-sealed` | Class modifier | Method/field names, parameters |
+| `permits` | Sealed class clause | Method/field names, parameters |
+| `when` | Pattern guard | Method/field names, parameters |
+| `module`, `open`, `opens`, `requires`, `exports`, `provides`, `uses`, `with`, `to` | Module declarations | Regular code |
+
+### Grammar Design
+The `Keyword` rule should only include hard keywords. Contextual keywords are matched by their specific rules (e.g., `PermitsClause <- 'permits' TypeList`) and fall through to `Identifier` elsewhere. PEG's ordered choice handles this naturally.
+
 ## References
 
 - [cpp-peglib](https://github.com/yhirose/cpp-peglib) - Reference implementation
