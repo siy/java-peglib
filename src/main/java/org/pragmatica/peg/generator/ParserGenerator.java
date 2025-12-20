@@ -894,7 +894,7 @@ public final class ParserGenerator {
         // Only add Error node type for ADVANCED mode (used in error recovery)
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
-                        record Error(SourceSpan span, String skippedText,
+                        record Error(SourceSpan span, String skippedText, String expected,
                                      List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
                             @Override public RuleId rule() { return null; }
                         }
@@ -1337,7 +1337,8 @@ public final class ParserGenerator {
                             var skippedSpan = skipToRecoveryPoint();
                             if (skippedSpan.length() > 0) {
                                 var skippedText = skippedSpan.extract(input);
-                                var errorNode = new CstNode.Error(skippedSpan, skippedText, leadingTrivia, List.of());
+                                var expected = furthestExpected != null ? furthestExpected : result.expected;
+                                var errorNode = new CstNode.Error(skippedSpan, skippedText, expected, leadingTrivia, List.of());
                                 return ParseResultWithDiagnostics.withErrors(errorNode, diagnostics, input);
                             }
                             return ParseResultWithDiagnostics.withErrors(null, diagnostics, input);
@@ -1850,7 +1851,7 @@ public final class ParserGenerator {
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
-                                err.span(), err.skippedText(), err.leadingTrivia(), trailingTrivia
+                                err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia
                             );
                 """);
         }

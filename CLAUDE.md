@@ -136,7 +136,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Trivia handling (whitespace/comments) for lossless CST
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
-- [x] 240 passing tests
+- [x] 245 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -277,7 +277,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (240 tests)
+## Test Coverage (245 tests)
 
 ### Grammar Parser Tests (14 tests)
 - Simple rules, actions, sequences, choices
