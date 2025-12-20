@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Generic method calls supported in PostOp rule (e.g., `foo.<Type>bar()`)
   - Added documentation for hard vs contextual keywords
 
+- **Generated Parser (ADVANCED mode)**
+  - Added missing `expected` field to `CstNode.Error` record
+  - Fixed `attachTrailingTrivia` to preserve `expected` when reconstructing Error nodes
+
 ## [0.1.1] - 2025-12-20
 
 ### Fixed
