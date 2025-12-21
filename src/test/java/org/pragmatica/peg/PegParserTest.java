@@ -493,4 +493,88 @@ class PegParserTest {
         assertTrue(parser.parseCst("while running").isSuccess());
         assertTrue(parser.parseCst("for loop").isFailure());
     }
+
+    // === Cut Operator Tests ===
+
+    @Test
+    void cutOperator_caret_parsed() {
+        var parser = PegParser.fromGrammar("Root <- 'a' ^ 'b'").unwrap();
+        assertTrue(parser.parseCst("ab").isSuccess());
+    }
+
+    @Test
+    void cutOperator_upArrow_parsed() {
+        var parser = PegParser.fromGrammar("Root <- 'a' ↑ 'b'").unwrap();
+        assertTrue(parser.parseCst("ab").isSuccess());
+    }
+
+    @Test
+    void cutOperator_preventsBacktracking() {
+        // Without cut, 'ax' would fail first alternative and try second
+        // With cut after 'a', parser commits to first alternative
+        var parser = PegParser.fromGrammar("""
+            Root <- ('a' ^ 'b') / 'a'
+            """).unwrap();
+
+        // 'ab' succeeds - matches first alternative
+        assertTrue(parser.parseCst("ab").isSuccess());
+
+        // 'a' fails - cut prevents trying second alternative
+        // Even though 'a' would match second alternative
+        var result = parser.parseCst("a");
+        assertTrue(result.isFailure());
+    }
+
+    @Test
+    void cutOperator_errorPositionAfterCut() {
+        var parser = PegParser.fromGrammar("""
+            Root <- ('a' ^ 'b') / 'c'
+            """).unwrap();
+
+        // Input 'ax' - matches 'a', cut commits, 'b' fails
+        // Error should indicate expected 'b', not 'c'
+        var result = parser.parseCst("ax");
+        assertTrue(result.isFailure());
+        var error = result.fold(err -> err.message(), _ -> "");
+        assertTrue(error.contains("'b'") || error.contains("x"),
+            "Error should indicate failure after cut: " + error);
+    }
+
+    @Test
+    void cutOperator_noEffectOnSuccessfulParse() {
+        var parser = PegParser.fromGrammar("""
+            Root <- 'a' ^ 'b' 'c'
+            """).unwrap();
+
+        assertTrue(parser.parseCst("abc").isSuccess());
+    }
+
+    @Test
+    void cutOperator_worksInNestedChoice() {
+        var parser = PegParser.fromGrammar("""
+            Root <- Outer
+            Outer <- Inner / 'fallback'
+            Inner <- 'start' ^ 'middle' 'end'
+            """).unwrap();
+
+        // Successful parse
+        assertTrue(parser.parseCst("startmiddleend").isSuccess());
+
+        // After cut, don't try 'fallback' alternative
+        var result = parser.parseCst("startfail");
+        assertTrue(result.isFailure());
+    }
+
+    @Test
+    void cutOperator_multipleInSequence() {
+        var parser = PegParser.fromGrammar("""
+            Root <- ('a' ^ 'b' ^ 'c') / 'x'
+            """).unwrap();
+
+        assertTrue(parser.parseCst("abc").isSuccess());
+
+        // First cut commits, second cut commits further
+        var result = parser.parseCst("abx");
+        assertTrue(result.isFailure());
+    }
 }

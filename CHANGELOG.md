@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.4] - 2025-12-21
 
-_No changes - version bump only._
+### Added
+
+- **Cut Operator (`^` / `↑`)**
+  - Commits to current choice alternative, prevents backtracking
+  - Compatible with cpp-peglib syntax (both `^` and `↑` supported)
+  - Provides accurate error positions after commitment
+  - Works in both runtime and generated parsers
+  - Example: `Rule <- ('if' ^ Statement) / ('while' ^ Statement)`
 
 ## [0.1.3] - 2025-12-21
 

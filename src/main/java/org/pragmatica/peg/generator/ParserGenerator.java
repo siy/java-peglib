@@ -365,20 +365,32 @@ public final class ParserGenerator {
             }
             case Expression.Sequence seq -> {
                 var seqStart = "seqStart" + id;
+                var cutVar = "cut" + id;
                 sb.append(pad).append("ParseResult ").append(resultVar).append(" = ParseResult.success(null, pos, line, column);\n");
                 sb.append(pad).append("int ").append(seqStart).append(" = pos;\n");
                 sb.append(pad).append("int ").append(seqStart).append("Line = line;\n");
                 sb.append(pad).append("int ").append(seqStart).append("Column = column;\n");
+                sb.append(pad).append("boolean ").append(cutVar).append(" = false;\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
                     sb.append(pad).append("skipWhitespace();\n");
                     generateExpressionCode(sb, elem, "elem" + id + "_" + i, indent, counter);
-                    sb.append(pad).append("if (elem").append(id).append("_").append(i).append(".isFailure()) {\n");
+                    // Check for cut failure propagation
+                    sb.append(pad).append("if (elem").append(id).append("_").append(i).append(".isCutFailure()) {\n");
                     sb.append(pad).append("    pos = ").append(seqStart).append(";\n");
                     sb.append(pad).append("    line = ").append(seqStart).append("Line;\n");
                     sb.append(pad).append("    column = ").append(seqStart).append("Column;\n");
                     sb.append(pad).append("    ").append(resultVar).append(" = elem").append(id).append("_").append(i).append(";\n");
+                    sb.append(pad).append("} else if (elem").append(id).append("_").append(i).append(".isFailure()) {\n");
+                    sb.append(pad).append("    pos = ").append(seqStart).append(";\n");
+                    sb.append(pad).append("    line = ").append(seqStart).append("Line;\n");
+                    sb.append(pad).append("    column = ").append(seqStart).append("Column;\n");
+                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(cutVar).append(" ? elem").append(id).append("_").append(i).append(".asCutFailure() : elem").append(id).append("_").append(i).append(";\n");
                     sb.append(pad).append("}\n");
+                    // Track if this element was a cut
+                    if (elem instanceof Expression.Cut) {
+                        sb.append(pad).append(cutVar).append(" = true;\n");
+                    }
                     i++;
                 }
             }
@@ -398,6 +410,8 @@ public final class ParserGenerator {
                     sb.append(pad).append("values = ").append(oldVals).append("_").append(i).append(";\n");
                     sb.append(pad).append("if (alt").append(id).append("_").append(i).append(".isSuccess()) {\n");
                     sb.append(pad).append("    values.addAll(choiceValues").append(id).append("_").append(i).append(");\n");
+                    sb.append(pad).append("    ").append(resultVar).append(" = alt").append(id).append("_").append(i).append(";\n");
+                    sb.append(pad).append("} else if (alt").append(id).append("_").append(i).append(".isCutFailure()) {\n");
                     sb.append(pad).append("    ").append(resultVar).append(" = alt").append(id).append("_").append(i).append(";\n");
                     sb.append(pad).append("} else {\n");
                     sb.append(pad).append("    pos = ").append(choiceStart).append(";\n");
@@ -668,25 +682,36 @@ public final class ParserGenerator {
                     final int endPos;
                     final int endLine;
                     final int endColumn;
+                    final boolean cutFailed;
 
-                    private ParseResult(boolean success, Object value, String expected, int endPos, int endLine, int endColumn) {
+                    private ParseResult(boolean success, Object value, String expected, int endPos, int endLine, int endColumn, boolean cutFailed) {
                         this.success = success;
                         this.value = value;
                         this.expected = expected;
                         this.endPos = endPos;
                         this.endLine = endLine;
                         this.endColumn = endColumn;
+                        this.cutFailed = cutFailed;
                     }
 
                     boolean isSuccess() { return success; }
                     boolean isFailure() { return !success; }
+                    boolean isCutFailure() { return !success && cutFailed; }
 
                     static ParseResult success(Object value, int endPos, int endLine, int endColumn) {
-                        return new ParseResult(true, value, null, endPos, endLine, endColumn);
+                        return new ParseResult(true, value, null, endPos, endLine, endColumn, false);
                     }
 
                     static ParseResult failure(String expected) {
-                        return new ParseResult(false, null, expected, 0, 0, 0);
+                        return new ParseResult(false, null, expected, 0, 0, 0, false);
+                    }
+
+                    static ParseResult cutFailure(String expected) {
+                        return new ParseResult(false, null, expected, 0, 0, 0, true);
+                    }
+
+                    ParseResult asCutFailure() {
+                        return cutFailed ? this : new ParseResult(false, null, expected, 0, 0, 0, true);
                     }
                 }
             """);
@@ -1539,8 +1564,10 @@ public final class ParserGenerator {
             }
             case Expression.Sequence seq -> {
                 var seqStart = "seqStart" + id;
+                var cutVar = "cut" + id;
                 sb.append(pad).append("CstParseResult ").append(resultVar).append(" = CstParseResult.success(null, \"\", location());\n");
                 sb.append(pad).append("var ").append(seqStart).append(" = location();\n");
+                sb.append(pad).append("boolean ").append(cutVar).append(" = false;\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
                     sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
@@ -1551,11 +1578,19 @@ public final class ParserGenerator {
                     }
                     var elemVar = "elem" + id + "_" + i;
                     generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
-                    sb.append(pad).append("    if (").append(elemVar).append(".isFailure()) {\n");
+                    // Check for cut failure propagation first
+                    sb.append(pad).append("    if (").append(elemVar).append(".isCutFailure()) {\n");
                     sb.append(pad).append("        restoreLocation(").append(seqStart).append(");\n");
                     sb.append(pad).append("        ").append(resultVar).append(" = ").append(elemVar).append(";\n");
+                    sb.append(pad).append("    } else if (").append(elemVar).append(".isFailure()) {\n");
+                    sb.append(pad).append("        restoreLocation(").append(seqStart).append(");\n");
+                    sb.append(pad).append("        ").append(resultVar).append(" = ").append(cutVar).append(" ? ").append(elemVar).append(".asCutFailure() : ").append(elemVar).append(";\n");
                     sb.append(pad).append("    }\n");
                     sb.append(pad).append("}\n");
+                    // Track if this element was a cut
+                    if (elem instanceof Expression.Cut) {
+                        sb.append(pad).append(cutVar).append(" = true;\n");
+                    }
                     i++;
                 }
                 sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
@@ -1580,6 +1615,8 @@ public final class ParserGenerator {
                     var altVar = "alt" + id + "_" + i;
                     generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter, inWhitespaceRule);
                     sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
+                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
+                    sb.append(pad).append("} else if (").append(altVar).append(".isCutFailure()) {\n");
                     sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
                     sb.append(pad).append("} else {\n");
                     sb.append(pad).append("    restoreLocation(").append(choiceStart).append(");\n");
@@ -1953,24 +1990,35 @@ public final class ParserGenerator {
                     final String text;
                     final String expected;
                     final SourceLocation endLocation;
+                    final boolean cutFailed;
 
-                    private CstParseResult(boolean success, CstNode node, String text, String expected, SourceLocation endLocation) {
+                    private CstParseResult(boolean success, CstNode node, String text, String expected, SourceLocation endLocation, boolean cutFailed) {
                         this.success = success;
                         this.node = node;
                         this.text = text;
                         this.expected = expected;
                         this.endLocation = endLocation;
+                        this.cutFailed = cutFailed;
                     }
 
                     boolean isSuccess() { return success; }
                     boolean isFailure() { return !success; }
+                    boolean isCutFailure() { return !success && cutFailed; }
 
                     static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
-                        return new CstParseResult(true, node, text, null, endLocation);
+                        return new CstParseResult(true, node, text, null, endLocation, false);
                     }
 
                     static CstParseResult failure(String expected) {
-                        return new CstParseResult(false, null, null, expected, null);
+                        return new CstParseResult(false, null, null, expected, null, false);
+                    }
+
+                    static CstParseResult cutFailure(String expected) {
+                        return new CstParseResult(false, null, null, expected, null, true);
+                    }
+
+                    CstParseResult asCutFailure() {
+                        return cutFailed ? this : new CstParseResult(false, null, null, expected, null, true);
                     }
                 }
             """);
