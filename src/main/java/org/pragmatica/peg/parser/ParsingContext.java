@@ -28,6 +28,8 @@ public final class ParsingContext {
     private int line;
     private int column;
     private int furthestPos;
+    private int furthestLine;
+    private int furthestColumn;
     private String furthestExpected;
     private int tokenBoundaryDepth;
 
@@ -47,6 +49,8 @@ public final class ParsingContext {
         this.line = 1;
         this.column = 1;
         this.furthestPos = 0;
+        this.furthestLine = 1;
+        this.furthestColumn = 1;
         this.furthestExpected = "";
         this.inRecovery = false;
         this.recoveryStartPos = -1;
@@ -118,6 +122,8 @@ public final class ParsingContext {
     public void updateFurthest(String expected) {
         if (pos > furthestPos) {
             furthestPos = pos;
+            furthestLine = line;
+            furthestColumn = column;
             furthestExpected = expected;
         } else if (pos == furthestPos && !furthestExpected.contains(expected)) {
             furthestExpected = furthestExpected.isEmpty()
@@ -128,6 +134,10 @@ public final class ParsingContext {
 
     public int furthestPos() {
         return furthestPos;
+    }
+
+    public SourceLocation furthestLocation() {
+        return SourceLocation.at(furthestLine, furthestColumn, furthestPos);
     }
 
     public String furthestExpected() {

@@ -75,10 +75,21 @@ public final class PegEngine implements Parser {
 
         if (result.isFailure()) {
             var failure = (ParseResult.Failure) result;
+            // Use furthest location for better error position after backtracking
+            var furthestLoc = ctx.furthestLocation();
+            var found = ctx.furthestPos() >= input.length()
+                ? "end of input"
+                : String.valueOf(input.charAt(ctx.furthestPos()));
+            // Prefer custom error message from failure, fall back to furthest expected
+            var expected = !failure.expected().startsWith("'") && !failure.expected().startsWith("[")
+                    && !failure.expected().startsWith("rule ") && !failure.expected().equals("any character")
+                    && !failure.expected().startsWith("not ") && !failure.expected().startsWith("one of")
+                ? failure.expected()  // Custom error message
+                : ctx.furthestExpected();
             return Result.failure(new ParseError.UnexpectedInput(
-                failure.location(),
-                ctx.isAtEnd() ? "end of input" : String.valueOf(ctx.peek()),
-                failure.expected()
+                furthestLoc,
+                found,
+                expected
             ));
         }
 
@@ -137,10 +148,21 @@ public final class PegEngine implements Parser {
 
         if (result.isFailure()) {
             var failure = (ParseResult.Failure) result;
+            // Use furthest location for better error position after backtracking
+            var furthestLoc = ctx.furthestLocation();
+            var found = ctx.furthestPos() >= input.length()
+                ? "end of input"
+                : String.valueOf(input.charAt(ctx.furthestPos()));
+            // Prefer custom error message from failure, fall back to furthest expected
+            var expected = !failure.expected().startsWith("'") && !failure.expected().startsWith("[")
+                    && !failure.expected().startsWith("rule ") && !failure.expected().equals("any character")
+                    && !failure.expected().startsWith("not ") && !failure.expected().startsWith("one of")
+                ? failure.expected()  // Custom error message
+                : ctx.furthestExpected();
             return Result.failure(new ParseError.UnexpectedInput(
-                failure.location(),
-                ctx.isAtEnd() ? "end of input" : String.valueOf(ctx.peek()),
-                failure.expected()
+                furthestLoc,
+                found,
+                expected
             ));
         }
 
