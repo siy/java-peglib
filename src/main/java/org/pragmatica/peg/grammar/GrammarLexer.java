@@ -240,7 +240,7 @@ public final class GrammarLexer {
             case '+' -> new GrammarToken.Plus(span(start));
             case '.' -> new GrammarToken.Dot(span(start));
             case '~' -> new GrammarToken.Tilde(span(start));
-            case '↑' -> new GrammarToken.Cut(span(start));
+            case '↑', '^' -> new GrammarToken.Cut(span(start));
             case '(' -> new GrammarToken.LParen(span(start));
             case ')' -> new GrammarToken.RParen(span(start));
             case '>' -> new GrammarToken.RAngle(span(start));

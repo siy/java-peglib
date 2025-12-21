@@ -22,7 +22,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.1.3</version>
+    <version>0.1.4</version>
 </dependency>
 ```
 
@@ -89,6 +89,10 @@ e{2,5}      # Between 2 and 5 times
 # Lookahead predicates (don't consume input)
 &e          # Positive lookahead - succeeds if e matches
 !e          # Negative lookahead - succeeds if e doesn't match
+
+# Cut - commits to current choice, prevents backtracking
+^           # Cut operator
+↑           # Cut operator (alternative syntax)
 
 # Grouping
 (e1 e2)     # Group expressions
@@ -326,7 +330,7 @@ public sealed interface CstNode {
 
 ```bash
 mvn compile    # Compile
-mvn test       # Run tests (240 tests)
+mvn test       # Run tests (252 tests)
 mvn verify     # Full verification
 ```
 

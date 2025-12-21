@@ -116,7 +116,7 @@ public sealed interface Expression {
     record Dictionary(SourceSpan span, List<String> words, boolean caseInsensitive) implements Expression {}
 
     /**
-     * Cut operator: ↑ - commits to current choice
+     * Cut operator: ^ (or ↑) - commits to current choice, prevents backtracking
      */
     record Cut(SourceSpan span) implements Expression {}
 

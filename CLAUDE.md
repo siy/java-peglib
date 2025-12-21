@@ -63,7 +63,7 @@ src/main/java/org/pragmatica/peg/
     └── Diagnostic.java         # Rich error type for Rust-style messages
 
 src/test/java/org/pragmatica/peg/
-├── PegParserTest.java          # 43 tests (parsing + actions)
+├── PegParserTest.java          # 50 tests (parsing + actions + cut operator)
 ├── EdgeCaseTest.java           # 24 tests (edge cases)
 ├── TriviaTest.java             # 13 tests (trivia handling)
 ├── GeneratedParserTriviaTest.java # 6 tests (generated parser trivia)
@@ -113,6 +113,8 @@ e{n,}       # At least n repetitions
 e{n,m}      # Between n and m repetitions
 $name<e>    # Named capture
 $name       # Back-reference
+^           # Cut - commits to current choice, prevents backtracking
+↑           # Cut (alternative syntax)
 
 # Directives
 %whitespace <- [ \t\r\n]*    # Auto-skip whitespace
@@ -136,7 +138,8 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Trivia handling (whitespace/comments) for lossless CST
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
-- [x] 245 passing tests
+- [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
+- [x] 252 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -277,7 +280,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (245 tests)
+## Test Coverage (252 tests)
 
 ### Grammar Parser Tests (14 tests)
 - Simple rules, actions, sequences, choices
@@ -285,13 +288,14 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - Token boundaries, whitespace directive
 - Case-insensitive matching, named captures
 
-### Parsing Engine Tests (22 tests)
+### Parsing Engine Tests (29 tests)
 - Literals, character classes, negated classes
 - Any character, sequences, choices
 - Zero-or-more, one-or-more, optional
 - Bounded repetition, lookahead predicates
 - Token boundaries, rule references
 - Whitespace skipping, case-insensitive
+- Cut operator (^/↑) - prevents backtracking after commit
 
 ### Action Tests (6 tests)
 - Simple action returning integer
@@ -354,6 +358,7 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 ### ParseResult Types (sealed)
 - `Success` - matched with node and optional semantic value
 - `Failure` - no match at position
+- `CutFailure` - failure after cut, prevents trying alternatives
 - `PredicateSuccess` - predicate matched (no consumption)
 - `Ignored` - matched but no node
 
@@ -398,6 +403,6 @@ The `Keyword` rule should only include hard keywords. Contextual keywords are ma
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (240 passing)
+mvn test             # Run tests (252 passing)
 mvn verify           # Full verification
 ```

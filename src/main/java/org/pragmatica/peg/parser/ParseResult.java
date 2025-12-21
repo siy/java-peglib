@@ -125,4 +125,23 @@ public sealed interface ParseResult {
             return true;
         }
     }
+
+    /**
+     * Failure after cut - prevents backtracking to try other alternatives.
+     * Used when a cut (^) operator was encountered and subsequent parsing failed.
+     */
+    record CutFailure(
+        SourceLocation location,
+        String expected
+    ) implements ParseResult {
+
+        @Override
+        public boolean isSuccess() {
+            return false;
+        }
+
+        public static CutFailure at(SourceLocation location, String expected) {
+            return new CutFailure(location, expected);
+        }
+    }
 }

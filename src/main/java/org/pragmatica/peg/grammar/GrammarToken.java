@@ -26,7 +26,7 @@ public sealed interface GrammarToken {
     record Plus(SourceSpan span) implements GrammarToken {}            // +
     record Dot(SourceSpan span) implements GrammarToken {}             // .
     record Tilde(SourceSpan span) implements GrammarToken {}           // ~
-    record Cut(SourceSpan span) implements GrammarToken {}             // ↑
+    record Cut(SourceSpan span) implements GrammarToken {}             // ^ or ↑
     record Pipe(SourceSpan span) implements GrammarToken {}            // | (dictionary)
 
     // Delimiters

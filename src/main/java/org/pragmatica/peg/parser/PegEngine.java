@@ -74,17 +74,27 @@ public final class PegEngine implements Parser {
         var result = parseRule(ctx, ruleOpt.unwrap());
 
         if (result.isFailure()) {
-            var failure = (ParseResult.Failure) result;
+            // Extract failure info from either Failure or CutFailure
+            var failureLoc = switch (result) {
+                case ParseResult.Failure f -> f.location();
+                case ParseResult.CutFailure cf -> cf.location();
+                default -> ctx.location();
+            };
+            var failureExpected = switch (result) {
+                case ParseResult.Failure f -> f.expected();
+                case ParseResult.CutFailure cf -> cf.expected();
+                default -> "unknown";
+            };
             // Use furthest location for better error position after backtracking
             var furthestLoc = ctx.furthestLocation();
             var found = ctx.furthestPos() >= input.length()
                 ? "end of input"
                 : String.valueOf(input.charAt(ctx.furthestPos()));
             // Prefer custom error message from failure, fall back to furthest expected
-            var expected = !failure.expected().startsWith("'") && !failure.expected().startsWith("[")
-                    && !failure.expected().startsWith("rule ") && !failure.expected().equals("any character")
-                    && !failure.expected().startsWith("not ") && !failure.expected().startsWith("one of")
-                ? failure.expected()  // Custom error message
+            var expected = !failureExpected.startsWith("'") && !failureExpected.startsWith("[")
+                    && !failureExpected.startsWith("rule ") && !failureExpected.equals("any character")
+                    && !failureExpected.startsWith("not ") && !failureExpected.startsWith("one of")
+                ? failureExpected  // Custom error message
                 : ctx.furthestExpected();
             return Result.failure(new ParseError.UnexpectedInput(
                 furthestLoc,
@@ -147,17 +157,22 @@ public final class PegEngine implements Parser {
         var result = parseRuleWithActions(ctx, ruleOpt.unwrap());
 
         if (result.isFailure()) {
-            var failure = (ParseResult.Failure) result;
+            // Extract failure info from either Failure or CutFailure
+            var failureExpected = switch (result) {
+                case ParseResult.Failure f -> f.expected();
+                case ParseResult.CutFailure cf -> cf.expected();
+                default -> "unknown";
+            };
             // Use furthest location for better error position after backtracking
             var furthestLoc = ctx.furthestLocation();
             var found = ctx.furthestPos() >= input.length()
                 ? "end of input"
                 : String.valueOf(input.charAt(ctx.furthestPos()));
             // Prefer custom error message from failure, fall back to furthest expected
-            var expected = !failure.expected().startsWith("'") && !failure.expected().startsWith("[")
-                    && !failure.expected().startsWith("rule ") && !failure.expected().equals("any character")
-                    && !failure.expected().startsWith("not ") && !failure.expected().startsWith("one of")
-                ? failure.expected()  // Custom error message
+            var expected = !failureExpected.startsWith("'") && !failureExpected.startsWith("[")
+                    && !failureExpected.startsWith("rule ") && !failureExpected.equals("any character")
+                    && !failureExpected.startsWith("not ") && !failureExpected.startsWith("one of")
+                ? failureExpected  // Custom error message
                 : ctx.furthestExpected();
             return Result.failure(new ParseError.UnexpectedInput(
                 furthestLoc,
@@ -249,13 +264,17 @@ public final class PegEngine implements Parser {
                 ctx.exitRecovery();
             } else {
                 // Parse failed - record error and skip to recovery point
-                var failure = (ParseResult.Failure) result;
+                var failureExpected = switch (result) {
+                    case ParseResult.Failure f -> f.expected();
+                    case ParseResult.CutFailure cf -> cf.expected();
+                    default -> "unknown";
+                };
                 var found = ctx.isAtEnd() ? "EOF" : String.valueOf(ctx.peek());
 
                 var errorSpan = SourceSpan.at(startLoc);
                 var diag = Diagnostic.error("unexpected input", errorSpan)
                     .withLabel("found '" + found + "'")
-                    .withHelp("expected " + failure.expected());
+                    .withHelp("expected " + failureExpected);
                 ctx.addDiagnostic(diag);
 
                 // Skip to recovery point
@@ -264,7 +283,7 @@ public final class PegEngine implements Parser {
                 if (skippedSpan.length() > 0) {
                     var skippedText = input.substring(skippedSpan.start().offset(), skippedSpan.end().offset());
                     var errorNode = new CstNode.Error(
-                        skippedSpan, skippedText, failure.expected(), leadingTrivia, List.of()
+                        skippedSpan, skippedText, failureExpected, leadingTrivia, List.of()
                     );
                     fragments.add(errorNode);
                 }
@@ -953,6 +972,7 @@ public final class PegEngine implements Parser {
                                                String ruleName, ParseMode mode) {
         var startLoc = ctx.location();
         var children = new ArrayList<CstNode>();
+        boolean cutEncountered = false;
 
         for (var element : seq.elements()) {
             // Skip whitespace between elements, but NOT before predicates
@@ -960,9 +980,25 @@ public final class PegEngine implements Parser {
                 skipWhitespace(ctx);
             }
             var result = parseExpressionWithMode(ctx, element, ruleName, mode);
-            if (result.isFailure()) {
+
+            // Handle failures
+            if (result instanceof ParseResult.CutFailure) {
+                // Propagate CutFailure immediately
                 ctx.restoreLocation(startLoc);
                 return result;
+            }
+            if (result instanceof ParseResult.Failure failure) {
+                ctx.restoreLocation(startLoc);
+                // If cut was encountered, return CutFailure to prevent backtracking
+                if (cutEncountered) {
+                    return ParseResult.CutFailure.at(failure.location(), failure.expected());
+                }
+                return result;
+            }
+
+            // Track if we've passed a cut point
+            if (element instanceof Expression.Cut) {
+                cutEncountered = true;
             }
             if (result instanceof ParseResult.Success success) {
                 children.add(success.node());
@@ -1002,6 +1038,10 @@ public final class PegEngine implements Parser {
                 if (result.isSuccess()) {
                     return result;
                 }
+            }
+            // CutFailure prevents trying other alternatives - return immediately
+            if (result instanceof ParseResult.CutFailure) {
+                return result;
             }
             lastFailure = result;
             ctx.restoreLocation(startLoc);

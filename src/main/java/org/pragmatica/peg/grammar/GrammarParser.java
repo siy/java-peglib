@@ -524,7 +524,7 @@ public final class GrammarParser {
             case GrammarToken.Plus p -> "'+'";
             case GrammarToken.Dot d -> "'.'";
             case GrammarToken.Tilde t -> "'~'";
-            case GrammarToken.Cut c -> "'↑'";
+            case GrammarToken.Cut c -> "'^'";
             case GrammarToken.LParen l -> "'('";
             case GrammarToken.RParen r -> "')'";
             case GrammarToken.LAngle l -> "'<'";
