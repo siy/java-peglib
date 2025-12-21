@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.3] - 2025-12-21
 
 ### Fixed
 
@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed error positions reporting 1:1 after PEG backtracking
   - Now tracks furthest position reached before failure for accurate error locations
   - Custom error messages preserved while using correct position
+
+- **Java 25 Grammar** (synced from jbct-cli)
+  - Added annotation support on enum constants (`@Deprecated RED`)
+  - Fixed operator ambiguity with negative lookahead (`|` vs `||`, `&` vs `&&`, `-` vs `->`)
+  - Fixed `QualifiedName` to not consume `.` before keywords like `class` (`String.class`)
+  - Added keyword boundary helper rules to prevent whitespace issues in statements
+  - Fixed `Member` rule order for better parsing of nested types
 
 ## [0.1.2] - 2025-12-20
 
