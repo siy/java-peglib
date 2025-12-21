@@ -67,11 +67,11 @@ class Java25GrammarExample {
 
         ClassBody <- '{' ClassMember* '}'
         ClassMember <- Annotation* Modifier* Member / InitializerBlock / ';'
-        Member <- ConstructorDecl / MethodDecl / FieldDecl / TypeKind
+        Member <- ConstructorDecl / TypeKind / MethodDecl / FieldDecl
         InitializerBlock <- 'static'? Block
         EnumBody <- '{' EnumConsts? (';' ClassMember*)? '}'
         EnumConsts <- EnumConst (',' EnumConst)* ','?
-        EnumConst <- Identifier ('(' Args? ')')? ClassBody?
+        EnumConst <- Annotation* Identifier ('(' Args? ')')? ClassBody?
         RecordComponents <- RecordComp (',' RecordComp)*
         RecordComp <- Annotation* Type Identifier
         RecordBody <- '{' RecordMember* '}'
@@ -94,6 +94,8 @@ class Java25GrammarExample {
         LocalTypeDecl <- Annotation* Modifier* TypeKind
         LocalVar <- Modifier* LocalVarType VarDecls ';'
         LocalVarType <- 'var' / Type
+        # Statement keywords use helper rules to combine keyword + word boundary as single token
+        # This prevents the parser from skipping whitespace before the boundary check
         Stmt <- Block
              / 'if' '(' Expr ')' Stmt ('else' Stmt)?
              / 'while' '(' Expr ')' Stmt
@@ -101,16 +103,24 @@ class Java25GrammarExample {
              / 'do' Stmt 'while' '(' Expr ')' ';'
              / 'try' ResourceSpec? Block Catch* Finally?
              / 'switch' '(' Expr ')' SwitchBlock
-             / 'return' Expr? ';'
-             / 'throw' Expr ';'
-             / 'break' Identifier? ';'
-             / 'continue' Identifier? ';'
-             / 'assert' Expr (':' Expr)? ';'
+             / ReturnKW Expr? ';'
+             / ThrowKW Expr ';'
+             / BreakKW Identifier? ';'
+             / ContinueKW Identifier? ';'
+             / AssertKW Expr (':' Expr)? ';'
              / 'synchronized' '(' Expr ')' Block
-             / 'yield' Expr ';'
+             / YieldKW Expr ';'
              / Identifier ':' Stmt
              / Expr ';'
              / ';'
+
+        # Helper rules: keyword with word boundary INSIDE token (prevents whitespace skip before boundary check)
+        ReturnKW <- < 'return' ![a-zA-Z0-9_$] >
+        ThrowKW <- < 'throw' ![a-zA-Z0-9_$] >
+        BreakKW <- < 'break' ![a-zA-Z0-9_$] >
+        ContinueKW <- < 'continue' ![a-zA-Z0-9_$] >
+        AssertKW <- < 'assert' ![a-zA-Z0-9_$] >
+        YieldKW <- < 'yield' ![a-zA-Z0-9_$] >
         ForCtrl <- ForInit? ';' Expr? ';' ExprList? / LocalVarType Identifier ':' Expr
         ForInit <- LocalVarNoSemi / ExprList
         LocalVarNoSemi <- Modifier* LocalVarType VarDecls
@@ -134,13 +144,13 @@ class Java25GrammarExample {
         Ternary <- LogOr ('?' Expr ':' Ternary)?
         LogOr <- LogAnd ('||' LogAnd)*
         LogAnd <- BitOr ('&&' BitOr)*
-        BitOr <- BitXor ('|' BitXor)*
+        BitOr <- BitXor (!'||' '|' BitXor)*
         BitXor <- BitAnd ('^' BitAnd)*
-        BitAnd <- Equality ('&' Equality)*
+        BitAnd <- Equality (!'&&' '&' Equality)*
         Equality <- Relational (('==' / '!=') Relational)*
         Relational <- Shift (('<=' / '>=' / '<' / '>') Shift / 'instanceof' (Pattern / Type))?
         Shift <- Additive (('<<' / '>>>' / '>>') Additive)*
-        Additive <- Multiplicative (('+' / '-') Multiplicative)*
+        Additive <- Multiplicative (('+' / '-' !'>') Multiplicative)*
         Multiplicative <- Unary (('*' / '/' / '%') Unary)*
         Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
         Postfix <- Primary PostOp*
@@ -161,7 +171,8 @@ class Java25GrammarExample {
         TypeArgs <- '<' '>' / '<' TypeArg (',' TypeArg)* '>'
         TypeArg <- Type / '?' (Annotation* ('extends' / 'super') Type)?
 
-        QualifiedName <- Identifier ('.' Identifier)*
+        # Use lookahead BEFORE consuming '.' to avoid capturing it when followed by keyword (e.g., 'String.class')
+        QualifiedName <- Identifier (&('.' Identifier) '.' Identifier)*
         Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
 
         Modifier <- 'public' / 'protected' / 'private' / 'static' / 'final' / 'abstract' / 'native' / 'synchronized' / 'transient' / 'volatile' / 'strictfp' / 'default' / 'sealed' / 'non-sealed'
