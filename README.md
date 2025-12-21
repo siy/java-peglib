@@ -90,6 +90,10 @@ e{2,5}      # Between 2 and 5 times
 &e          # Positive lookahead - succeeds if e matches
 !e          # Negative lookahead - succeeds if e doesn't match
 
+# Cut - commits to current choice, prevents backtracking
+^           # Cut operator
+↑           # Cut operator (alternative syntax)
+
 # Grouping
 (e1 e2)     # Group expressions
 
@@ -326,7 +330,7 @@ public sealed interface CstNode {
 
 ```bash
 mvn compile    # Compile
-mvn test       # Run tests (240 tests)
+mvn test       # Run tests (252 tests)
 mvn verify     # Full verification
 ```
 
