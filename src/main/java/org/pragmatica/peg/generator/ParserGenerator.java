@@ -1903,92 +1903,204 @@ public final class ParserGenerator {
                     };
                 }
 
-                private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {
-                    if (remaining() < text.length()) {
-                        return CstParseResult.failure("'" + text + "'");
-                    }
-                    var startLoc = location();
-                    for (int i = 0; i < text.length(); i++) {
-                        char expected = text.charAt(i);
-                        char actual = peek(i);
-                        if (caseInsensitive) {
-                            if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
-                                return CstParseResult.failure("'" + text + "'");
-                            }
-                        } else {
-                            if (expected != actual) {
-                                return CstParseResult.failure("'" + text + "'");
-                            }
-                        }
-                    }
-                    for (int i = 0; i < text.length(); i++) {
-                        advance();
-                    }
-                    var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, List.of(), List.of());
-                    return CstParseResult.success(node, text, location());
-                }
-
-                private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {
-                    String longestMatch = null;
-                    int longestLen = 0;
-                    for (var word : words) {
-                        if (matchesWord(word, caseInsensitive) && word.length() > longestLen) {
-                            longestMatch = word;
-                            longestLen = word.length();
-                        }
-                    }
-                    if (longestMatch == null) {
-                        return CstParseResult.failure("dictionary word");
-                    }
-                    var startLoc = location();
-                    for (int i = 0; i < longestLen; i++) {
-                        advance();
-                    }
-                    var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, List.of(), List.of());
-                    return CstParseResult.success(node, longestMatch, location());
-                }
-
             """);
+
+        // Generate match methods with trackFailure calls for ADVANCED mode
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("""
+                    private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {
+                        if (remaining() < text.length()) {
+                            trackFailure("'" + text + "'");
+                            return CstParseResult.failure("'" + text + "'");
+                        }
+                        var startLoc = location();
+                        for (int i = 0; i < text.length(); i++) {
+                            char expected = text.charAt(i);
+                            char actual = peek(i);
+                            if (caseInsensitive) {
+                                if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
+                                    trackFailure("'" + text + "'");
+                                    return CstParseResult.failure("'" + text + "'");
+                                }
+                            } else {
+                                if (expected != actual) {
+                                    trackFailure("'" + text + "'");
+                                    return CstParseResult.failure("'" + text + "'");
+                                }
+                            }
+                        }
+                        for (int i = 0; i < text.length(); i++) {
+                            advance();
+                        }
+                        var span = SourceSpan.of(startLoc, location());
+                        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, List.of(), List.of());
+                        return CstParseResult.success(node, text, location());
+                    }
+
+                    private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {
+                        String longestMatch = null;
+                        int longestLen = 0;
+                        for (var word : words) {
+                            if (matchesWord(word, caseInsensitive) && word.length() > longestLen) {
+                                longestMatch = word;
+                                longestLen = word.length();
+                            }
+                        }
+                        if (longestMatch == null) {
+                            trackFailure("dictionary word");
+                            return CstParseResult.failure("dictionary word");
+                        }
+                        var startLoc = location();
+                        for (int i = 0; i < longestLen; i++) {
+                            advance();
+                        }
+                        var span = SourceSpan.of(startLoc, location());
+                        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, List.of(), List.of());
+                        return CstParseResult.success(node, longestMatch, location());
+                    }
+
+                """);
+        } else {
+            sb.append("""
+                    private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {
+                        if (remaining() < text.length()) {
+                            return CstParseResult.failure("'" + text + "'");
+                        }
+                        var startLoc = location();
+                        for (int i = 0; i < text.length(); i++) {
+                            char expected = text.charAt(i);
+                            char actual = peek(i);
+                            if (caseInsensitive) {
+                                if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
+                                    return CstParseResult.failure("'" + text + "'");
+                                }
+                            } else {
+                                if (expected != actual) {
+                                    return CstParseResult.failure("'" + text + "'");
+                                }
+                            }
+                        }
+                        for (int i = 0; i < text.length(); i++) {
+                            advance();
+                        }
+                        var span = SourceSpan.of(startLoc, location());
+                        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, List.of(), List.of());
+                        return CstParseResult.success(node, text, location());
+                    }
+
+                    private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {
+                        String longestMatch = null;
+                        int longestLen = 0;
+                        for (var word : words) {
+                            if (matchesWord(word, caseInsensitive) && word.length() > longestLen) {
+                                longestMatch = word;
+                                longestLen = word.length();
+                            }
+                        }
+                        if (longestMatch == null) {
+                            return CstParseResult.failure("dictionary word");
+                        }
+                        var startLoc = location();
+                        for (int i = 0; i < longestLen; i++) {
+                            advance();
+                        }
+                        var span = SourceSpan.of(startLoc, location());
+                        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, List.of(), List.of());
+                        return CstParseResult.success(node, longestMatch, location());
+                    }
+
+                """);
+        }
         sb.append(MATCHES_WORD_METHOD);
-        sb.append("""
 
-                private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
-                    if (isAtEnd()) {
-                        return CstParseResult.failure("character class");
-                    }
-                    var startLoc = location();
-                    char c = peek();
-                    boolean matches = matchesPattern(c, pattern, caseInsensitive);
-                    if (negated) matches = !matches;
-                    if (!matches) {
-                        return CstParseResult.failure("character class");
-                    }
-                    advance();
-                    var text = String.valueOf(c);
-                    var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());
-                    return CstParseResult.success(node, text, location());
-                }
+        // Generate matchCharClassCst and matchAnyCst with trackFailure for ADVANCED mode
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("""
 
-            """);
+                    private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
+                        if (isAtEnd()) {
+                            trackFailure("character class");
+                            return CstParseResult.failure("character class");
+                        }
+                        var startLoc = location();
+                        char c = peek();
+                        boolean matches = matchesPattern(c, pattern, caseInsensitive);
+                        if (negated) matches = !matches;
+                        if (!matches) {
+                            trackFailure("character class");
+                            return CstParseResult.failure("character class");
+                        }
+                        advance();
+                        var text = String.valueOf(c);
+                        var span = SourceSpan.of(startLoc, location());
+                        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());
+                        return CstParseResult.success(node, text, location());
+                    }
+
+                """);
+        } else {
+            sb.append("""
+
+                    private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
+                        if (isAtEnd()) {
+                            return CstParseResult.failure("character class");
+                        }
+                        var startLoc = location();
+                        char c = peek();
+                        boolean matches = matchesPattern(c, pattern, caseInsensitive);
+                        if (negated) matches = !matches;
+                        if (!matches) {
+                            return CstParseResult.failure("character class");
+                        }
+                        advance();
+                        var text = String.valueOf(c);
+                        var span = SourceSpan.of(startLoc, location());
+                        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());
+                        return CstParseResult.success(node, text, location());
+                    }
+
+                """);
+        }
         sb.append(MATCHES_PATTERN_METHOD);
-        sb.append("""
 
-                private CstParseResult matchAnyCst() {
-                    if (isAtEnd()) {
-                        return CstParseResult.failure("any character");
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("""
+
+                    private CstParseResult matchAnyCst() {
+                        if (isAtEnd()) {
+                            trackFailure("any character");
+                            return CstParseResult.failure("any character");
+                        }
+                        var startLoc = location();
+                        char c = advance();
+                        var text = String.valueOf(c);
+                        var span = SourceSpan.of(startLoc, location());
+                        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());
+                        return CstParseResult.success(node, text, location());
                     }
-                    var startLoc = location();
-                    char c = advance();
-                    var text = String.valueOf(c);
-                    var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());
-                    return CstParseResult.success(node, text, location());
-                }
 
-                // === CST Parse Result ===
+                    // === CST Parse Result ===
+                """);
+        } else {
+            sb.append("""
+
+                    private CstParseResult matchAnyCst() {
+                        if (isAtEnd()) {
+                            return CstParseResult.failure("any character");
+                        }
+                        var startLoc = location();
+                        char c = advance();
+                        var text = String.valueOf(c);
+                        var span = SourceSpan.of(startLoc, location());
+                        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());
+                        return CstParseResult.success(node, text, location());
+                    }
+
+                    // === CST Parse Result ===
+                """);
+        }
+
+        sb.append("""
 
                 private static final class CstParseResult {
                     final boolean success;

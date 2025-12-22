@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Cut now correctly affects only the containing Choice, not parent Choices
   - Enables proper backtracking at higher grammar levels after cut failure
 
+- **Error Position Tracking in Generated Parsers (ADVANCED mode)**
+  - Fixed `trackFailure()` not being called in generated match methods
+  - Error positions now correctly report the furthest position reached before failure
+  - Previously, `furthestFailure` was always null causing fallback to current position after backtracking
+
 ## [0.1.4] - 2025-12-21
 
 ### Added
