@@ -1039,7 +1039,7 @@ public final class PegEngine implements Parser {
                     return result;
                 }
             }
-            // CutFailure prevents trying other alternatives - return immediately
+            // CutFailure prevents trying other alternatives - propagate it up
             if (result instanceof ParseResult.CutFailure) {
                 return result;
             }
@@ -1082,6 +1082,10 @@ public final class PegEngine implements Parser {
                 result = parseExpressionWithMode(ctx, zom.expression(), ruleName, mode);
             }
 
+            // CutFailure must propagate - don't just break
+            if (result instanceof ParseResult.CutFailure) {
+                return result;
+            }
             if (result.isFailure()) {
                 ctx.restoreLocation(beforeLoc);
                 break;
@@ -1144,6 +1148,10 @@ public final class PegEngine implements Parser {
                 result = parseExpressionWithMode(ctx, oom.expression(), ruleName, mode);
             }
 
+            // CutFailure must propagate - don't just break
+            if (result instanceof ParseResult.CutFailure) {
+                return result;
+            }
             if (result.isFailure()) {
                 ctx.restoreLocation(beforeLoc);
                 break;
@@ -1175,6 +1183,11 @@ public final class PegEngine implements Parser {
         var result = parseExpressionWithMode(ctx, opt.expression(), ruleName, mode);
 
         if (result.isSuccess()) {
+            return result;
+        }
+
+        // CutFailure must propagate - don't treat as success
+        if (result instanceof ParseResult.CutFailure) {
             return result;
         }
 
@@ -1218,6 +1231,10 @@ public final class PegEngine implements Parser {
                 result = parseExpressionWithMode(ctx, rep.expression(), ruleName, mode);
             }
 
+            // CutFailure must propagate - don't just break
+            if (result instanceof ParseResult.CutFailure) {
+                return result;
+            }
             if (result.isFailure()) {
                 ctx.restoreLocation(beforeLoc);
                 break;

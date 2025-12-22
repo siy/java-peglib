@@ -22,7 +22,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.1.4</version>
+    <version>0.1.5</version>
 </dependency>
 ```
 
@@ -330,7 +330,7 @@ public sealed interface CstNode {
 
 ```bash
 mvn compile    # Compile
-mvn test       # Run tests (252 tests)
+mvn test       # Run tests (268 tests)
 mvn verify     # Full verification
 ```
 

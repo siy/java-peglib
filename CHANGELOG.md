@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2025-12-22
+
+### Fixed
+
+- **CutFailure Propagation Through Repetitions**
+  - Fixed CutFailure not propagating through repetitions (ZeroOrMore, OneOrMore, Optional, Repetition)
+  - Previously, repetitions would treat CutFailure as "end of repetition" and succeed with partial results
+  - Now CutFailure correctly propagates up, preventing silent backtracking after commit
+  - Fixes issue where parse errors were reported at wrong positions (e.g., start of class instead of actual error)
+
+- **CutFailure Propagation Through Choices**
+  - CutFailure now propagates through Choice rules instead of being converted to regular Failure
+  - Enables cuts in nested rules to affect parent rule behavior correctly
+
+- **Word Boundary Checks in Grammars with Cuts**
+  - Added word boundary checks (`![a-zA-Z0-9_$]`) before cuts in type declarations
+  - Prevents false commits when keyword is prefix of identifier (e.g., `record` in `recordResult`)
+
+- **Error Position Tracking in Generated Parsers (ADVANCED mode)**
+  - Fixed `trackFailure()` not being called in generated match methods
+  - Error positions now correctly report the furthest position reached before failure
+  - Previously, `furthestFailure` was always null causing fallback to current position after backtracking
+
 ## [0.1.4] - 2025-12-21
 
 ### Added
