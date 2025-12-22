@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Works in both runtime and generated parsers
   - Example: `Rule <- ('if' ^ Statement) / ('while' ^ Statement)`
 
+### Fixed
+
+- **Cut Operator Scope**
+  - Fixed CutFailure propagation beyond immediate Choice
+  - Cut now correctly affects only the containing Choice, not parent Choices
+  - Enables proper backtracking at higher grammar levels after cut failure
+
 ## [0.1.3] - 2025-12-21
 
 ### Fixed

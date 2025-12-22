@@ -1039,9 +1039,10 @@ public final class PegEngine implements Parser {
                     return result;
                 }
             }
-            // CutFailure prevents trying other alternatives - return immediately
-            if (result instanceof ParseResult.CutFailure) {
-                return result;
+            // CutFailure prevents trying other alternatives in THIS choice
+            // But we convert it to regular Failure for parent choices to allow backtracking at higher levels
+            if (result instanceof ParseResult.CutFailure cutFailure) {
+                return ParseResult.Failure.at(cutFailure.location(), cutFailure.expected());
             }
             lastFailure = result;
             ctx.restoreLocation(startLoc);

@@ -412,7 +412,8 @@ public final class ParserGenerator {
                     sb.append(pad).append("    values.addAll(choiceValues").append(id).append("_").append(i).append(");\n");
                     sb.append(pad).append("    ").append(resultVar).append(" = alt").append(id).append("_").append(i).append(";\n");
                     sb.append(pad).append("} else if (alt").append(id).append("_").append(i).append(".isCutFailure()) {\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = alt").append(id).append("_").append(i).append(";\n");
+                    // Convert CutFailure to regular failure for parent choices to allow backtracking at higher levels
+                    sb.append(pad).append("    ").append(resultVar).append(" = alt").append(id).append("_").append(i).append(".asRegularFailure();\n");
                     sb.append(pad).append("} else {\n");
                     sb.append(pad).append("    pos = ").append(choiceStart).append(";\n");
                     sb.append(pad).append("    line = ").append(choiceStart).append("Line;\n");
@@ -712,6 +713,10 @@ public final class ParserGenerator {
 
                     ParseResult asCutFailure() {
                         return cutFailed ? this : new ParseResult(false, null, expected, 0, 0, 0, true);
+                    }
+
+                    ParseResult asRegularFailure() {
+                        return cutFailed ? new ParseResult(false, null, expected, 0, 0, 0, false) : this;
                     }
                 }
             """);
@@ -1617,7 +1622,8 @@ public final class ParserGenerator {
                     sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
                     sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
                     sb.append(pad).append("} else if (").append(altVar).append(".isCutFailure()) {\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
+                    // Convert CutFailure to regular failure for parent choices to allow backtracking at higher levels
+                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(".asRegularFailure();\n");
                     sb.append(pad).append("} else {\n");
                     sb.append(pad).append("    restoreLocation(").append(choiceStart).append(");\n");
                     i++;
@@ -2019,6 +2025,10 @@ public final class ParserGenerator {
 
                     CstParseResult asCutFailure() {
                         return cutFailed ? this : new CstParseResult(false, null, null, expected, null, true);
+                    }
+
+                    CstParseResult asRegularFailure() {
+                        return cutFailed ? new CstParseResult(false, null, null, expected, null, false) : this;
                     }
                 }
             """);
