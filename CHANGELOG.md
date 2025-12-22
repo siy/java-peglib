@@ -9,10 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Cut Operator Scope**
-  - Fixed CutFailure propagation beyond immediate Choice
-  - Cut now correctly affects only the containing Choice, not parent Choices
-  - Enables proper backtracking at higher grammar levels after cut failure
+- **CutFailure Propagation Through Repetitions**
+  - Fixed CutFailure not propagating through repetitions (ZeroOrMore, OneOrMore, Optional, Repetition)
+  - Previously, repetitions would treat CutFailure as "end of repetition" and succeed with partial results
+  - Now CutFailure correctly propagates up, preventing silent backtracking after commit
+  - Fixes issue where parse errors were reported at wrong positions (e.g., start of class instead of actual error)
+
+- **CutFailure Propagation Through Choices**
+  - CutFailure now propagates through Choice rules instead of being converted to regular Failure
+  - Enables cuts in nested rules to affect parent rule behavior correctly
+
+- **Word Boundary Checks in Grammars with Cuts**
+  - Added word boundary checks (`![a-zA-Z0-9_$]`) before cuts in type declarations
+  - Prevents false commits when keyword is prefix of identifier (e.g., `record` in `recordResult`)
 
 - **Error Position Tracking in Generated Parsers (ADVANCED mode)**
   - Fixed `trackFailure()` not being called in generated match methods

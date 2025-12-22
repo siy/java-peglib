@@ -4,8 +4,6 @@ import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.PegParser;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -34,14 +32,15 @@ class CutOperatorRegressionTest {
 
         TypeDecl <- Annotation* Modifier* TypeKind
         TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
-        ClassDecl <- 'class' ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
-        InterfaceDecl <- 'interface' ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
-        AnnotationDecl <- '@' 'interface' ^ Identifier AnnotationBody
+        # Word boundary checks before cuts to prevent matching prefixes (e.g., 'record' in 'recordResult')
+        ClassDecl <- 'class' ![a-zA-Z0-9_$] ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
+        InterfaceDecl <- 'interface' ![a-zA-Z0-9_$] ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
+        AnnotationDecl <- '@' 'interface' ![a-zA-Z0-9_$] ^ Identifier AnnotationBody
         AnnotationBody <- '{' AnnotationMember* '}'
         AnnotationMember <- Annotation* Modifier* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
         AnnotationElemDecl <- Type Identifier '(' ')' ('default' AnnotationElem)? ';'
-        EnumDecl <- 'enum' ^ Identifier ImplementsClause? EnumBody
-        RecordDecl <- 'record' ^ Identifier TypeParams? '(' RecordComponents? ')' ImplementsClause? RecordBody
+        EnumDecl <- 'enum' ![a-zA-Z0-9_$] ^ Identifier ImplementsClause? EnumBody
+        RecordDecl <- 'record' ![a-zA-Z0-9_$] ^ Identifier TypeParams? '(' RecordComponents? ')' ImplementsClause? RecordBody
         ImplementsClause <- 'implements' ^ TypeList
         PermitsClause <- 'permits' ^ TypeList
         TypeList <- Type (',' Type)*
@@ -170,14 +169,8 @@ class CutOperatorRegressionTest {
 
     @Test
     void testTypeTokenFile() throws IOException {
-        var path = Path.of("../pragmatica-lite/core/src/main/java/org/pragmatica/lang/type/TypeToken.java");
-        if (!Files.exists(path)) {
-            System.out.println("Skipping test: TypeToken.java not found at " + path);
-            return;
-        }
-
+        var source = readResource("test-java-files/TypeToken.java");
         var parser = PegParser.fromGrammar(JAVA_GRAMMAR_WITH_CUTS).unwrap();
-        var source = Files.readString(path);
         var result = parser.parseCst(source);
 
         assertTrue(result.isSuccess(), () -> "Failed to parse TypeToken.java: " + result.fold(cause -> cause.message(), n -> "ok"));
@@ -189,28 +182,17 @@ class CutOperatorRegressionTest {
         // The cut operator fix doesn't affect this - the file parses correctly up to line 37 but fails
         // somewhere in the class body due to grammar coverage issues.
         // Skipping for now - the cut operator fix is verified by the other tests.
-        var path = Path.of("../pragmatica-lite/core/src/test/java/org/pragmatica/lang/PromiseTest.java");
-        if (!Files.exists(path)) {
-            System.out.println("Skipping test: PromiseTest.java not found at " + path);
-            return;
-        }
         // Disabled - see comment above
+        // var source = readResource("test-java-files/PromiseTest.java");
         // var parser = PegParser.fromGrammar(JAVA_GRAMMAR_WITH_CUTS).unwrap();
-        // var source = Files.readString(path);
         // var result = parser.parseCst(source);
         // assertTrue(result.isSuccess(), () -> "Failed to parse PromiseTest.java: " + result.fold(cause -> cause.message(), n -> "ok"));
     }
 
     @Test
     void testOptionMetricsFile() throws IOException {
-        var path = Path.of("../pragmatica-lite/integrations/metrics/micrometer/src/main/java/org/pragmatica/metrics/OptionMetrics.java");
-        if (!Files.exists(path)) {
-            System.out.println("Skipping test: OptionMetrics.java not found at " + path);
-            return;
-        }
-
+        var source = readResource("test-java-files/OptionMetrics.java");
         var parser = PegParser.fromGrammar(JAVA_GRAMMAR_WITH_CUTS).unwrap();
-        var source = Files.readString(path);
         var result = parser.parseCst(source);
 
         assertTrue(result.isSuccess(), () -> "Failed to parse OptionMetrics.java: " + result.fold(cause -> cause.message(), n -> "ok"));
@@ -218,14 +200,8 @@ class CutOperatorRegressionTest {
 
     @Test
     void testResultMetricsFile() throws IOException {
-        var path = Path.of("../pragmatica-lite/integrations/metrics/micrometer/src/main/java/org/pragmatica/metrics/ResultMetrics.java");
-        if (!Files.exists(path)) {
-            System.out.println("Skipping test: ResultMetrics.java not found at " + path);
-            return;
-        }
-
+        var source = readResource("test-java-files/ResultMetrics.java");
         var parser = PegParser.fromGrammar(JAVA_GRAMMAR_WITH_CUTS).unwrap();
-        var source = Files.readString(path);
         var result = parser.parseCst(source);
 
         assertTrue(result.isSuccess(), () -> "Failed to parse ResultMetrics.java: " + result.fold(cause -> cause.message(), n -> "ok"));
@@ -440,14 +416,9 @@ class CutOperatorRegressionTest {
 
     @Test
     void testExactPromiseTestFirst37Lines() throws IOException {
-        // Read the exact first 37 lines from the actual file
-        var path = Path.of("../pragmatica-lite/core/src/test/java/org/pragmatica/lang/PromiseTest.java");
-        if (!Files.exists(path)) {
-            System.out.println("Skipping: file not found");
-            return;
-        }
-
-        var lines = Files.readAllLines(path);
+        // Read the exact first 37 lines from the resource file
+        var source = readResource("test-java-files/PromiseTest.java");
+        var lines = source.lines().toList();
         // Get first 37 lines and add closing brace to make it valid
         var first37 = String.join("\n", lines.subList(0, 37)) + "\n}";
 
@@ -504,5 +475,14 @@ class CutOperatorRegressionTest {
 
         var result = parser.parseCst(source);
         assertTrue(result.isSuccess(), () -> "Failed to parse PromiseTest structure: " + result.fold(cause -> cause.message(), n -> "ok"));
+    }
+
+    private String readResource(String resourcePath) throws IOException {
+        try (var is = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
+            if (is == null) {
+                throw new IOException("Resource not found: " + resourcePath);
+            }
+            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
     }
 }
