@@ -181,4 +181,47 @@ class GrammarParserTest {
 
         assertTrue(result.isFailure());
     }
+
+    @Test
+    void validate_undefinedReference_returnsFailure() {
+        var result = GrammarParser.parse("Start <- 'a' UndefinedRule 'b'");
+
+        assertTrue(result.isSuccess());
+        var grammar = result.unwrap();
+
+        var validation = grammar.validate();
+        assertTrue(validation.isFailure());
+        var message = validation.fold(cause -> cause.message(), g -> "");
+        assertTrue(message.contains("Undefined rule reference: 'UndefinedRule'"), message);
+    }
+
+    @Test
+    void validate_validGrammar_succeeds() {
+        var result = GrammarParser.parse("""
+            Start <- 'a' Middle 'b'
+            Middle <- [0-9]+
+            """);
+
+        assertTrue(result.isSuccess());
+        var grammar = result.unwrap();
+
+        var validation = grammar.validate();
+        assertTrue(validation.isSuccess());
+    }
+
+    @Test
+    void validate_nestedUndefinedReference_returnsFailure() {
+        var result = GrammarParser.parse("""
+            Start <- (Foo / Bar)*
+            Foo <- 'foo'
+            """);
+
+        assertTrue(result.isSuccess());
+        var grammar = result.unwrap();
+
+        var validation = grammar.validate();
+        assertTrue(validation.isFailure());
+        var message = validation.fold(cause -> cause.message(), g -> "");
+        assertTrue(message.contains("Undefined rule reference: 'Bar'"), message);
+    }
 }

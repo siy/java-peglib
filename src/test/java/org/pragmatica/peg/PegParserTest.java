@@ -267,7 +267,7 @@ class PegParserTest {
     @Test
     void builder_allowsConfiguration() {
         var result = PegParser.builder("Root <- 'test'")
-            .withPackrat(true)
+            .packrat(true)
             .build();
 
         assertTrue(result.isSuccess());

@@ -32,7 +32,7 @@ Peglib supports three recovery strategies:
 
 ```java
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.NONE)
+    .recovery(RecoveryStrategy.NONE)
     .build()
     .unwrap();
 ```
@@ -45,7 +45,7 @@ var parser = PegParser.builder(grammar)
 
 ```java
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.BASIC)
+    .recovery(RecoveryStrategy.BASIC)
     .build()
     .unwrap();
 ```
@@ -58,7 +58,7 @@ var parser = PegParser.builder(grammar)
 
 ```java
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .recovery(RecoveryStrategy.ADVANCED)
     .build()
     .unwrap();
 ```
@@ -74,7 +74,7 @@ var parser = PegParser.builder(grammar)
 
 ```java
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .recovery(RecoveryStrategy.ADVANCED)
     .build()
     .unwrap();
 
@@ -406,13 +406,13 @@ List<QuickFix> suggestFixes(Diagnostic d) {
 
 ```java
 // For validation (fast fail)
-.withErrorRecovery(RecoveryStrategy.NONE)
+.recovery(RecoveryStrategy.NONE)
 
 // For CLI tools (single error)
-.withErrorRecovery(RecoveryStrategy.BASIC)
+.recovery(RecoveryStrategy.BASIC)
 
 // For IDEs/editors (all errors)
-.withErrorRecovery(RecoveryStrategy.ADVANCED)
+.recovery(RecoveryStrategy.ADVANCED)
 ```
 
 ### 2. Provide Helpful Messages
@@ -483,7 +483,7 @@ var grammar = """
     """;
 
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .recovery(RecoveryStrategy.ADVANCED)
     .build()
     .unwrap();
 
@@ -525,7 +525,7 @@ var grammar = """
     """;
 
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .recovery(RecoveryStrategy.ADVANCED)
     .build()
     .unwrap();
 
@@ -553,7 +553,7 @@ var grammar = """
     """;
 
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .recovery(RecoveryStrategy.ADVANCED)
     .build()
     .unwrap();
 

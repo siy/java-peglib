@@ -22,7 +22,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.1.5</version>
+    <version>0.1.6</version>
 </dependency>
 ```
 
@@ -128,9 +128,6 @@ $name       # Back-reference to captured 'name'
 ```peg
 # Auto-skip whitespace between tokens
 %whitespace <- [ \t\r\n]*
-
-# Word boundary detection
-%word <- [a-zA-Z]+
 ```
 
 ### Inline Actions
@@ -163,9 +160,9 @@ Note: `$1`, `$2`, etc. use 1-based indexing (like regex groups), while `sv.get()
 
 ```java
 var parser = PegParser.builder(grammar)
-    .withPackrat(true)                           // Enable memoization (default: true)
-    .withTrivia(true)                            // Collect whitespace/comments (default: true)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED) // Error recovery mode
+    .packrat(true)                           // Enable memoization (default: true)
+    .trivia(true)                            // Collect whitespace/comments (default: true)
+    .recovery(RecoveryStrategy.ADVANCED)     // Error recovery mode
     .build()
     .unwrap();
 ```
@@ -176,7 +173,7 @@ Peglib provides advanced error recovery with Rust-style diagnostic messages:
 
 ```java
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .recovery(RecoveryStrategy.ADVANCED)
     .build()
     .unwrap();
 
@@ -330,7 +327,7 @@ public sealed interface CstNode {
 
 ```bash
 mvn compile    # Compile
-mvn test       # Run tests (268 tests)
+mvn test       # Run tests (271 tests)
 mvn verify     # Full verification
 ```
 

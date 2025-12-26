@@ -131,17 +131,17 @@ public final class PegParser {
             this.grammarText = grammarText;
         }
 
-        public Builder withPackrat(boolean enabled) {
+        public Builder packrat(boolean enabled) {
             this.packratEnabled = enabled;
             return this;
         }
 
-        public Builder withErrorRecovery(RecoveryStrategy strategy) {
+        public Builder recovery(RecoveryStrategy strategy) {
             this.recoveryStrategy = strategy;
             return this;
         }
 
-        public Builder withTrivia(boolean capture) {
+        public Builder trivia(boolean capture) {
             this.captureTrivia = capture;
             return this;
         }

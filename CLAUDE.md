@@ -18,7 +18,7 @@ Java implementation of PEG (Parsing Expression Grammar) parser inspired by [cpp-
 | Tree output | Both CST and AST | CST for formatting/linting, AST for compilers |
 | Whitespace/comments | Grouped as Trivia nodes | Convenient for tooling |
 | Error recovery | Configurable (basic/advanced) | Flexibility for different use cases |
-| Runtime dependency | `pragmatica-lite:core` 0.8.4 | Result/Option/Promise types |
+| Runtime dependency | `pragmatica-lite:core` 0.9.0 | Result/Option/Promise types |
 
 ## Compilation Modes
 
@@ -118,7 +118,6 @@ $name       # Back-reference
 
 # Directives
 %whitespace <- [ \t\r\n]*    # Auto-skip whitespace
-%word       <- [a-zA-Z]+     # Word boundary detection
 
 # Inline actions (Java)
 Number <- < [0-9]+ > { return sv.toInt(); }
@@ -129,7 +128,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 
 ### Completed
 - [x] Project scaffolded with `jbct init`
-- [x] pom.xml updated for Java 25, pragmatica-lite 0.8.4
+- [x] pom.xml updated for Java 25, pragmatica-lite 0.9.0
 - [x] Core types implemented
 - [x] Grammar parser (bootstrap) implemented
 - [x] Parsing engine with packrat memoization
@@ -139,7 +138,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
 - [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
-- [x] 268 passing tests
+- [x] 271 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -172,8 +171,8 @@ Result<Object> result = calculator.parse("3 + 5");  // Returns 8
 
 // Configuration
 var parser = PegParser.builder(grammar)
-    .withPackrat(true)
-    .withTrivia(true)
+    .packrat(true)
+    .trivia(true)
     .build()
     .unwrap();
 
@@ -248,7 +247,7 @@ Advanced error recovery with Rust-style diagnostic messages.
 ### API Usage
 ```java
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .recovery(RecoveryStrategy.ADVANCED)
     .build()
     .unwrap();
 
@@ -280,13 +279,14 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (268 tests)
+## Test Coverage (271 tests)
 
-### Grammar Parser Tests (14 tests)
+### Grammar Parser Tests (17 tests)
 - Simple rules, actions, sequences, choices
 - Lookahead predicates, repetition operators
 - Token boundaries, whitespace directive
 - Case-insensitive matching, named captures
+- Grammar validation (undefined rule references)
 
 ### Parsing Engine Tests (29 tests)
 - Literals, character classes, negated classes

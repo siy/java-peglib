@@ -193,13 +193,22 @@ public final class ParserGenerator {
                 private int column;
                 private Map<Long, ParseResult> cache;
                 private Map<String, String> captures;
+                private boolean packratEnabled = true;
+
+                /**
+                 * Enable or disable packrat memoization.
+                 * Disabling may reduce memory usage for large inputs.
+                 */
+                public void setPackratEnabled(boolean enabled) {
+                    this.packratEnabled = enabled;
+                }
 
                 private void init(String input) {
                     this.input = input;
                     this.pos = 0;
                     this.line = 1;
                     this.column = 1;
-                    this.cache = new HashMap<>();
+                    this.cache = packratEnabled ? new HashMap<>() : null;
                     this.captures = new HashMap<>();
                 }
 
@@ -282,12 +291,14 @@ public final class ParserGenerator {
         sb.append("        \n");
         sb.append("        // Check cache\n");
         sb.append("        long key = cacheKey(").append(ruleId).append(", startPos);\n");
-        sb.append("        var cached = cache.get(key);\n");
-        sb.append("        if (cached != null) {\n");
-        sb.append("            pos = cached.endPos;\n");
-        sb.append("            line = cached.endLine;\n");
-        sb.append("            column = cached.endColumn;\n");
-        sb.append("            return cached;\n");
+        sb.append("        if (cache != null) {\n");
+        sb.append("            var cached = cache.get(key);\n");
+        sb.append("            if (cached != null) {\n");
+        sb.append("                pos = cached.endPos;\n");
+        sb.append("                line = cached.endLine;\n");
+        sb.append("                column = cached.endColumn;\n");
+        sb.append("                return cached;\n");
+        sb.append("            }\n");
         sb.append("        }\n");
         sb.append("        \n");
         sb.append("        skipWhitespace();\n");
@@ -323,7 +334,7 @@ public final class ParserGenerator {
         }
         sb.append("        }\n");
         sb.append("        \n");
-        sb.append("        cache.put(key, result);\n");
+        sb.append("        if (cache != null) cache.put(key, result);\n");
         sb.append("        return result;\n");
         sb.append("    }\n\n");
     }
@@ -738,12 +749,15 @@ public final class ParserGenerator {
                 .replace("\t", "\\t");
     }
 
+    private static final java.util.regex.Pattern POSITIONAL_VAR = java.util.regex.Pattern.compile("\\$(\\d+)");
+
     private String transformActionCode(String code) {
-        var result = code.replace("$0", "$0");
-        for (int i = 1; i <= 20; i++) {
-            result = result.replace("$" + i, "values.get(" + (i - 1) + ")");
-        }
-        return result;
+        // $0 stays as $0 (it's the matched text, handled separately)
+        // Replace $N (N > 0) with values.get(N-1) using regex for unlimited support
+        return POSITIONAL_VAR.matcher(code).replaceAll(match -> {
+            int n = Integer.parseInt(match.group(1));
+            return n == 0 ? "\\$0" : "values.get(" + (n - 1) + ")";
+        });
     }
 
     private String wrapActionCode(String code) {
@@ -932,6 +946,14 @@ public final class ParserGenerator {
         }
 
         sb.append("""
+                }
+
+                public sealed interface AstNode {
+                    SourceSpan span();
+                    String rule();
+
+                    record Terminal(SourceSpan span, String rule, String text) implements AstNode {}
+                    record NonTerminal(SourceSpan span, String rule, List<AstNode> children) implements AstNode {}
                 }
 
                 public record ParseError(SourceLocation location, String reason) implements Cause {
@@ -1205,6 +1227,15 @@ public final class ParserGenerator {
                 private Map<Long, CstParseResult> cache;
                 private Map<String, String> captures;
                 private boolean inTokenBoundary;
+                private boolean packratEnabled = true;
+
+                /**
+                 * Enable or disable packrat memoization.
+                 * Disabling may reduce memory usage for large inputs.
+                 */
+                public void setPackratEnabled(boolean enabled) {
+                    this.packratEnabled = enabled;
+                }
             """);
 
         if (errorReporting == ErrorReporting.ADVANCED) {
@@ -1222,7 +1253,7 @@ public final class ParserGenerator {
                     this.pos = 0;
                     this.line = 1;
                     this.column = 1;
-                    this.cache = new HashMap<>();
+                    this.cache = packratEnabled ? new HashMap<>() : null;
                     this.captures = new HashMap<>();
                     this.inTokenBoundary = false;
             """);
@@ -1343,6 +1374,26 @@ public final class ParserGenerator {
                     return Result.success(rootNode);
                 }
 
+                /**
+                 * Parse input and return AST (Abstract Syntax Tree).
+                 * The AST is a simplified tree without trivia (whitespace/comments).
+                 */
+                public Result<AstNode> parseAst(String input) {
+                    return parse(input).map(this::toAst);
+                }
+
+                private AstNode toAst(CstNode cst) {
+                    return switch (cst) {
+                        case CstNode.Terminal t -> new AstNode.Terminal(t.span(), t.rule().name(), t.text());
+                        case CstNode.Token tok -> new AstNode.Terminal(tok.span(), tok.rule().name(), tok.text());
+                        case CstNode.NonTerminal nt -> new AstNode.NonTerminal(
+                            nt.span(), nt.rule().name(),
+                            nt.children().stream().map(this::toAst).toList()
+                        );
+                        default -> new AstNode.Terminal(cst.span(), "error", "");
+                    };
+                }
+
             """.formatted(sanitizedName));
 
         if (errorReporting == ErrorReporting.ADVANCED) {
@@ -1416,10 +1467,12 @@ public final class ParserGenerator {
         sb.append("        \n");
         sb.append("        // Check cache\n");
         sb.append("        long key = cacheKey(").append(ruleId).append(", startLoc.offset());\n");
-        sb.append("        var cached = cache.get(key);\n");
-        sb.append("        if (cached != null) {\n");
-        sb.append("            if (cached.isSuccess()) restoreLocation(cached.endLocation);\n");
-        sb.append("            return cached;\n");
+        sb.append("        if (cache != null) {\n");
+        sb.append("            var cached = cache.get(key);\n");
+        sb.append("            if (cached != null) {\n");
+        sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation);\n");
+        sb.append("                return cached;\n");
+        sb.append("            }\n");
         sb.append("        }\n");
         sb.append("        \n");
         sb.append("        var children = new ArrayList<CstNode>();\n");
@@ -1454,7 +1507,7 @@ public final class ParserGenerator {
         }
         sb.append("        }\n");
         sb.append("        \n");
-        sb.append("        cache.put(key, finalResult);\n");
+        sb.append("        if (cache != null) cache.put(key, finalResult);\n");
         sb.append("        return finalResult;\n");
         sb.append("    }\n\n");
     }

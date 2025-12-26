@@ -43,7 +43,7 @@ class ErrorRecoveryExample {
     @Test
     void noneStrategy_failsImmediately() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.NONE)
+            .recovery(RecoveryStrategy.NONE)
             .build()
             .unwrap();
 
@@ -60,7 +60,7 @@ class ErrorRecoveryExample {
     @Test
     void basicStrategy_reportsErrorAndStops() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.BASIC)
+            .recovery(RecoveryStrategy.BASIC)
             .build()
             .unwrap();
 
@@ -74,7 +74,7 @@ class ErrorRecoveryExample {
     @Test
     void advancedStrategy_collectsAllErrors() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -135,7 +135,7 @@ class ErrorRecoveryExample {
     @Test
     void multipleDiagnostics_formatTogether() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -205,7 +205,7 @@ class ErrorRecoveryExample {
     @Test
     void errorNodes_containSkippedText() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -230,7 +230,7 @@ class ErrorRecoveryExample {
     @Test
     void errorStatistics() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -247,7 +247,7 @@ class ErrorRecoveryExample {
     @Test
     void iterateDiagnostics() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -274,7 +274,7 @@ class ErrorRecoveryExample {
     @Test
     void convertToLspFormat() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -301,7 +301,7 @@ class ErrorRecoveryExample {
     @Test
     void extractErrorRanges() {
         var parser = PegParser.builder(LIST_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 

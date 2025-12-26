@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2025-12-26
+
+### Added
+
+- **AST Support in Generated Parsers**
+  - Generated CST parsers now include `AstNode` type and `parseAst()` method
+  - Allows parsing directly to AST (without trivia) from generated parsers
+
+- **Packrat Toggle in Generated Parsers**
+  - Added `setPackratEnabled(boolean)` method to generated parsers
+  - Allows disabling memoization at runtime to reduce memory usage for large inputs
+
+- **Unlimited Action Variable Support**
+  - Action code now supports unlimited `$N` positional variables (previously limited to `$1-$20`)
+  - Uses regex-based substitution for flexibility
+
+### Fixed
+
+- **Grammar Validation**
+  - Implemented `Grammar.validate()` to detect undefined rule references
+  - Recursively walks all expressions and reports first undefined reference with location
+  - Previously, grammars with typos in rule names would fail at parse time with cryptic errors
+
+- **Thread Safety in Whitespace Skipping**
+  - Moved `skippingWhitespace` flag from `PegEngine` (per-instance) to `ParsingContext` (per-parse)
+  - Fixes potential race conditions when reusing parser instances across threads
+
+- **Packrat Cache Key Collision Risk**
+  - Changed cache key from `hashCode()` to unique sequential IDs
+  - Eliminates theoretical collision bugs with different rule names having same hash
+
+### Changed
+
+- **Builder API Naming Standardized**
+  - `PegParser.Builder` methods renamed for consistency: `withPackrat()` → `packrat()`, `withTrivia()` → `trivia()`, `withErrorRecovery()` → `recovery()`
+  - Matches `ParserConfig.Builder` naming convention
+
+- **Documentation Cleanup**
+  - Removed undocumented `%word` directive from documentation (feature not implemented)
+  - Removed unused placeholder `skipWhitespace()` method from `ParsingContext`
+
+- Test count: 268 → 271
+- Updated pragmatica-lite dependency: 0.8.4 → 0.9.0
+
 ## [0.1.5] - 2025-12-22
 
 ### Fixed

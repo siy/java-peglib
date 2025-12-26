@@ -875,17 +875,14 @@ public final class PegEngine implements Parser {
 
     // === Helpers ===
 
-    // Flag to prevent recursive whitespace skipping
-    private boolean skippingWhitespace = false;
-
     private List<Trivia> skipWhitespace(ParsingContext ctx) {
         var trivia = new ArrayList<Trivia>();
         // Don't skip whitespace inside token boundaries or during whitespace parsing
-        if (grammar.whitespace().isEmpty() || skippingWhitespace || ctx.inTokenBoundary()) {
+        if (grammar.whitespace().isEmpty() || ctx.isSkippingWhitespace() || ctx.inTokenBoundary()) {
             return trivia;
         }
 
-        skippingWhitespace = true;
+        ctx.enterWhitespaceSkip();
         try {
             var wsExpr = grammar.whitespace().unwrap();
             // Extract inner expression from ZeroOrMore/OneOrMore to match one element at a time
@@ -906,7 +903,7 @@ public final class PegEngine implements Parser {
                 }
             }
         } finally {
-            skippingWhitespace = false;
+            ctx.exitWhitespaceSkip();
         }
         return trivia;
     }
