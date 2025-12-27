@@ -7,28 +7,22 @@ import java.util.List;
 
 /**
  * Semantic values passed to actions during parsing.
- * Provides access to matched text, child values, and choice information.
+ * Provides access to matched text and child values.
  */
 public final class SemanticValues {
 
     private final String matchedText;
     private final SourceSpan span;
     private final List<Object> values;
-    private final int choice;
 
-    private SemanticValues(String matchedText, SourceSpan span, List<Object> values, int choice) {
+    private SemanticValues(String matchedText, SourceSpan span, List<Object> values) {
         this.matchedText = matchedText;
         this.span = span;
         this.values = values;
-        this.choice = choice;
     }
 
     public static SemanticValues of(String matchedText, SourceSpan span, List<Object> values) {
-        return new SemanticValues(matchedText, span, values, 0);
-    }
-
-    public static SemanticValues of(String matchedText, SourceSpan span, List<Object> values, int choice) {
-        return new SemanticValues(matchedText, span, values, choice);
+        return new SemanticValues(matchedText, span, values);
     }
 
     /**
@@ -128,14 +122,6 @@ public final class SemanticValues {
     }
 
     /**
-     * Get which alternative matched (for choice expressions).
-     * 0-indexed.
-     */
-    public int choice() {
-        return choice;
-    }
-
-    /**
      * Transform all child values to a specific type.
      */
     @SuppressWarnings("unchecked")
@@ -147,6 +133,6 @@ public final class SemanticValues {
 
     @Override
     public String toString() {
-        return "SemanticValues{token='" + matchedText + "', values=" + values + ", choice=" + choice + "}";
+        return "SemanticValues{token='" + matchedText + "', values=" + values + "}";
     }
 }

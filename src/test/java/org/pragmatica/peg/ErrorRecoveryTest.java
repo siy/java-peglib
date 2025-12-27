@@ -44,7 +44,7 @@ class ErrorRecoveryTest {
     @Test
     void collectsMultipleErrors() {
         var parser = PegParser.builder(SIMPLE_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -65,7 +65,7 @@ class ErrorRecoveryTest {
     @Test
     void fragmentRecoveryParsesValidParts() {
         var parser = PegParser.builder(SIMPLE_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -86,7 +86,7 @@ class ErrorRecoveryTest {
     @Test
     void errorNodeContainsSkippedText() {
         var parser = PegParser.builder(SIMPLE_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -106,7 +106,7 @@ class ErrorRecoveryTest {
     @Test
     void basicStrategyStopsOnFirstError() {
         var parser = PegParser.builder(SIMPLE_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.BASIC)
+            .recovery(RecoveryStrategy.BASIC)
             .build()
             .unwrap();
 
@@ -120,7 +120,7 @@ class ErrorRecoveryTest {
     @Test
     void noneStrategyFailsImmediately() {
         var parser = PegParser.builder(SIMPLE_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.NONE)
+            .recovery(RecoveryStrategy.NONE)
             .build()
             .unwrap();
 
@@ -133,7 +133,7 @@ class ErrorRecoveryTest {
     @Test
     void diagnosticShowsExpectedTokens() {
         var parser = PegParser.builder(SIMPLE_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 
@@ -154,7 +154,7 @@ class ErrorRecoveryTest {
     @Test
     void formattedDiagnosticsAreRustStyleWithSourceContext() {
         var parser = PegParser.builder(SIMPLE_GRAMMAR)
-            .withErrorRecovery(RecoveryStrategy.ADVANCED)
+            .recovery(RecoveryStrategy.ADVANCED)
             .build()
             .unwrap();
 

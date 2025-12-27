@@ -22,6 +22,7 @@ public final class ParsingContext {
     private final Grammar grammar;
     private final ParserConfig config;
     private final Map<Long, ParseResult> packratCache;
+    private final Map<String, Integer> ruleIds;
     private final Map<String, String> captures;
 
     private int pos;
@@ -38,11 +39,15 @@ public final class ParsingContext {
     private boolean inRecovery;
     private int recoveryStartPos;
 
+    // Whitespace skipping guard (prevents recursive whitespace parsing)
+    private boolean skippingWhitespace;
+
     private ParsingContext(String input, Grammar grammar, ParserConfig config) {
         this.input = input;
         this.grammar = grammar;
         this.config = config;
         this.packratCache = config.packratEnabled() ? new HashMap<>() : null;
+        this.ruleIds = config.packratEnabled() ? new HashMap<>() : null;
         this.captures = new HashMap<>();
         this.diagnostics = new ArrayList<>();
         this.pos = 0;
@@ -271,16 +276,18 @@ public final class ParsingContext {
         return tokenBoundaryDepth > 0;
     }
 
-    // === Whitespace Handling ===
+    // === Whitespace Skipping Guard ===
 
-    public List<Trivia> skipWhitespace() {
-        var trivia = new ArrayList<Trivia>();
-        if (grammar.whitespace().isEmpty()) {
-            return trivia;
-        }
-        // Whitespace skipping is handled by the engine using the %whitespace rule
-        // This is a placeholder - actual implementation in PegEngine
-        return trivia;
+    public boolean isSkippingWhitespace() {
+        return skippingWhitespace;
+    }
+
+    public void enterWhitespaceSkip() {
+        skippingWhitespace = true;
+    }
+
+    public void exitWhitespaceSkip() {
+        skippingWhitespace = false;
     }
 
     // === Captures (for back-references) ===
@@ -338,7 +345,8 @@ public final class ParsingContext {
     }
 
     private long packratKey(String ruleName, int position) {
-        return ((long) ruleName.hashCode() << 32) | position;
+        int ruleId = ruleIds.computeIfAbsent(ruleName, k -> ruleIds.size());
+        return ((long) ruleId << 32) | (position & 0xFFFFFFFFL);
     }
 
     // === Accessors ===

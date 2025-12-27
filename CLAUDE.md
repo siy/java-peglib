@@ -18,7 +18,7 @@ Java implementation of PEG (Parsing Expression Grammar) parser inspired by [cpp-
 | Tree output | Both CST and AST | CST for formatting/linting, AST for compilers |
 | Whitespace/comments | Grouped as Trivia nodes | Convenient for tooling |
 | Error recovery | Configurable (basic/advanced) | Flexibility for different use cases |
-| Runtime dependency | `pragmatica-lite:core` 0.8.4 | Result/Option/Promise types |
+| Runtime dependency | `pragmatica-lite:core` 0.9.0 | Result/Option/Promise types |
 
 ## Compilation Modes
 
@@ -39,10 +39,11 @@ src/main/java/org/pragmatica/peg/
 │   └── GrammarParser.java      # Recursive descent parser
 ├── parser/
 │   ├── Parser.java             # Parser interface
-│   ├── ParserConfig.java       # Configuration record + builder
+│   ├── ParserConfig.java       # Configuration record
 │   ├── ParsingContext.java     # Mutable parsing state with packrat cache
 │   ├── ParseResult.java        # Parse result types (sealed)
 │   ├── ParseResultWithDiagnostics.java # Result with error recovery diagnostics
+│   ├── ParseMode.java          # Parsing mode (standard, withActions, noWhitespace)
 │   └── PegEngine.java          # PEG parsing engine with action execution
 ├── tree/
 │   ├── SourceLocation.java     # Position in source (line, column, offset)
@@ -69,17 +70,18 @@ src/test/java/org/pragmatica/peg/
 ├── GeneratedParserTriviaTest.java # 6 tests (generated parser trivia)
 ├── ErrorRecoveryTest.java      # 8 tests (error recovery + diagnostics)
 ├── grammar/
-│   └── GrammarParserTest.java  # 14 tests for grammar parser
+│   └── GrammarParserTest.java  # 17 tests for grammar parser
 ├── generator/
-│   └── ParserGeneratorTest.java # 16 tests for source generation (8 basic + 8 ErrorReporting)
+│   └── ParserGeneratorTest.java # 18 tests for source generation
 └── examples/
     ├── ErrorRecoveryExample.java # 12 tests - error recovery patterns
     ├── CalculatorExample.java   # 6 tests - arithmetic with actions
     ├── JsonParserExample.java   # 11 tests - JSON CST parsing
     ├── SExpressionExample.java  # 11 tests - Lisp-like syntax
     ├── CsvParserExample.java    # 8 tests - CSV data format
-    ├── SourceGenerationExample.java # 9 tests - standalone parser
-    └── Java25GrammarExample.java # 59 tests - Java 25 syntax
+    ├── SourceGenerationExample.java # 11 tests - standalone parser
+    ├── CutOperatorRegressionTest.java # 16 tests - cut operator regression tests
+    └── Java25GrammarExample.java # 60 tests - Java 25 syntax
 ```
 
 ## Grammar Syntax (cpp-peglib compatible)
@@ -118,7 +120,6 @@ $name       # Back-reference
 
 # Directives
 %whitespace <- [ \t\r\n]*    # Auto-skip whitespace
-%word       <- [a-zA-Z]+     # Word boundary detection
 
 # Inline actions (Java)
 Number <- < [0-9]+ > { return sv.toInt(); }
@@ -129,7 +130,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 
 ### Completed
 - [x] Project scaffolded with `jbct init`
-- [x] pom.xml updated for Java 25, pragmatica-lite 0.8.4
+- [x] pom.xml updated for Java 25, pragmatica-lite 0.9.0
 - [x] Core types implemented
 - [x] Grammar parser (bootstrap) implemented
 - [x] Parsing engine with packrat memoization
@@ -139,7 +140,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
 - [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
-- [x] 268 passing tests
+- [x] 271 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -172,8 +173,8 @@ Result<Object> result = calculator.parse("3 + 5");  // Returns 8
 
 // Configuration
 var parser = PegParser.builder(grammar)
-    .withPackrat(true)
-    .withTrivia(true)
+    .packrat(true)
+    .trivia(true)
     .build()
     .unwrap();
 
@@ -248,7 +249,7 @@ Advanced error recovery with Rust-style diagnostic messages.
 ### API Usage
 ```java
 var parser = PegParser.builder(grammar)
-    .withErrorRecovery(RecoveryStrategy.ADVANCED)
+    .recovery(RecoveryStrategy.ADVANCED)
     .build()
     .unwrap();
 
@@ -280,13 +281,14 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (268 tests)
+## Test Coverage (271 tests)
 
-### Grammar Parser Tests (14 tests)
+### Grammar Parser Tests (17 tests)
 - Simple rules, actions, sequences, choices
 - Lookahead predicates, repetition operators
 - Token boundaries, whitespace directive
 - Case-insensitive matching, named captures
+- Grammar validation (undefined rule references)
 
 ### Parsing Engine Tests (29 tests)
 - Literals, character classes, negated classes
@@ -304,7 +306,7 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - List building
 - No action returns CST node
 
-### Generator Tests (16 tests)
+### Generator Tests (18 tests)
 - Simple literal generates valid Java
 - Whitespace handling
 - Action code inclusion
@@ -314,14 +316,15 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - ErrorReporting.ADVANCED mode (Rust-style diagnostics)
 - parseWithDiagnostics() method generation
 
-### Example Tests (116 tests)
+### Example Tests (135 tests)
 - **ErrorRecovery** (12 tests): Recovery strategies, diagnostic formatting, CST error nodes
 - **Calculator** (6 tests): Number parsing, addition, multiplication, boolean/double types
 - **JSON** (11 tests): CST parsing of JSON values, objects, arrays, nested structures
 - **S-Expression** (11 tests): Lisp-like syntax, nested lists, atoms, symbols
 - **CSV** (8 tests): Field parsing, empty fields, spaces preserved
-- **Source Generation** (9 tests): Standalone parser generation, all operators
-- **Java25Grammar** (59 tests): Full Java 25 syntax including modules, var, patterns, text blocks
+- **Source Generation** (11 tests): Standalone parser generation, all operators
+- **CutOperatorRegression** (16 tests): Cut operator regression tests
+- **Java25Grammar** (60 tests): Full Java 25 syntax including modules, var, patterns, text blocks
 
 ### Trivia Tests (19 tests)
 - **TriviaTest** (13 tests): Runtime trivia - leading, trailing, mixed, comments

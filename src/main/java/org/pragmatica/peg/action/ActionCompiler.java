@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 /**
  * Compiles inline Java actions from grammar rules.
@@ -91,14 +92,17 @@ public final class ActionCompiler {
         return compileAndLoad(fullClassName, sourceCode, location);
     }
 
+    private static final Pattern POSITIONAL_VAR = Pattern.compile("\\$(\\d+)");
+
     private String transformActionCode(String code) {
         // Replace $0 with sv.token()
         var result = code.replace("$0", "sv.token()");
 
-        // Replace $1, $2, ... with sv.get(0), sv.get(1), ...
-        for (int i = 1; i <= 20; i++) {
-            result = result.replace("$" + i, "sv.get(" + (i - 1) + ")");
-        }
+        // Replace $N (N > 0) with sv.get(N-1) using regex for unlimited support
+        result = POSITIONAL_VAR.matcher(result).replaceAll(match -> {
+            int n = Integer.parseInt(match.group(1));
+            return n == 0 ? "sv.token()" : "sv.get(" + (n - 1) + ")";
+        });
 
         return result;
     }

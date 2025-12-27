@@ -6,7 +6,7 @@
 
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.1.5</version>
+    <version>0.1.6</version>
     <packaging>jar</packaging>
 
     <name>Peglib</name>
@@ -38,7 +38,7 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>25</maven.compiler.release>
-        <pragmatica-lite.version>0.8.4</pragmatica-lite.version>
+        <pragmatica-lite.version>0.9.0</pragmatica-lite.version>
     </properties>
 
     <dependencies>

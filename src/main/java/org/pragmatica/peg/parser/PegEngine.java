@@ -74,33 +74,7 @@ public final class PegEngine implements Parser {
         var result = parseRule(ctx, ruleOpt.unwrap());
 
         if (result.isFailure()) {
-            // Extract failure info from either Failure or CutFailure
-            var failureLoc = switch (result) {
-                case ParseResult.Failure f -> f.location();
-                case ParseResult.CutFailure cf -> cf.location();
-                default -> ctx.location();
-            };
-            var failureExpected = switch (result) {
-                case ParseResult.Failure f -> f.expected();
-                case ParseResult.CutFailure cf -> cf.expected();
-                default -> "unknown";
-            };
-            // Use furthest location for better error position after backtracking
-            var furthestLoc = ctx.furthestLocation();
-            var found = ctx.furthestPos() >= input.length()
-                ? "end of input"
-                : String.valueOf(input.charAt(ctx.furthestPos()));
-            // Prefer custom error message from failure, fall back to furthest expected
-            var expected = !failureExpected.startsWith("'") && !failureExpected.startsWith("[")
-                    && !failureExpected.startsWith("rule ") && !failureExpected.equals("any character")
-                    && !failureExpected.startsWith("not ") && !failureExpected.startsWith("one of")
-                ? failureExpected  // Custom error message
-                : ctx.furthestExpected();
-            return Result.failure(new ParseError.UnexpectedInput(
-                furthestLoc,
-                found,
-                expected
-            ));
+            return Result.failure(buildParseError(result, ctx, input));
         }
 
         // Capture trailing trivia
@@ -157,28 +131,7 @@ public final class PegEngine implements Parser {
         var result = parseRuleWithActions(ctx, ruleOpt.unwrap());
 
         if (result.isFailure()) {
-            // Extract failure info from either Failure or CutFailure
-            var failureExpected = switch (result) {
-                case ParseResult.Failure f -> f.expected();
-                case ParseResult.CutFailure cf -> cf.expected();
-                default -> "unknown";
-            };
-            // Use furthest location for better error position after backtracking
-            var furthestLoc = ctx.furthestLocation();
-            var found = ctx.furthestPos() >= input.length()
-                ? "end of input"
-                : String.valueOf(input.charAt(ctx.furthestPos()));
-            // Prefer custom error message from failure, fall back to furthest expected
-            var expected = !failureExpected.startsWith("'") && !failureExpected.startsWith("[")
-                    && !failureExpected.startsWith("rule ") && !failureExpected.equals("any character")
-                    && !failureExpected.startsWith("not ") && !failureExpected.startsWith("one of")
-                ? failureExpected  // Custom error message
-                : ctx.furthestExpected();
-            return Result.failure(new ParseError.UnexpectedInput(
-                furthestLoc,
-                found,
-                expected
-            ));
+            return Result.failure(buildParseError(result, ctx, input));
         }
 
         // Skip trailing whitespace before checking end
@@ -337,7 +290,7 @@ public final class PegEngine implements Parser {
         // Skip leading whitespace
         var leadingTrivia = skipWhitespace(ctx);
 
-        var result = parseExpression(ctx, rule.expression(), rule.name());
+        var result = parseExpressionWithMode(ctx, rule.expression(), rule.name(), ParseMode.standard());
 
         // Cache the result at START position
         ctx.cacheAt(rule.name(), startPos, result);
@@ -370,7 +323,7 @@ public final class PegEngine implements Parser {
 
         var childValues = new ArrayList<Object>();
         var tokenCapture = new String[1]; // Holder for token boundary capture
-        var result = parseExpressionWithActions(ctx, rule.expression(), rule.name(), childValues, tokenCapture);
+        var result = parseExpressionWithMode(ctx, rule.expression(), rule.name(), ParseMode.withActions(childValues, tokenCapture));
 
         if (result.isFailure()) {
             ctx.restoreLocation(startLoc);
@@ -408,35 +361,6 @@ public final class PegEngine implements Parser {
         return ParseResult.Success.of(node, ctx.location());
     }
 
-    /**
-     * Parse expression collecting semantic values from child rules.
-     */
-    private ParseResult parseExpressionWithActions(ParsingContext ctx, Expression expr,
-                                                    String ruleName, List<Object> values, String[] tokenCapture) {
-        return switch (expr) {
-            case Expression.Literal lit -> parseLiteral(ctx, lit);
-            case Expression.CharClass cc -> parseCharClass(ctx, cc);
-            case Expression.Any any -> parseAny(ctx, any);
-            case Expression.Reference ref -> parseReferenceWithActions(ctx, ref, values);
-            case Expression.Sequence seq -> parseSequenceWithMode(ctx, seq, ruleName, ParseMode.withActions(values, tokenCapture));
-            case Expression.Choice choice -> parseChoiceWithMode(ctx, choice, ruleName, ParseMode.withActions(values, tokenCapture));
-            case Expression.ZeroOrMore zom -> parseZeroOrMoreWithMode(ctx, zom, ruleName, ParseMode.withActions(values, tokenCapture));
-            case Expression.OneOrMore oom -> parseOneOrMoreWithMode(ctx, oom, ruleName, ParseMode.withActions(values, tokenCapture));
-            case Expression.Optional opt -> parseOptionalWithMode(ctx, opt, ruleName, ParseMode.withActions(values, tokenCapture));
-            case Expression.Repetition rep -> parseRepetitionWithMode(ctx, rep, ruleName, ParseMode.withActions(values, tokenCapture));
-            case Expression.And and -> parseAnd(ctx, and, ruleName);
-            case Expression.Not not -> parseNot(ctx, not, ruleName);
-            case Expression.TokenBoundary tb -> parseTokenBoundaryWithActions(ctx, tb, ruleName, values, tokenCapture);
-            case Expression.Ignore ign -> parseIgnore(ctx, ign, ruleName);
-            case Expression.Capture cap -> parseCaptureWithActions(ctx, cap, ruleName, values, tokenCapture);
-            case Expression.CaptureScope cs -> parseCaptureScopeWithActions(ctx, cs, ruleName, values, tokenCapture);
-            case Expression.Dictionary dict -> parseDictionary(ctx, dict);
-            case Expression.BackReference br -> parseBackReference(ctx, br);
-            case Expression.Cut cut -> parseCut(ctx, cut);
-            case Expression.Group grp -> parseExpressionWithActions(ctx, grp.expression(), ruleName, values, tokenCapture);
-        };
-    }
-
     private ParseResult parseReferenceWithActions(ParsingContext ctx, Expression.Reference ref, List<Object> values) {
         var ruleOpt = grammar.rule(ref.ruleName());
         if (ruleOpt.isEmpty()) {
@@ -459,7 +383,7 @@ public final class PegEngine implements Parser {
         try {
             // Token boundary inner expressions don't propagate token capture
             var innerTokenCapture = new String[1];
-            var result = parseExpressionWithActions(ctx, tb.expression(), ruleName, values, innerTokenCapture);
+            var result = parseExpressionWithMode(ctx, tb.expression(), ruleName, ParseMode.withActions(values, innerTokenCapture));
             if (result.isFailure()) {
                 return result;
             }
@@ -479,7 +403,7 @@ public final class PegEngine implements Parser {
     private ParseResult parseCaptureWithActions(ParsingContext ctx, Expression.Capture cap,
                                                  String ruleName, List<Object> values, String[] tokenCapture) {
         var startPos = ctx.pos();
-        var result = parseExpressionWithActions(ctx, cap.expression(), ruleName, values, tokenCapture);
+        var result = parseExpressionWithMode(ctx, cap.expression(), ruleName, ParseMode.withActions(values, tokenCapture));
 
         if (result.isSuccess()) {
             var text = ctx.substring(startPos, ctx.pos());
@@ -495,36 +419,9 @@ public final class PegEngine implements Parser {
     private ParseResult parseCaptureScopeWithActions(ParsingContext ctx, Expression.CaptureScope cs,
                                                       String ruleName, List<Object> values, String[] tokenCapture) {
         var savedCaptures = ctx.saveCaptures();
-        var result = parseExpressionWithActions(ctx, cs.expression(), ruleName, values, tokenCapture);
+        var result = parseExpressionWithMode(ctx, cs.expression(), ruleName, ParseMode.withActions(values, tokenCapture));
         ctx.restoreCaptures(savedCaptures);
         return result;
-    }
-
-    // === Expression Parsing ===
-
-    private ParseResult parseExpression(ParsingContext ctx, Expression expr, String ruleName) {
-        return switch (expr) {
-            case Expression.Literal lit -> parseLiteral(ctx, lit);
-            case Expression.CharClass cc -> parseCharClass(ctx, cc);
-            case Expression.Any any -> parseAny(ctx, any);
-            case Expression.Reference ref -> parseReference(ctx, ref);
-            case Expression.Sequence seq -> parseSequenceWithMode(ctx, seq, ruleName, ParseMode.standard());
-            case Expression.Choice choice -> parseChoiceWithMode(ctx, choice, ruleName, ParseMode.standard());
-            case Expression.ZeroOrMore zom -> parseZeroOrMoreWithMode(ctx, zom, ruleName, ParseMode.standard());
-            case Expression.OneOrMore oom -> parseOneOrMoreWithMode(ctx, oom, ruleName, ParseMode.standard());
-            case Expression.Optional opt -> parseOptionalWithMode(ctx, opt, ruleName, ParseMode.standard());
-            case Expression.Repetition rep -> parseRepetitionWithMode(ctx, rep, ruleName, ParseMode.standard());
-            case Expression.And and -> parseAnd(ctx, and, ruleName);
-            case Expression.Not not -> parseNot(ctx, not, ruleName);
-            case Expression.TokenBoundary tb -> parseTokenBoundary(ctx, tb, ruleName);
-            case Expression.Ignore ign -> parseIgnore(ctx, ign, ruleName);
-            case Expression.Capture cap -> parseCapture(ctx, cap, ruleName);
-            case Expression.CaptureScope cs -> parseCaptureScope(ctx, cs, ruleName);
-            case Expression.Dictionary dict -> parseDictionary(ctx, dict);
-            case Expression.BackReference br -> parseBackReference(ctx, br);
-            case Expression.Cut cut -> parseCut(ctx, cut);
-            case Expression.Group grp -> parseExpression(ctx, grp.expression(), ruleName);
-        };
     }
 
     // === Terminal Parsers ===
@@ -762,7 +659,7 @@ public final class PegEngine implements Parser {
 
     private ParseResult parseAnd(ParsingContext ctx, Expression.And and, String ruleName) {
         var startLoc = ctx.location();
-        var result = parseExpression(ctx, and.expression(), ruleName);
+        var result = parseExpressionWithMode(ctx, and.expression(), ruleName, ParseMode.standard());
         ctx.restoreLocation(startLoc); // Always restore - predicates don't consume
 
         if (result.isSuccess()) {
@@ -773,7 +670,7 @@ public final class PegEngine implements Parser {
 
     private ParseResult parseNot(ParsingContext ctx, Expression.Not not, String ruleName) {
         var startLoc = ctx.location();
-        var result = parseExpression(ctx, not.expression(), ruleName);
+        var result = parseExpressionWithMode(ctx, not.expression(), ruleName, ParseMode.standard());
         ctx.restoreLocation(startLoc); // Always restore - predicates don't consume
 
         if (result.isSuccess()) {
@@ -791,7 +688,7 @@ public final class PegEngine implements Parser {
         // Disable whitespace skipping inside token boundary
         ctx.enterTokenBoundary();
         try {
-            var result = parseExpression(ctx, tb.expression(), ruleName);
+            var result = parseExpressionWithMode(ctx, tb.expression(), ruleName, ParseMode.standard());
             if (result.isFailure()) {
                 return result;
             }
@@ -810,7 +707,7 @@ public final class PegEngine implements Parser {
         var startLoc = ctx.location();
         var startPos = ctx.pos();
 
-        var result = parseExpression(ctx, ign.expression(), ruleName);
+        var result = parseExpressionWithMode(ctx, ign.expression(), ruleName, ParseMode.standard());
         if (result.isFailure()) {
             return result;
         }
@@ -821,7 +718,7 @@ public final class PegEngine implements Parser {
 
     private ParseResult parseCapture(ParsingContext ctx, Expression.Capture cap, String ruleName) {
         var startPos = ctx.pos();
-        var result = parseExpression(ctx, cap.expression(), ruleName);
+        var result = parseExpressionWithMode(ctx, cap.expression(), ruleName, ParseMode.standard());
 
         if (result.isSuccess()) {
             var text = ctx.substring(startPos, ctx.pos());
@@ -836,7 +733,7 @@ public final class PegEngine implements Parser {
      */
     private ParseResult parseCaptureScope(ParsingContext ctx, Expression.CaptureScope cs, String ruleName) {
         var savedCaptures = ctx.saveCaptures();
-        var result = parseExpression(ctx, cs.expression(), ruleName);
+        var result = parseExpressionWithMode(ctx, cs.expression(), ruleName, ParseMode.standard());
         ctx.restoreCaptures(savedCaptures);
         return result;
     }
@@ -875,17 +772,14 @@ public final class PegEngine implements Parser {
 
     // === Helpers ===
 
-    // Flag to prevent recursive whitespace skipping
-    private boolean skippingWhitespace = false;
-
     private List<Trivia> skipWhitespace(ParsingContext ctx) {
         var trivia = new ArrayList<Trivia>();
         // Don't skip whitespace inside token boundaries or during whitespace parsing
-        if (grammar.whitespace().isEmpty() || skippingWhitespace || ctx.inTokenBoundary()) {
+        if (grammar.whitespace().isEmpty() || ctx.isSkippingWhitespace() || ctx.inTokenBoundary()) {
             return trivia;
         }
 
-        skippingWhitespace = true;
+        ctx.enterWhitespaceSkip();
         try {
             var wsExpr = grammar.whitespace().unwrap();
             // Extract inner expression from ZeroOrMore/OneOrMore to match one element at a time
@@ -894,7 +788,7 @@ public final class PegEngine implements Parser {
             while (!ctx.isAtEnd()) {
                 var startLoc = ctx.location();
                 var startPos = ctx.pos();
-                var result = parseExpressionNoWs(ctx, innerExpr, "%whitespace");
+                var result = parseExpressionWithMode(ctx, innerExpr, "%whitespace", ParseMode.noWhitespace());
                 if (result.isFailure() || ctx.pos() == startPos) {
                     break;
                 }
@@ -906,7 +800,7 @@ public final class PegEngine implements Parser {
                 }
             }
         } finally {
-            skippingWhitespace = false;
+            ctx.exitWhitespaceSkip();
         }
         return trivia;
     }
@@ -925,6 +819,29 @@ public final class PegEngine implements Parser {
     }
 
     /**
+     * Build parse error from failure result with accurate position information.
+     */
+    private ParseError buildParseError(ParseResult result, ParsingContext ctx, String input) {
+        var failureExpected = switch (result) {
+            case ParseResult.Failure f -> f.expected();
+            case ParseResult.CutFailure cf -> cf.expected();
+            default -> "unknown";
+        };
+        // Use furthest location for better error position after backtracking
+        var furthestLoc = ctx.furthestLocation();
+        var found = ctx.furthestPos() >= input.length()
+            ? "end of input"
+            : String.valueOf(input.charAt(ctx.furthestPos()));
+        // Prefer custom error message from failure, fall back to furthest expected
+        var expected = !failureExpected.startsWith("'") && !failureExpected.startsWith("[")
+                && !failureExpected.startsWith("rule ") && !failureExpected.equals("any character")
+                && !failureExpected.startsWith("not ") && !failureExpected.startsWith("one of")
+            ? failureExpected  // Custom error message
+            : ctx.furthestExpected();
+        return new ParseError.UnexpectedInput(furthestLoc, found, expected);
+    }
+
+    /**
      * Classify trivia based on its content.
      */
     private Trivia classifyTrivia(SourceSpan span, String text) {
@@ -935,32 +852,6 @@ public final class PegEngine implements Parser {
         } else {
             return new Trivia.Whitespace(span, text);
         }
-    }
-
-    // Parse expression without whitespace skipping (for whitespace rule itself)
-    private ParseResult parseExpressionNoWs(ParsingContext ctx, Expression expr, String ruleName) {
-        return switch (expr) {
-            case Expression.Literal lit -> parseLiteral(ctx, lit);
-            case Expression.CharClass cc -> parseCharClass(ctx, cc);
-            case Expression.Any any -> parseAny(ctx, any);
-            case Expression.Reference ref -> parseReference(ctx, ref);
-            case Expression.Sequence seq -> parseSequenceWithMode(ctx, seq, ruleName, ParseMode.noWhitespace());
-            case Expression.Choice choice -> parseChoiceWithMode(ctx, choice, ruleName, ParseMode.noWhitespace());
-            case Expression.ZeroOrMore zom -> parseZeroOrMoreWithMode(ctx, zom, ruleName, ParseMode.noWhitespace());
-            case Expression.OneOrMore oom -> parseOneOrMoreWithMode(ctx, oom, ruleName, ParseMode.noWhitespace());
-            case Expression.Optional opt -> parseOptionalWithMode(ctx, opt, ruleName, ParseMode.noWhitespace());
-            case Expression.Repetition rep -> parseRepetitionWithMode(ctx, rep, ruleName, ParseMode.noWhitespace());
-            case Expression.And and -> parseAnd(ctx, and, ruleName);
-            case Expression.Not not -> parseNot(ctx, not, ruleName);
-            case Expression.TokenBoundary tb -> parseTokenBoundary(ctx, tb, ruleName);
-            case Expression.Ignore ign -> parseIgnore(ctx, ign, ruleName);
-            case Expression.Capture cap -> parseCapture(ctx, cap, ruleName);
-            case Expression.CaptureScope cs -> parseCaptureScope(ctx, cs, ruleName);
-            case Expression.Dictionary dict -> parseDictionary(ctx, dict);
-            case Expression.BackReference br -> parseBackReference(ctx, br);
-            case Expression.Cut cut -> parseCut(ctx, cut);
-            case Expression.Group grp -> parseExpressionNoWs(ctx, grp.expression(), ruleName);
-        };
     }
 
     // === Unified Parsing Methods (with ParseMode) ===
@@ -1265,7 +1156,7 @@ public final class PegEngine implements Parser {
     }
 
     /**
-     * Unified expression dispatcher - consolidates parseExpression, parseExpressionWithActions, parseExpressionNoWs.
+     * Parse expression with configurable mode (standard, withActions, noWhitespace).
      */
     private ParseResult parseExpressionWithMode(ParsingContext ctx, Expression expr,
                                                  String ruleName, ParseMode mode) {
