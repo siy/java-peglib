@@ -39,10 +39,11 @@ src/main/java/org/pragmatica/peg/
 │   └── GrammarParser.java      # Recursive descent parser
 ├── parser/
 │   ├── Parser.java             # Parser interface
-│   ├── ParserConfig.java       # Configuration record + builder
+│   ├── ParserConfig.java       # Configuration record
 │   ├── ParsingContext.java     # Mutable parsing state with packrat cache
 │   ├── ParseResult.java        # Parse result types (sealed)
 │   ├── ParseResultWithDiagnostics.java # Result with error recovery diagnostics
+│   ├── ParseMode.java          # Parsing mode (standard, withActions, noWhitespace)
 │   └── PegEngine.java          # PEG parsing engine with action execution
 ├── tree/
 │   ├── SourceLocation.java     # Position in source (line, column, offset)

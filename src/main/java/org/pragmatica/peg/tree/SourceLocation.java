@@ -11,14 +11,6 @@ public record SourceLocation(int line, int column, int offset) {
         return new SourceLocation(line, column, offset);
     }
 
-    public SourceLocation advanceColumn(int delta) {
-        return new SourceLocation(line, column + delta, offset + delta);
-    }
-
-    public SourceLocation advanceLine() {
-        return new SourceLocation(line + 1, 1, offset + 1);
-    }
-
     @Override
     public String toString() {
         return line + ":" + column;

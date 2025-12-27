@@ -40,11 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Builder API Naming Standardized**
   - `PegParser.Builder` methods renamed for consistency: `withPackrat()` → `packrat()`, `withTrivia()` → `trivia()`, `withErrorRecovery()` → `recovery()`
-  - Matches `ParserConfig.Builder` naming convention
+  - Removed duplicate `ParserConfig.Builder` (unused)
 
 - **Documentation Cleanup**
   - Removed undocumented `%word` directive from documentation (feature not implemented)
   - Removed unused placeholder `skipWhitespace()` method from `ParsingContext`
+
+- **Code Simplification**
+  - Consolidated 3 duplicate expression parsing switch statements into unified `parseExpressionWithMode()`
+  - Extracted `buildParseError()` helper to eliminate duplicate error message construction
+  - Removed unused `SemanticValues.choice` field and getter
+  - Removed unused `SourceLocation.advanceColumn()`/`advanceLine()` methods
+  - ~120 lines of duplicate code eliminated
 
 - Test count: 268 → 271
 - Updated pragmatica-lite dependency: 0.8.4 → 0.9.0
