@@ -69,17 +69,18 @@ src/test/java/org/pragmatica/peg/
 ├── GeneratedParserTriviaTest.java # 6 tests (generated parser trivia)
 ├── ErrorRecoveryTest.java      # 8 tests (error recovery + diagnostics)
 ├── grammar/
-│   └── GrammarParserTest.java  # 14 tests for grammar parser
+│   └── GrammarParserTest.java  # 17 tests for grammar parser
 ├── generator/
-│   └── ParserGeneratorTest.java # 16 tests for source generation (8 basic + 8 ErrorReporting)
+│   └── ParserGeneratorTest.java # 18 tests for source generation
 └── examples/
     ├── ErrorRecoveryExample.java # 12 tests - error recovery patterns
     ├── CalculatorExample.java   # 6 tests - arithmetic with actions
     ├── JsonParserExample.java   # 11 tests - JSON CST parsing
     ├── SExpressionExample.java  # 11 tests - Lisp-like syntax
     ├── CsvParserExample.java    # 8 tests - CSV data format
-    ├── SourceGenerationExample.java # 9 tests - standalone parser
-    └── Java25GrammarExample.java # 59 tests - Java 25 syntax
+    ├── SourceGenerationExample.java # 11 tests - standalone parser
+    ├── CutOperatorRegressionTest.java # 16 tests - cut operator regression tests
+    └── Java25GrammarExample.java # 60 tests - Java 25 syntax
 ```
 
 ## Grammar Syntax (cpp-peglib compatible)
@@ -304,7 +305,7 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - List building
 - No action returns CST node
 
-### Generator Tests (16 tests)
+### Generator Tests (18 tests)
 - Simple literal generates valid Java
 - Whitespace handling
 - Action code inclusion
@@ -314,14 +315,15 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - ErrorReporting.ADVANCED mode (Rust-style diagnostics)
 - parseWithDiagnostics() method generation
 
-### Example Tests (116 tests)
+### Example Tests (135 tests)
 - **ErrorRecovery** (12 tests): Recovery strategies, diagnostic formatting, CST error nodes
 - **Calculator** (6 tests): Number parsing, addition, multiplication, boolean/double types
 - **JSON** (11 tests): CST parsing of JSON values, objects, arrays, nested structures
 - **S-Expression** (11 tests): Lisp-like syntax, nested lists, atoms, symbols
 - **CSV** (8 tests): Field parsing, empty fields, spaces preserved
-- **Source Generation** (9 tests): Standalone parser generation, all operators
-- **Java25Grammar** (59 tests): Full Java 25 syntax including modules, var, patterns, text blocks
+- **Source Generation** (11 tests): Standalone parser generation, all operators
+- **CutOperatorRegression** (16 tests): Cut operator regression tests
+- **Java25Grammar** (60 tests): Full Java 25 syntax including modules, var, patterns, text blocks
 
 ### Trivia Tests (19 tests)
 - **TriviaTest** (13 tests): Runtime trivia - leading, trailing, mixed, comments
