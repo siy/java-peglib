@@ -168,7 +168,7 @@ class ErrorRecoveryExample {
             .withHelp("add a return value");
 
         assertEquals(Diagnostic.Severity.ERROR, error.severity());
-        assertEquals("E0001", error.code());
+        assertEquals("E0001", error.code().unwrap());
 
         var formatted = error.format(source, "test.js");
         assertTrue(formatted.contains("error[E0001]"));

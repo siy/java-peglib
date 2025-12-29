@@ -1,5 +1,6 @@
 package org.pragmatica.peg.error;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.peg.tree.SourceSpan;
 
 import java.util.List;
@@ -27,7 +28,7 @@ import java.util.List;
  */
 public record Diagnostic(
     Severity severity,
-    String code,
+    Option<String> code,
     String message,
     SourceSpan span,
     List<Label> labels,
@@ -74,21 +75,21 @@ public record Diagnostic(
      * Create an error diagnostic.
      */
     public static Diagnostic error(String message, SourceSpan span) {
-        return new Diagnostic(Severity.ERROR, null, message, span, List.of(), List.of());
+        return new Diagnostic(Severity.ERROR, Option.none(), message, span, List.of(), List.of());
     }
 
     /**
      * Create an error with code.
      */
     public static Diagnostic error(String code, String message, SourceSpan span) {
-        return new Diagnostic(Severity.ERROR, code, message, span, List.of(), List.of());
+        return new Diagnostic(Severity.ERROR, Option.some(code), message, span, List.of(), List.of());
     }
 
     /**
      * Create a warning diagnostic.
      */
     public static Diagnostic warning(String message, SourceSpan span) {
-        return new Diagnostic(Severity.WARNING, null, message, span, List.of(), List.of());
+        return new Diagnostic(Severity.WARNING, Option.none(), message, span, List.of(), List.of());
     }
 
     /**
@@ -138,8 +139,8 @@ public record Diagnostic(
 
         // Header: error[E0001]: message
         sb.append(severity.display());
-        if (code != null) {
-            sb.append("[").append(code).append("]");
+        if (code.isPresent()) {
+            sb.append("[").append(code.unwrap()).append("]");
         }
         sb.append(": ").append(message).append("\n");
 
