@@ -15,11 +15,10 @@ import java.util.List;
  * </ul>
  */
 public record ParseMode(
-    boolean skipWhitespace,
-    boolean collectActions,
-    Option<List<Object>> semanticValues,
-    Option<String[]> tokenCapture
-) {
+ boolean skipWhitespace,
+ boolean collectActions,
+ Option<List<Object>> semanticValues,
+ Option<String[] > tokenCapture) {
     /**
      * Standard CST parsing mode - skips whitespace, doesn't collect semantic values.
      */
@@ -70,7 +69,8 @@ public record ParseMode(
      */
     public void addValue(Object value) {
         if (collectActions && semanticValues.isPresent()) {
-            semanticValues.unwrap().add(value);
+            semanticValues.unwrap()
+                          .add(value);
         }
     }
 
@@ -79,7 +79,7 @@ public record ParseMode(
      */
     public void setTokenCapture(String text) {
         if (collectActions && tokenCapture.isPresent()) {
-            tokenCapture.unwrap()[0] = text;
+            tokenCapture.unwrap() [0] = text;
         }
     }
 }

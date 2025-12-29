@@ -9,7 +9,6 @@ import java.util.List;
  * Optimized for interpretation and compilation.
  */
 public sealed interface AstNode {
-
     /**
      * The source span (for error reporting).
      */
@@ -29,19 +28,17 @@ public sealed interface AstNode {
      * Terminal AST node - a leaf with text.
      */
     record Terminal(
-        SourceSpan span,
-        String rule,
-        String text,
-        Option<Object> value
-    ) implements AstNode {}
+    SourceSpan span,
+    String rule,
+    String text,
+    Option<Object> value) implements AstNode {}
 
     /**
      * Non-terminal AST node - interior node with children.
      */
     record NonTerminal(
-        SourceSpan span,
-        String rule,
-        List<AstNode> children,
-        Option<Object> value
-    ) implements AstNode {}
+    SourceSpan span,
+    String rule,
+    List<AstNode> children,
+    Option<Object> value) implements AstNode {}
 }

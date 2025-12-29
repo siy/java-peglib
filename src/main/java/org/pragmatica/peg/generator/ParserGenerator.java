@@ -9,7 +9,6 @@ import org.pragmatica.peg.grammar.Rule;
  * The generated parser depends only on pragmatica-lite:core.
  */
 public final class ParserGenerator {
-
     // Shared generated code fragments
     private static final String MATCHES_WORD_METHOD = """
             private boolean matchesWord(String word, boolean caseInsensitive) {
@@ -104,13 +103,15 @@ public final class ParserGenerator {
         return new ParserGenerator(grammar, packageName, className, ErrorReporting.BASIC);
     }
 
-    public static ParserGenerator create(Grammar grammar, String packageName, String className, ErrorReporting errorReporting) {
+    public static ParserGenerator create(Grammar grammar,
+                                         String packageName,
+                                         String className,
+                                         ErrorReporting errorReporting) {
         return new ParserGenerator(grammar, packageName, className, errorReporting);
     }
 
     public String generate() {
         var sb = new StringBuilder();
-
         generatePackage(sb);
         generateImports(sb);
         generateClassStart(sb);
@@ -119,7 +120,6 @@ public final class ParserGenerator {
         generateRuleMethods(sb);
         generateHelperMethods(sb);
         generateClassEnd(sb);
-
         return sb.toString();
     }
 
@@ -129,7 +129,6 @@ public final class ParserGenerator {
      */
     public String generateCst() {
         var sb = new StringBuilder();
-
         generatePackage(sb);
         generateCstImports(sb);
         generateCstClassStart(sb);
@@ -140,12 +139,13 @@ public final class ParserGenerator {
         generateCstRuleMethods(sb);
         generateCstHelperMethods(sb);
         generateClassEnd(sb);
-
         return sb.toString();
     }
 
     private void generatePackage(StringBuilder sb) {
-        sb.append("package ").append(packageName).append(";\n\n");
+        sb.append("package ")
+          .append(packageName)
+          .append(";\n\n");
     }
 
     private void generateImports(StringBuilder sb) {
@@ -167,8 +167,9 @@ public final class ParserGenerator {
         sb.append(" * Generated PEG parser.\n");
         sb.append(" * This parser was generated from a PEG grammar and depends only on pragmatica-lite:core.\n");
         sb.append(" */\n");
-        sb.append("public final class ").append(className).append(" {\n\n");
-
+        sb.append("public final class ")
+          .append(className)
+          .append(" {\n\n");
         // Add ParseError type
         sb.append("""
                 // === Parse Error ===
@@ -252,8 +253,12 @@ public final class ParserGenerator {
 
     private void generateParseMethods(StringBuilder sb) {
         var startRule = grammar.effectiveStartRule();
-        var startRuleName = startRule.isPresent() ? startRule.unwrap().name() : grammar.rules().getFirst().name();
-
+        var startRuleName = startRule.isPresent()
+                            ? startRule.unwrap()
+                                       .name()
+                            : grammar.rules()
+                                     .getFirst()
+                                     .name();
         sb.append("""
                 // === Public Parse Methods ===
 
@@ -274,23 +279,25 @@ public final class ParserGenerator {
 
     private void generateRuleMethods(StringBuilder sb) {
         sb.append("    // === Rule Parsing Methods ===\n\n");
-
         int ruleId = 0;
         for (var rule : grammar.rules()) {
-            generateRuleMethod(sb, rule, ruleId++);
+            generateRuleMethod(sb, rule, ruleId++ );
         }
     }
 
     private void generateRuleMethod(StringBuilder sb, Rule rule, int ruleId) {
         var methodName = "parse_" + sanitize(rule.name());
-
-        sb.append("    private ParseResult ").append(methodName).append("() {\n");
+        sb.append("    private ParseResult ")
+          .append(methodName)
+          .append("() {\n");
         sb.append("        int startPos = pos;\n");
         sb.append("        int startLine = line;\n");
         sb.append("        int startColumn = column;\n");
         sb.append("        \n");
         sb.append("        // Check cache\n");
-        sb.append("        long key = cacheKey(").append(ruleId).append(", startPos);\n");
+        sb.append("        long key = cacheKey(")
+          .append(ruleId)
+          .append(", startPos);\n");
         sb.append("        if (cache != null) {\n");
         sb.append("            var cached = cache.get(key);\n");
         sb.append("            if (cached != null) {\n");
@@ -304,33 +311,36 @@ public final class ParserGenerator {
         sb.append("        skipWhitespace();\n");
         sb.append("        var values = new ArrayList<Object>();\n");
         sb.append("        \n");
-
         int[] counter = {0};
         generateExpressionCode(sb, rule.expression(), "result", 2, counter);
-
         sb.append("        \n");
         sb.append("        if (result.isSuccess()) {\n");
-
         // Generate action if present
-        if (rule.action().isPresent()) {
-            var actionCode = transformActionCode(rule.action().unwrap());
+        if (rule.action()
+                .isPresent()) {
+            var actionCode = transformActionCode(rule.action()
+                                                     .unwrap());
             sb.append("            String $0 = substring(startPos, pos);\n");
             sb.append("            Object value;\n");
-            sb.append("            ").append(wrapActionCode(actionCode)).append("\n");
+            sb.append("            ")
+              .append(wrapActionCode(actionCode))
+              .append("\n");
             sb.append("            result = ParseResult.success(value, pos, line, column);\n");
-        } else {
+        }else {
             sb.append("            result = ParseResult.success(\n");
             sb.append("                values.isEmpty() ? substring(startPos, pos) : values.size() == 1 ? values.getFirst() : values,\n");
             sb.append("                pos, line, column);\n");
         }
-
         sb.append("        } else {\n");
         sb.append("            pos = startPos;\n");
         sb.append("            line = startLine;\n");
         sb.append("            column = startColumn;\n");
         // Use custom error message if available
         if (rule.hasErrorMessage()) {
-            sb.append("            result = ParseResult.failure(\"").append(escape(rule.errorMessage().unwrap())).append("\");\n");
+            sb.append("            result = ParseResult.failure(\"")
+              .append(escape(rule.errorMessage()
+                                 .unwrap()))
+              .append("\");\n");
         }
         sb.append("        }\n");
         sb.append("        \n");
@@ -339,255 +349,721 @@ public final class ParserGenerator {
         sb.append("    }\n\n");
     }
 
-    private void generateExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent, int[] counter) {
+    private void generateExpressionCode(StringBuilder sb,
+                                        Expression expr,
+                                        String resultVar,
+                                        int indent,
+                                        int[] counter) {
         var pad = "    ".repeat(indent);
-        int id = counter[0]++;  // Get unique ID for this expression
-
+        int id = counter[0]++ ;
+        // Get unique ID for this expression
         switch (expr) {
             case Expression.Literal lit -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = matchLiteral(\"")
-                    .append(escape(lit.text())).append("\", ").append(lit.caseInsensitive()).append(");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = matchLiteral(\"")
+                  .append(escape(lit.text()))
+                  .append("\", ")
+                  .append(lit.caseInsensitive())
+                  .append(");\n");
             }
             case Expression.CharClass cc -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = matchCharClass(\"")
-                    .append(escape(cc.pattern())).append("\", ")
-                    .append(cc.negated()).append(", ")
-                    .append(cc.caseInsensitive()).append(");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = matchCharClass(\"")
+                  .append(escape(cc.pattern()))
+                  .append("\", ")
+                  .append(cc.negated())
+                  .append(", ")
+                  .append(cc.caseInsensitive())
+                  .append(");\n");
             }
             case Expression.Dictionary dict -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = matchDictionary(List.of(");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = matchDictionary(List.of(");
                 var words = dict.words();
-                for (int i = 0; i < words.size(); i++) {
+                for (int i = 0; i < words.size(); i++ ) {
                     if (i > 0) sb.append(", ");
-                    sb.append("\"").append(escape(words.get(i))).append("\"");
+                    sb.append("\"")
+                      .append(escape(words.get(i)))
+                      .append("\"");
                 }
-                sb.append("), ").append(dict.caseInsensitive()).append(");\n");
+                sb.append("), ")
+                  .append(dict.caseInsensitive())
+                  .append(");\n");
             }
             case Expression.Any any -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = matchAny();\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = matchAny();\n");
             }
             case Expression.Reference ref -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = parse_")
-                    .append(sanitize(ref.ruleName())).append("();\n");
-                sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ")
-                    .append(resultVar).append(".value.isPresent()) {\n");
-                sb.append(pad).append("    values.add(").append(resultVar).append(".value.unwrap());\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = parse_")
+                  .append(sanitize(ref.ruleName()))
+                  .append("();\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(resultVar)
+                  .append(".isSuccess() && ")
+                  .append(resultVar)
+                  .append(".value.isPresent()) {\n");
+                sb.append(pad)
+                  .append("    values.add(")
+                  .append(resultVar)
+                  .append(".value.unwrap());\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.Sequence seq -> {
                 var seqStart = "seqStart" + id;
                 var cutVar = "cut" + id;
-                sb.append(pad).append("ParseResult ").append(resultVar).append(" = ParseResult.success(null, pos, line, column);\n");
-                sb.append(pad).append("int ").append(seqStart).append(" = pos;\n");
-                sb.append(pad).append("int ").append(seqStart).append("Line = line;\n");
-                sb.append(pad).append("int ").append(seqStart).append("Column = column;\n");
-                sb.append(pad).append("boolean ").append(cutVar).append(" = false;\n");
+                sb.append(pad)
+                  .append("ParseResult ")
+                  .append(resultVar)
+                  .append(" = ParseResult.success(null, pos, line, column);\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(seqStart)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(seqStart)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(seqStart)
+                  .append("Column = column;\n");
+                sb.append(pad)
+                  .append("boolean ")
+                  .append(cutVar)
+                  .append(" = false;\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
-                    sb.append(pad).append("skipWhitespace();\n");
+                    sb.append(pad)
+                      .append("skipWhitespace();\n");
                     generateExpressionCode(sb, elem, "elem" + id + "_" + i, indent, counter);
                     // Check for cut failure propagation
-                    sb.append(pad).append("if (elem").append(id).append("_").append(i).append(".isCutFailure()) {\n");
-                    sb.append(pad).append("    pos = ").append(seqStart).append(";\n");
-                    sb.append(pad).append("    line = ").append(seqStart).append("Line;\n");
-                    sb.append(pad).append("    column = ").append(seqStart).append("Column;\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = elem").append(id).append("_").append(i).append(";\n");
-                    sb.append(pad).append("} else if (elem").append(id).append("_").append(i).append(".isFailure()) {\n");
-                    sb.append(pad).append("    pos = ").append(seqStart).append(";\n");
-                    sb.append(pad).append("    line = ").append(seqStart).append("Line;\n");
-                    sb.append(pad).append("    column = ").append(seqStart).append("Column;\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(cutVar).append(" ? elem").append(id).append("_").append(i).append(".asCutFailure() : elem").append(id).append("_").append(i).append(";\n");
-                    sb.append(pad).append("}\n");
+                    sb.append(pad)
+                      .append("if (elem")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(".isCutFailure()) {\n");
+                    sb.append(pad)
+                      .append("    pos = ")
+                      .append(seqStart)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("    line = ")
+                      .append(seqStart)
+                      .append("Line;\n");
+                    sb.append(pad)
+                      .append("    column = ")
+                      .append(seqStart)
+                      .append("Column;\n");
+                    sb.append(pad)
+                      .append("    ")
+                      .append(resultVar)
+                      .append(" = elem")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("} else if (elem")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(".isFailure()) {\n");
+                    sb.append(pad)
+                      .append("    pos = ")
+                      .append(seqStart)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("    line = ")
+                      .append(seqStart)
+                      .append("Line;\n");
+                    sb.append(pad)
+                      .append("    column = ")
+                      .append(seqStart)
+                      .append("Column;\n");
+                    sb.append(pad)
+                      .append("    ")
+                      .append(resultVar)
+                      .append(" = ")
+                      .append(cutVar)
+                      .append(" ? elem")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(".asCutFailure() : elem")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("}\n");
                     // Track if this element was a cut
                     if (elem instanceof Expression.Cut) {
-                        sb.append(pad).append(cutVar).append(" = true;\n");
+                        sb.append(pad)
+                          .append(cutVar)
+                          .append(" = true;\n");
                     }
-                    i++;
+                    i++ ;
                 }
             }
             case Expression.Choice choice -> {
                 var choiceStart = "choiceStart" + id;
                 var oldVals = "oldValues" + id;
-                sb.append(pad).append("ParseResult ").append(resultVar).append(" = null;\n");
-                sb.append(pad).append("int ").append(choiceStart).append(" = pos;\n");
-                sb.append(pad).append("int ").append(choiceStart).append("Line = line;\n");
-                sb.append(pad).append("int ").append(choiceStart).append("Column = column;\n");
+                sb.append(pad)
+                  .append("ParseResult ")
+                  .append(resultVar)
+                  .append(" = null;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(choiceStart)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(choiceStart)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(choiceStart)
+                  .append("Column = column;\n");
                 int i = 0;
                 for (var alt : choice.alternatives()) {
-                    sb.append(pad).append("var choiceValues").append(id).append("_").append(i).append(" = new ArrayList<Object>();\n");
-                    sb.append(pad).append("var ").append(oldVals).append("_").append(i).append(" = values;\n");
-                    sb.append(pad).append("values = choiceValues").append(id).append("_").append(i).append(";\n");
+                    sb.append(pad)
+                      .append("var choiceValues")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(" = new ArrayList<Object>();\n");
+                    sb.append(pad)
+                      .append("var ")
+                      .append(oldVals)
+                      .append("_")
+                      .append(i)
+                      .append(" = values;\n");
+                    sb.append(pad)
+                      .append("values = choiceValues")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(";\n");
                     generateExpressionCode(sb, alt, "alt" + id + "_" + i, indent, counter);
-                    sb.append(pad).append("values = ").append(oldVals).append("_").append(i).append(";\n");
-                    sb.append(pad).append("if (alt").append(id).append("_").append(i).append(".isSuccess()) {\n");
-                    sb.append(pad).append("    values.addAll(choiceValues").append(id).append("_").append(i).append(");\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = alt").append(id).append("_").append(i).append(";\n");
-                    sb.append(pad).append("} else if (alt").append(id).append("_").append(i).append(".isCutFailure()) {\n");
+                    sb.append(pad)
+                      .append("values = ")
+                      .append(oldVals)
+                      .append("_")
+                      .append(i)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("if (alt")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(".isSuccess()) {\n");
+                    sb.append(pad)
+                      .append("    values.addAll(choiceValues")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("    ")
+                      .append(resultVar)
+                      .append(" = alt")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("} else if (alt")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(".isCutFailure()) {\n");
                     // Convert CutFailure to regular failure for parent choices to allow backtracking at higher levels
-                    sb.append(pad).append("    ").append(resultVar).append(" = alt").append(id).append("_").append(i).append(".asRegularFailure();\n");
-                    sb.append(pad).append("} else {\n");
-                    sb.append(pad).append("    pos = ").append(choiceStart).append(";\n");
-                    sb.append(pad).append("    line = ").append(choiceStart).append("Line;\n");
-                    sb.append(pad).append("    column = ").append(choiceStart).append("Column;\n");
-                    i++;
+                    sb.append(pad)
+                      .append("    ")
+                      .append(resultVar)
+                      .append(" = alt")
+                      .append(id)
+                      .append("_")
+                      .append(i)
+                      .append(".asRegularFailure();\n");
+                    sb.append(pad)
+                      .append("} else {\n");
+                    sb.append(pad)
+                      .append("    pos = ")
+                      .append(choiceStart)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("    line = ")
+                      .append(choiceStart)
+                      .append("Line;\n");
+                    sb.append(pad)
+                      .append("    column = ")
+                      .append(choiceStart)
+                      .append("Column;\n");
+                    i++ ;
                 }
                 // Close all else blocks
-                for (int j = 0; j < choice.alternatives().size(); j++) {
-                    sb.append(pad).append("}\n");
+                for (int j = 0; j < choice.alternatives()
+                                          .size(); j++ ) {
+                    sb.append(pad)
+                      .append("}\n");
                 }
-                sb.append(pad).append("if (").append(resultVar).append(" == null) {\n");
-                sb.append(pad).append("    ").append(resultVar).append(" = ParseResult.failure(\"one of alternatives\");\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(resultVar)
+                  .append(" == null) {\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = ParseResult.failure(\"one of alternatives\");\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.ZeroOrMore zom -> {
                 var zomElem = "zomElem" + id;
                 var beforePos = "beforePos" + id;
-                sb.append(pad).append("ParseResult ").append(resultVar).append(" = ParseResult.success(null, pos, line, column);\n");
-                sb.append(pad).append("while (true) {\n");
-                sb.append(pad).append("    int ").append(beforePos).append(" = pos;\n");
-                sb.append(pad).append("    int ").append(beforePos).append("Line = line;\n");
-                sb.append(pad).append("    int ").append(beforePos).append("Column = column;\n");
-                sb.append(pad).append("    skipWhitespace();\n");
+                sb.append(pad)
+                  .append("ParseResult ")
+                  .append(resultVar)
+                  .append(" = ParseResult.success(null, pos, line, column);\n");
+                sb.append(pad)
+                  .append("while (true) {\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforePos)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforePos)
+                  .append("Column = column;\n");
+                sb.append(pad)
+                  .append("    skipWhitespace();\n");
                 generateExpressionCode(sb, zom.expression(), zomElem, indent + 1, counter);
-                sb.append(pad).append("    if (").append(zomElem).append(".isFailure() || pos == ").append(beforePos).append(") {\n");
-                sb.append(pad).append("        pos = ").append(beforePos).append(";\n");
-                sb.append(pad).append("        line = ").append(beforePos).append("Line;\n");
-                sb.append(pad).append("        column = ").append(beforePos).append("Column;\n");
-                sb.append(pad).append("        break;\n");
-                sb.append(pad).append("    }\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("    if (")
+                  .append(zomElem)
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
+                sb.append(pad)
+                  .append("        pos = ")
+                  .append(beforePos)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("        line = ")
+                  .append(beforePos)
+                  .append("Line;\n");
+                sb.append(pad)
+                  .append("        column = ")
+                  .append(beforePos)
+                  .append("Column;\n");
+                sb.append(pad)
+                  .append("        break;\n");
+                sb.append(pad)
+                  .append("    }\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.OneOrMore oom -> {
                 var oomFirst = "oomFirst" + id;
                 var oomElem = "oomElem" + id;
                 var beforePos = "beforePos" + id;
                 generateExpressionCode(sb, oom.expression(), oomFirst, indent, counter);
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(oomFirst).append(";\n");
-                sb.append(pad).append("if (").append(oomFirst).append(".isSuccess()) {\n");
-                sb.append(pad).append("    while (true) {\n");
-                sb.append(pad).append("        int ").append(beforePos).append(" = pos;\n");
-                sb.append(pad).append("        int ").append(beforePos).append("Line = line;\n");
-                sb.append(pad).append("        int ").append(beforePos).append("Column = column;\n");
-                sb.append(pad).append("        skipWhitespace();\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(oomFirst)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(oomFirst)
+                  .append(".isSuccess()) {\n");
+                sb.append(pad)
+                  .append("    while (true) {\n");
+                sb.append(pad)
+                  .append("        int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("        int ")
+                  .append(beforePos)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("        int ")
+                  .append(beforePos)
+                  .append("Column = column;\n");
+                sb.append(pad)
+                  .append("        skipWhitespace();\n");
                 generateExpressionCode(sb, oom.expression(), oomElem, indent + 2, counter);
-                sb.append(pad).append("        if (").append(oomElem).append(".isFailure() || pos == ").append(beforePos).append(") {\n");
-                sb.append(pad).append("            pos = ").append(beforePos).append(";\n");
-                sb.append(pad).append("            line = ").append(beforePos).append("Line;\n");
-                sb.append(pad).append("            column = ").append(beforePos).append("Column;\n");
-                sb.append(pad).append("            break;\n");
-                sb.append(pad).append("        }\n");
-                sb.append(pad).append("    }\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("        if (")
+                  .append(oomElem)
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
+                sb.append(pad)
+                  .append("            pos = ")
+                  .append(beforePos)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("            line = ")
+                  .append(beforePos)
+                  .append("Line;\n");
+                sb.append(pad)
+                  .append("            column = ")
+                  .append(beforePos)
+                  .append("Column;\n");
+                sb.append(pad)
+                  .append("            break;\n");
+                sb.append(pad)
+                  .append("        }\n");
+                sb.append(pad)
+                  .append("    }\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.Optional opt -> {
                 var optStart = "optStart" + id;
                 var optElem = "optElem" + id;
-                sb.append(pad).append("int ").append(optStart).append(" = pos;\n");
-                sb.append(pad).append("int ").append(optStart).append("Line = line;\n");
-                sb.append(pad).append("int ").append(optStart).append("Column = column;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(optStart)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(optStart)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(optStart)
+                  .append("Column = column;\n");
                 generateExpressionCode(sb, opt.expression(), optElem, indent, counter);
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(optElem).append(".isSuccess() ? ").append(optElem).append(" : ParseResult.success(null, pos, line, column);\n");
-                sb.append(pad).append("if (").append(optElem).append(".isFailure()) {\n");
-                sb.append(pad).append("    pos = ").append(optStart).append(";\n");
-                sb.append(pad).append("    line = ").append(optStart).append("Line;\n");
-                sb.append(pad).append("    column = ").append(optStart).append("Column;\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(optElem)
+                  .append(".isSuccess() ? ")
+                  .append(optElem)
+                  .append(" : ParseResult.success(null, pos, line, column);\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(optElem)
+                  .append(".isFailure()) {\n");
+                sb.append(pad)
+                  .append("    pos = ")
+                  .append(optStart)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("    line = ")
+                  .append(optStart)
+                  .append("Line;\n");
+                sb.append(pad)
+                  .append("    column = ")
+                  .append(optStart)
+                  .append("Column;\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.Repetition rep -> {
                 var repCount = "repCount" + id;
                 var repStart = "repStart" + id;
                 var repElem = "repElem" + id;
                 var beforePos = "beforePos" + id;
-                sb.append(pad).append("int ").append(repCount).append(" = 0;\n");
-                sb.append(pad).append("int ").append(repStart).append(" = pos;\n");
-                sb.append(pad).append("int ").append(repStart).append("Line = line;\n");
-                sb.append(pad).append("int ").append(repStart).append("Column = column;\n");
-                var maxStr = rep.max().isPresent() ? String.valueOf(rep.max().unwrap()) : "Integer.MAX_VALUE";
-                sb.append(pad).append("while (").append(repCount).append(" < ").append(maxStr).append(") {\n");
-                sb.append(pad).append("    int ").append(beforePos).append(" = pos;\n");
-                sb.append(pad).append("    int ").append(beforePos).append("Line = line;\n");
-                sb.append(pad).append("    int ").append(beforePos).append("Column = column;\n");
-                sb.append(pad).append("    if (").append(repCount).append(" > 0) skipWhitespace();\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repCount)
+                  .append(" = 0;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repStart)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repStart)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repStart)
+                  .append("Column = column;\n");
+                var maxStr = rep.max()
+                                .isPresent()
+                             ? String.valueOf(rep.max()
+                                                 .unwrap())
+                             : "Integer.MAX_VALUE";
+                sb.append(pad)
+                  .append("while (")
+                  .append(repCount)
+                  .append(" < ")
+                  .append(maxStr)
+                  .append(") {\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforePos)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforePos)
+                  .append("Column = column;\n");
+                sb.append(pad)
+                  .append("    if (")
+                  .append(repCount)
+                  .append(" > 0) skipWhitespace();\n");
                 generateExpressionCode(sb, rep.expression(), repElem, indent + 1, counter);
-                sb.append(pad).append("    if (").append(repElem).append(".isFailure() || pos == ").append(beforePos).append(") {\n");
-                sb.append(pad).append("        pos = ").append(beforePos).append(";\n");
-                sb.append(pad).append("        line = ").append(beforePos).append("Line;\n");
-                sb.append(pad).append("        column = ").append(beforePos).append("Column;\n");
-                sb.append(pad).append("        break;\n");
-                sb.append(pad).append("    }\n");
-                sb.append(pad).append("    ").append(repCount).append("++;\n");
-                sb.append(pad).append("}\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(repCount).append(" >= ").append(rep.min())
-                    .append(" ? ParseResult.success(null, pos, line, column) : ParseResult.failure(\"at least ")
-                    .append(rep.min()).append(" repetitions\");\n");
-                sb.append(pad).append("if (").append(resultVar).append(".isFailure()) {\n");
-                sb.append(pad).append("    pos = ").append(repStart).append(";\n");
-                sb.append(pad).append("    line = ").append(repStart).append("Line;\n");
-                sb.append(pad).append("    column = ").append(repStart).append("Column;\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("    if (")
+                  .append(repElem)
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
+                sb.append(pad)
+                  .append("        pos = ")
+                  .append(beforePos)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("        line = ")
+                  .append(beforePos)
+                  .append("Line;\n");
+                sb.append(pad)
+                  .append("        column = ")
+                  .append(beforePos)
+                  .append("Column;\n");
+                sb.append(pad)
+                  .append("        break;\n");
+                sb.append(pad)
+                  .append("    }\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(repCount)
+                  .append("++;\n");
+                sb.append(pad)
+                  .append("}\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(repCount)
+                  .append(" >= ")
+                  .append(rep.min())
+                  .append(" ? ParseResult.success(null, pos, line, column) : ParseResult.failure(\"at least ")
+                  .append(rep.min())
+                  .append(" repetitions\");\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(resultVar)
+                  .append(".isFailure()) {\n");
+                sb.append(pad)
+                  .append("    pos = ")
+                  .append(repStart)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("    line = ")
+                  .append(repStart)
+                  .append("Line;\n");
+                sb.append(pad)
+                  .append("    column = ")
+                  .append(repStart)
+                  .append("Column;\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.And and -> {
                 var andStart = "andStart" + id;
                 var andElem = "andElem" + id;
-                sb.append(pad).append("int ").append(andStart).append(" = pos;\n");
-                sb.append(pad).append("int ").append(andStart).append("Line = line;\n");
-                sb.append(pad).append("int ").append(andStart).append("Column = column;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(andStart)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(andStart)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(andStart)
+                  .append("Column = column;\n");
                 generateExpressionCode(sb, and.expression(), andElem, indent, counter);
-                sb.append(pad).append("pos = ").append(andStart).append(";\n");
-                sb.append(pad).append("line = ").append(andStart).append("Line;\n");
-                sb.append(pad).append("column = ").append(andStart).append("Column;\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(andElem).append(".isSuccess() ? ParseResult.success(null, pos, line, column) : ").append(andElem).append(";\n");
+                sb.append(pad)
+                  .append("pos = ")
+                  .append(andStart)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("line = ")
+                  .append(andStart)
+                  .append("Line;\n");
+                sb.append(pad)
+                  .append("column = ")
+                  .append(andStart)
+                  .append("Column;\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(andElem)
+                  .append(".isSuccess() ? ParseResult.success(null, pos, line, column) : ")
+                  .append(andElem)
+                  .append(";\n");
             }
             case Expression.Not not -> {
                 var notStart = "notStart" + id;
                 var notElem = "notElem" + id;
-                sb.append(pad).append("int ").append(notStart).append(" = pos;\n");
-                sb.append(pad).append("int ").append(notStart).append("Line = line;\n");
-                sb.append(pad).append("int ").append(notStart).append("Column = column;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(notStart)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(notStart)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(notStart)
+                  .append("Column = column;\n");
                 generateExpressionCode(sb, not.expression(), notElem, indent, counter);
-                sb.append(pad).append("pos = ").append(notStart).append(";\n");
-                sb.append(pad).append("line = ").append(notStart).append("Line;\n");
-                sb.append(pad).append("column = ").append(notStart).append("Column;\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(notElem).append(".isSuccess() ? ParseResult.failure(\"not match\") : ParseResult.success(null, pos, line, column);\n");
+                sb.append(pad)
+                  .append("pos = ")
+                  .append(notStart)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("line = ")
+                  .append(notStart)
+                  .append("Line;\n");
+                sb.append(pad)
+                  .append("column = ")
+                  .append(notStart)
+                  .append("Column;\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(notElem)
+                  .append(".isSuccess() ? ParseResult.failure(\"not match\") : ParseResult.success(null, pos, line, column);\n");
             }
             case Expression.TokenBoundary tb -> {
                 var tbStart = "tbStart" + id;
                 var tbElem = "tbElem" + id;
-                sb.append(pad).append("int ").append(tbStart).append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(tbStart)
+                  .append(" = pos;\n");
                 generateExpressionCode(sb, tb.expression(), tbElem, indent, counter);
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(tbElem).append(".isSuccess() ? ParseResult.success(substring(").append(tbStart).append(", pos), pos, line, column) : ").append(tbElem).append(";\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(tbElem)
+                  .append(".isSuccess() ? ParseResult.success(substring(")
+                  .append(tbStart)
+                  .append(", pos), pos, line, column) : ")
+                  .append(tbElem)
+                  .append(";\n");
             }
             case Expression.Ignore ign -> {
                 var ignElem = "ignElem" + id;
                 generateExpressionCode(sb, ign.expression(), ignElem, indent, counter);
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(ignElem).append(".isSuccess() ? ParseResult.success(null, pos, line, column) : ").append(ignElem).append(";\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(ignElem)
+                  .append(".isSuccess() ? ParseResult.success(null, pos, line, column) : ")
+                  .append(ignElem)
+                  .append(";\n");
             }
             case Expression.Capture cap -> {
                 var capStart = "capStart" + id;
                 var capElem = "capElem" + id;
-                sb.append(pad).append("int ").append(capStart).append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(capStart)
+                  .append(" = pos;\n");
                 generateExpressionCode(sb, cap.expression(), capElem, indent, counter);
-                sb.append(pad).append("if (").append(capElem).append(".isSuccess()) {\n");
-                sb.append(pad).append("    captures.put(\"").append(cap.name()).append("\", substring(").append(capStart).append(", pos));\n");
-                sb.append(pad).append("}\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(capElem).append(";\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(capElem)
+                  .append(".isSuccess()) {\n");
+                sb.append(pad)
+                  .append("    captures.put(\"")
+                  .append(cap.name())
+                  .append("\", substring(")
+                  .append(capStart)
+                  .append(", pos));\n");
+                sb.append(pad)
+                  .append("}\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(capElem)
+                  .append(";\n");
             }
             case Expression.CaptureScope cs -> {
                 var savedCaptures = "savedCaptures" + id;
                 var csElem = "csElem" + id;
-                sb.append(pad).append("var ").append(savedCaptures).append(" = new HashMap<>(captures);\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(savedCaptures)
+                  .append(" = new HashMap<>(captures);\n");
                 generateExpressionCode(sb, cs.expression(), csElem, indent, counter);
-                sb.append(pad).append("captures.clear();\n");
-                sb.append(pad).append("captures.putAll(").append(savedCaptures).append(");\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(csElem).append(";\n");
+                sb.append(pad)
+                  .append("captures.clear();\n");
+                sb.append(pad)
+                  .append("captures.putAll(")
+                  .append(savedCaptures)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(csElem)
+                  .append(";\n");
             }
             case Expression.BackReference br -> {
                 var captured = "captured" + id;
-                sb.append(pad).append("var ").append(captured).append(" = captures.get(\"").append(br.name()).append("\");\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(captured).append(" != null ? matchLiteral(").append(captured).append(", false) : ParseResult.failure(\"capture '\");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(captured)
+                  .append(" = captures.get(\"")
+                  .append(br.name())
+                  .append("\");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(captured)
+                  .append(" != null ? matchLiteral(")
+                  .append(captured)
+                  .append(", false) : ParseResult.failure(\"capture '\");\n");
             }
             case Expression.Cut cut -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = ParseResult.success(null, pos, line, column);\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ParseResult.success(null, pos, line, column);\n");
             }
             case Expression.Group grp -> {
                 generateExpressionCode(sb, grp.expression(), resultVar, indent, counter);
@@ -601,16 +1077,20 @@ public final class ParserGenerator {
 
                 private void skipWhitespace() {
             """);
-
-        if (grammar.whitespace().isPresent()) {
+        if (grammar.whitespace()
+                   .isPresent()) {
             sb.append("        while (!isAtEnd()) {\n");
             sb.append("            int wsBeforePos = pos;\n");
             int[] wsCounter = {0};
-            generateExpressionCode(sb, grammar.whitespace().unwrap(), "wsResult", 3, wsCounter);
+            generateExpressionCode(sb,
+                                   grammar.whitespace()
+                                          .unwrap(),
+                                   "wsResult",
+                                   3,
+                                   wsCounter);
             sb.append("            if (wsResult.isFailure() || pos == wsBeforePos) break;\n");
             sb.append("        }\n");
         }
-
         sb.append("""
                 }
 
@@ -754,10 +1234,13 @@ public final class ParserGenerator {
     private String transformActionCode(String code) {
         // $0 stays as $0 (it's the matched text, handled separately)
         // Replace $N (N > 0) with values.get(N-1) using regex for unlimited support
-        return POSITIONAL_VAR.matcher(code).replaceAll(match -> {
-            int n = Integer.parseInt(match.group(1));
-            return n == 0 ? "\\$0" : "values.get(" + (n - 1) + ")";
-        });
+        return POSITIONAL_VAR.matcher(code)
+                             .replaceAll(match -> {
+                                             int n = Integer.parseInt(match.group(1));
+                                             return n == 0
+                                                    ? "\\$0"
+                                                    : "values.get(" + (n - 1) + ")";
+                                         });
     }
 
     private String wrapActionCode(String code) {
@@ -766,14 +1249,15 @@ public final class ParserGenerator {
             return "value = " + trimmed.substring(7);
         }
         if (!trimmed.contains(";") || (trimmed.endsWith(";") && !trimmed.contains("\n"))) {
-            var expr = trimmed.endsWith(";") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+            var expr = trimmed.endsWith(";")
+                       ? trimmed.substring(0, trimmed.length() - 1)
+                       : trimmed;
             return "value = " + expr + ";";
         }
         return trimmed.replace("return ", "value = ");
     }
 
     // === CST Generation Methods ===
-
     private void generateCstImports(StringBuilder sb) {
         sb.append("""
             import org.pragmatica.lang.Cause;
@@ -794,29 +1278,33 @@ public final class ParserGenerator {
         sb.append(" * This parser preserves all source information including trivia (whitespace/comments).\n");
         sb.append(" * Depends only on pragmatica-lite:core for Result type.\n");
         sb.append(" */\n");
-        sb.append("public final class ").append(className).append(" {\n\n");
+        sb.append("public final class ")
+          .append(className)
+          .append(" {\n\n");
     }
 
     private void generateRuleIdInterface(StringBuilder sb) {
         var rules = grammar.rules();
-
         sb.append("    // === Rule ID Types ===\n\n");
-
         // Nested records are implicitly permitted - no need for explicit permits clause
         sb.append("    public sealed interface RuleId {\n");
         sb.append("        int ordinal();\n");
         sb.append("        String name();\n\n");
-
         // Generate record for each rule
         int ordinal = 0;
         for (var rule : rules) {
             var ruleClassName = toClassName(rule.name());
-            sb.append("        record ").append(ruleClassName).append("() implements RuleId {\n");
-            sb.append("            public int ordinal() { return ").append(ordinal++).append("; }\n");
-            sb.append("            public String name() { return \"").append(rule.name()).append("\"; }\n");
+            sb.append("        record ")
+              .append(ruleClassName)
+              .append("() implements RuleId {\n");
+            sb.append("            public int ordinal() { return ")
+              .append(ordinal++ )
+              .append("; }\n");
+            sb.append("            public String name() { return \"")
+              .append(rule.name())
+              .append("\"; }\n");
             sb.append("        }\n");
         }
-
         // Generate built-in types for anonymous terminals (prefixed to avoid collision with grammar rules)
         sb.append("        // Built-in types for anonymous terminals\n");
         sb.append("        record PegLiteral() implements RuleId {\n");
@@ -836,14 +1324,18 @@ public final class ParserGenerator {
         sb.append("            public String name() { return \"token\"; }\n");
         sb.append("        }\n");
         sb.append("    }\n\n");
-
         // Generate singleton instances
         sb.append("    // Rule ID singleton instances\n");
         for (var rule : rules) {
             var ruleClassName = toClassName(rule.name());
             var constName = toConstantName(rule.name());
-            sb.append("    private static final RuleId.").append(ruleClassName)
-              .append(" ").append(constName).append(" = new RuleId.").append(ruleClassName).append("();\n");
+            sb.append("    private static final RuleId.")
+              .append(ruleClassName)
+              .append(" ")
+              .append(constName)
+              .append(" = new RuleId.")
+              .append(ruleClassName)
+              .append("();\n");
         }
         // Built-in singletons
         sb.append("    private static final RuleId.PegLiteral RULE_PEG_LITERAL = new RuleId.PegLiteral();\n");
@@ -856,16 +1348,18 @@ public final class ParserGenerator {
     private String toClassName(String ruleName) {
         // Convert rule name to valid Java class name (PascalCase)
         if (ruleName.startsWith("%")) {
-            ruleName = ruleName.substring(1); // Remove % prefix
+            ruleName = ruleName.substring(1);
         }
         // Handle special characters
         var sb = new StringBuilder();
         boolean capitalizeNext = true;
         for (char c : ruleName.toCharArray()) {
             if (Character.isLetterOrDigit(c)) {
-                sb.append(capitalizeNext ? Character.toUpperCase(c) : c);
+                sb.append(capitalizeNext
+                          ? Character.toUpperCase(c)
+                          : c);
                 capitalizeNext = false;
-            } else {
+            }else {
                 capitalizeNext = true;
             }
         }
@@ -875,7 +1369,7 @@ public final class ParserGenerator {
     private String toConstantName(String ruleName) {
         // Convert rule name to constant name (UPPER_SNAKE_CASE)
         if (ruleName.startsWith("%")) {
-            ruleName = ruleName.substring(1); // Remove % prefix
+            ruleName = ruleName.substring(1);
         }
         var sb = new StringBuilder("RULE_");
         for (char c : ruleName.toCharArray()) {
@@ -884,7 +1378,7 @@ public final class ParserGenerator {
             }
             if (Character.isLetterOrDigit(c)) {
                 sb.append(Character.toUpperCase(c));
-            } else {
+            }else {
                 sb.append('_');
             }
         }
@@ -935,7 +1429,6 @@ public final class ParserGenerator {
                     record Token(SourceSpan span, RuleId rule, String text,
                                  List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
             """);
-
         // Only add Error node type for ADVANCED mode (used in error recovery)
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
@@ -945,7 +1438,6 @@ public final class ParserGenerator {
                         }
                 """);
         }
-
         sb.append("""
                 }
 
@@ -965,7 +1457,6 @@ public final class ParserGenerator {
                 }
 
             """);
-
         if (errorReporting == ErrorReporting.ADVANCED) {
             generateAdvancedDiagnosticTypes(sb);
         }
@@ -1238,7 +1729,6 @@ public final class ParserGenerator {
                     this.packratEnabled = enabled;
                 }
             """);
-
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     private List<Diagnostic> diagnostics;
@@ -1246,7 +1736,6 @@ public final class ParserGenerator {
                     private String furthestExpected;
                 """);
         }
-
         sb.append("""
 
                 private void init(String input) {
@@ -1258,7 +1747,6 @@ public final class ParserGenerator {
                     this.captures = new HashMap<>();
                     this.inTokenBoundary = false;
             """);
-
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                         this.diagnostics = new ArrayList<>();
@@ -1266,7 +1754,6 @@ public final class ParserGenerator {
                         this.furthestExpected = null;
                 """);
         }
-
         sb.append("""
                 }
 
@@ -1316,7 +1803,6 @@ public final class ParserGenerator {
                 }
 
             """);
-
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     private void trackFailure(String expected) {
@@ -1353,9 +1839,13 @@ public final class ParserGenerator {
 
     private void generateCstParseMethods(StringBuilder sb) {
         var startRule = grammar.effectiveStartRule();
-        var startRuleName = startRule.isPresent() ? startRule.unwrap().name() : grammar.rules().getFirst().name();
+        var startRuleName = startRule.isPresent()
+                            ? startRule.unwrap()
+                                       .name()
+                            : grammar.rules()
+                                     .getFirst()
+                                     .name();
         var sanitizedName = sanitize(startRuleName);
-
         sb.append("""
                 // === Public Parse Methods ===
 
@@ -1396,7 +1886,6 @@ public final class ParserGenerator {
                 }
 
             """.formatted(sanitizedName));
-
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     /**
@@ -1452,22 +1941,24 @@ public final class ParserGenerator {
 
     private void generateCstRuleMethods(StringBuilder sb) {
         sb.append("    // === Rule Parsing Methods ===\n\n");
-
         int ruleId = 0;
         for (var rule : grammar.rules()) {
-            generateCstRuleMethod(sb, rule, ruleId++);
+            generateCstRuleMethod(sb, rule, ruleId++ );
         }
     }
 
     private void generateCstRuleMethod(StringBuilder sb, Rule rule, int ruleId) {
         var methodName = "parse_" + sanitize(rule.name());
         var ruleName = rule.name();
-
-        sb.append("    private CstParseResult ").append(methodName).append("(List<Trivia> leadingTrivia) {\n");
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("(List<Trivia> leadingTrivia) {\n");
         sb.append("        var startLoc = location();\n");
         sb.append("        \n");
         sb.append("        // Check cache\n");
-        sb.append("        long key = cacheKey(").append(ruleId).append(", startLoc.offset());\n");
+        sb.append("        long key = cacheKey(")
+          .append(ruleId)
+          .append(", startLoc.offset());\n");
         sb.append("        if (cache != null) {\n");
         sb.append("            var cached = cache.get(key);\n");
         sb.append("            if (cached != null) {\n");
@@ -1478,23 +1969,23 @@ public final class ParserGenerator {
         sb.append("        \n");
         sb.append("        var children = new ArrayList<CstNode>();\n");
         sb.append("        \n");
-
-        var counter = new int[]{0}; // Mutable counter for unique variable names
+        var counter = new int[]{0};
+        // Mutable counter for unique variable names
         generateCstExpressionCode(sb, rule.expression(), "result", 2, true, counter, false);
-
         sb.append("        \n");
         sb.append("        CstParseResult finalResult;\n");
         sb.append("        if (result.isSuccess()) {\n");
         sb.append("            var endLoc = location();\n");
         sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
-
         // Check if this rule contains only a token boundary or simple terminals
         var ruleIdConst = toConstantName(ruleName);
         if (isTokenRule(rule.expression())) {
-            sb.append("            var node = new CstNode.Token(span, ").append(ruleIdConst)
+            sb.append("            var node = new CstNode.Token(span, ")
+              .append(ruleIdConst)
               .append(", result.text.unwrap(), leadingTrivia, List.of());\n");
-        } else {
-            sb.append("            var node = new CstNode.NonTerminal(span, ").append(ruleIdConst)
+        }else {
+            sb.append("            var node = new CstNode.NonTerminal(span, ")
+              .append(ruleIdConst)
               .append(", children, leadingTrivia, List.of());\n");
         }
         sb.append("            finalResult = CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
@@ -1502,8 +1993,11 @@ public final class ParserGenerator {
         sb.append("            restoreLocation(startLoc);\n");
         // Use custom error message if available
         if (rule.hasErrorMessage()) {
-            sb.append("            finalResult = CstParseResult.failure(\"").append(escape(rule.errorMessage().unwrap())).append("\");\n");
-        } else {
+            sb.append("            finalResult = CstParseResult.failure(\"")
+              .append(escape(rule.errorMessage()
+                                 .unwrap()))
+              .append("\");\n");
+        }else {
             sb.append("            finalResult = result;\n");
         }
         sb.append("        }\n");
@@ -1518,7 +2012,9 @@ public final class ParserGenerator {
             case Expression.TokenBoundary tb -> true;
             case Expression.Literal lit -> true;
             case Expression.CharClass cc -> true;
-            case Expression.Sequence seq -> seq.elements().stream().allMatch(this::isTokenRule);
+            case Expression.Sequence seq -> seq.elements()
+                                               .stream()
+                                               .allMatch(this::isTokenRule);
             case Expression.Group grp -> isTokenRule(grp.expression());
             default -> false;
         };
@@ -1539,7 +2035,8 @@ public final class ParserGenerator {
         return switch (expr) {
             case Expression.Optional o -> true;
             case Expression.ZeroOrMore z -> true;
-            case Expression.Choice c -> true;  // Choice saves position and may restore on failure
+            case Expression.Choice c -> true;
+            // Choice saves position and may restore on failure
             case Expression.Group g -> isOptionalLike(g.expression());
             default -> false;
         };
@@ -1555,336 +2052,841 @@ public final class ParserGenerator {
             case Expression.ZeroOrMore zom -> zom.expression();
             case Expression.OneOrMore oom -> oom.expression();
             case Expression.Group grp -> extractInnerExpression(grp.expression());
-            default -> expr;  // If not wrapped in repetition, use as-is
+            default -> expr;
         };
     }
 
-    private void generateCstExpressionCode(StringBuilder sb, Expression expr, String resultVar, int indent, boolean addToChildren, int[] counter, boolean inWhitespaceRule) {
+    private void generateCstExpressionCode(StringBuilder sb,
+                                           Expression expr,
+                                           String resultVar,
+                                           int indent,
+                                           boolean addToChildren,
+                                           int[] counter,
+                                           boolean inWhitespaceRule) {
         var pad = "    ".repeat(indent);
-        var id = counter[0]++;  // Get unique ID for this expression
-
+        var id = counter[0]++ ;
+        // Get unique ID for this expression
         switch (expr) {
             case Expression.Literal lit -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = matchLiteralCst(\"")
-                    .append(escape(lit.text())).append("\", ").append(lit.caseInsensitive()).append(");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = matchLiteralCst(\"")
+                  .append(escape(lit.text()))
+                  .append("\", ")
+                  .append(lit.caseInsensitive())
+                  .append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
-                    sb.append(pad).append("}\n");
+                    sb.append(pad)
+                      .append("if (")
+                      .append(resultVar)
+                      .append(".isSuccess() && ")
+                      .append(resultVar)
+                      .append(".node.isPresent()) {\n");
+                    sb.append(pad)
+                      .append("    children.add(")
+                      .append(resultVar)
+                      .append(".node.unwrap());\n");
+                    sb.append(pad)
+                      .append("}\n");
                 }
             }
             case Expression.CharClass cc -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = matchCharClassCst(\"")
-                    .append(escape(cc.pattern())).append("\", ")
-                    .append(cc.negated()).append(", ")
-                    .append(cc.caseInsensitive()).append(");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = matchCharClassCst(\"")
+                  .append(escape(cc.pattern()))
+                  .append("\", ")
+                  .append(cc.negated())
+                  .append(", ")
+                  .append(cc.caseInsensitive())
+                  .append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
-                    sb.append(pad).append("}\n");
+                    sb.append(pad)
+                      .append("if (")
+                      .append(resultVar)
+                      .append(".isSuccess() && ")
+                      .append(resultVar)
+                      .append(".node.isPresent()) {\n");
+                    sb.append(pad)
+                      .append("    children.add(")
+                      .append(resultVar)
+                      .append(".node.unwrap());\n");
+                    sb.append(pad)
+                      .append("}\n");
                 }
             }
             case Expression.Dictionary dict -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = matchDictionaryCst(List.of(");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = matchDictionaryCst(List.of(");
                 var words = dict.words();
-                for (int i = 0; i < words.size(); i++) {
+                for (int i = 0; i < words.size(); i++ ) {
                     if (i > 0) sb.append(", ");
-                    sb.append("\"").append(escape(words.get(i))).append("\"");
+                    sb.append("\"")
+                      .append(escape(words.get(i)))
+                      .append("\"");
                 }
-                sb.append("), ").append(dict.caseInsensitive()).append(");\n");
+                sb.append("), ")
+                  .append(dict.caseInsensitive())
+                  .append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
-                    sb.append(pad).append("}\n");
+                    sb.append(pad)
+                      .append("if (")
+                      .append(resultVar)
+                      .append(".isSuccess() && ")
+                      .append(resultVar)
+                      .append(".node.isPresent()) {\n");
+                    sb.append(pad)
+                      .append("    children.add(")
+                      .append(resultVar)
+                      .append(".node.unwrap());\n");
+                    sb.append(pad)
+                      .append("}\n");
                 }
             }
             case Expression.Any any -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = matchAnyCst();\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = matchAnyCst();\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
-                    sb.append(pad).append("}\n");
+                    sb.append(pad)
+                      .append("if (")
+                      .append(resultVar)
+                      .append(".isSuccess() && ")
+                      .append(resultVar)
+                      .append(".node.isPresent()) {\n");
+                    sb.append(pad)
+                      .append("    children.add(")
+                      .append(resultVar)
+                      .append(".node.unwrap());\n");
+                    sb.append(pad)
+                      .append("}\n");
                 }
             }
             case Expression.Reference ref -> {
                 var triviaVar = "trivia" + id;
                 if (inWhitespaceRule) {
-                    sb.append(pad).append("var ").append(triviaVar).append(" = List.<Trivia>of();\n");
-                } else {
-                    sb.append(pad).append("var ").append(triviaVar).append(" = inTokenBoundary ? List.<Trivia>of() : skipWhitespace();\n");
+                    sb.append(pad)
+                      .append("var ")
+                      .append(triviaVar)
+                      .append(" = List.<Trivia>of();\n");
+                }else {
+                    sb.append(pad)
+                      .append("var ")
+                      .append(triviaVar)
+                      .append(" = inTokenBoundary ? List.<Trivia>of() : skipWhitespace();\n");
                 }
-                sb.append(pad).append("var ").append(resultVar).append(" = parse_")
-                    .append(sanitize(ref.ruleName())).append("(").append(triviaVar).append(");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = parse_")
+                  .append(sanitize(ref.ruleName()))
+                  .append("(")
+                  .append(triviaVar)
+                  .append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
-                    sb.append(pad).append("}\n");
+                    sb.append(pad)
+                      .append("if (")
+                      .append(resultVar)
+                      .append(".isSuccess() && ")
+                      .append(resultVar)
+                      .append(".node.isPresent()) {\n");
+                    sb.append(pad)
+                      .append("    children.add(")
+                      .append(resultVar)
+                      .append(".node.unwrap());\n");
+                    sb.append(pad)
+                      .append("}\n");
                 }
             }
             case Expression.Sequence seq -> {
                 var seqStart = "seqStart" + id;
                 var cutVar = "cut" + id;
-                sb.append(pad).append("CstParseResult ").append(resultVar).append(" = CstParseResult.success(null, \"\", location());\n");
-                sb.append(pad).append("var ").append(seqStart).append(" = location();\n");
-                sb.append(pad).append("boolean ").append(cutVar).append(" = false;\n");
+                sb.append(pad)
+                  .append("CstParseResult ")
+                  .append(resultVar)
+                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(seqStart)
+                  .append(" = location();\n");
+                sb.append(pad)
+                  .append("boolean ")
+                  .append(cutVar)
+                  .append(" = false;\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
+                    sb.append(pad)
+                      .append("if (")
+                      .append(resultVar)
+                      .append(".isSuccess()) {\n");
                     // Skip whitespace before non-Reference elements (References capture trivia themselves)
                     // Also don't skip for Optional/ZeroOrMore/Choice - they handle trivia internally (isOptionalLike)
                     if (i > 0 && !inWhitespaceRule && !isReference(elem) && !isOptionalLike(elem)) {
-                        sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
+                        sb.append(pad)
+                          .append("    if (!inTokenBoundary) skipWhitespace();\n");
                     }
                     var elemVar = "elem" + id + "_" + i;
                     generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
                     // Check for cut failure propagation first
-                    sb.append(pad).append("    if (").append(elemVar).append(".isCutFailure()) {\n");
-                    sb.append(pad).append("        restoreLocation(").append(seqStart).append(");\n");
-                    sb.append(pad).append("        ").append(resultVar).append(" = ").append(elemVar).append(";\n");
-                    sb.append(pad).append("    } else if (").append(elemVar).append(".isFailure()) {\n");
-                    sb.append(pad).append("        restoreLocation(").append(seqStart).append(");\n");
-                    sb.append(pad).append("        ").append(resultVar).append(" = ").append(cutVar).append(" ? ").append(elemVar).append(".asCutFailure() : ").append(elemVar).append(";\n");
-                    sb.append(pad).append("    }\n");
-                    sb.append(pad).append("}\n");
+                    sb.append(pad)
+                      .append("    if (")
+                      .append(elemVar)
+                      .append(".isCutFailure()) {\n");
+                    sb.append(pad)
+                      .append("        restoreLocation(")
+                      .append(seqStart)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("        ")
+                      .append(resultVar)
+                      .append(" = ")
+                      .append(elemVar)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("    } else if (")
+                      .append(elemVar)
+                      .append(".isFailure()) {\n");
+                    sb.append(pad)
+                      .append("        restoreLocation(")
+                      .append(seqStart)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("        ")
+                      .append(resultVar)
+                      .append(" = ")
+                      .append(cutVar)
+                      .append(" ? ")
+                      .append(elemVar)
+                      .append(".asCutFailure() : ")
+                      .append(elemVar)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("    }\n");
+                    sb.append(pad)
+                      .append("}\n");
                     // Track if this element was a cut
                     if (elem instanceof Expression.Cut) {
-                        sb.append(pad).append(cutVar).append(" = true;\n");
+                        sb.append(pad)
+                          .append(cutVar)
+                          .append(" = true;\n");
                     }
-                    i++;
+                    i++ ;
                 }
-                sb.append(pad).append("if (").append(resultVar).append(".isSuccess()) {\n");
-                sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.success(null, substring(").append(seqStart).append(".offset(), pos), location());\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(resultVar)
+                  .append(".isSuccess()) {\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = CstParseResult.success(null, substring(")
+                  .append(seqStart)
+                  .append(".offset(), pos), location());\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.Choice choice -> {
                 var choiceStart = "choiceStart" + id;
                 var savedChildren = "savedChildren" + id;
-                sb.append(pad).append("CstParseResult ").append(resultVar).append(" = null;\n");
-                sb.append(pad).append("var ").append(choiceStart).append(" = location();\n");
+                sb.append(pad)
+                  .append("CstParseResult ")
+                  .append(resultVar)
+                  .append(" = null;\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(choiceStart)
+                  .append(" = location();\n");
                 // Don't skip whitespace here - let alternatives capture trivia themselves
                 if (addToChildren) {
-                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildren)
+                      .append(" = new ArrayList<>(children);\n");
                 }
                 int i = 0;
                 for (var alt : choice.alternatives()) {
                     if (addToChildren) {
-                        sb.append(pad).append("children.clear();\n");
-                        sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                        sb.append(pad)
+                          .append("children.clear();\n");
+                        sb.append(pad)
+                          .append("children.addAll(")
+                          .append(savedChildren)
+                          .append(");\n");
                     }
                     var altVar = "alt" + id + "_" + i;
                     generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter, inWhitespaceRule);
-                    sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
-                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
-                    sb.append(pad).append("} else if (").append(altVar).append(".isCutFailure()) {\n");
+                    sb.append(pad)
+                      .append("if (")
+                      .append(altVar)
+                      .append(".isSuccess()) {\n");
+                    sb.append(pad)
+                      .append("    ")
+                      .append(resultVar)
+                      .append(" = ")
+                      .append(altVar)
+                      .append(";\n");
+                    sb.append(pad)
+                      .append("} else if (")
+                      .append(altVar)
+                      .append(".isCutFailure()) {\n");
                     // Convert CutFailure to regular failure for parent choices to allow backtracking at higher levels
-                    sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(".asRegularFailure();\n");
-                    sb.append(pad).append("} else {\n");
-                    sb.append(pad).append("    restoreLocation(").append(choiceStart).append(");\n");
-                    i++;
+                    sb.append(pad)
+                      .append("    ")
+                      .append(resultVar)
+                      .append(" = ")
+                      .append(altVar)
+                      .append(".asRegularFailure();\n");
+                    sb.append(pad)
+                      .append("} else {\n");
+                    sb.append(pad)
+                      .append("    restoreLocation(")
+                      .append(choiceStart)
+                      .append(");\n");
+                    i++ ;
                 }
-                for (int j = 0; j < choice.alternatives().size(); j++) {
-                    sb.append(pad).append("}\n");
+                for (int j = 0; j < choice.alternatives()
+                                          .size(); j++ ) {
+                    sb.append(pad)
+                      .append("}\n");
                 }
-                sb.append(pad).append("if (").append(resultVar).append(" == null) {\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(resultVar)
+                  .append(" == null) {\n");
                 if (addToChildren) {
-                    sb.append(pad).append("    children.clear();\n");
-                    sb.append(pad).append("    children.addAll(").append(savedChildren).append(");\n");
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildren)
+                      .append(");\n");
                 }
-                sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.failure(\"one of alternatives\");\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = CstParseResult.failure(\"one of alternatives\");\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.ZeroOrMore zom -> {
                 var zomStart = "zomStart" + id;
                 var beforeLoc = "beforeLoc" + id;
                 var zomElem = "zomElem" + id;
-                sb.append(pad).append("CstParseResult ").append(resultVar).append(" = CstParseResult.success(null, \"\", location());\n");
-                sb.append(pad).append("var ").append(zomStart).append(" = location();\n");
-                sb.append(pad).append("while (true) {\n");
-                sb.append(pad).append("    var ").append(beforeLoc).append(" = location();\n");
+                sb.append(pad)
+                  .append("CstParseResult ")
+                  .append(resultVar)
+                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(zomStart)
+                  .append(" = location();\n");
+                sb.append(pad)
+                  .append("while (true) {\n");
+                sb.append(pad)
+                  .append("    var ")
+                  .append(beforeLoc)
+                  .append(" = location();\n");
                 // Skip whitespace before non-Reference elements (References capture trivia themselves)
                 if (!inWhitespaceRule && !isReference(zom.expression())) {
-                    sb.append(pad).append("    if (!inTokenBoundary) skipWhitespace();\n");
+                    sb.append(pad)
+                      .append("    if (!inTokenBoundary) skipWhitespace();\n");
                 }
-                generateCstExpressionCode(sb, zom.expression(), zomElem, indent + 1, addToChildren, counter, inWhitespaceRule);
-                sb.append(pad).append("    if (").append(zomElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
-                sb.append(pad).append("        restoreLocation(").append(beforeLoc).append(");\n");
-                sb.append(pad).append("        break;\n");
-                sb.append(pad).append("    }\n");
-                sb.append(pad).append("}\n");
-                sb.append(pad).append(resultVar).append(" = CstParseResult.success(null, substring(").append(zomStart).append(".offset(), pos), location());\n");
+                generateCstExpressionCode(sb,
+                                          zom.expression(),
+                                          zomElem,
+                                          indent + 1,
+                                          addToChildren,
+                                          counter,
+                                          inWhitespaceRule);
+                sb.append(pad)
+                  .append("    if (")
+                  .append(zomElem)
+                  .append(".isFailure() || location().offset() == ")
+                  .append(beforeLoc)
+                  .append(".offset()) {\n");
+                sb.append(pad)
+                  .append("        restoreLocation(")
+                  .append(beforeLoc)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("        break;\n");
+                sb.append(pad)
+                  .append("    }\n");
+                sb.append(pad)
+                  .append("}\n");
+                sb.append(pad)
+                  .append(resultVar)
+                  .append(" = CstParseResult.success(null, substring(")
+                  .append(zomStart)
+                  .append(".offset(), pos), location());\n");
             }
             case Expression.OneOrMore oom -> {
                 var oomFirst = "oomFirst" + id;
                 var oomStart = "oomStart" + id;
                 var beforeLoc = "beforeLoc" + id;
                 var oomElem = "oomElem" + id;
-                generateCstExpressionCode(sb, oom.expression(), oomFirst, indent, addToChildren, counter, inWhitespaceRule);
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(oomFirst).append(";\n");
-                sb.append(pad).append("if (").append(oomFirst).append(".isSuccess()) {\n");
-                sb.append(pad).append("    var ").append(oomStart).append(" = location();\n");
-                sb.append(pad).append("    while (true) {\n");
-                sb.append(pad).append("        var ").append(beforeLoc).append(" = location();\n");
+                generateCstExpressionCode(sb,
+                                          oom.expression(),
+                                          oomFirst,
+                                          indent,
+                                          addToChildren,
+                                          counter,
+                                          inWhitespaceRule);
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(oomFirst)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(oomFirst)
+                  .append(".isSuccess()) {\n");
+                sb.append(pad)
+                  .append("    var ")
+                  .append(oomStart)
+                  .append(" = location();\n");
+                sb.append(pad)
+                  .append("    while (true) {\n");
+                sb.append(pad)
+                  .append("        var ")
+                  .append(beforeLoc)
+                  .append(" = location();\n");
                 // Skip whitespace before non-Reference elements (References capture trivia themselves)
                 if (!inWhitespaceRule && !isReference(oom.expression())) {
-                    sb.append(pad).append("        if (!inTokenBoundary) skipWhitespace();\n");
+                    sb.append(pad)
+                      .append("        if (!inTokenBoundary) skipWhitespace();\n");
                 }
-                generateCstExpressionCode(sb, oom.expression(), oomElem, indent + 2, addToChildren, counter, inWhitespaceRule);
-                sb.append(pad).append("        if (").append(oomElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
-                sb.append(pad).append("            restoreLocation(").append(beforeLoc).append(");\n");
-                sb.append(pad).append("            break;\n");
-                sb.append(pad).append("        }\n");
-                sb.append(pad).append("    }\n");
-                sb.append(pad).append("}\n");
+                generateCstExpressionCode(sb,
+                                          oom.expression(),
+                                          oomElem,
+                                          indent + 2,
+                                          addToChildren,
+                                          counter,
+                                          inWhitespaceRule);
+                sb.append(pad)
+                  .append("        if (")
+                  .append(oomElem)
+                  .append(".isFailure() || location().offset() == ")
+                  .append(beforeLoc)
+                  .append(".offset()) {\n");
+                sb.append(pad)
+                  .append("            restoreLocation(")
+                  .append(beforeLoc)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("            break;\n");
+                sb.append(pad)
+                  .append("        }\n");
+                sb.append(pad)
+                  .append("    }\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.Optional opt -> {
                 var optStart = "optStart" + id;
                 var optElem = "optElem" + id;
-                sb.append(pad).append("var ").append(optStart).append(" = location();\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(optStart)
+                  .append(" = location();\n");
                 // Skip whitespace before non-Reference elements (References capture trivia themselves)
                 if (!inWhitespaceRule && !isReference(opt.expression())) {
-                    sb.append(pad).append("if (!inTokenBoundary) skipWhitespace();\n");
+                    sb.append(pad)
+                      .append("if (!inTokenBoundary) skipWhitespace();\n");
                 }
-                generateCstExpressionCode(sb, opt.expression(), optElem, indent, addToChildren, counter, inWhitespaceRule);
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(optElem).append(".isSuccess() ? ").append(optElem).append(" : CstParseResult.success(null, \"\", location());\n");
-                sb.append(pad).append("if (").append(optElem).append(".isFailure()) {\n");
-                sb.append(pad).append("    restoreLocation(").append(optStart).append(");\n");
-                sb.append(pad).append("}\n");
+                generateCstExpressionCode(sb,
+                                          opt.expression(),
+                                          optElem,
+                                          indent,
+                                          addToChildren,
+                                          counter,
+                                          inWhitespaceRule);
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(optElem)
+                  .append(".isSuccess() ? ")
+                  .append(optElem)
+                  .append(" : CstParseResult.success(null, \"\", location());\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(optElem)
+                  .append(".isFailure()) {\n");
+                sb.append(pad)
+                  .append("    restoreLocation(")
+                  .append(optStart)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.Repetition rep -> {
                 var repCount = "repCount" + id;
                 var repStart = "repStart" + id;
                 var beforeLoc = "beforeLoc" + id;
                 var repElem = "repElem" + id;
-                sb.append(pad).append("int ").append(repCount).append(" = 0;\n");
-                sb.append(pad).append("var ").append(repStart).append(" = location();\n");
-                var maxStr = rep.max().isPresent() ? String.valueOf(rep.max().unwrap()) : "Integer.MAX_VALUE";
-                sb.append(pad).append("while (").append(repCount).append(" < ").append(maxStr).append(") {\n");
-                sb.append(pad).append("    var ").append(beforeLoc).append(" = location();\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repCount)
+                  .append(" = 0;\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(repStart)
+                  .append(" = location();\n");
+                var maxStr = rep.max()
+                                .isPresent()
+                             ? String.valueOf(rep.max()
+                                                 .unwrap())
+                             : "Integer.MAX_VALUE";
+                sb.append(pad)
+                  .append("while (")
+                  .append(repCount)
+                  .append(" < ")
+                  .append(maxStr)
+                  .append(") {\n");
+                sb.append(pad)
+                  .append("    var ")
+                  .append(beforeLoc)
+                  .append(" = location();\n");
                 // Skip whitespace before non-Reference elements (References capture trivia themselves)
                 if (!inWhitespaceRule && !isReference(rep.expression())) {
-                    sb.append(pad).append("    if (").append(repCount).append(" > 0 && !inTokenBoundary) skipWhitespace();\n");
+                    sb.append(pad)
+                      .append("    if (")
+                      .append(repCount)
+                      .append(" > 0 && !inTokenBoundary) skipWhitespace();\n");
                 }
-                generateCstExpressionCode(sb, rep.expression(), repElem, indent + 1, addToChildren, counter, inWhitespaceRule);
-                sb.append(pad).append("    if (").append(repElem).append(".isFailure() || location().offset() == ").append(beforeLoc).append(".offset()) {\n");
-                sb.append(pad).append("        restoreLocation(").append(beforeLoc).append(");\n");
-                sb.append(pad).append("        break;\n");
-                sb.append(pad).append("    }\n");
-                sb.append(pad).append("    ").append(repCount).append("++;\n");
-                sb.append(pad).append("}\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(repCount).append(" >= ").append(rep.min())
-                    .append(" ? CstParseResult.success(null, substring(").append(repStart).append(".offset(), pos), location()) : CstParseResult.failure(\"at least ")
-                    .append(rep.min()).append(" repetitions\");\n");
-                sb.append(pad).append("if (").append(resultVar).append(".isFailure()) {\n");
-                sb.append(pad).append("    restoreLocation(").append(repStart).append(");\n");
-                sb.append(pad).append("}\n");
+                generateCstExpressionCode(sb,
+                                          rep.expression(),
+                                          repElem,
+                                          indent + 1,
+                                          addToChildren,
+                                          counter,
+                                          inWhitespaceRule);
+                sb.append(pad)
+                  .append("    if (")
+                  .append(repElem)
+                  .append(".isFailure() || location().offset() == ")
+                  .append(beforeLoc)
+                  .append(".offset()) {\n");
+                sb.append(pad)
+                  .append("        restoreLocation(")
+                  .append(beforeLoc)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("        break;\n");
+                sb.append(pad)
+                  .append("    }\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(repCount)
+                  .append("++;\n");
+                sb.append(pad)
+                  .append("}\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(repCount)
+                  .append(" >= ")
+                  .append(rep.min())
+                  .append(" ? CstParseResult.success(null, substring(")
+                  .append(repStart)
+                  .append(".offset(), pos), location()) : CstParseResult.failure(\"at least ")
+                  .append(rep.min())
+                  .append(" repetitions\");\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(resultVar)
+                  .append(".isFailure()) {\n");
+                sb.append(pad)
+                  .append("    restoreLocation(")
+                  .append(repStart)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.And and -> {
                 var andStart = "andStart" + id;
                 var savedChildren = "savedChildrenAnd" + id;
                 var andElem = "andElem" + id;
-                sb.append(pad).append("var ").append(andStart).append(" = location();\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(andStart)
+                  .append(" = location();\n");
                 if (addToChildren) {
-                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildren)
+                      .append(" = new ArrayList<>(children);\n");
                 }
                 generateCstExpressionCode(sb, and.expression(), andElem, indent, false, counter, inWhitespaceRule);
-                sb.append(pad).append("restoreLocation(").append(andStart).append(");\n");
+                sb.append(pad)
+                  .append("restoreLocation(")
+                  .append(andStart)
+                  .append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("children.clear();\n");
-                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                    sb.append(pad)
+                      .append("children.clear();\n");
+                    sb.append(pad)
+                      .append("children.addAll(")
+                      .append(savedChildren)
+                      .append(");\n");
                 }
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(andElem).append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ").append(andElem).append(";\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(andElem)
+                  .append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ")
+                  .append(andElem)
+                  .append(";\n");
             }
             case Expression.Not not -> {
                 var notStart = "notStart" + id;
                 var savedChildren = "savedChildrenNot" + id;
                 var notElem = "notElem" + id;
-                sb.append(pad).append("var ").append(notStart).append(" = location();\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(notStart)
+                  .append(" = location();\n");
                 if (addToChildren) {
-                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildren)
+                      .append(" = new ArrayList<>(children);\n");
                 }
                 generateCstExpressionCode(sb, not.expression(), notElem, indent, false, counter, inWhitespaceRule);
-                sb.append(pad).append("restoreLocation(").append(notStart).append(");\n");
+                sb.append(pad)
+                  .append("restoreLocation(")
+                  .append(notStart)
+                  .append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("children.clear();\n");
-                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                    sb.append(pad)
+                      .append("children.clear();\n");
+                    sb.append(pad)
+                      .append("children.addAll(")
+                      .append(savedChildren)
+                      .append(");\n");
                 }
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(notElem).append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.success(null, \"\", location());\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(notElem)
+                  .append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.success(null, \"\", location());\n");
             }
             case Expression.TokenBoundary tb -> {
                 var tbStart = "tbStart" + id;
                 var savedChildren = "savedChildrenTb" + id;
                 var tbElem = "tbElem" + id;
-                sb.append(pad).append("var ").append(tbStart).append(" = location();\n");
-                sb.append(pad).append("inTokenBoundary = true;\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(tbStart)
+                  .append(" = location();\n");
+                sb.append(pad)
+                  .append("inTokenBoundary = true;\n");
                 if (addToChildren) {
-                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildren)
+                      .append(" = new ArrayList<>(children);\n");
                 }
                 generateCstExpressionCode(sb, tb.expression(), tbElem, indent, false, counter, inWhitespaceRule);
-                sb.append(pad).append("inTokenBoundary = false;\n");
+                sb.append(pad)
+                  .append("inTokenBoundary = false;\n");
                 if (addToChildren) {
-                    sb.append(pad).append("children.clear();\n");
-                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                    sb.append(pad)
+                      .append("children.clear();\n");
+                    sb.append(pad)
+                      .append("children.addAll(")
+                      .append(savedChildren)
+                      .append(");\n");
                 }
-                sb.append(pad).append("CstParseResult ").append(resultVar).append(";\n");
-                sb.append(pad).append("if (").append(tbElem).append(".isSuccess()) {\n");
-                sb.append(pad).append("    var tbText").append(id).append(" = substring(").append(tbStart).append(".offset(), pos);\n");
-                sb.append(pad).append("    var tbSpan").append(id).append(" = SourceSpan.of(").append(tbStart).append(", location());\n");
-                sb.append(pad).append("    var tbNode").append(id).append(" = new CstNode.Token(tbSpan").append(id).append(", RULE_PEG_TOKEN, tbText").append(id).append(", List.of(), List.of());\n");
+                sb.append(pad)
+                  .append("CstParseResult ")
+                  .append(resultVar)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(tbElem)
+                  .append(".isSuccess()) {\n");
+                sb.append(pad)
+                  .append("    var tbText")
+                  .append(id)
+                  .append(" = substring(")
+                  .append(tbStart)
+                  .append(".offset(), pos);\n");
+                sb.append(pad)
+                  .append("    var tbSpan")
+                  .append(id)
+                  .append(" = SourceSpan.of(")
+                  .append(tbStart)
+                  .append(", location());\n");
+                sb.append(pad)
+                  .append("    var tbNode")
+                  .append(id)
+                  .append(" = new CstNode.Token(tbSpan")
+                  .append(id)
+                  .append(", RULE_PEG_TOKEN, tbText")
+                  .append(id)
+                  .append(", List.of(), List.of());\n");
                 if (addToChildren) {
-                    sb.append(pad).append("    children.add(tbNode").append(id).append(");\n");
+                    sb.append(pad)
+                      .append("    children.add(tbNode")
+                      .append(id)
+                      .append(");\n");
                 }
-                sb.append(pad).append("    ").append(resultVar).append(" = CstParseResult.success(tbNode").append(id).append(", tbText").append(id).append(", location());\n");
-                sb.append(pad).append("} else {\n");
-                sb.append(pad).append("    ").append(resultVar).append(" = ").append(tbElem).append(";\n");
-                sb.append(pad).append("}\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = CstParseResult.success(tbNode")
+                  .append(id)
+                  .append(", tbText")
+                  .append(id)
+                  .append(", location());\n");
+                sb.append(pad)
+                  .append("} else {\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(tbElem)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.Ignore ign -> {
                 var savedChildren = "savedChildrenIgn" + id;
                 var ignElem = "ignElem" + id;
                 if (addToChildren) {
-                    sb.append(pad).append("var ").append(savedChildren).append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildren)
+                      .append(" = new ArrayList<>(children);\n");
                 }
                 generateCstExpressionCode(sb, ign.expression(), ignElem, indent, false, counter, inWhitespaceRule);
                 if (addToChildren) {
-                    sb.append(pad).append("children.clear();\n");
-                    sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+                    sb.append(pad)
+                      .append("children.clear();\n");
+                    sb.append(pad)
+                      .append("children.addAll(")
+                      .append(savedChildren)
+                      .append(");\n");
                 }
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(ignElem).append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ").append(ignElem).append(";\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(ignElem)
+                  .append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ")
+                  .append(ignElem)
+                  .append(";\n");
             }
             case Expression.Capture cap -> {
                 var capStart = "capStart" + id;
                 var capElem = "capElem" + id;
-                sb.append(pad).append("var ").append(capStart).append(" = location();\n");
-                generateCstExpressionCode(sb, cap.expression(), capElem, indent, addToChildren, counter, inWhitespaceRule);
-                sb.append(pad).append("if (").append(capElem).append(".isSuccess()) {\n");
-                sb.append(pad).append("    captures.put(\"").append(cap.name()).append("\", substring(").append(capStart).append(".offset(), pos));\n");
-                sb.append(pad).append("}\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(capElem).append(";\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(capStart)
+                  .append(" = location();\n");
+                generateCstExpressionCode(sb,
+                                          cap.expression(),
+                                          capElem,
+                                          indent,
+                                          addToChildren,
+                                          counter,
+                                          inWhitespaceRule);
+                sb.append(pad)
+                  .append("if (")
+                  .append(capElem)
+                  .append(".isSuccess()) {\n");
+                sb.append(pad)
+                  .append("    captures.put(\"")
+                  .append(cap.name())
+                  .append("\", substring(")
+                  .append(capStart)
+                  .append(".offset(), pos));\n");
+                sb.append(pad)
+                  .append("}\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(capElem)
+                  .append(";\n");
             }
             case Expression.CaptureScope cs -> {
                 var savedCapturesVar = "savedCaptures" + id;
                 var csElem = "csElem" + id;
-                sb.append(pad).append("var ").append(savedCapturesVar).append(" = new HashMap<>(captures);\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(savedCapturesVar)
+                  .append(" = new HashMap<>(captures);\n");
                 generateCstExpressionCode(sb, cs.expression(), csElem, indent, addToChildren, counter, inWhitespaceRule);
-                sb.append(pad).append("captures.clear();\n");
-                sb.append(pad).append("captures.putAll(").append(savedCapturesVar).append(");\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(csElem).append(";\n");
+                sb.append(pad)
+                  .append("captures.clear();\n");
+                sb.append(pad)
+                  .append("captures.putAll(")
+                  .append(savedCapturesVar)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(csElem)
+                  .append(";\n");
             }
             case Expression.BackReference br -> {
                 var captured = "captured" + id;
-                sb.append(pad).append("var ").append(captured).append(" = captures.get(\"").append(br.name()).append("\");\n");
-                sb.append(pad).append("var ").append(resultVar).append(" = ").append(captured).append(" != null ? matchLiteralCst(").append(captured).append(", false) : CstParseResult.failure(\"capture '\");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(captured)
+                  .append(" = captures.get(\"")
+                  .append(br.name())
+                  .append("\");\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(captured)
+                  .append(" != null ? matchLiteralCst(")
+                  .append(captured)
+                  .append(", false) : CstParseResult.failure(\"capture '\");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
-                    sb.append(pad).append("}\n");
+                    sb.append(pad)
+                      .append("if (")
+                      .append(resultVar)
+                      .append(".isSuccess() && ")
+                      .append(resultVar)
+                      .append(".node.isPresent()) {\n");
+                    sb.append(pad)
+                      .append("    children.add(")
+                      .append(resultVar)
+                      .append(".node.unwrap());\n");
+                    sb.append(pad)
+                      .append("}\n");
                 }
             }
             case Expression.Cut cut -> {
-                sb.append(pad).append("var ").append(resultVar).append(" = CstParseResult.success(null, \"\", location());\n");
+                sb.append(pad)
+                  .append("var ")
+                  .append(resultVar)
+                  .append(" = CstParseResult.success(null, \"\", location());\n");
             }
             case Expression.Group grp -> {
-                generateCstExpressionCode(sb, grp.expression(), resultVar, indent, addToChildren, counter, inWhitespaceRule);
+                generateCstExpressionCode(sb,
+                                          grp.expression(),
+                                          resultVar,
+                                          indent,
+                                          addToChildren,
+                                          counter,
+                                          inWhitespaceRule);
             }
         }
     }
@@ -1897,12 +2899,12 @@ public final class ParserGenerator {
                     var trivia = new ArrayList<Trivia>();
                     if (inTokenBoundary) return trivia;
             """);
-
-        if (grammar.whitespace().isPresent()) {
+        if (grammar.whitespace()
+                   .isPresent()) {
             // Extract inner expression from ZeroOrMore/OneOrMore to match one element at a time
-            var wsExpr = grammar.whitespace().unwrap();
+            var wsExpr = grammar.whitespace()
+                                .unwrap();
             var innerExpr = extractInnerExpression(wsExpr);
-
             sb.append("        while (!isAtEnd()) {\n");
             sb.append("            var wsStartLoc = location();\n");
             sb.append("            var wsStartPos = pos;\n");
@@ -1913,7 +2915,6 @@ public final class ParserGenerator {
             sb.append("            trivia.add(classifyTrivia(wsSpan, wsText));\n");
             sb.append("        }\n");
         }
-
         sb.append("""
                     return trivia;
                 }
@@ -1943,7 +2944,6 @@ public final class ParserGenerator {
                             tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
                         );
             """);
-
         // Add Error case only for ADVANCED mode
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
@@ -1952,13 +2952,11 @@ public final class ParserGenerator {
                             );
                 """);
         }
-
         sb.append("""
                     };
                 }
 
             """);
-
         // Generate match methods with trackFailure calls for ADVANCED mode
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
@@ -2014,7 +3012,7 @@ public final class ParserGenerator {
                     }
 
                 """);
-        } else {
+        }else {
             sb.append("""
                     private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {
                         if (remaining() < text.length()) {
@@ -2066,7 +3064,6 @@ public final class ParserGenerator {
                 """);
         }
         sb.append(MATCHES_WORD_METHOD);
-
         // Generate matchCharClassCst and matchAnyCst with trackFailure for ADVANCED mode
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
@@ -2092,7 +3089,7 @@ public final class ParserGenerator {
                     }
 
                 """);
-        } else {
+        }else {
             sb.append("""
 
                     private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
@@ -2116,7 +3113,6 @@ public final class ParserGenerator {
                 """);
         }
         sb.append(MATCHES_PATTERN_METHOD);
-
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
 
@@ -2135,7 +3131,7 @@ public final class ParserGenerator {
 
                     // === CST Parse Result ===
                 """);
-        } else {
+        }else {
             sb.append("""
 
                     private CstParseResult matchAnyCst() {
@@ -2153,7 +3149,6 @@ public final class ParserGenerator {
                     // === CST Parse Result ===
                 """);
         }
-
         sb.append("""
 
                 private static final class CstParseResult {

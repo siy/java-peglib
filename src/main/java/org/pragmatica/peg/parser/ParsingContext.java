@@ -17,7 +17,6 @@ import java.util.Map;
  * Mutable parsing context that tracks state during parsing.
  */
 public final class ParsingContext {
-
     private final String input;
     private final Grammar grammar;
     private final ParserConfig config;
@@ -46,8 +45,12 @@ public final class ParsingContext {
         this.input = input;
         this.grammar = grammar;
         this.config = config;
-        this.packratCache = config.packratEnabled() ? Option.some(new HashMap<>()) : Option.none();
-        this.ruleIds = config.packratEnabled() ? Option.some(new HashMap<>()) : Option.none();
+        this.packratCache = config.packratEnabled()
+                            ? Option.some(new HashMap<>())
+                            : Option.none();
+        this.ruleIds = config.packratEnabled()
+                       ? Option.some(new HashMap<>())
+                       : Option.none();
         this.captures = new HashMap<>();
         this.diagnostics = new ArrayList<>();
         this.pos = 0;
@@ -58,7 +61,7 @@ public final class ParsingContext {
         this.furthestColumn = 1;
         this.furthestExpected = "";
         this.inRecovery = false;
-        this.recoveryStartPos = -1;
+        this.recoveryStartPos = - 1;
     }
 
     public static ParsingContext create(String input, Grammar grammar, ParserConfig config) {
@@ -66,7 +69,6 @@ public final class ParsingContext {
     }
 
     // === Position Management ===
-
     public int pos() {
         return pos;
     }
@@ -94,7 +96,6 @@ public final class ParsingContext {
     }
 
     // === Character Access ===
-
     public char peek() {
         return input.charAt(pos);
     }
@@ -104,12 +105,12 @@ public final class ParsingContext {
     }
 
     public char advance() {
-        char c = input.charAt(pos++);
+        char c = input.charAt(pos++ );
         if (c == '\n') {
-            line++;
+            line++ ;
             column = 1;
-        } else {
-            column++;
+        }else {
+            column++ ;
         }
         return c;
     }
@@ -123,17 +124,16 @@ public final class ParsingContext {
     }
 
     // === Error Tracking ===
-
     public void updateFurthest(String expected) {
         if (pos > furthestPos) {
             furthestPos = pos;
             furthestLine = line;
             furthestColumn = column;
             furthestExpected = expected;
-        } else if (pos == furthestPos && !furthestExpected.contains(expected)) {
+        }else if (pos == furthestPos && !furthestExpected.contains(expected)) {
             furthestExpected = furthestExpected.isEmpty()
-                ? expected
-                : furthestExpected + " or " + expected;
+                               ? expected
+                               : furthestExpected + " or " + expected;
         }
     }
 
@@ -150,7 +150,6 @@ public final class ParsingContext {
     }
 
     // === Diagnostic Collection (for advanced error recovery) ===
-
     /**
      * Add a diagnostic error and continue parsing if recovery is enabled.
      */
@@ -162,7 +161,8 @@ public final class ParsingContext {
      * Create and add an error diagnostic at current position.
      */
     public void addError(String message, SourceSpan span, String label) {
-        var diag = Diagnostic.error(message, span).withLabel(label);
+        var diag = Diagnostic.error(message, span)
+                             .withLabel(label);
         diagnostics.add(diag);
     }
 
@@ -171,10 +171,14 @@ public final class ParsingContext {
      */
     public void addUnexpectedError(String found, String expected) {
         var span = SourceSpan.at(location());
-        var message = found.isEmpty() ? "unexpected end of input" : "unexpected input";
+        var message = found.isEmpty()
+                      ? "unexpected end of input"
+                      : "unexpected input";
         var diag = Diagnostic.error(message, span)
-            .withLabel("found '" + (found.isEmpty() ? "EOF" : found) + "'")
-            .withHelp("expected " + expected);
+                             .withLabel("found '" + (found.isEmpty()
+                                                     ? "EOF"
+                                                     : found) + "'")
+                             .withHelp("expected " + expected);
         diagnostics.add(diag);
     }
 
@@ -200,7 +204,6 @@ public final class ParsingContext {
     }
 
     // === Error Recovery State ===
-
     /**
      * Check if advanced recovery is enabled.
      */
@@ -223,7 +226,7 @@ public final class ParsingContext {
      */
     public void exitRecovery() {
         inRecovery = false;
-        recoveryStartPos = -1;
+        recoveryStartPos = - 1;
     }
 
     /**
@@ -263,13 +266,12 @@ public final class ParsingContext {
     }
 
     // === Token Boundary Tracking ===
-
     public void enterTokenBoundary() {
-        tokenBoundaryDepth++;
+        tokenBoundaryDepth++ ;
     }
 
     public void exitTokenBoundary() {
-        tokenBoundaryDepth--;
+        tokenBoundaryDepth-- ;
     }
 
     public boolean inTokenBoundary() {
@@ -277,7 +279,6 @@ public final class ParsingContext {
     }
 
     // === Whitespace Skipping Guard ===
-
     public boolean isSkippingWhitespace() {
         return skippingWhitespace;
     }
@@ -291,7 +292,6 @@ public final class ParsingContext {
     }
 
     // === Captures (for back-references) ===
-
     public void setCapture(String name, String value) {
         captures.put(name, value);
     }
@@ -320,7 +320,6 @@ public final class ParsingContext {
     }
 
     // === Packrat Cache ===
-
     public Option<ParseResult> getCached(String ruleName) {
         return getCachedAt(ruleName, pos);
     }
@@ -330,7 +329,8 @@ public final class ParsingContext {
             return Option.none();
         }
         long key = packratKey(ruleName, position);
-        return Option.option(packratCache.unwrap().get(key));
+        return Option.option(packratCache.unwrap()
+                                         .get(key));
     }
 
     public void cache(String ruleName, ParseResult result) {
@@ -340,17 +340,20 @@ public final class ParsingContext {
     public void cacheAt(String ruleName, int position, ParseResult result) {
         if (packratCache.isPresent()) {
             long key = packratKey(ruleName, position);
-            packratCache.unwrap().put(key, result);
+            packratCache.unwrap()
+                        .put(key, result);
         }
     }
 
     private long packratKey(String ruleName, int position) {
-        int ruleId = ruleIds.unwrap().computeIfAbsent(ruleName, k -> ruleIds.unwrap().size());
-        return ((long) ruleId << 32) | (position & 0xFFFFFFFFL);
+        int ruleId = ruleIds.unwrap()
+                            .computeIfAbsent(ruleName,
+                                             k -> ruleIds.unwrap()
+                                                         .size());
+        return ((long) ruleId<< 32) | (position & 0xFFFFFFFFL);
     }
 
     // === Accessors ===
-
     public String input() {
         return input;
     }
@@ -364,7 +367,6 @@ public final class ParsingContext {
     }
 
     // === Span Creation ===
-
     public SourceSpan spanFrom(SourceLocation start) {
         return SourceSpan.of(start, location());
     }

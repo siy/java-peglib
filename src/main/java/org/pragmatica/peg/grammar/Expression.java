@@ -9,14 +9,12 @@ import java.util.List;
  * PEG expression types - the building blocks of grammar rules.
  */
 public sealed interface Expression {
-
     /**
      * Source location of this expression in the grammar.
      */
     SourceSpan span();
 
     // === Terminals ===
-
     /**
      * Literal string match: 'text' or "text"
      */
@@ -38,7 +36,6 @@ public sealed interface Expression {
     record Reference(SourceSpan span, String ruleName) implements Expression {}
 
     // === Combinators ===
-
     /**
      * Sequence: e1 e2 e3
      */
@@ -50,7 +47,6 @@ public sealed interface Expression {
     record Choice(SourceSpan span, List<Expression> alternatives) implements Expression {}
 
     // === Repetition ===
-
     /**
      * Zero or more: e*
      */
@@ -72,7 +68,6 @@ public sealed interface Expression {
     record Repetition(SourceSpan span, Expression expression, int min, Option<Integer> max) implements Expression {}
 
     // === Predicates ===
-
     /**
      * Positive lookahead: &e
      */
@@ -84,7 +79,6 @@ public sealed interface Expression {
     record Not(SourceSpan span, Expression expression) implements Expression {}
 
     // === Special ===
-
     /**
      * Token boundary: < e > - captures matched text
      */

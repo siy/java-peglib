@@ -24,7 +24,6 @@ import org.pragmatica.peg.parser.PegEngine;
  * }</pre>
  */
 public final class PegParser {
-
     private PegParser() {}
 
     /**
@@ -39,7 +38,7 @@ public final class PegParser {
      */
     public static Result<Parser> fromGrammar(String grammarText, ParserConfig config) {
         return GrammarParser.parse(grammarText)
-            .flatMap(grammar -> fromGrammar(grammar, config));
+                            .flatMap(grammar -> fromGrammar(grammar, config));
     }
 
     /**
@@ -54,8 +53,8 @@ public final class PegParser {
      */
     public static Result<Parser> fromGrammar(Grammar grammar, ParserConfig config) {
         return grammar.validate()
-            .flatMap(g -> PegEngine.create(g, config)
-                .map(engine -> (Parser) engine));
+                      .flatMap(g -> PegEngine.create(g, config)
+                                             .map(engine -> (Parser) engine));
     }
 
     /**
@@ -64,7 +63,7 @@ public final class PegParser {
      */
     public static Result<Parser> fromGrammarWithoutActions(Grammar grammar, ParserConfig config) {
         return grammar.validate()
-            .map(g -> PegEngine.createWithoutActions(g, config));
+                      .map(g -> PegEngine.createWithoutActions(g, config));
     }
 
     /**
@@ -78,8 +77,9 @@ public final class PegParser {
      */
     public static Result<String> generateParser(String grammarText, String packageName, String className) {
         return GrammarParser.parse(grammarText)
-            .flatMap(Grammar::validate)
-            .map(grammar -> ParserGenerator.create(grammar, packageName, className).generate());
+                            .flatMap(Grammar::validate)
+                            .map(grammar -> ParserGenerator.create(grammar, packageName, className)
+                                                           .generate());
     }
 
     /**
@@ -93,8 +93,9 @@ public final class PegParser {
      */
     public static Result<String> generateCstParser(String grammarText, String packageName, String className) {
         return GrammarParser.parse(grammarText)
-            .flatMap(Grammar::validate)
-            .map(grammar -> ParserGenerator.create(grammar, packageName, className).generateCst());
+                            .flatMap(Grammar::validate)
+                            .map(grammar -> ParserGenerator.create(grammar, packageName, className)
+                                                           .generateCst());
     }
 
     /**
@@ -107,11 +108,14 @@ public final class PegParser {
      * @param errorReporting BASIC for simple errors, ADVANCED for Rust-style diagnostics
      * @return generated Java source code, or error if grammar is invalid
      */
-    public static Result<String> generateCstParser(String grammarText, String packageName, String className,
+    public static Result<String> generateCstParser(String grammarText,
+                                                   String packageName,
+                                                   String className,
                                                    ErrorReporting errorReporting) {
         return GrammarParser.parse(grammarText)
-            .flatMap(Grammar::validate)
-            .map(grammar -> ParserGenerator.create(grammar, packageName, className, errorReporting).generateCst());
+                            .flatMap(Grammar::validate)
+                            .map(grammar -> ParserGenerator.create(grammar, packageName, className, errorReporting)
+                                                           .generateCst());
     }
 
     /**

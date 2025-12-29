@@ -1,5 +1,4 @@
 package org.pragmatica.peg.generator;
-
 /**
  * Controls error reporting style in generated parsers.
  */
@@ -9,7 +8,6 @@ public enum ErrorReporting {
      * Minimal code footprint, suitable for simple parsers.
      */
     BASIC,
-
     /**
      * Advanced Rust-style error reporting with rich diagnostics.
      * Includes source context, underlines, labels, and multi-error collection.

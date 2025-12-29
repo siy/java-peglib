@@ -19,10 +19,9 @@ import java.util.List;
  * @param source      The original source text (for formatting diagnostics)
  */
 public record ParseResultWithDiagnostics(
-    Option<CstNode> node,
-    List<Diagnostic> diagnostics,
-    String source
-) {
+ Option<CstNode> node,
+ List<Diagnostic> diagnostics,
+ String source) {
     /**
      * Create a successful result with no errors.
      */
@@ -33,7 +32,9 @@ public record ParseResultWithDiagnostics(
     /**
      * Create a result with errors (may have partial node or none).
      */
-    public static ParseResultWithDiagnostics withErrors(Option<CstNode> node, List<Diagnostic> diagnostics, String source) {
+    public static ParseResultWithDiagnostics withErrors(Option<CstNode> node,
+                                                        List<Diagnostic> diagnostics,
+                                                        String source) {
         return new ParseResultWithDiagnostics(node, List.copyOf(diagnostics), source);
     }
 
@@ -88,8 +89,8 @@ public record ParseResultWithDiagnostics(
      */
     public int errorCount() {
         return (int) diagnostics.stream()
-            .filter(d -> d.severity() == Diagnostic.Severity.ERROR)
-            .count();
+                               .filter(d -> d.severity() == Diagnostic.Severity.ERROR)
+                               .count();
     }
 
     /**
@@ -97,7 +98,7 @@ public record ParseResultWithDiagnostics(
      */
     public int warningCount() {
         return (int) diagnostics.stream()
-            .filter(d -> d.severity() == Diagnostic.Severity.WARNING)
-            .count();
+                               .filter(d -> d.severity() == Diagnostic.Severity.WARNING)
+                               .count();
     }
 }

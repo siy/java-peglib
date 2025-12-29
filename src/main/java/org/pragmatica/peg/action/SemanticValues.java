@@ -10,7 +10,6 @@ import java.util.List;
  * Provides access to matched text and child values.
  */
 public final class SemanticValues {
-
     private final String matchedText;
     private final SourceSpan span;
     private final List<Object> values;
@@ -123,7 +122,9 @@ public final class SemanticValues {
     @SuppressWarnings("unchecked")
     public <T> T getOrDefault(int index, T defaultValue) {
         var opt = this.<T>getOpt(index);
-        return opt.isPresent() ? opt.unwrap() : defaultValue;
+        return opt.isPresent()
+               ? opt.unwrap()
+               : defaultValue;
     }
 
     /**
@@ -151,8 +152,8 @@ public final class SemanticValues {
     @SuppressWarnings("unchecked")
     public <T> List<T> transform() {
         return values.stream()
-            .map(v -> (T) v)
-            .toList();
+                     .map(v -> (T) v)
+                     .toList();
     }
 
     @Override

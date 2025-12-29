@@ -11,7 +11,6 @@ import java.util.List;
  * Result of parsing an expression - either success with a node or failure.
  */
 public sealed interface ParseResult {
-
     boolean isSuccess();
 
     default boolean isFailure() {
@@ -22,12 +21,10 @@ public sealed interface ParseResult {
      * Successful parse with CST node and new position.
      */
     record Success(
-        CstNode node,
-        SourceLocation endLocation,
-        List<Trivia> trailingTrivia,
-        Option<Object> semanticValue
-    ) implements ParseResult {
-
+    CstNode node,
+    SourceLocation endLocation,
+    List<Trivia> trailingTrivia,
+    Option<Object> semanticValue) implements ParseResult {
         @Override
         public boolean isSuccess() {
             return true;
@@ -69,10 +66,8 @@ public sealed interface ParseResult {
      * Failed parse - no match at current position.
      */
     record Failure(
-        SourceLocation location,
-        String expected
-    ) implements ParseResult {
-
+    SourceLocation location,
+    String expected) implements ParseResult {
         @Override
         public boolean isSuccess() {
             return false;
@@ -87,9 +82,7 @@ public sealed interface ParseResult {
      * Special result for predicates - matched but consumed no input.
      */
     record PredicateSuccess(
-        SourceLocation location
-    ) implements ParseResult {
-
+    SourceLocation location) implements ParseResult {
         @Override
         public boolean isSuccess() {
             return true;
@@ -100,10 +93,8 @@ public sealed interface ParseResult {
      * Special result for ignored expressions - matched but no node produced.
      */
     record Ignored(
-        SourceLocation endLocation,
-        String matchedText
-    ) implements ParseResult {
-
+    SourceLocation endLocation,
+    String matchedText) implements ParseResult {
         @Override
         public boolean isSuccess() {
             return true;
@@ -115,10 +106,8 @@ public sealed interface ParseResult {
      * Used when a cut (^) operator was encountered and subsequent parsing failed.
      */
     record CutFailure(
-        SourceLocation location,
-        String expected
-    ) implements ParseResult {
-
+    SourceLocation location,
+    String expected) implements ParseResult {
         @Override
         public boolean isSuccess() {
             return false;

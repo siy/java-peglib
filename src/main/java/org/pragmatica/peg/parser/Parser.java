@@ -8,7 +8,6 @@ import org.pragmatica.peg.tree.CstNode;
  * Parser interface - parses input text according to a grammar.
  */
 public interface Parser {
-
     /**
      * Parse input and return CST (lossless, preserves trivia).
      */

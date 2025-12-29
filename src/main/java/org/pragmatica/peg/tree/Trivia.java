@@ -1,11 +1,9 @@
 package org.pragmatica.peg.tree;
-
 /**
  * Trivia represents non-semantic content: whitespace and comments.
  * Grouped for convenience in CST representation.
  */
 public sealed interface Trivia {
-
     SourceSpan span();
 
     String text();

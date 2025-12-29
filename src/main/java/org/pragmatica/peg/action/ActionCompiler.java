@@ -23,7 +23,6 @@ import java.util.regex.Pattern;
  * Uses the JDK Compiler API for runtime compilation.
  */
 public final class ActionCompiler {
-
     private static final AtomicInteger COUNTER = new AtomicInteger(0);
     private static final String PACKAGE = "org.pragmatica.peg.action.generated";
 
@@ -48,7 +47,6 @@ public final class ActionCompiler {
      */
     public Result<Map<String, Action>> compileGrammar(Grammar grammar) {
         var actions = new HashMap<String, Action>();
-
         for (var rule : grammar.rules()) {
             if (rule.hasAction()) {
                 var result = compileAction(rule);
@@ -58,7 +56,6 @@ public final class ActionCompiler {
                 actions.put(rule.name(), result.unwrap());
             }
         }
-
         return Result.success(actions);
     }
 
@@ -66,15 +63,19 @@ public final class ActionCompiler {
      * Compile a single rule's action.
      */
     public Result<Action> compileAction(Rule rule) {
-        if (rule.action().isEmpty()) {
+        if (rule.action()
+                .isEmpty()) {
             return Result.failure(new ParseError.SemanticError(
-                rule.span().start(),
-                "Rule '" + rule.name() + "' has no action"
-            ));
+            rule.span()
+                .start(),
+            "Rule '" + rule.name() + "' has no action"));
         }
-
-        var actionCode = rule.action().unwrap();
-        return compileActionCode(rule.name(), actionCode, rule.span().start());
+        var actionCode = rule.action()
+                             .unwrap();
+        return compileActionCode(rule.name(),
+                                 actionCode,
+                                 rule.span()
+                                     .start());
     }
 
     /**
@@ -83,12 +84,9 @@ public final class ActionCompiler {
     public Result<Action> compileActionCode(String ruleName, String actionCode, SourceLocation location) {
         var className = "Action_" + sanitize(ruleName) + "_" + COUNTER.incrementAndGet();
         var fullClassName = PACKAGE + "." + className;
-
         // Transform action code: $0 -> sv.token(), $1 -> sv.get(0), etc.
         var transformedCode = transformActionCode(actionCode);
-
         var sourceCode = generateActionClass(className, transformedCode);
-
         return compileAndLoad(fullClassName, sourceCode, location);
     }
 
@@ -97,13 +95,14 @@ public final class ActionCompiler {
     private String transformActionCode(String code) {
         // Replace $0 with sv.token()
         var result = code.replace("$0", "sv.token()");
-
         // Replace $N (N > 0) with sv.get(N-1) using regex for unlimited support
-        result = POSITIONAL_VAR.matcher(result).replaceAll(match -> {
-            int n = Integer.parseInt(match.group(1));
-            return n == 0 ? "sv.token()" : "sv.get(" + (n - 1) + ")";
-        });
-
+        result = POSITIONAL_VAR.matcher(result)
+                               .replaceAll(match -> {
+                                               int n = Integer.parseInt(match.group(1));
+                                               return n == 0
+                                                      ? "sv.token()"
+                                                      : "sv.get(" + (n - 1) + ")";
+                                           });
         return result;
     }
 
@@ -132,7 +131,9 @@ public final class ActionCompiler {
         }
         // If code is a simple expression, wrap with return
         if (!trimmed.contains(";") || trimmed.endsWith(";") && !trimmed.contains("\n")) {
-            var expr = trimmed.endsWith(";") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+            var expr = trimmed.endsWith(";")
+                       ? trimmed.substring(0, trimmed.length() - 1)
+                       : trimmed;
             return "return " + expr + ";";
         }
         // Otherwise, assume it's a block that handles its own return
@@ -143,45 +144,27 @@ public final class ActionCompiler {
         var compiler = ToolProvider.getSystemJavaCompiler();
         if (compiler == null) {
             return Result.failure(new ParseError.SemanticError(
-                location,
-                "No Java compiler available. Run with JDK, not JRE."
-            ));
+            location, "No Java compiler available. Run with JDK, not JRE."));
         }
-
         var fileManager = new InMemoryFileManager(
-            compiler.getStandardFileManager(null, null, null)
-        );
-
+        compiler.getStandardFileManager(null, null, null));
         var sourceFile = new StringJavaFileObject(className, sourceCode);
         var diagnostics = new StringWriter();
-
         var task = compiler.getTask(
-            diagnostics,
-            fileManager,
-            null,
-            List.of("--release", "25"),
-            null,
-            List.of(sourceFile)
-        );
-
+        diagnostics, fileManager, null, List.of("--release", "25"), null, List.of(sourceFile));
         if (!task.call()) {
             return Result.failure(new ParseError.SemanticError(
-                location,
-                "Action compilation failed: " + diagnostics
-            ));
+            location, "Action compilation failed: " + diagnostics));
         }
-
-        try {
+        try{
             var classLoader = new InMemoryClassLoader(fileManager, parentLoader);
             var actionClass = classLoader.loadClass(className);
-            var action = (Action) actionClass.getDeclaredConstructor().newInstance();
+            var action = (Action) actionClass.getDeclaredConstructor()
+                                            .newInstance();
             return Result.success(action);
         } catch (Exception e) {
             return Result.failure(new ParseError.ActionError(
-                location,
-                sourceCode,
-                e
-            ));
+            location, sourceCode, e));
         }
     }
 
@@ -190,7 +173,6 @@ public final class ActionCompiler {
     }
 
     // === In-memory compilation support ===
-
     private static class StringJavaFileObject extends SimpleJavaFileObject {
         private final String code;
 
@@ -237,8 +219,10 @@ public final class ActionCompiler {
         }
 
         @Override
-        public JavaFileObject getJavaFileForOutput(Location location, String className,
-                                                    JavaFileObject.Kind kind, javax.tools.FileObject sibling) {
+        public JavaFileObject getJavaFileForOutput(Location location,
+                                                   String className,
+                                                   JavaFileObject.Kind kind,
+                                                   javax.tools.FileObject sibling) {
             var fileObject = new ByteArrayJavaFileObject(className);
             classFiles.put(className, fileObject);
             return fileObject;
@@ -246,7 +230,9 @@ public final class ActionCompiler {
 
         byte[] getClassBytes(String className) {
             var file = classFiles.get(className);
-            return file != null ? file.getBytes() : null;
+            return file != null
+                   ? file.getBytes()
+                   : null;
         }
     }
 
@@ -259,7 +245,7 @@ public final class ActionCompiler {
         }
 
         @Override
-        protected Class<?> findClass(String name) throws ClassNotFoundException {
+        protected Class< ? > findClass(String name) throws ClassNotFoundException {
             var bytes = fileManager.getClassBytes(name);
             if (bytes == null) {
                 throw new ClassNotFoundException(name);

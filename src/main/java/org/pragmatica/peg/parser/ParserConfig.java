@@ -6,13 +6,9 @@ import org.pragmatica.peg.error.RecoveryStrategy;
  * Parser configuration options.
  */
 public record ParserConfig(
-    boolean packratEnabled,
-    RecoveryStrategy recoveryStrategy,
-    boolean captureTrivia
-) {
+ boolean packratEnabled,
+ RecoveryStrategy recoveryStrategy,
+ boolean captureTrivia) {
     public static final ParserConfig DEFAULT = new ParserConfig(
-        true,
-        RecoveryStrategy.BASIC,
-        true
-    );
+    true, RecoveryStrategy.BASIC, true);
 }

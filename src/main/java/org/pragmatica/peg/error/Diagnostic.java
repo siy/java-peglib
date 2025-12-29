@@ -27,13 +27,12 @@ import java.util.List;
  * @param notes       Additional notes or suggestions
  */
 public record Diagnostic(
-    Severity severity,
-    Option<String> code,
-    String message,
-    SourceSpan span,
-    List<Label> labels,
-    List<String> notes
-) {
+ Severity severity,
+ Option<String> code,
+ String message,
+ SourceSpan span,
+ List<Label> labels,
+ List<String> notes) {
     /**
      * Error severity levels.
      */
@@ -42,13 +41,10 @@ public record Diagnostic(
         WARNING("warning"),
         INFO("info"),
         HINT("hint");
-
         private final String display;
-
         Severity(String display) {
             this.display = display;
         }
-
         public String display() {
             return display;
         }
@@ -135,121 +131,152 @@ public record Diagnostic(
      */
     public String format(String source, String filename) {
         var sb = new StringBuilder();
-        var lines = source.split("\n", -1);
-
+        var lines = source.split("\n", - 1);
         // Header: error[E0001]: message
         sb.append(severity.display());
         if (code.isPresent()) {
-            sb.append("[").append(code.unwrap()).append("]");
+            sb.append("[")
+              .append(code.unwrap())
+              .append("]");
         }
-        sb.append(": ").append(message).append("\n");
-
+        sb.append(": ")
+          .append(message)
+          .append("\n");
         // Location: --> filename:line:column
         var loc = span.start();
         sb.append("  --> ");
         if (filename != null) {
-            sb.append(filename).append(":");
+            sb.append(filename)
+              .append(":");
         }
-        sb.append(loc.line()).append(":").append(loc.column()).append("\n");
-
+        sb.append(loc.line())
+          .append(":")
+          .append(loc.column())
+          .append("\n");
         // Find all lines we need to display
-        int minLine = span.start().line();
-        int maxLine = span.end().line();
+        int minLine = span.start()
+                          .line();
+        int maxLine = span.end()
+                          .line();
         for (var label : labels) {
-            minLine = Math.min(minLine, label.span().start().line());
-            maxLine = Math.max(maxLine, label.span().end().line());
+            minLine = Math.min(minLine,
+                               label.span()
+                                    .start()
+                                    .line());
+            maxLine = Math.max(maxLine,
+                               label.span()
+                                    .end()
+                                    .line());
         }
-
         // Calculate gutter width
-        int gutterWidth = String.valueOf(maxLine).length();
-
+        int gutterWidth = String.valueOf(maxLine)
+                                .length();
         // Empty line before source
-        sb.append(" ".repeat(gutterWidth + 1)).append("|\n");
-
+        sb.append(" ".repeat(gutterWidth + 1))
+          .append("|\n");
         // Display source lines with labels
-        for (int lineNum = minLine; lineNum <= maxLine; lineNum++) {
+        for (int lineNum = minLine; lineNum <= maxLine; lineNum++ ) {
             if (lineNum < 1 || lineNum > lines.length) continue;
-
             String lineContent = lines[lineNum - 1];
             String lineNumStr = String.format("%" + gutterWidth + "d", lineNum);
-
             // Source line
-            sb.append(lineNumStr).append(" | ").append(lineContent).append("\n");
-
+            sb.append(lineNumStr)
+              .append(" | ")
+              .append(lineContent)
+              .append("\n");
             // Underline labels on this line
             var lineLabels = getLabelsOnLine(lineNum);
             if (!lineLabels.isEmpty()) {
-                sb.append(" ".repeat(gutterWidth)).append(" | ");
+                sb.append(" ".repeat(gutterWidth))
+                  .append(" | ");
                 sb.append(formatUnderlines(lineNum, lineContent, lineLabels));
                 sb.append("\n");
             }
         }
-
         // Empty line after source
-        sb.append(" ".repeat(gutterWidth + 1)).append("|\n");
-
+        sb.append(" ".repeat(gutterWidth + 1))
+          .append("|\n");
         // Notes
         for (var note : notes) {
-            sb.append(" ".repeat(gutterWidth + 1)).append("= ").append(note).append("\n");
+            sb.append(" ".repeat(gutterWidth + 1))
+              .append("= ")
+              .append(note)
+              .append("\n");
         }
-
         return sb.toString();
     }
 
     private List<Label> getLabelsOnLine(int lineNum) {
         var result = new java.util.ArrayList<Label>();
-
         // Check if primary span covers this line
-        if (span.start().line() <= lineNum && span.end().line() >= lineNum) {
+        if (span.start()
+                .line() <= lineNum && span.end()
+                                          .line() >= lineNum) {
             // Add implicit primary label if no explicit labels
             if (labels.isEmpty()) {
                 result.add(Label.primary(span, ""));
             }
         }
-
         // Add explicit labels on this line
         for (var label : labels) {
-            if (label.span().start().line() <= lineNum && label.span().end().line() >= lineNum) {
+            if (label.span()
+                     .start()
+                     .line() <= lineNum && label.span()
+                                                .end()
+                                                .line() >= lineNum) {
                 result.add(label);
             }
         }
-
         return result;
     }
 
     private String formatUnderlines(int lineNum, String lineContent, List<Label> lineLabels) {
         var sb = new StringBuilder();
         int currentCol = 1;
-
         // Sort labels by start column
         var sorted = lineLabels.stream()
-            .sorted((a, b) -> Integer.compare(a.span().start().column(), b.span().start().column()))
-            .toList();
-
+                               .sorted((a, b) -> Integer.compare(a.span()
+                                                                  .start()
+                                                                  .column(),
+                                                                 b.span()
+                                                                  .start()
+                                                                  .column()))
+                               .toList();
         for (var label : sorted) {
-            int startCol = label.span().start().line() == lineNum ? label.span().start().column() : 1;
-            int endCol = label.span().end().line() == lineNum
-                ? label.span().end().column()
-                : lineContent.length() + 1;
-
+            int startCol = label.span()
+                                .start()
+                                .line() == lineNum
+                           ? label.span()
+                                  .start()
+                                  .column()
+                           : 1;
+            int endCol = label.span()
+                              .end()
+                              .line() == lineNum
+                         ? label.span()
+                                .end()
+                                .column()
+                         : lineContent.length() + 1;
             // Pad to start
             while (currentCol < startCol) {
                 sb.append(" ");
-                currentCol++;
+                currentCol++ ;
             }
-
             // Draw underline
-            char underlineChar = label.primary() ? '^' : '-';
+            char underlineChar = label.primary()
+                                 ? '^'
+                                 : '-';
             int underlineLen = Math.max(1, endCol - startCol);
-            sb.append(String.valueOf(underlineChar).repeat(underlineLen));
+            sb.append(String.valueOf(underlineChar)
+                            .repeat(underlineLen));
             currentCol += underlineLen;
-
             // Add label message if present
-            if (!label.message().isEmpty()) {
-                sb.append(" ").append(label.message());
+            if (!label.message()
+                      .isEmpty()) {
+                sb.append(" ")
+                  .append(label.message());
             }
         }
-
         return sb.toString();
     }
 
@@ -258,7 +285,6 @@ public record Diagnostic(
      */
     public String formatSimple() {
         var loc = span.start();
-        return String.format("%s:%d:%d: %s: %s",
-            "input", loc.line(), loc.column(), severity.display(), message);
+        return String.format("%s:%d:%d: %s: %s", "input", loc.line(), loc.column(), severity.display(), message);
     }
 }

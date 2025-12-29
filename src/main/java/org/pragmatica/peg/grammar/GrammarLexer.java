@@ -10,7 +10,6 @@ import java.util.List;
  * Lexer for PEG grammar syntax.
  */
 public final class GrammarLexer {
-
     private final String input;
     private int pos;
     private int line;
@@ -41,29 +40,23 @@ public final class GrammarLexer {
 
     private GrammarToken nextToken() {
         var start = currentLocation();
-
         char c = peek();
-
         // Identifiers
         if (isIdentifierStart(c)) {
             return scanIdentifier(start);
         }
-
         // Directives %name
         if (c == '%') {
             return scanDirective(start);
         }
-
         // String literals
         if (c == '\'' || c == '"') {
             return scanStringLiteral(start);
         }
-
         // Character class
         if (c == '[') {
             return scanCharClass(start);
         }
-
         // Action code or repetition
         if (c == '{') {
             // Look ahead to distinguish {n} from { code }
@@ -73,12 +66,10 @@ public final class GrammarLexer {
             }
             return scanActionCode(start);
         }
-
         // Numbers (for repetition)
         if (isDigit(c)) {
             return scanNumber(start);
         }
-
         // Operators and delimiters
         return scanOperator(start);
     }
@@ -92,7 +83,8 @@ public final class GrammarLexer {
     }
 
     private GrammarToken scanDirective(SourceLocation start) {
-        advance(); // skip %
+        advance();
+        // skip %
         var sb = new StringBuilder();
         while (!isAtEnd() && isIdentifierPart(peek())) {
             sb.append(advance());
@@ -105,38 +97,39 @@ public final class GrammarLexer {
         var sb = new StringBuilder();
         while (!isAtEnd() && peek() != quote) {
             if (peek() == '\\' && pos + 1 < input.length()) {
-                advance(); // skip backslash
+                advance();
+                // skip backslash
                 sb.append(scanEscapeSequence());
-            } else {
+            }else {
                 sb.append(advance());
             }
         }
         if (isAtEnd()) {
             return new GrammarToken.Error(span(start), "Unterminated string literal");
         }
-        advance(); // skip closing quote
-
+        advance();
+        // skip closing quote
         // Check for case-insensitive suffix
         boolean caseInsensitive = !isAtEnd() && peek() == 'i';
         if (caseInsensitive) {
             advance();
         }
-
         return new GrammarToken.StringLiteral(span(start), sb.toString(), caseInsensitive);
     }
 
     private GrammarToken scanCharClass(SourceLocation start) {
-        advance(); // skip [
+        advance();
+        // skip [
         boolean negated = false;
         if (!isAtEnd() && peek() == '^') {
             negated = true;
             advance();
         }
-
         var sb = new StringBuilder();
         while (!isAtEnd() && peek() != ']') {
             if (peek() == '\\' && pos + 1 < input.length()) {
-                advance(); // skip backslash
+                advance();
+                // skip backslash
                 sb.append('\\');
                 char escaped = advance();
                 sb.append(escaped);
@@ -144,45 +137,44 @@ public final class GrammarLexer {
                 if (escaped == 'x' && pos + 2 <= input.length()) {
                     sb.append(advance());
                     sb.append(advance());
-                } else if (escaped == 'u' && pos + 4 <= input.length()) {
+                }else if (escaped == 'u' && pos + 4 <= input.length()) {
                     sb.append(advance());
                     sb.append(advance());
                     sb.append(advance());
                     sb.append(advance());
                 }
-            } else {
+            }else {
                 sb.append(advance());
             }
         }
         if (isAtEnd()) {
             return new GrammarToken.Error(span(start), "Unterminated character class");
         }
-        advance(); // skip ]
-
+        advance();
+        // skip ]
         // Check for case-insensitive suffix
         boolean caseInsensitive = !isAtEnd() && peek() == 'i';
         if (caseInsensitive) {
             advance();
         }
-
         return new GrammarToken.CharClassLiteral(span(start), sb.toString(), negated, caseInsensitive);
     }
 
     private GrammarToken scanActionCode(SourceLocation start) {
-        advance(); // skip {
+        advance();
+        // skip {
         var sb = new StringBuilder();
         int braceDepth = 1;
-
         while (!isAtEnd() && braceDepth > 0) {
             char c = peek();
             if (c == '{') {
-                braceDepth++;
-            } else if (c == '}') {
-                braceDepth--;
+                braceDepth++ ;
+            }else if (c == '}') {
+                braceDepth-- ;
                 if (braceDepth == 0) {
                     break;
                 }
-            } else if (c == '\'' || c == '"') {
+            }else if (c == '\'' || c == '"') {
                 // Skip string literals in action code
                 sb.append(scanJavaString());
                 continue;
@@ -192,9 +184,11 @@ public final class GrammarLexer {
         if (isAtEnd()) {
             return new GrammarToken.Error(span(start), "Unterminated action code");
         }
-        advance(); // skip }
-
-        return new GrammarToken.ActionCode(span(start), sb.toString().trim());
+        advance();
+        // skip }
+        return new GrammarToken.ActionCode(span(start),
+                                           sb.toString()
+                                             .trim());
     }
 
     private String scanJavaString() {
@@ -218,37 +212,38 @@ public final class GrammarLexer {
         while (!isAtEnd() && isDigit(peek())) {
             sb.append(advance());
         }
-        return new GrammarToken.Number(span(start), Integer.parseInt(sb.toString()));
+        return new GrammarToken.Number(span(start),
+                                       Integer.parseInt(sb.toString()));
     }
 
     private GrammarToken scanOperator(SourceLocation start) {
         char c = advance();
         return switch (c) {
-            case '<' -> {
+            case'<' -> {
                 if (!isAtEnd() && peek() == '-') {
                     advance();
                     yield new GrammarToken.LeftArrow(span(start));
                 }
                 yield new GrammarToken.LAngle(span(start));
             }
-            case '←' -> new GrammarToken.LeftArrow(span(start));
-            case '/' -> new GrammarToken.Slash(span(start));
-            case '&' -> new GrammarToken.Ampersand(span(start));
-            case '!' -> new GrammarToken.Exclamation(span(start));
-            case '?' -> new GrammarToken.Question(span(start));
-            case '*' -> new GrammarToken.Star(span(start));
-            case '+' -> new GrammarToken.Plus(span(start));
-            case '.' -> new GrammarToken.Dot(span(start));
-            case '~' -> new GrammarToken.Tilde(span(start));
-            case '↑', '^' -> new GrammarToken.Cut(span(start));
-            case '(' -> new GrammarToken.LParen(span(start));
-            case ')' -> new GrammarToken.RParen(span(start));
-            case '>' -> new GrammarToken.RAngle(span(start));
-            case '{' -> new GrammarToken.LBrace(span(start));
-            case '}' -> new GrammarToken.RBrace(span(start));
-            case ',' -> new GrammarToken.Comma(span(start));
-            case '$' -> new GrammarToken.Dollar(span(start));
-            case '|' -> new GrammarToken.Pipe(span(start));
+            case'←' -> new GrammarToken.LeftArrow(span(start));
+            case'/' -> new GrammarToken.Slash(span(start));
+            case'&' -> new GrammarToken.Ampersand(span(start));
+            case'!' -> new GrammarToken.Exclamation(span(start));
+            case'?' -> new GrammarToken.Question(span(start));
+            case'*' -> new GrammarToken.Star(span(start));
+            case'+' -> new GrammarToken.Plus(span(start));
+            case'.' -> new GrammarToken.Dot(span(start));
+            case'~' -> new GrammarToken.Tilde(span(start));
+            case'↑', '^' -> new GrammarToken.Cut(span(start));
+            case'(' -> new GrammarToken.LParen(span(start));
+            case')' -> new GrammarToken.RParen(span(start));
+            case'>' -> new GrammarToken.RAngle(span(start));
+            case'{' -> new GrammarToken.LBrace(span(start));
+            case'}' -> new GrammarToken.RBrace(span(start));
+            case',' -> new GrammarToken.Comma(span(start));
+            case'$' -> new GrammarToken.Dollar(span(start));
+            case'|' -> new GrammarToken.Pipe(span(start));
             default -> new GrammarToken.Error(span(start), "Unexpected character: " + c);
         };
     }
@@ -257,31 +252,37 @@ public final class GrammarLexer {
         if (isAtEnd()) return '\\';
         char c = advance();
         return switch (c) {
-            case 'n' -> '\n';
-            case 'r' -> '\r';
-            case 't' -> '\t';
-            case '\\' -> '\\';
-            case '\'' -> '\'';
-            case '"' -> '"';
-            case '0' -> '\0';
-            case 'x' -> scanHexEscape(2);  // hex escape
-            case 'u' -> scanHexEscape(4);  // unicode escape
+            case'n' -> '\n';
+            case'r' -> '\r';
+            case't' -> '\t';
+            case'\\' -> '\\';
+            case'\'' -> '\'';
+            case'"' -> '"';
+            case'0' -> '\0';
+            case'x' -> scanHexEscape(2);
+            // hex escape
+            case'u' -> scanHexEscape(4);
+            // unicode escape
             default -> c;
         };
     }
 
     private char scanHexEscape(int digits) {
         if (pos + digits > input.length()) {
-            return (digits == 2) ? 'x' : 'u';  // Fallback if not enough chars
+            return (digits == 2)
+                   ? 'x'
+                   : 'u';
         }
         var hex = input.substring(pos, pos + digits);
-        try {
+        try{
             var value = Integer.parseInt(hex, 16);
             pos += digits;
             column += digits;
             return (char) value;
         } catch (NumberFormatException e) {
-            return (digits == 2) ? 'x' : 'u';  // Fallback on invalid hex
+            return (digits == 2)
+                   ? 'x'
+                   : 'u';
         }
     }
 
@@ -290,16 +291,16 @@ public final class GrammarLexer {
             char c = peek();
             if (c == ' ' || c == '\t' || c == '\r') {
                 advance();
-            } else if (c == '\n') {
+            }else if (c == '\n') {
                 advance();
-                line++;
+                line++ ;
                 column = 1;
-            } else if (c == '#') {
+            }else if (c == '#') {
                 // Line comment
                 while (!isAtEnd() && peek() != '\n') {
                     advance();
                 }
-            } else {
+            }else {
                 break;
             }
         }
@@ -314,12 +315,12 @@ public final class GrammarLexer {
     }
 
     private char advance() {
-        char c = input.charAt(pos++);
+        char c = input.charAt(pos++ );
         if (c == '\n') {
-            line++;
+            line++ ;
             column = 1;
-        } else {
-            column++;
+        }else {
+            column++ ;
         }
         return c;
     }
@@ -356,7 +357,7 @@ public final class GrammarLexer {
         int lookahead = pos + 1;
         // Skip initial digits
         while (lookahead < input.length() && isDigit(input.charAt(lookahead))) {
-            lookahead++;
+            lookahead++ ;
         }
         if (lookahead == pos + 1) {
             // No digits after {, it's action code
