@@ -146,9 +146,8 @@ public final class PegEngine implements Parser {
         }
 
         var success = (ParseResult.Success) result;
-        return Result.success(success.hasSemanticValue()
-            ? success.unwrapSemanticValue()
-            : success.node());
+        return Result.success(success.semanticValueOpt()
+            .isPresent() ? success.semanticValueOpt().unwrap() : success.node());
     }
 
     @Override
@@ -367,8 +366,8 @@ public final class PegEngine implements Parser {
             return ParseResult.Failure.at(ctx.location(), "rule '" + ref.ruleName() + "'");
         }
         var result = parseRuleWithActions(ctx, ruleOpt.unwrap());
-        if (result instanceof ParseResult.Success success && success.hasSemanticValue()) {
-            values.add(success.unwrapSemanticValue());
+        if (result instanceof ParseResult.Success success && success.semanticValueOpt().isPresent()) {
+            values.add(success.semanticValueOpt().unwrap());
         }
         return result;
     }

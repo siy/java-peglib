@@ -15,7 +15,9 @@ class EdgeCaseTest {
     // === Null return from actions ===
 
     @Test
-    void action_returningNull_shouldReturnNull() {
+    void action_returningNull_returnsCstNode() {
+        // JBCT behavior: null return from action is treated as "no value",
+        // so the CST node is returned instead
         var grammar = """
             Null <- 'null' { return null; }
             """;
@@ -23,11 +25,13 @@ class EdgeCaseTest {
 
         var result = parser.parse("null");
         assertTrue(result.isSuccess());
-        assertNull(result.unwrap());
+        // Null return is treated as no semantic value, so CST node is returned
+        assertInstanceOf(CstNode.class, result.unwrap());
     }
 
     @Test
-    void action_returningNullInChoice_shouldReturnNull() {
+    void action_returningNullInChoice_returnsCstNode() {
+        // JBCT behavior: null return from action is treated as "no value"
         var grammar = """
             Value <- Null / Number
             Null   <- 'null' { return null; }
@@ -35,7 +39,9 @@ class EdgeCaseTest {
             """;
         var parser = PegParser.fromGrammar(grammar).unwrap();
 
-        assertNull(parser.parse("null").unwrap());
+        // Null return gives CST node
+        assertInstanceOf(CstNode.class, parser.parse("null").unwrap());
+        // Non-null return gives the value
         assertEquals(42L, parser.parse("42").unwrap());
     }
 

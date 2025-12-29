@@ -19,16 +19,6 @@ public sealed interface ParseResult {
     }
 
     /**
-     * Marker to distinguish explicit null return from no value.
-     */
-    Object EXPLICIT_NULL = new Object() {
-        @Override
-        public String toString() {
-            return "EXPLICIT_NULL";
-        }
-    };
-
-    /**
      * Successful parse with CST node and new position.
      */
     record Success(
@@ -52,32 +42,26 @@ public sealed interface ParseResult {
         }
 
         public static Success withValue(CstNode node, SourceLocation endLocation, Object value) {
-            // Use EXPLICIT_NULL marker to distinguish null from no value
-            var wrapped = value == null ? EXPLICIT_NULL : value;
-            return new Success(node, endLocation, List.of(), Option.some(wrapped));
+            return new Success(node, endLocation, List.of(), Option.option(value));
         }
 
         public Success withSemanticValue(Object value) {
-            var wrapped = value == null ? EXPLICIT_NULL : value;
-            return new Success(node, endLocation, trailingTrivia, Option.some(wrapped));
+            return new Success(node, endLocation, trailingTrivia, Option.option(value));
         }
 
         /**
-         * Check if this result has an explicit semantic value (including explicit null).
+         * Check if this result has an explicit semantic value.
          */
         public boolean hasSemanticValue() {
             return semanticValue.isPresent();
         }
 
         /**
-         * Get the unwrapped semantic value, converting EXPLICIT_NULL back to null.
+         * Get the semantic value as Option.
+         * This is the JBCT-compliant way to access the semantic value.
          */
-        public Object unwrapSemanticValue() {
-            if (semanticValue.isEmpty()) {
-                return null;
-            }
-            var value = semanticValue.unwrap();
-            return value == EXPLICIT_NULL ? null : value;
+        public Option<Object> semanticValueOpt() {
+            return semanticValue;
         }
     }
 

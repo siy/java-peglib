@@ -37,7 +37,7 @@ class ParseResultTest {
         var result = ParseResult.Success.of(node, END_LOC);
 
         assertFalse(result.hasSemanticValue());
-        assertNull(result.unwrapSemanticValue());
+        assertTrue(result.semanticValueOpt().isEmpty());
     }
 
     @Test
@@ -46,7 +46,7 @@ class ParseResultTest {
         var result = ParseResult.Success.withValue(node, END_LOC, 42);
 
         assertTrue(result.hasSemanticValue());
-        assertEquals(42, result.unwrapSemanticValue());
+        assertEquals(42, result.semanticValueOpt().unwrap());
     }
 
     @Test
@@ -55,18 +55,17 @@ class ParseResultTest {
         var result = ParseResult.Success.withValue(node, END_LOC, "hello");
 
         assertTrue(result.hasSemanticValue());
-        assertEquals("hello", result.unwrapSemanticValue());
+        assertEquals("hello", result.semanticValueOpt().unwrap());
     }
 
     @Test
-    void success_withExplicitNull_distinguishedFromNoValue() {
+    void success_withNullValue_treatedAsNoValue() {
         var node = createTerminal("null");
         var result = ParseResult.Success.withValue(node, END_LOC, null);
 
-        // Should have semantic value (explicit null is different from no value)
-        assertTrue(result.hasSemanticValue());
-        // Should unwrap back to null
-        assertNull(result.unwrapSemanticValue());
+        // Null is now treated as "no value" - JBCT compliant behavior
+        assertFalse(result.hasSemanticValue());
+        assertTrue(result.semanticValueOpt().isEmpty());
     }
 
     @Test
@@ -78,7 +77,7 @@ class ParseResultTest {
 
         assertFalse(result.hasSemanticValue());  // Original unchanged
         assertTrue(withValue.hasSemanticValue());
-        assertEquals(100, withValue.unwrapSemanticValue());
+        assertEquals(100, withValue.semanticValueOpt().unwrap());
     }
 
     @Test
@@ -174,38 +173,31 @@ class ParseResultTest {
         assertEquals(END_LOC, result.endLocation());
     }
 
-    // === EXPLICIT_NULL Sentinel Tests ===
+    // === Semantic Value Option Tests ===
 
     @Test
-    void explicitNull_hasDistinctToString() {
-        assertEquals("EXPLICIT_NULL", ParseResult.EXPLICIT_NULL.toString());
-    }
-
-    @Test
-    void explicitNull_notEqualToNull() {
-        assertNotNull(ParseResult.EXPLICIT_NULL);
-    }
-
-    @Test
-    void explicitNull_distinguishesNullFromAbsent() {
+    void semanticValue_optionBehavior() {
         var node = createTerminal("test");
 
         // No semantic value
         var noValue = ParseResult.Success.of(node, END_LOC);
-        // Explicit null value
+        // Null passed to withValue is treated as none (JBCT compliant)
         var nullValue = ParseResult.Success.withValue(node, END_LOC, null);
         // Non-null value
         var someValue = ParseResult.Success.withValue(node, END_LOC, "value");
 
-        // All return null when unwrapped (either no value or explicit null)
-        assertNull(noValue.unwrapSemanticValue());
-        assertNull(nullValue.unwrapSemanticValue());
-        assertEquals("value", someValue.unwrapSemanticValue());
+        // noValue and nullValue both have no semantic value
+        assertTrue(noValue.semanticValueOpt().isEmpty());
+        assertTrue(nullValue.semanticValueOpt().isEmpty());
+        assertTrue(someValue.semanticValueOpt().isPresent());
 
-        // But hasSemanticValue distinguishes them
+        // hasSemanticValue reflects Option presence
         assertFalse(noValue.hasSemanticValue());
-        assertTrue(nullValue.hasSemanticValue());
+        assertFalse(nullValue.hasSemanticValue());  // null is treated as none
         assertTrue(someValue.hasSemanticValue());
+
+        // Unwrap returns the value
+        assertEquals("value", someValue.semanticValueOpt().unwrap());
     }
 
     // === Helper Methods ===
