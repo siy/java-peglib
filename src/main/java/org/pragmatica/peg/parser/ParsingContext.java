@@ -21,8 +21,8 @@ public final class ParsingContext {
     private final String input;
     private final Grammar grammar;
     private final ParserConfig config;
-    private final Map<Long, ParseResult> packratCache;
-    private final Map<String, Integer> ruleIds;
+    private final Option<Map<Long, ParseResult>> packratCache;
+    private final Option<Map<String, Integer>> ruleIds;
     private final Map<String, String> captures;
 
     private int pos;
@@ -46,8 +46,8 @@ public final class ParsingContext {
         this.input = input;
         this.grammar = grammar;
         this.config = config;
-        this.packratCache = config.packratEnabled() ? new HashMap<>() : null;
-        this.ruleIds = config.packratEnabled() ? new HashMap<>() : null;
+        this.packratCache = config.packratEnabled() ? Option.some(new HashMap<>()) : Option.none();
+        this.ruleIds = config.packratEnabled() ? Option.some(new HashMap<>()) : Option.none();
         this.captures = new HashMap<>();
         this.diagnostics = new ArrayList<>();
         this.pos = 0;
@@ -326,11 +326,11 @@ public final class ParsingContext {
     }
 
     public Option<ParseResult> getCachedAt(String ruleName, int position) {
-        if (packratCache == null) {
+        if (packratCache.isEmpty()) {
             return Option.none();
         }
         long key = packratKey(ruleName, position);
-        return Option.option(packratCache.get(key));
+        return Option.option(packratCache.unwrap().get(key));
     }
 
     public void cache(String ruleName, ParseResult result) {
@@ -338,14 +338,14 @@ public final class ParsingContext {
     }
 
     public void cacheAt(String ruleName, int position, ParseResult result) {
-        if (packratCache != null) {
+        if (packratCache.isPresent()) {
             long key = packratKey(ruleName, position);
-            packratCache.put(key, result);
+            packratCache.unwrap().put(key, result);
         }
     }
 
     private long packratKey(String ruleName, int position) {
-        int ruleId = ruleIds.computeIfAbsent(ruleName, k -> ruleIds.size());
+        int ruleId = ruleIds.unwrap().computeIfAbsent(ruleName, k -> ruleIds.unwrap().size());
         return ((long) ruleId << 32) | (position & 0xFFFFFFFFL);
     }
 
