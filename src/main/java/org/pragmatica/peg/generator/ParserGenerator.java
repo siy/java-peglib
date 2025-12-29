@@ -261,12 +261,12 @@ public final class ParserGenerator {
                     init(input);
                     var result = parse_%s();
                     if (result.isFailure()) {
-                        return Result.failure(new ParseError(line, column, "expected " + result.expected));
+                        return Result.failure(new ParseError(line, column, "expected " + result.expected.orElse("valid input")));
                     }
                     if (!isAtEnd()) {
                         return Result.failure(new ParseError(line, column, "unexpected input"));
                     }
-                    return Result.success(result.value);
+                    return Result.success(result.value.orElse(null));
                 }
 
             """.formatted(sanitize(startRuleName)));
@@ -370,8 +370,8 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(resultVar).append(" = parse_")
                     .append(sanitize(ref.ruleName())).append("();\n");
                 sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ")
-                    .append(resultVar).append(".value != null) {\n");
-                sb.append(pad).append("    values.add(").append(resultVar).append(".value);\n");
+                    .append(resultVar).append(".value.isPresent()) {\n");
+                sb.append(pad).append("    values.add(").append(resultVar).append(".value.unwrap());\n");
                 sb.append(pad).append("}\n");
             }
             case Expression.Sequence seq -> {
@@ -689,14 +689,14 @@ public final class ParserGenerator {
 
                 private static final class ParseResult {
                     final boolean success;
-                    final Object value;
-                    final String expected;
+                    final Option<Object> value;
+                    final Option<String> expected;
                     final int endPos;
                     final int endLine;
                     final int endColumn;
                     final boolean cutFailed;
 
-                    private ParseResult(boolean success, Object value, String expected, int endPos, int endLine, int endColumn, boolean cutFailed) {
+                    private ParseResult(boolean success, Option<Object> value, Option<String> expected, int endPos, int endLine, int endColumn, boolean cutFailed) {
                         this.success = success;
                         this.value = value;
                         this.expected = expected;
@@ -711,23 +711,23 @@ public final class ParserGenerator {
                     boolean isCutFailure() { return !success && cutFailed; }
 
                     static ParseResult success(Object value, int endPos, int endLine, int endColumn) {
-                        return new ParseResult(true, value, null, endPos, endLine, endColumn, false);
+                        return new ParseResult(true, Option.some(value), Option.none(), endPos, endLine, endColumn, false);
                     }
 
                     static ParseResult failure(String expected) {
-                        return new ParseResult(false, null, expected, 0, 0, 0, false);
+                        return new ParseResult(false, Option.none(), Option.some(expected), 0, 0, 0, false);
                     }
 
                     static ParseResult cutFailure(String expected) {
-                        return new ParseResult(false, null, expected, 0, 0, 0, true);
+                        return new ParseResult(false, Option.none(), Option.some(expected), 0, 0, 0, true);
                     }
 
                     ParseResult asCutFailure() {
-                        return cutFailed ? this : new ParseResult(false, null, expected, 0, 0, 0, true);
+                        return cutFailed ? this : new ParseResult(false, Option.none(), expected, 0, 0, 0, true);
                     }
 
                     ParseResult asRegularFailure() {
-                        return cutFailed ? new ParseResult(false, null, expected, 0, 0, 0, false) : this;
+                        return cutFailed ? new ParseResult(false, Option.none(), expected, 0, 0, 0, false) : this;
                     }
                 }
             """);
