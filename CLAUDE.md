@@ -69,10 +69,14 @@ src/test/java/org/pragmatica/peg/
 ├── TriviaTest.java             # 13 tests (trivia handling)
 ├── GeneratedParserTriviaTest.java # 6 tests (generated parser trivia)
 ├── ErrorRecoveryTest.java      # 8 tests (error recovery + diagnostics)
+├── parser/
+│   ├── ParseResultTest.java    # 10 tests (ParseResult internal types)
+│   └── ParsingContextTest.java # 8 tests (packrat cache)
 ├── grammar/
 │   └── GrammarParserTest.java  # 17 tests for grammar parser
 ├── generator/
-│   └── ParserGeneratorTest.java # 18 tests for source generation
+│   ├── ParserGeneratorTest.java # 18 tests for source generation
+│   └── GeneratedParserDiagnosticsTest.java # 6 tests (ADVANCED diagnostics)
 └── examples/
     ├── ErrorRecoveryExample.java # 12 tests - error recovery patterns
     ├── CalculatorExample.java   # 6 tests - arithmetic with actions
@@ -140,7 +144,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
 - [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
-- [x] 271 passing tests
+- [x] 305 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -281,7 +285,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (271 tests)
+## Test Coverage (305 tests)
 
 ### Grammar Parser Tests (17 tests)
 - Simple rules, actions, sequences, choices
@@ -315,6 +319,11 @@ Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 - ErrorReporting.BASIC mode (no diagnostics)
 - ErrorReporting.ADVANCED mode (Rust-style diagnostics)
 - parseWithDiagnostics() method generation
+
+### Internal Type Tests (24 tests)
+- **ParseResultTest** (10 tests): CutFailure, PredicateSuccess, Ignored, semantic values
+- **ParsingContextTest** (8 tests): Packrat cache hit/miss, cache disabled behavior
+- **GeneratedParserDiagnosticsTest** (6 tests): ADVANCED diagnostics in generated parsers
 
 ### Example Tests (135 tests)
 - **ErrorRecovery** (12 tests): Recovery strategies, diagnostic formatting, CST error nodes
