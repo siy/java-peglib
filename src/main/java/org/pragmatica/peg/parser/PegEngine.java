@@ -156,7 +156,7 @@ public final class PegEngine implements Parser {
         if (startRule.isEmpty()) {
             var diag = Diagnostic.error("no start rule defined in grammar",
                 SourceSpan.at(SourceLocation.START));
-            return ParseResultWithDiagnostics.withErrors(null, List.of(diag), input);
+            return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
         }
         return parseCstWithDiagnostics(input, startRule.unwrap().name());
     }
@@ -167,7 +167,7 @@ public final class PegEngine implements Parser {
         if (ruleOpt.isEmpty()) {
             var diag = Diagnostic.error("unknown rule: " + startRule,
                 SourceSpan.at(SourceLocation.START));
-            return ParseResultWithDiagnostics.withErrors(null, List.of(diag), input);
+            return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
         }
 
         var ctx = ParsingContext.create(input, grammar, config);
@@ -182,7 +182,7 @@ public final class PegEngine implements Parser {
                     var span = SourceSpan.at(loc);
                     var diag = Diagnostic.error("parse error", span)
                         .withLabel(parseError.message());
-                    return ParseResultWithDiagnostics.withErrors(null, List.of(diag), input);
+                    return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
                 },
                 node -> ParseResultWithDiagnostics.success(node, input)
             );
@@ -251,19 +251,19 @@ public final class PegEngine implements Parser {
         var trailingTrivia = skipWhitespace(ctx);
 
         // Build result
-        CstNode rootNode = null;
-        if (!fragments.isEmpty()) {
-            if (fragments.size() == 1) {
-                rootNode = attachTrailingTrivia(fragments.get(0), trailingTrivia);
-            } else {
-                // Multiple fragments - wrap in a root node
-                var firstSpan = fragments.get(0).span();
-                var lastSpan = fragments.get(fragments.size() - 1).span();
-                var fullSpan = SourceSpan.of(firstSpan.start(), lastSpan.end());
-                rootNode = new CstNode.NonTerminal(
-                    fullSpan, startRule.name(), fragments, List.of(), trailingTrivia
-                );
-            }
+        Option<CstNode> rootNode;
+        if (fragments.isEmpty()) {
+            rootNode = Option.none();
+        } else if (fragments.size() == 1) {
+            rootNode = Option.some(attachTrailingTrivia(fragments.get(0), trailingTrivia));
+        } else {
+            // Multiple fragments - wrap in a root node
+            var firstSpan = fragments.get(0).span();
+            var lastSpan = fragments.get(fragments.size() - 1).span();
+            var fullSpan = SourceSpan.of(firstSpan.start(), lastSpan.end());
+            rootNode = Option.some(new CstNode.NonTerminal(
+                fullSpan, startRule.name(), fragments, List.of(), trailingTrivia
+            ));
         }
 
         return ParseResultWithDiagnostics.withErrors(rootNode, ctx.diagnostics(), input);

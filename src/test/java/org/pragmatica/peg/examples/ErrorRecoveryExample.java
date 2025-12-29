@@ -213,10 +213,12 @@ class ErrorRecoveryExample {
         var result = parser.parseCstWithDiagnostics(input);
 
         // Find error node
-        var errorNode = findErrorNode(result.node());
-        if (errorNode != null) {
-            assertTrue(errorNode.skippedText().contains("@"),
-                "Error node should contain skipped text");
+        if (result.node().isPresent()) {
+            var errorNode = findErrorNode(result.node().unwrap());
+            if (errorNode != null) {
+                assertTrue(errorNode.skippedText().contains("@"),
+                    "Error node should contain skipped text");
+            }
         }
     }
 

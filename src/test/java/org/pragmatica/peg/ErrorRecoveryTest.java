@@ -57,8 +57,8 @@ class ErrorRecoveryTest {
             "Expected at least 2 errors, got " + result.diagnostics().size());
 
         // Should still have parsed the valid fragments
-        if (result.node() != null) {
-            assertTrue(result.node() instanceof CstNode.NonTerminal);
+        if (result.node().isPresent()) {
+            assertTrue(result.node().unwrap() instanceof CstNode.NonTerminal);
         }
     }
 
@@ -77,8 +77,8 @@ class ErrorRecoveryTest {
         assertFalse(result.diagnostics().isEmpty(), "Expected errors for invalid input");
 
         // The tree should contain error nodes for unparseable parts
-        if (result.node() != null) {
-            var hasErrorNode = containsErrorNode(result.node());
+        if (result.node().isPresent()) {
+            var hasErrorNode = containsErrorNode(result.node().unwrap());
             assertTrue(hasErrorNode, "Expected Error node in tree for invalid input");
         }
     }
@@ -94,8 +94,8 @@ class ErrorRecoveryTest {
         var result = parser.parseCstWithDiagnostics(input);
 
         // Find the error node
-        if (result.node() != null) {
-            var errorNode = findFirstErrorNode(result.node());
+        if (result.node().isPresent()) {
+            var errorNode = findFirstErrorNode(result.node().unwrap());
             if (errorNode != null) {
                 assertTrue(errorNode.skippedText().contains("@"),
                     "Error node should contain skipped text");
