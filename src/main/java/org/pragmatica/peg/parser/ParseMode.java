@@ -1,5 +1,7 @@
 package org.pragmatica.peg.parser;
 
+import org.pragmatica.lang.Option;
+
 import java.util.List;
 
 /**
@@ -15,28 +17,28 @@ import java.util.List;
 public record ParseMode(
     boolean skipWhitespace,
     boolean collectActions,
-    List<Object> semanticValues,
-    String[] tokenCapture
+    Option<List<Object>> semanticValues,
+    Option<String[]> tokenCapture
 ) {
     /**
      * Standard CST parsing mode - skips whitespace, doesn't collect semantic values.
      */
     public static ParseMode standard() {
-        return new ParseMode(true, false, null, null);
+        return new ParseMode(true, false, Option.none(), Option.none());
     }
 
     /**
      * Action collection mode - skips whitespace, collects semantic values from child rules.
      */
     public static ParseMode withActions(List<Object> values, String[] tokenCapture) {
-        return new ParseMode(true, true, values, tokenCapture);
+        return new ParseMode(true, true, Option.some(values), Option.some(tokenCapture));
     }
 
     /**
      * No-whitespace mode - for parsing the %whitespace rule itself.
      */
     public static ParseMode noWhitespace() {
-        return new ParseMode(false, false, null, null);
+        return new ParseMode(false, false, Option.none(), Option.none());
     }
 
     /**
@@ -44,7 +46,7 @@ public record ParseMode(
      */
     public ParseMode childMode(List<Object> childValues, String[] childTokenCapture) {
         if (collectActions) {
-            return new ParseMode(skipWhitespace, true, childValues, childTokenCapture);
+            return new ParseMode(skipWhitespace, true, Option.some(childValues), Option.some(childTokenCapture));
         }
         return this;
     }
@@ -67,8 +69,8 @@ public record ParseMode(
      * Add a semantic value collected from a child rule.
      */
     public void addValue(Object value) {
-        if (collectActions && semanticValues != null) {
-            semanticValues.add(value);
+        if (collectActions && semanticValues.isPresent()) {
+            semanticValues.unwrap().add(value);
         }
     }
 
@@ -76,8 +78,8 @@ public record ParseMode(
      * Set the token capture (from &lt; &gt; boundary).
      */
     public void setTokenCapture(String text) {
-        if (collectActions && tokenCapture != null) {
-            tokenCapture[0] = text;
+        if (collectActions && tokenCapture.isPresent()) {
+            tokenCapture.unwrap()[0] = text;
         }
     }
 }

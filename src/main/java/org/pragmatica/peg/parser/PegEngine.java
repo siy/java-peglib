@@ -917,9 +917,9 @@ public final class PegEngine implements Parser {
                 var localMode = mode.childMode(localValues, localTokenCapture);
                 result = parseExpressionWithMode(ctx, alt, ruleName, localMode);
                 if (result.isSuccess()) {
-                    mode.semanticValues().addAll(localValues);
+                    mode.semanticValues().unwrap().addAll(localValues);
                     if (localTokenCapture[0] != null) {
-                        mode.tokenCapture()[0] = localTokenCapture[0];
+                        mode.tokenCapture().unwrap()[0] = localTokenCapture[0];
                     }
                     return result;
                 }
@@ -963,9 +963,9 @@ public final class PegEngine implements Parser {
                 var localMode = mode.childMode(localValues, localTokenCapture);
                 result = parseExpressionWithMode(ctx, zom.expression(), ruleName, localMode);
                 if (result.isSuccess()) {
-                    mode.semanticValues().addAll(localValues);
+                    mode.semanticValues().unwrap().addAll(localValues);
                     if (localTokenCapture[0] != null) {
-                        mode.tokenCapture()[0] = localTokenCapture[0];
+                        mode.tokenCapture().unwrap()[0] = localTokenCapture[0];
                     }
                 }
             } else {
@@ -1029,9 +1029,9 @@ public final class PegEngine implements Parser {
                 var localMode = mode.childMode(localValues, localTokenCapture);
                 result = parseExpressionWithMode(ctx, oom.expression(), ruleName, localMode);
                 if (result.isSuccess()) {
-                    mode.semanticValues().addAll(localValues);
+                    mode.semanticValues().unwrap().addAll(localValues);
                     if (localTokenCapture[0] != null) {
-                        mode.tokenCapture()[0] = localTokenCapture[0];
+                        mode.tokenCapture().unwrap()[0] = localTokenCapture[0];
                     }
                 }
             } else {
@@ -1112,9 +1112,9 @@ public final class PegEngine implements Parser {
                 var localMode = mode.childMode(localValues, localTokenCapture);
                 result = parseExpressionWithMode(ctx, rep.expression(), ruleName, localMode);
                 if (result.isSuccess()) {
-                    mode.semanticValues().addAll(localValues);
+                    mode.semanticValues().unwrap().addAll(localValues);
                     if (localTokenCapture[0] != null) {
-                        mode.tokenCapture()[0] = localTokenCapture[0];
+                        mode.tokenCapture().unwrap()[0] = localTokenCapture[0];
                     }
                 }
             } else {
@@ -1164,7 +1164,7 @@ public final class PegEngine implements Parser {
             case Expression.CharClass cc -> parseCharClass(ctx, cc);
             case Expression.Any any -> parseAny(ctx, any);
             case Expression.Reference ref -> mode.shouldCollectActions()
-                ? parseReferenceWithActions(ctx, ref, mode.semanticValues())
+                ? parseReferenceWithActions(ctx, ref, mode.semanticValues().unwrap())
                 : parseReference(ctx, ref);
             case Expression.Sequence seq -> parseSequenceWithMode(ctx, seq, ruleName, mode);
             case Expression.Choice choice -> parseChoiceWithMode(ctx, choice, ruleName, mode);
@@ -1175,14 +1175,14 @@ public final class PegEngine implements Parser {
             case Expression.And and -> parseAnd(ctx, and, ruleName);
             case Expression.Not not -> parseNot(ctx, not, ruleName);
             case Expression.TokenBoundary tb -> mode.shouldCollectActions()
-                ? parseTokenBoundaryWithActions(ctx, tb, ruleName, mode.semanticValues(), mode.tokenCapture())
+                ? parseTokenBoundaryWithActions(ctx, tb, ruleName, mode.semanticValues().unwrap(), mode.tokenCapture().unwrap())
                 : parseTokenBoundary(ctx, tb, ruleName);
             case Expression.Ignore ign -> parseIgnore(ctx, ign, ruleName);
             case Expression.Capture cap -> mode.shouldCollectActions()
-                ? parseCaptureWithActions(ctx, cap, ruleName, mode.semanticValues(), mode.tokenCapture())
+                ? parseCaptureWithActions(ctx, cap, ruleName, mode.semanticValues().unwrap(), mode.tokenCapture().unwrap())
                 : parseCapture(ctx, cap, ruleName);
             case Expression.CaptureScope cs -> mode.shouldCollectActions()
-                ? parseCaptureScopeWithActions(ctx, cs, ruleName, mode.semanticValues(), mode.tokenCapture())
+                ? parseCaptureScopeWithActions(ctx, cs, ruleName, mode.semanticValues().unwrap(), mode.tokenCapture().unwrap())
                 : parseCaptureScope(ctx, cs, ruleName);
             case Expression.Dictionary dict -> parseDictionary(ctx, dict);
             case Expression.BackReference br -> parseBackReference(ctx, br);
