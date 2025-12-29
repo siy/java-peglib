@@ -85,6 +85,10 @@ public final class SemanticValues {
     /**
      * Get child value by index.
      * Accessible as $1, $2, etc. in actions.
+     *
+     * <p>Note: This method uses unchecked cast intentionally for action DSL compatibility.
+     * User actions know the expected types at the call site. For type-safe access,
+     * use {@link #getOpt(int)} or {@link #get(int, Class)}.
      */
     @SuppressWarnings("unchecked")
     public <T> T get(int index) {
@@ -92,19 +96,39 @@ public final class SemanticValues {
     }
 
     /**
-     * Get child value by index, with default.
+     * Get child value by index with type checking.
+     * Returns Option.none() if index is out of bounds or type doesn't match.
+     *
+     * @param index the index of the child value
+     * @param type the expected type class
+     * @return Option containing the value if present and of correct type
+     */
+    public <T> Option<T> get(int index, Class<T> type) {
+        if (index < 0 || index >= values.size()) {
+            return Option.none();
+        }
+        var value = values.get(index);
+        if (type.isInstance(value)) {
+            return Option.some(type.cast(value));
+        }
+        return Option.none();
+    }
+
+    /**
+     * Get child value by index, with default if out of bounds.
+     *
+     * <p>Note: Uses Option internally for null-safety. Returns defaultValue
+     * if index is out of bounds OR if the value is null.
      */
     @SuppressWarnings("unchecked")
     public <T> T getOrDefault(int index, T defaultValue) {
-        if (index < 0 || index >= values.size()) {
-            return defaultValue;
-        }
-        var value = values.get(index);
-        return value != null ? (T) value : defaultValue;
+        var opt = this.<T>getOpt(index);
+        return opt.isPresent() ? opt.unwrap() : defaultValue;
     }
 
     /**
      * Get child value as Option.
+     * This is the recommended JBCT-compliant way to access values safely.
      */
     @SuppressWarnings("unchecked")
     public <T> Option<T> getOpt(int index) {
