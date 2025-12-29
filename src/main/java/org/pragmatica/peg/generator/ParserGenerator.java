@@ -777,6 +777,7 @@ public final class ParserGenerator {
     private void generateCstImports(StringBuilder sb) {
         sb.append("""
             import org.pragmatica.lang.Cause;
+            import org.pragmatica.lang.Option;
             import org.pragmatica.lang.Result;
 
             import java.util.ArrayList;
@@ -1363,14 +1364,14 @@ public final class ParserGenerator {
                     var leadingTrivia = skipWhitespace();
                     var result = parse_%s(leadingTrivia);
                     if (result.isFailure()) {
-                        return Result.failure(new ParseError(location(), "expected " + result.expected));
+                        return Result.failure(new ParseError(location(), "expected " + result.expected.or("valid input")));
                     }
                     var trailingTrivia = skipWhitespace(); // Capture trailing trivia
                     if (!isAtEnd()) {
                         return Result.failure(new ParseError(location(), "unexpected input"));
                     }
                     // Attach trailing trivia to root node
-                    var rootNode = attachTrailingTrivia(result.node, trailingTrivia);
+                    var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
                     return Result.success(rootNode);
                 }
 
@@ -1412,13 +1413,13 @@ public final class ParserGenerator {
                             // Record the failure and attempt recovery
                             var errorLoc = furthestFailure != null ? furthestFailure : location();
                             var errorSpan = SourceSpan.of(errorLoc, errorLoc);
-                            addDiagnostic("expected " + (furthestExpected != null ? furthestExpected : result.expected), errorSpan);
+                            addDiagnostic("expected " + (furthestExpected != null ? furthestExpected : result.expected.or("valid input")), errorSpan);
 
                             // Skip to recovery point and try to continue
                             var skippedSpan = skipToRecoveryPoint();
                             if (skippedSpan.length() > 0) {
                                 var skippedText = skippedSpan.extract(input);
-                                var expected = furthestExpected != null ? furthestExpected : result.expected;
+                                var expected = furthestExpected != null ? furthestExpected : result.expected.or("valid input");
                                 var errorNode = new CstNode.Error(skippedSpan, skippedText, expected, leadingTrivia, List.of());
                                 return ParseResultWithDiagnostics.withErrors(errorNode, diagnostics, input);
                             }
@@ -1434,11 +1435,11 @@ public final class ParserGenerator {
                             addDiagnostic("unexpected input", skippedSpan, "expected end of input");
 
                             // Attach error node to result
-                            var rootNode = attachTrailingTrivia(result.node, trailingTrivia);
+                            var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
                             return ParseResultWithDiagnostics.withErrors(rootNode, diagnostics, input);
                         }
 
-                        var rootNode = attachTrailingTrivia(result.node, trailingTrivia);
+                        var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
                         if (diagnostics.isEmpty()) {
                             return ParseResultWithDiagnostics.success(rootNode, input);
                         }
@@ -1470,7 +1471,7 @@ public final class ParserGenerator {
         sb.append("        if (cache != null) {\n");
         sb.append("            var cached = cache.get(key);\n");
         sb.append("            if (cached != null) {\n");
-        sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation);\n");
+        sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation.unwrap());\n");
         sb.append("                return cached;\n");
         sb.append("            }\n");
         sb.append("        }\n");
@@ -1491,12 +1492,12 @@ public final class ParserGenerator {
         var ruleIdConst = toConstantName(ruleName);
         if (isTokenRule(rule.expression())) {
             sb.append("            var node = new CstNode.Token(span, ").append(ruleIdConst)
-              .append(", result.text, leadingTrivia, List.of());\n");
+              .append(", result.text.unwrap(), leadingTrivia, List.of());\n");
         } else {
             sb.append("            var node = new CstNode.NonTerminal(span, ").append(ruleIdConst)
               .append(", children, leadingTrivia, List.of());\n");
         }
-        sb.append("            finalResult = CstParseResult.success(node, result.text, endLoc);\n");
+        sb.append("            finalResult = CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
         sb.append("        } else {\n");
         sb.append("            restoreLocation(startLoc);\n");
         // Use custom error message if available
@@ -1567,8 +1568,8 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(resultVar).append(" = matchLiteralCst(\"")
                     .append(escape(lit.text())).append("\", ").append(lit.caseInsensitive()).append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
+                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
+                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
                     sb.append(pad).append("}\n");
                 }
             }
@@ -1578,8 +1579,8 @@ public final class ParserGenerator {
                     .append(cc.negated()).append(", ")
                     .append(cc.caseInsensitive()).append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
+                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
+                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
                     sb.append(pad).append("}\n");
                 }
             }
@@ -1592,16 +1593,16 @@ public final class ParserGenerator {
                 }
                 sb.append("), ").append(dict.caseInsensitive()).append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
+                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
+                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
                     sb.append(pad).append("}\n");
                 }
             }
             case Expression.Any any -> {
                 sb.append(pad).append("var ").append(resultVar).append(" = matchAnyCst();\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
+                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
+                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
                     sb.append(pad).append("}\n");
                 }
             }
@@ -1615,8 +1616,8 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(resultVar).append(" = parse_")
                     .append(sanitize(ref.ruleName())).append("(").append(triviaVar).append(");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
+                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
+                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
                     sb.append(pad).append("}\n");
                 }
             }
@@ -1874,8 +1875,8 @@ public final class ParserGenerator {
                 sb.append(pad).append("var ").append(captured).append(" = captures.get(\"").append(br.name()).append("\");\n");
                 sb.append(pad).append("var ").append(resultVar).append(" = ").append(captured).append(" != null ? matchLiteralCst(").append(captured).append(", false) : CstParseResult.failure(\"capture '\");\n");
                 if (addToChildren) {
-                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node != null) {\n");
-                    sb.append(pad).append("    children.add(").append(resultVar).append(".node);\n");
+                    sb.append(pad).append("if (").append(resultVar).append(".isSuccess() && ").append(resultVar).append(".node.isPresent()) {\n");
+                    sb.append(pad).append("    children.add(").append(resultVar).append(".node.unwrap());\n");
                     sb.append(pad).append("}\n");
                 }
             }
@@ -2157,13 +2158,13 @@ public final class ParserGenerator {
 
                 private static final class CstParseResult {
                     final boolean success;
-                    final CstNode node;
-                    final String text;
-                    final String expected;
-                    final SourceLocation endLocation;
+                    final Option<CstNode> node;
+                    final Option<String> text;
+                    final Option<String> expected;
+                    final Option<SourceLocation> endLocation;
                     final boolean cutFailed;
 
-                    private CstParseResult(boolean success, CstNode node, String text, String expected, SourceLocation endLocation, boolean cutFailed) {
+                    private CstParseResult(boolean success, Option<CstNode> node, Option<String> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
                         this.success = success;
                         this.node = node;
                         this.text = text;
@@ -2177,23 +2178,23 @@ public final class ParserGenerator {
                     boolean isCutFailure() { return !success && cutFailed; }
 
                     static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
-                        return new CstParseResult(true, node, text, null, endLocation, false);
+                        return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.some(endLocation), false);
                     }
 
                     static CstParseResult failure(String expected) {
-                        return new CstParseResult(false, null, null, expected, null, false);
+                        return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), false);
                     }
 
                     static CstParseResult cutFailure(String expected) {
-                        return new CstParseResult(false, null, null, expected, null, true);
+                        return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), true);
                     }
 
                     CstParseResult asCutFailure() {
-                        return cutFailed ? this : new CstParseResult(false, null, null, expected, null, true);
+                        return cutFailed ? this : new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), true);
                     }
 
                     CstParseResult asRegularFailure() {
-                        return cutFailed ? new CstParseResult(false, null, null, expected, null, false) : this;
+                        return cutFailed ? new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), false) : this;
                     }
                 }
             """);
