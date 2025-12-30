@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **JBCT Compliance Refactoring**
+  - Replaced null usage with `Option<T>` throughout the codebase
+  - `ParseResultWithDiagnostics.node()` now returns `Option<CstNode>`
+  - `ParseMode` uses `Option` for nullable fields
+  - `ParsingContext` packrat cache uses `Option`
+  - `Diagnostic.code()` now returns `Option<String>`
+  - Generated `ParseResult` and `CstParseResult` use `Option` for nullable fields
+  - Improved type safety with `SemanticValues`
+
+### Added
+
+- **JBCT Maven Plugin** - Added jbct-maven-plugin 0.4.1 for code formatting and linting
+- **Internal Type Tests** - 24 new tests for ParseResult, ParsingContext, and generated parser diagnostics
+
+- Test count: 271 → 305
+
 ## [0.1.6] - 2025-12-26
 
 ### Added
