@@ -327,7 +327,7 @@ public sealed interface CstNode {
 
 ```bash
 mvn compile    # Compile
-mvn test       # Run tests (271 tests)
+mvn test       # Run tests (305 tests)
 mvn verify     # Full verification
 ```
 
