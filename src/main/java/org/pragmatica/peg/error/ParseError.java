@@ -6,6 +6,7 @@ import org.pragmatica.peg.tree.SourceLocation;
 /**
  * Parse error with location and context information.
  */
+@SuppressWarnings("JBCT-SEAL-01")
 public sealed interface ParseError extends Cause {
     SourceLocation location();
 
