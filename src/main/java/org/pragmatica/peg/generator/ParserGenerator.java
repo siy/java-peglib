@@ -293,7 +293,9 @@ public final class ParserGenerator {
                         return Result.failure(new ParseError(errorLine, errorColumn, "expected " + expected));
                     }
                     if (!isAtEnd()) {
-                        return Result.failure(new ParseError(line, column, "unexpected input"));
+                        var errorLine = furthestPos > 0 ? furthestLine : line;
+                        var errorColumn = furthestPos > 0 ? furthestColumn : column;
+                        return Result.failure(new ParseError(errorLine, errorColumn, "unexpected input"));
                     }
                     return Result.success(result.value.or(null));
                 }
@@ -1903,7 +1905,8 @@ public final class ParserGenerator {
                     }
                     var trailingTrivia = skipWhitespace(); // Capture trailing trivia
                     if (!isAtEnd()) {
-                        return Result.failure(new ParseError(location(), "unexpected input"));
+                        var errorLoc = furthestFailure.or(location());
+                        return Result.failure(new ParseError(errorLoc, "unexpected input"));
                     }
                     // Attach trailing trivia to root node
                     var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
@@ -1962,11 +1965,11 @@ public final class ParserGenerator {
 
                         var trailingTrivia = skipWhitespace();
                         if (!isAtEnd()) {
-                            // Unexpected trailing input
-                            var errorStart = location();
+                            // Unexpected trailing input - use furthest failure position for error
+                            var errorLoc = furthestFailure.or(location());
                             var skippedSpan = skipToRecoveryPoint();
-                            var skippedText = skippedSpan.extract(input);
-                            addDiagnostic("unexpected input", skippedSpan, "expected end of input");
+                            var errorSpan = SourceSpan.of(errorLoc, skippedSpan.end());
+                            addDiagnostic("unexpected input", errorSpan, "expected end of input");
 
                             // Attach error node to result
                             var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);

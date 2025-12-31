@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `furthestPos`/`furthestFailure` tracking to both AST and CST generated parsers
   - Replaces null checks with `Option<T>` in CST parser generator for consistency
   - Fixed infinite recursion in AST parser when whitespace rule contained `*` quantifier
+  - Fixed "unexpected input" errors to also use furthest failure position
 
 ### Added
 
