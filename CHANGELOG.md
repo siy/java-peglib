@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Farthest Failure Tracking** - Error positions now report at the furthest parsing position instead of 1:1 after backtracking
+  - Added `furthestPos`/`furthestFailure` tracking to both AST and CST generated parsers
+  - Replaces null checks with `Option<T>` in CST parser generator for consistency
+  - Fixed infinite recursion in AST parser when whitespace rule contained `*` quantifier
+
+### Added
+
+- **Error Position Tests** - 3 new tests verifying farthest failure tracking in generated parsers
+- Test count: 305 → 308
+
 ## [0.1.7] - 2025-12-30
 
 ### Changed
