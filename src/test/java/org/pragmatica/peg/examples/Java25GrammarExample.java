@@ -33,34 +33,44 @@ import static org.junit.jupiter.api.Assertions.*;
 class Java25GrammarExample {
 
     // Java 25 Grammar (PEG-compatible adaptation of JLS Chapter 19)
+    // Cut operator (^) commits to current alternative, preventing backtracking.
+    // Used after discriminating keywords to improve error messages and performance.
     static final String JAVA_GRAMMAR = """
         # === Compilation Units (JLS 7.3-7.8) ===
         CompilationUnit <- ModuleDecl / OrdinaryUnit
         OrdinaryUnit <- PackageDecl? ImportDecl* TypeDecl*
-        PackageDecl <- Annotation* 'package' QualifiedName ';'
-        ImportDecl  <- 'import' 'module' QualifiedName ';' / 'import' 'static'? QualifiedName ('.' '*')? ';'
+        PackageDecl <- Annotation* 'package' ^ QualifiedName ';'
+        ImportDecl  <- 'import' ^ ('module' QualifiedName ';' / 'static'? QualifiedName ('.' '*')? ';')
 
         # === Module Declarations (JLS 7.7) ===
-        ModuleDecl <- Annotation* 'open'? 'module' QualifiedName '{' ModuleDirective* '}'
+        ModuleDecl <- Annotation* 'open'? 'module' ^ QualifiedName '{' ModuleDirective* '}'
         ModuleDirective <- RequiresDirective / ExportsDirective / OpensDirective / UsesDirective / ProvidesDirective
-        RequiresDirective <- 'requires' ('transitive' / 'static')* QualifiedName ';'
-        ExportsDirective <- 'exports' QualifiedName ('to' QualifiedName (',' QualifiedName)*)? ';'
-        OpensDirective <- 'opens' QualifiedName ('to' QualifiedName (',' QualifiedName)*)? ';'
-        UsesDirective <- 'uses' QualifiedName ';'
-        ProvidesDirective <- 'provides' QualifiedName 'with' QualifiedName (',' QualifiedName)* ';'
+        RequiresDirective <- 'requires' ^ ('transitive' / 'static')* QualifiedName ';'
+        ExportsDirective <- 'exports' ^ QualifiedName ('to' QualifiedName (',' QualifiedName)*)? ';'
+        OpensDirective <- 'opens' ^ QualifiedName ('to' QualifiedName (',' QualifiedName)*)? ';'
+        UsesDirective <- 'uses' ^ QualifiedName ';'
+        ProvidesDirective <- 'provides' ^ QualifiedName 'with' QualifiedName (',' QualifiedName)* ';'
 
         TypeDecl <- Annotation* Modifier* TypeKind
         TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
-        ClassDecl <- 'class' Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
-        InterfaceDecl <- 'interface' Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
-        AnnotationDecl <- '@' 'interface' Identifier AnnotationBody
+        ClassDecl <- ClassKW ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
+        InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
+        AnnotationDecl <- '@' InterfaceKW ^ Identifier AnnotationBody
+        # Type declaration keywords with word boundary (prevents 'class' matching prefix of 'className')
+        ClassKW <- < 'class' ![a-zA-Z0-9_$] >
+        InterfaceKW <- < 'interface' ![a-zA-Z0-9_$] >
         AnnotationBody <- '{' AnnotationMember* '}'
         AnnotationMember <- Annotation* Modifier* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
         AnnotationElemDecl <- Type Identifier '(' ')' ('default' AnnotationElem)? ';'
-        EnumDecl <- 'enum' Identifier ImplementsClause? EnumBody
-        RecordDecl <- 'record' Identifier TypeParams? '(' RecordComponents? ')' ImplementsClause? RecordBody
-        ImplementsClause <- 'implements' TypeList
-        PermitsClause <- 'permits' TypeList
+        EnumDecl <- EnumKW ^ Identifier ImplementsClause? EnumBody
+        # Lookahead ensures this is a record declaration (record Name(...)) not:
+        # - method call: record(...)
+        # - field/variable of type 'record': record field;
+        RecordDecl <- RecordKW &(Identifier TypeParams? '(') Identifier ^ TypeParams? '(' RecordComponents? ')' ImplementsClause? RecordBody
+        EnumKW <- < 'enum' ![a-zA-Z0-9_$] >
+        RecordKW <- < 'record' ![a-zA-Z0-9_$] >
+        ImplementsClause <- 'implements' ^ TypeList
+        PermitsClause <- 'permits' ^ TypeList
         TypeList <- Type (',' Type)*
         TypeParams <- '<' TypeParam (',' TypeParam)* '>'
         TypeParam <- Identifier ('extends' Type ('&' Type)*)?
@@ -82,90 +92,103 @@ class Java25GrammarExample {
         VarDecls <- VarDecl (',' VarDecl)*
         VarDecl <- Identifier Dims? ('=' VarInit)?
         VarInit <- '{' (VarInit (',' VarInit)* ','?)? '}' / Expr
-        MethodDecl <- TypeParams? Type Identifier '(' Params? ')' Dims? Throws? (Block / ';')
+        MethodDecl <- TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? (Block / ';')
         Params <- Param (',' Param)*
         Param <- Annotation* Modifier* Type '...'? Identifier Dims?
-        Throws <- 'throws' TypeList
-        ConstructorDecl <- TypeParams? Identifier '(' Params? ')' Throws? Block
+        Throws <- 'throws' ^ TypeList
+        ConstructorDecl <- TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 
         # === Blocks and Statements (JLS 14) ===
         Block <- '{' BlockStmt* '}'
         BlockStmt <- LocalVar / LocalTypeDecl / Stmt
         LocalTypeDecl <- Annotation* Modifier* TypeKind
         LocalVar <- Modifier* LocalVarType VarDecls ';'
-        LocalVarType <- 'var' / Type
+        LocalVarType <- < 'var' ![a-zA-Z0-9_$] > / Type
         # Statement keywords use helper rules to combine keyword + word boundary as single token
         # This prevents the parser from skipping whitespace before the boundary check
+        # Cut operator after keyword rules commits to that statement type
         Stmt <- Block
-             / 'if' '(' Expr ')' Stmt ('else' Stmt)?
-             / 'while' '(' Expr ')' Stmt
-             / 'for' '(' ForCtrl ')' Stmt
-             / 'do' Stmt 'while' '(' Expr ')' ';'
-             / 'try' ResourceSpec? Block Catch* Finally?
-             / 'switch' '(' Expr ')' SwitchBlock
+             / IfKW ^ '(' Expr ')' Stmt ('else' Stmt)?
+             / WhileKW ^ '(' Expr ')' Stmt
+             / ForKW ^ '(' ForCtrl ')' Stmt
+             / DoKW ^ Stmt 'while' '(' Expr ')' ';'
+             / TryKW ^ ResourceSpec? Block Catch* Finally?
+             / SwitchKW ^ '(' Expr ')' SwitchBlock
              / ReturnKW Expr? ';'
              / ThrowKW Expr ';'
              / BreakKW Identifier? ';'
              / ContinueKW Identifier? ';'
              / AssertKW Expr (':' Expr)? ';'
-             / 'synchronized' '(' Expr ')' Block
+             / SynchronizedKW ^ '(' Expr ')' Block
              / YieldKW Expr ';'
              / Identifier ':' Stmt
              / Expr ';'
              / ';'
 
         # Helper rules: keyword with word boundary INSIDE token (prevents whitespace skip before boundary check)
+        IfKW <- < 'if' ![a-zA-Z0-9_$] >
+        WhileKW <- < 'while' ![a-zA-Z0-9_$] >
+        ForKW <- < 'for' ![a-zA-Z0-9_$] >
+        DoKW <- < 'do' ![a-zA-Z0-9_$] >
+        TryKW <- < 'try' ![a-zA-Z0-9_$] >
+        SwitchKW <- < 'switch' ![a-zA-Z0-9_$] >
+        SynchronizedKW <- < 'synchronized' ![a-zA-Z0-9_$] >
         ReturnKW <- < 'return' ![a-zA-Z0-9_$] >
         ThrowKW <- < 'throw' ![a-zA-Z0-9_$] >
         BreakKW <- < 'break' ![a-zA-Z0-9_$] >
         ContinueKW <- < 'continue' ![a-zA-Z0-9_$] >
         AssertKW <- < 'assert' ![a-zA-Z0-9_$] >
         YieldKW <- < 'yield' ![a-zA-Z0-9_$] >
+        CatchKW <- < 'catch' ![a-zA-Z0-9_$] >
+        FinallyKW <- < 'finally' ![a-zA-Z0-9_$] >
+        WhenKW <- < 'when' ![a-zA-Z0-9_$] >
         ForCtrl <- ForInit? ';' Expr? ';' ExprList? / LocalVarType Identifier ':' Expr
         ForInit <- LocalVarNoSemi / ExprList
         LocalVarNoSemi <- Modifier* LocalVarType VarDecls
         ResourceSpec <- '(' Resource (';' Resource)* ';'? ')'
         Resource <- Modifier* LocalVarType Identifier '=' Expr / QualifiedName
-        Catch <- 'catch' '(' Modifier* Type ('|' Type)* Identifier ')' Block
-        Finally <- 'finally' Block
+        Catch <- CatchKW ^ '(' Modifier* Type ('|' Type)* Identifier ')' Block
+        Finally <- FinallyKW ^ Block
         SwitchBlock <- '{' SwitchRule* '}'
-        SwitchRule <- SwitchLabel '->' (Expr ';' / Block / 'throw' Expr ';') / SwitchLabel ':' BlockStmt*
+        SwitchRule <- SwitchLabel '->' (Expr ';' / Block / ThrowKW Expr ';') / SwitchLabel ':' BlockStmt*
         # === Switch Labels and Patterns (JLS 14.11, 14.30) ===
-        SwitchLabel <- 'case' 'null' (',' 'default')? / 'case' CaseItem (',' CaseItem)* Guard? / 'default'
+        SwitchLabel <- 'case' ^ ('null' (',' 'default')? / CaseItem (',' CaseItem)* Guard?) / 'default'
         CaseItem <- Pattern / QualifiedName &('->' / ',' / ':' / 'when') / Expr
         Pattern <- RecordPattern / TypePattern
         TypePattern <- &(LocalVarType Identifier) LocalVarType Identifier / '_'
         RecordPattern <- RefType '(' PatternList? ')'
         PatternList <- Pattern (',' Pattern)*
-        Guard <- 'when' Expr
+        Guard <- WhenKW Expr
 
         Expr <- Assignment
         Assignment <- Ternary (('=' / '>>>=' / '>>=' / '<<=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Assignment)?
         Ternary <- LogOr ('?' Expr ':' Ternary)?
         LogOr <- LogAnd ('||' LogAnd)*
         LogAnd <- BitOr ('&&' BitOr)*
-        BitOr <- BitXor (!'||' '|' BitXor)*
-        BitXor <- BitAnd ('^' BitAnd)*
-        BitAnd <- Equality (!'&&' '&' Equality)*
+        BitOr <- BitXor (!'||' !'|=' '|' BitXor)*
+        BitXor <- BitAnd (!'^=' '^' BitAnd)*
+        BitAnd <- Equality (!'&&' !'&=' '&' Equality)*
         Equality <- Relational (('==' / '!=') Relational)*
         Relational <- Shift (('<=' / '>=' / '<' / '>') Shift / 'instanceof' (Pattern / Type))?
-        Shift <- Additive (('<<' / '>>>' / '>>') Additive)*
-        Additive <- Multiplicative (('+' / '-' !'>') Multiplicative)*
-        Multiplicative <- Unary (('*' / '/' / '%') Unary)*
+        Shift <- Additive ((!'<<=' '<<' / !'>>>=' '>>>' / !'>>=' !'>>>=' '>>') Additive)*
+        Additive <- Multiplicative ((!'+=' '+' / !'-=' !'->' '-') Multiplicative)*
+        Multiplicative <- Unary ((!'*=' '*' / !'/=' '/' / !'%=' '%') Unary)*
         Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
         Postfix <- Primary PostOp*
         PostOp <- '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
-        Primary <- Literal / 'this' / 'super' / 'new' TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / 'switch' '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / QualifiedName
+        Primary <- Literal / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? Type ('(' Args? ')' ClassBody? / Dims? VarInit?) / SwitchKW '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / TypeExpr / QualifiedName
+        TypeExpr <- Type ('.' < 'class' > / '::' TypeArgs? (< 'new' > / Identifier))
         Lambda <- LambdaParams '->' (Expr / Block)
         LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
-        LambdaParam <- Annotation* Modifier* (('var' / Type) &('...' / Identifier / '_'))? '...'? (Identifier / '_')
+        LambdaParam <- Annotation* Modifier* ((< 'var' ![a-zA-Z0-9_$] > / Type) &('...' / Identifier / '_'))? '...'? (Identifier / '_')
         Args <- Expr (',' Expr)*
         ExprList <- Expr (',' Expr)*
 
         # === Types with Type-Use Annotations (JSR 308 / JLS 4.11) ===
         Type <- Annotation* (PrimType / RefType) Dims?
-        PrimType <- 'boolean' / 'byte' / 'short' / 'int' / 'long' / 'float' / 'double' / 'char' / 'void'
-        RefType <- AnnotatedTypeName ('.' AnnotatedTypeName)*
+        PrimType <- < ('boolean' / 'byte' / 'short' / 'int' / 'long' / 'float' / 'double' / 'char' / 'void') ![a-zA-Z0-9_$] >
+        # Use lookahead BEFORE consuming '.' to avoid capturing it when followed by keyword (e.g., 'HashMap.class')
+        RefType <- AnnotatedTypeName (&('.' ('@' / Identifier)) '.' AnnotatedTypeName)*
         AnnotatedTypeName <- Annotation* Identifier TypeArgs?
         Dims <- (Annotation* '[' ']')+
         TypeArgs <- '<' '>' / '<' TypeArg (',' TypeArg)* '>'
@@ -175,12 +198,12 @@ class Java25GrammarExample {
         QualifiedName <- Identifier (&('.' Identifier) '.' Identifier)*
         Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
 
-        Modifier <- 'public' / 'protected' / 'private' / 'static' / 'final' / 'abstract' / 'native' / 'synchronized' / 'transient' / 'volatile' / 'strictfp' / 'default' / 'sealed' / 'non-sealed'
+        Modifier <- < ('public' / 'protected' / 'private' / 'static' / 'final' / 'abstract' / 'native' / 'synchronized' / 'transient' / 'volatile' / 'strictfp' / 'default' / 'sealed' / 'non-sealed') ![a-zA-Z0-9_$] >
         Annotation <- '@' !'interface' QualifiedName ('(' AnnotationValue? ')')?
         AnnotationValue <- Identifier '=' AnnotationElem (',' Identifier '=' AnnotationElem)* / AnnotationElem
         AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)* ','?)? '}' / Ternary
 
-        Literal <- 'null' / 'true' / 'false' / CharLit / StringLit / NumLit
+        Literal <- < ('null' / 'true' / 'false') ![a-zA-Z0-9_$] > / CharLit / StringLit / NumLit
         CharLit <- < '\\'' ([^'\\\\] / '\\\\' .)* '\\'' >
         StringLit <- < '\"\"\"' (!'\"\"\"' .)* '\"\"\"' > / < '"' ([^"\\\\] / '\\\\' .)* '"' >
         NumLit <- < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\\-]? [0-9_]+)? [fFdD]? >

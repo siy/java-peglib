@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Java 25 Grammar Sync** - Synced grammar improvements from jbct-cli
+  - Added cut operators (`^`) after discriminating keywords for better error messages
+  - Added keyword helper rules with word boundaries (`ClassKW`, `InterfaceKW`, `EnumKW`, etc.)
+  - Added token boundaries to `PrimType`, `Modifier`, `Literal`, `Primary` rules
+  - Updated `RefType` lookahead to handle `Type.@Annotation Inner` correctly
+  - Added `TypeExpr` rule for `Type.class` and `Type::new` expressions
+  - Updated operator rules with lookaheads to prevent compound operator conflicts
+  - Added `RecordDecl` lookahead to distinguish from methods/fields named 'record'
+
 ### Fixed
 
 - **Farthest Failure Tracking** - Error positions now report at the furthest parsing position instead of 1:1 after backtracking
