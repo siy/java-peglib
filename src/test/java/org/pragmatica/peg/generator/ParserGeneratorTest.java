@@ -3,6 +3,11 @@ package org.pragmatica.peg.generator;
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.PegParser;
 
+import javax.tools.ToolProvider;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.Files;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -340,5 +345,129 @@ class ParserGeneratorTest {
 
         // No Error case in switch
         assertFalse(source.contains("case CstNode.Error"));
+    }
+
+    @Test
+    void generatedAstParser_errorReportsAtFurthestPosition() throws Exception {
+        // Grammar that requires 'abc' followed by letters - no backtracking possible
+        var result = PegParser.generateParser("""
+            Root <- 'start' [a-z]+
+            %whitespace <- [ ]*
+            """,
+            "test.furthest",
+            "FurthestAstParser"
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Compile and run
+        var parser = compileAndInstantiate(source, "test.furthest.FurthestAstParser");
+        var parseMethod = parser.getClass().getMethod("parse", String.class);
+
+        // Parse valid input - should succeed
+        var validResult = parseMethod.invoke(parser, "start abc");
+        assertThat(validResult.toString()).contains("Success");
+
+        // Parse input with error after 'start' - number instead of letters
+        // "start 123" - error is at position 6 (the '1'), not at 1:1
+        var errorResult = parseMethod.invoke(parser, "start 123");
+        var errorString = errorResult.toString();
+        assertThat(errorString).contains("Failure");
+        // Should report error at column 7 (after "start "), not at column 1
+        assertThat(errorString).doesNotContain("column=1,");
+        assertThat(errorString).contains("column=7");
+    }
+
+    @Test
+    void generatedCstParser_errorReportsAtFurthestPosition() throws Exception {
+        var result = PegParser.generateCstParser("""
+            Root <- 'start' [a-z]+
+            %whitespace <- [ ]*
+            """,
+            "test.furthest.cst",
+            "FurthestCstParser",
+            ErrorReporting.BASIC
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Compile and run
+        var parser = compileAndInstantiate(source, "test.furthest.cst.FurthestCstParser");
+        var parseMethod = parser.getClass().getMethod("parse", String.class);
+
+        // Parse input with error after 'start'
+        var errorResult = parseMethod.invoke(parser, "start 123");
+        var errorString = errorResult.toString();
+        assertThat(errorString).contains("Failure");
+        // Should report error at furthest position, not at 1:1
+        assertThat(errorString).doesNotContain("at 1:1");
+        assertThat(errorString).contains("1:7");
+    }
+
+    @Test
+    void generatedCstParser_advanced_errorReportsAtFurthestPosition() throws Exception {
+        var result = PegParser.generateCstParser("""
+            Root <- 'start' [a-z]+
+            %whitespace <- [ ]*
+            """,
+            "test.furthest.adv",
+            "FurthestAdvParser",
+            ErrorReporting.ADVANCED
+        );
+
+        assertTrue(result.isSuccess());
+        var source = result.unwrap();
+
+        // Compile and run
+        var parser = compileAndInstantiate(source, "test.furthest.adv.FurthestAdvParser");
+        var parseWithDiagMethod = parser.getClass().getMethod("parseWithDiagnostics", String.class);
+
+        // Parse input with error after 'start'
+        var diagResult = parseWithDiagMethod.invoke(parser, "start 123");
+
+        // Check diagnostics
+        var formatMethod = diagResult.getClass().getMethod("formatDiagnostics", String.class);
+        var formatted = (String) formatMethod.invoke(diagResult, "test.txt");
+
+        // Should report error at furthest position (line 1, column 7)
+        assertThat(formatted).contains("1:7");
+        assertThat(formatted).doesNotContain("1:1");
+    }
+
+    // Helper to compile and instantiate a generated parser
+    private Object compileAndInstantiate(String source, String className) throws Exception {
+        var tempDir = Files.createTempDirectory("peglib-test");
+        var packagePath = className.substring(0, className.lastIndexOf('.')).replace('.', '/');
+        var simpleClassName = className.substring(className.lastIndexOf('.') + 1);
+
+        var packageDir = tempDir.resolve(packagePath);
+        Files.createDirectories(packageDir);
+
+        var sourceFile = packageDir.resolve(simpleClassName + ".java");
+        Files.writeString(sourceFile, source);
+
+        // Compile with error capture
+        var compiler = ToolProvider.getSystemJavaCompiler();
+        var errStream = new java.io.ByteArrayOutputStream();
+        var result = compiler.run(null, null, errStream,
+            "-d", tempDir.toString(),
+            "-cp", System.getProperty("java.class.path"),
+            sourceFile.toString()
+        );
+
+        if (result != 0) {
+            System.err.println("=== Generated source ===");
+            System.err.println(source);
+            System.err.println("=== Compilation errors ===");
+            System.err.println(errStream);
+            throw new RuntimeException("Compilation failed for " + className + ": " + errStream);
+        }
+
+        // Load and instantiate
+        var classLoader = new URLClassLoader(new URL[]{tempDir.toUri().toURL()});
+        var parserClass = classLoader.loadClass(className);
+        return parserClass.getDeclaredConstructor().newInstance();
     }
 }

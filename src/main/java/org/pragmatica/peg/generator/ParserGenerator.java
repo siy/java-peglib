@@ -91,12 +91,14 @@ public final class ParserGenerator {
     private final String packageName;
     private final String className;
     private final ErrorReporting errorReporting;
+    private boolean inWhitespaceRuleGeneration;
 
     private ParserGenerator(Grammar grammar, String packageName, String className, ErrorReporting errorReporting) {
         this.grammar = grammar;
         this.packageName = packageName;
         this.className = className;
         this.errorReporting = errorReporting;
+        this.inWhitespaceRuleGeneration = false;
     }
 
     public static ParserGenerator create(Grammar grammar, String packageName, String className) {
@@ -195,6 +197,10 @@ public final class ParserGenerator {
                 private Map<Long, ParseResult> cache;
                 private Map<String, String> captures;
                 private boolean packratEnabled = true;
+                private int furthestPos;
+                private int furthestLine;
+                private int furthestColumn;
+                private String furthestExpected;
 
                 /**
                  * Enable or disable packrat memoization.
@@ -211,6 +217,10 @@ public final class ParserGenerator {
                     this.column = 1;
                     this.cache = packratEnabled ? new HashMap<>() : null;
                     this.captures = new HashMap<>();
+                    this.furthestPos = 0;
+                    this.furthestLine = 1;
+                    this.furthestColumn = 1;
+                    this.furthestExpected = "";
                 }
 
                 private boolean isAtEnd() {
@@ -248,6 +258,17 @@ public final class ParserGenerator {
                     return ((long) ruleId << 32) | position;
                 }
 
+                private void trackFailure(String expected) {
+                    if (pos > furthestPos) {
+                        furthestPos = pos;
+                        furthestLine = line;
+                        furthestColumn = column;
+                        furthestExpected = expected;
+                    } else if (pos == furthestPos && !furthestExpected.contains(expected)) {
+                        furthestExpected = furthestExpected.isEmpty() ? expected : furthestExpected + " or " + expected;
+                    }
+                }
+
             """);
     }
 
@@ -266,12 +287,17 @@ public final class ParserGenerator {
                     init(input);
                     var result = parse_%s();
                     if (result.isFailure()) {
-                        return Result.failure(new ParseError(line, column, "expected " + result.expected.orElse("valid input")));
+                        var errorLine = furthestPos > 0 ? furthestLine : line;
+                        var errorColumn = furthestPos > 0 ? furthestColumn : column;
+                        var expected = !furthestExpected.isEmpty() ? furthestExpected : result.expected.or("valid input");
+                        return Result.failure(new ParseError(errorLine, errorColumn, "expected " + expected));
                     }
                     if (!isAtEnd()) {
-                        return Result.failure(new ParseError(line, column, "unexpected input"));
+                        var errorLine = furthestPos > 0 ? furthestLine : line;
+                        var errorColumn = furthestPos > 0 ? furthestColumn : column;
+                        return Result.failure(new ParseError(errorLine, errorColumn, "unexpected input"));
                     }
-                    return Result.success(result.value.orElse(null));
+                    return Result.success(result.value.or(null));
                 }
 
             """.formatted(sanitize(startRuleName)));
@@ -447,8 +473,10 @@ public final class ParserGenerator {
                   .append(" = false;\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
-                    sb.append(pad)
-                      .append("skipWhitespace();\n");
+                    if (!inWhitespaceRuleGeneration) {
+                        sb.append(pad)
+                          .append("skipWhitespace();\n");
+                    }
                     generateExpressionCode(sb, elem, "elem" + id + "_" + i, indent, counter);
                     // Check for cut failure propagation
                     sb.append(pad)
@@ -655,8 +683,10 @@ public final class ParserGenerator {
                   .append("    int ")
                   .append(beforePos)
                   .append("Column = column;\n");
-                sb.append(pad)
-                  .append("    skipWhitespace();\n");
+                if (!inWhitespaceRuleGeneration) {
+                    sb.append(pad)
+                      .append("    skipWhitespace();\n");
+                }
                 generateExpressionCode(sb, zom.expression(), zomElem, indent + 1, counter);
                 sb.append(pad)
                   .append("    if (")
@@ -712,8 +742,10 @@ public final class ParserGenerator {
                   .append("        int ")
                   .append(beforePos)
                   .append("Column = column;\n");
-                sb.append(pad)
-                  .append("        skipWhitespace();\n");
+                if (!inWhitespaceRuleGeneration) {
+                    sb.append(pad)
+                      .append("        skipWhitespace();\n");
+                }
                 generateExpressionCode(sb, oom.expression(), oomElem, indent + 2, counter);
                 sb.append(pad)
                   .append("        if (")
@@ -829,10 +861,12 @@ public final class ParserGenerator {
                   .append("    int ")
                   .append(beforePos)
                   .append("Column = column;\n");
-                sb.append(pad)
-                  .append("    if (")
-                  .append(repCount)
-                  .append(" > 0) skipWhitespace();\n");
+                if (!inWhitespaceRuleGeneration) {
+                    sb.append(pad)
+                      .append("    if (")
+                      .append(repCount)
+                      .append(" > 0) skipWhitespace();\n");
+                }
                 generateExpressionCode(sb, rep.expression(), repElem, indent + 1, counter);
                 sb.append(pad)
                   .append("    if (")
@@ -1082,12 +1116,14 @@ public final class ParserGenerator {
             sb.append("        while (!isAtEnd()) {\n");
             sb.append("            int wsBeforePos = pos;\n");
             int[] wsCounter = {0};
+            inWhitespaceRuleGeneration = true;
             generateExpressionCode(sb,
                                    grammar.whitespace()
                                           .unwrap(),
                                    "wsResult",
                                    3,
                                    wsCounter);
+            inWhitespaceRuleGeneration = false;
             sb.append("            if (wsResult.isFailure() || pos == wsBeforePos) break;\n");
             sb.append("        }\n");
         }
@@ -1096,6 +1132,7 @@ public final class ParserGenerator {
 
                 private ParseResult matchLiteral(String text, boolean caseInsensitive) {
                     if (remaining() < text.length()) {
+                        trackFailure("'" + text + "'");
                         return ParseResult.failure("'" + text + "'");
                     }
                     for (int i = 0; i < text.length(); i++) {
@@ -1103,10 +1140,12 @@ public final class ParserGenerator {
                         char actual = peek(i);
                         if (caseInsensitive) {
                             if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
+                                trackFailure("'" + text + "'");
                                 return ParseResult.failure("'" + text + "'");
                             }
                         } else {
                             if (expected != actual) {
+                                trackFailure("'" + text + "'");
                                 return ParseResult.failure("'" + text + "'");
                             }
                         }
@@ -1127,6 +1166,7 @@ public final class ParserGenerator {
                         }
                     }
                     if (longestMatch == null) {
+                        trackFailure("dictionary word");
                         return ParseResult.failure("dictionary word");
                     }
                     for (int i = 0; i < longestLen; i++) {
@@ -1141,12 +1181,14 @@ public final class ParserGenerator {
 
                 private ParseResult matchCharClass(String pattern, boolean negated, boolean caseInsensitive) {
                     if (isAtEnd()) {
+                        trackFailure("[" + (negated ? "^" : "") + pattern + "]");
                         return ParseResult.failure("character class");
                     }
                     char c = peek();
                     boolean matches = matchesPattern(c, pattern, caseInsensitive);
                     if (negated) matches = !matches;
                     if (!matches) {
+                        trackFailure("[" + (negated ? "^" : "") + pattern + "]");
                         return ParseResult.failure("character class");
                     }
                     advance();
@@ -1159,6 +1201,7 @@ public final class ParserGenerator {
 
                 private ParseResult matchAny() {
                     if (isAtEnd()) {
+                        trackFailure("any character");
                         return ParseResult.failure("any character");
                     }
                     char c = advance();
@@ -1652,20 +1695,20 @@ public final class ParserGenerator {
                 }
 
                 public record ParseResultWithDiagnostics(
-                    CstNode node,
+                    Option<CstNode> node,
                     List<Diagnostic> diagnostics,
                     String source
                 ) {
                     public static ParseResultWithDiagnostics success(CstNode node, String source) {
-                        return new ParseResultWithDiagnostics(node, List.of(), source);
+                        return new ParseResultWithDiagnostics(Option.some(node), List.of(), source);
                     }
 
-                    public static ParseResultWithDiagnostics withErrors(CstNode node, List<Diagnostic> diagnostics, String source) {
+                    public static ParseResultWithDiagnostics withErrors(Option<CstNode> node, List<Diagnostic> diagnostics, String source) {
                         return new ParseResultWithDiagnostics(node, List.copyOf(diagnostics), source);
                     }
 
                     public boolean isSuccess() {
-                        return node != null && diagnostics.isEmpty();
+                        return node.isPresent() && diagnostics.isEmpty();
                     }
 
                     public boolean hasErrors() {
@@ -1673,7 +1716,7 @@ public final class ParserGenerator {
                     }
 
                     public boolean hasNode() {
-                        return node != null;
+                        return node.isPresent();
                     }
 
                     public String formatDiagnostics(String filename) {
@@ -1720,6 +1763,8 @@ public final class ParserGenerator {
                 private Map<String, String> captures;
                 private boolean inTokenBoundary;
                 private boolean packratEnabled = true;
+                private Option<SourceLocation> furthestFailure;
+                private Option<String> furthestExpected;
 
                 /**
                  * Enable or disable packrat memoization.
@@ -1732,8 +1777,6 @@ public final class ParserGenerator {
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     private List<Diagnostic> diagnostics;
-                    private SourceLocation furthestFailure;
-                    private String furthestExpected;
                 """);
         }
         sb.append("""
@@ -1746,12 +1789,12 @@ public final class ParserGenerator {
                     this.cache = packratEnabled ? new HashMap<>() : null;
                     this.captures = new HashMap<>();
                     this.inTokenBoundary = false;
+                    this.furthestFailure = Option.none();
+                    this.furthestExpected = Option.none();
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                         this.diagnostics = new ArrayList<>();
-                        this.furthestFailure = null;
-                        this.furthestExpected = null;
                 """);
         }
         sb.append("""
@@ -1802,17 +1845,19 @@ public final class ParserGenerator {
                     this.column = loc.column();
                 }
 
+                private void trackFailure(String expected) {
+                    var loc = location();
+                    if (furthestFailure.isEmpty() || loc.offset() > furthestFailure.unwrap().offset()) {
+                        furthestFailure = Option.some(loc);
+                        furthestExpected = Option.some(expected);
+                    } else if (loc.offset() == furthestFailure.unwrap().offset() && !furthestExpected.or("").contains(expected)) {
+                        furthestExpected = Option.some(furthestExpected.or("").isEmpty() ? expected : furthestExpected.or("") + " or " + expected);
+                    }
+                }
+
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
-                    private void trackFailure(String expected) {
-                        var loc = location();
-                        if (furthestFailure == null || loc.offset() > furthestFailure.offset()) {
-                            furthestFailure = loc;
-                            furthestExpected = expected;
-                        }
-                    }
-
                     private SourceSpan skipToRecoveryPoint() {
                         var start = location();
                         while (!isAtEnd()) {
@@ -1854,11 +1899,14 @@ public final class ParserGenerator {
                     var leadingTrivia = skipWhitespace();
                     var result = parse_%s(leadingTrivia);
                     if (result.isFailure()) {
-                        return Result.failure(new ParseError(location(), "expected " + result.expected.or("valid input")));
+                        var errorLoc = furthestFailure.or(location());
+                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                        return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
                     var trailingTrivia = skipWhitespace(); // Capture trailing trivia
                     if (!isAtEnd()) {
-                        return Result.failure(new ParseError(location(), "unexpected input"));
+                        var errorLoc = furthestFailure.or(location());
+                        return Result.failure(new ParseError(errorLoc, "unexpected input"));
                     }
                     // Attach trailing trivia to root node
                     var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
@@ -1900,39 +1948,39 @@ public final class ParserGenerator {
 
                         if (result.isFailure()) {
                             // Record the failure and attempt recovery
-                            var errorLoc = furthestFailure != null ? furthestFailure : location();
+                            var errorLoc = furthestFailure.or(location());
                             var errorSpan = SourceSpan.of(errorLoc, errorLoc);
-                            addDiagnostic("expected " + (furthestExpected != null ? furthestExpected : result.expected.or("valid input")), errorSpan);
+                            var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                            addDiagnostic("expected " + expected, errorSpan);
 
                             // Skip to recovery point and try to continue
                             var skippedSpan = skipToRecoveryPoint();
                             if (skippedSpan.length() > 0) {
                                 var skippedText = skippedSpan.extract(input);
-                                var expected = furthestExpected != null ? furthestExpected : result.expected.or("valid input");
                                 var errorNode = new CstNode.Error(skippedSpan, skippedText, expected, leadingTrivia, List.of());
-                                return ParseResultWithDiagnostics.withErrors(errorNode, diagnostics, input);
+                                return ParseResultWithDiagnostics.withErrors(Option.some(errorNode), diagnostics, input);
                             }
-                            return ParseResultWithDiagnostics.withErrors(null, diagnostics, input);
+                            return ParseResultWithDiagnostics.withErrors(Option.none(), diagnostics, input);
                         }
 
                         var trailingTrivia = skipWhitespace();
                         if (!isAtEnd()) {
-                            // Unexpected trailing input
-                            var errorStart = location();
+                            // Unexpected trailing input - use furthest failure position for error
+                            var errorLoc = furthestFailure.or(location());
                             var skippedSpan = skipToRecoveryPoint();
-                            var skippedText = skippedSpan.extract(input);
-                            addDiagnostic("unexpected input", skippedSpan, "expected end of input");
+                            var errorSpan = SourceSpan.of(errorLoc, skippedSpan.end());
+                            addDiagnostic("unexpected input", errorSpan, "expected end of input");
 
                             // Attach error node to result
                             var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
-                            return ParseResultWithDiagnostics.withErrors(rootNode, diagnostics, input);
+                            return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                         }
 
                         var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
                         if (diagnostics.isEmpty()) {
                             return ParseResultWithDiagnostics.success(rootNode, input);
                         }
-                        return ParseResultWithDiagnostics.withErrors(rootNode, diagnostics, input);
+                        return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                     }
 
                 """.formatted(sanitizedName));
@@ -3016,6 +3064,7 @@ public final class ParserGenerator {
             sb.append("""
                     private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {
                         if (remaining() < text.length()) {
+                            trackFailure("'" + text + "'");
                             return CstParseResult.failure("'" + text + "'");
                         }
                         var startLoc = location();
@@ -3024,10 +3073,12 @@ public final class ParserGenerator {
                             char actual = peek(i);
                             if (caseInsensitive) {
                                 if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
+                                    trackFailure("'" + text + "'");
                                     return CstParseResult.failure("'" + text + "'");
                                 }
                             } else {
                                 if (expected != actual) {
+                                    trackFailure("'" + text + "'");
                                     return CstParseResult.failure("'" + text + "'");
                                 }
                             }
@@ -3050,6 +3101,7 @@ public final class ParserGenerator {
                             }
                         }
                         if (longestMatch == null) {
+                            trackFailure("dictionary word");
                             return CstParseResult.failure("dictionary word");
                         }
                         var startLoc = location();
@@ -3064,91 +3116,48 @@ public final class ParserGenerator {
                 """);
         }
         sb.append(MATCHES_WORD_METHOD);
-        // Generate matchCharClassCst and matchAnyCst with trackFailure for ADVANCED mode
-        if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("""
+        // trackFailure is now always available (moved out of ADVANCED-only block)
+        sb.append("""
 
-                    private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
-                        if (isAtEnd()) {
-                            trackFailure("character class");
-                            return CstParseResult.failure("character class");
-                        }
-                        var startLoc = location();
-                        char c = peek();
-                        boolean matches = matchesPattern(c, pattern, caseInsensitive);
-                        if (negated) matches = !matches;
-                        if (!matches) {
-                            trackFailure("character class");
-                            return CstParseResult.failure("character class");
-                        }
-                        advance();
-                        var text = String.valueOf(c);
-                        var span = SourceSpan.of(startLoc, location());
-                        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());
-                        return CstParseResult.success(node, text, location());
+                private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
+                    if (isAtEnd()) {
+                        trackFailure("[" + (negated ? "^" : "") + pattern + "]");
+                        return CstParseResult.failure("character class");
                     }
-
-                """);
-        }else {
-            sb.append("""
-
-                    private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
-                        if (isAtEnd()) {
-                            return CstParseResult.failure("character class");
-                        }
-                        var startLoc = location();
-                        char c = peek();
-                        boolean matches = matchesPattern(c, pattern, caseInsensitive);
-                        if (negated) matches = !matches;
-                        if (!matches) {
-                            return CstParseResult.failure("character class");
-                        }
-                        advance();
-                        var text = String.valueOf(c);
-                        var span = SourceSpan.of(startLoc, location());
-                        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());
-                        return CstParseResult.success(node, text, location());
+                    var startLoc = location();
+                    char c = peek();
+                    boolean matches = matchesPattern(c, pattern, caseInsensitive);
+                    if (negated) matches = !matches;
+                    if (!matches) {
+                        trackFailure("[" + (negated ? "^" : "") + pattern + "]");
+                        return CstParseResult.failure("character class");
                     }
+                    advance();
+                    var text = String.valueOf(c);
+                    var span = SourceSpan.of(startLoc, location());
+                    var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());
+                    return CstParseResult.success(node, text, location());
+                }
 
-                """);
-        }
+            """);
         sb.append(MATCHES_PATTERN_METHOD);
-        if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("""
+        sb.append("""
 
-                    private CstParseResult matchAnyCst() {
-                        if (isAtEnd()) {
-                            trackFailure("any character");
-                            return CstParseResult.failure("any character");
-                        }
-                        var startLoc = location();
-                        char c = advance();
-                        var text = String.valueOf(c);
-                        var span = SourceSpan.of(startLoc, location());
-                        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());
-                        return CstParseResult.success(node, text, location());
+                private CstParseResult matchAnyCst() {
+                    if (isAtEnd()) {
+                        trackFailure("any character");
+                        return CstParseResult.failure("any character");
                     }
+                    var startLoc = location();
+                    char c = advance();
+                    var text = String.valueOf(c);
+                    var span = SourceSpan.of(startLoc, location());
+                    var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());
+                    return CstParseResult.success(node, text, location());
+                }
 
-                    // === CST Parse Result ===
-                """);
-        }else {
-            sb.append("""
-
-                    private CstParseResult matchAnyCst() {
-                        if (isAtEnd()) {
-                            return CstParseResult.failure("any character");
-                        }
-                        var startLoc = location();
-                        char c = advance();
-                        var text = String.valueOf(c);
-                        var span = SourceSpan.of(startLoc, location());
-                        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());
-                        return CstParseResult.success(node, text, location());
-                    }
-
-                    // === CST Parse Result ===
-                """);
-        }
+                // === CST Parse Result ===
+            """);
         sb.append("""
 
                 private static final class CstParseResult {

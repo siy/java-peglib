@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2025-12-31
+
+### Changed
+
+- **Java 25 Grammar Sync** - Synced grammar improvements from jbct-cli
+  - Added cut operators (`^`) after discriminating keywords for better error messages
+  - Added keyword helper rules with word boundaries (`ClassKW`, `InterfaceKW`, `EnumKW`, etc.)
+  - Added token boundaries to `PrimType`, `Modifier`, `Literal`, `Primary` rules
+  - Updated `RefType` lookahead to handle `Type.@Annotation Inner` correctly
+  - Added `TypeExpr` rule for `Type.class` and `Type::new` expressions
+  - Updated operator rules with lookaheads to prevent compound operator conflicts
+  - Added `RecordDecl` lookahead to distinguish from methods/fields named 'record'
+
+### Fixed
+
+- **Farthest Failure Tracking** - Error positions now report at the furthest parsing position instead of 1:1 after backtracking
+  - Added `furthestPos`/`furthestFailure` tracking to both AST and CST generated parsers
+  - Replaces null checks with `Option<T>` in CST parser generator for consistency
+  - Fixed infinite recursion in AST parser when whitespace rule contained `*` quantifier
+  - Fixed "unexpected input" errors to also use furthest failure position
+
+### Added
+
+- **Error Position Tests** - 3 new tests verifying farthest failure tracking in generated parsers
+- Test count: 305 → 308
+
 ## [0.1.7] - 2025-12-30
 
 ### Changed
