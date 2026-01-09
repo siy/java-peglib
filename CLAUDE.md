@@ -2,6 +2,10 @@
 
 ## Project Status: FEATURE COMPLETE
 
+## Agent Usage
+
+**IMPORTANT:** Use ONLY `jbct-coder` agent for ALL coding and fixing tasks in this project.
+
 ## Overview
 
 Java implementation of PEG (Parsing Expression Grammar) parser inspired by [cpp-peglib](https://github.com/yhirose/cpp-peglib).
@@ -144,7 +148,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
 - [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
-- [x] 305 passing tests
+- [x] 308 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -285,7 +289,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (305 tests)
+## Test Coverage (308 tests)
 
 ### Grammar Parser Tests (17 tests)
 - Simple rules, actions, sequences, choices
@@ -415,6 +419,6 @@ The `Keyword` rule should only include hard keywords. Contextual keywords are ma
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (268 passing)
+mvn test             # Run tests (308 passing)
 mvn verify           # Full verification
 ```

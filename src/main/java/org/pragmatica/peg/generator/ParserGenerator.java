@@ -9,6 +9,9 @@ import org.pragmatica.peg.grammar.Rule;
  * The generated parser depends only on pragmatica-lite:core.
  */
 public final class ParserGenerator {
+    private static final int INITIAL_BUFFER_SIZE = 32_000;
+    private static final int MAX_RECURSION_DEPTH = 100;
+
     // Shared generated code fragments
     private static final String MATCHES_WORD_METHOD = """
             private boolean matchesWord(String word, boolean caseInsensitive) {
@@ -113,7 +116,7 @@ public final class ParserGenerator {
     }
 
     public String generate() {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(INITIAL_BUFFER_SIZE);
         generatePackage(sb);
         generateImports(sb);
         generateClassStart(sb);
@@ -130,7 +133,7 @@ public final class ParserGenerator {
      * The generated parser preserves all source information including whitespace and comments.
      */
     public String generateCst() {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(INITIAL_BUFFER_SIZE);
         generatePackage(sb);
         generateCstImports(sb);
         generateCstClassStart(sb);
@@ -380,6 +383,9 @@ public final class ParserGenerator {
                                         String resultVar,
                                         int indent,
                                         int[] counter) {
+        if (indent > MAX_RECURSION_DEPTH) {
+            throw new IllegalStateException("Grammar expression nesting exceeds maximum depth of " + MAX_RECURSION_DEPTH);
+        }
         var pad = "    ".repeat(indent);
         int id = counter[0]++ ;
         // Get unique ID for this expression
@@ -2111,6 +2117,9 @@ public final class ParserGenerator {
                                            boolean addToChildren,
                                            int[] counter,
                                            boolean inWhitespaceRule) {
+        if (indent > MAX_RECURSION_DEPTH) {
+            throw new IllegalStateException("Grammar expression nesting exceeds maximum depth of " + MAX_RECURSION_DEPTH);
+        }
         var pad = "    ".repeat(indent);
         var id = counter[0]++ ;
         // Get unique ID for this expression

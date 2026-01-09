@@ -49,8 +49,8 @@ public final class GrammarParser {
             if (token instanceof GrammarToken.Directive directive) {
                 advance();
                 var result = parseDirective(directive);
-                if (result.isFailure()) {
-                    return result.fold(Result::failure, _ -> null);
+                if (result instanceof Result.Failure< ? > f) {
+                    return Result.failure(f.cause());
                 }
                 var expr = result.unwrap();
                 switch (directive.name()) {
@@ -59,8 +59,8 @@ public final class GrammarParser {
                 }
             }else if (token instanceof GrammarToken.Identifier) {
                 var result = parseRule();
-                if (result.isFailure()) {
-                    return result.fold(Result::failure, _ -> null);
+                if (result instanceof Result.Failure< ? > f) {
+                    return Result.failure(f.cause());
                 }
                 rules.add(result.unwrap());
             }else if (token instanceof GrammarToken.Eof) {
@@ -110,8 +110,8 @@ public final class GrammarParser {
             "'<-'"));
         }
         var exprResult = parseExpression();
-        if (exprResult.isFailure()) {
-            return exprResult.fold(Result::failure, _ -> null);
+        if (exprResult instanceof Result.Failure< ? > f) {
+            return Result.failure(f.cause());
         }
         var expression = exprResult.unwrap();
         // Check for action and/or error_message

@@ -13,12 +13,26 @@ import java.util.List;
  *   <li>{@link #withActions(List, String[])} - Skip whitespace, collect semantic values</li>
  *   <li>{@link #noWhitespace()} - Don't skip whitespace (for %whitespace rule itself)</li>
  * </ul>
+ *
+ * <p>Note: This is a mutable context holder, not a value object. The contained
+ * List and array are mutated during parsing to collect semantic values.
  */
-public record ParseMode(
- boolean skipWhitespace,
- boolean collectActions,
- Option<List<Object>> semanticValues,
- Option<String[] > tokenCapture) {
+public final class ParseMode {
+    private final boolean skipWhitespace;
+    private final boolean collectActions;
+    private final Option<List<Object>> semanticValues;
+    private final Option<String[] > tokenCapture;
+
+    private ParseMode(boolean skipWhitespace,
+                      boolean collectActions,
+                      Option<List<Object>> semanticValues,
+                      Option<String[] > tokenCapture) {
+        this.skipWhitespace = skipWhitespace;
+        this.collectActions = collectActions;
+        this.semanticValues = semanticValues;
+        this.tokenCapture = tokenCapture;
+    }
+
     /**
      * Standard CST parsing mode - skips whitespace, doesn't collect semantic values.
      */
@@ -50,6 +64,22 @@ public record ParseMode(
         return this;
     }
 
+    public boolean skipWhitespace() {
+        return skipWhitespace;
+    }
+
+    public boolean collectActions() {
+        return collectActions;
+    }
+
+    public Option<List<Object>> semanticValues() {
+        return semanticValues;
+    }
+
+    public Option<String[] > tokenCapture() {
+        return tokenCapture;
+    }
+
     /**
      * Check if this mode should skip whitespace before parsing an element.
      */
@@ -66,20 +96,21 @@ public record ParseMode(
 
     /**
      * Add a semantic value collected from a child rule.
+     * Mutates the contained list.
      */
     public void addValue(Object value) {
-        if (collectActions && semanticValues.isPresent()) {
-            semanticValues.unwrap()
-                          .add(value);
+        if (collectActions) {
+            semanticValues.onPresent(list -> list.add(value));
         }
     }
 
     /**
      * Set the token capture (from &lt; &gt; boundary).
+     * Mutates the contained array.
      */
     public void setTokenCapture(String text) {
-        if (collectActions && tokenCapture.isPresent()) {
-            tokenCapture.unwrap() [0] = text;
+        if (collectActions) {
+            tokenCapture.onPresent(arr -> arr[0] = text);
         }
     }
 }

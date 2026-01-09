@@ -33,7 +33,7 @@ public final class PegEngine implements Parser {
     private PegEngine(Grammar grammar, ParserConfig config, Map<String, Action> actions) {
         this.grammar = grammar;
         this.config = config;
-        this.actions = actions;
+        this.actions = Map.copyOf(actions);
     }
 
     public static Result<PegEngine> create(Grammar grammar, ParserConfig config) {
@@ -44,7 +44,7 @@ public final class PegEngine implements Parser {
     }
 
     public static PegEngine createWithoutActions(Grammar grammar, ParserConfig config) {
-        return new PegEngine(grammar, config, new HashMap<>());
+        return new PegEngine(grammar, config, Map.of());
     }
 
     @Override
@@ -162,18 +162,19 @@ public final class PegEngine implements Parser {
         if (config.recoveryStrategy() != RecoveryStrategy.ADVANCED) {
             var result = parseCst(input, startRule);
             return result.fold(
-            cause -> {
-                var parseError = (ParseError) cause;
-                var loc = parseError.location();
-                var span = SourceSpan.at(loc);
-                var diag = Diagnostic.error("parse error", span)
-                                     .withLabel(parseError.message());
-                return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
-            },
+            cause -> toDiagnosticsResult((ParseError) cause, input),
             node -> ParseResultWithDiagnostics.success(node, input));
         }
         // Advanced recovery: try to parse fragments with error collection
         return parseWithRecovery(ctx, ruleOpt.unwrap(), input);
+    }
+
+    private ParseResultWithDiagnostics toDiagnosticsResult(ParseError parseError, String input) {
+        var loc = parseError.location();
+        var span = SourceSpan.at(loc);
+        var diag = Diagnostic.error("parse error", span)
+                             .withLabel(parseError.message());
+        return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
     }
 
     /**
@@ -312,16 +313,17 @@ public final class PegEngine implements Parser {
         }
         var success = (ParseResult.Success) result;
         // Use token capture if available, otherwise full match
-        var matchedText = tokenCapture[0] != null
-                          ? tokenCapture[0]
-                          : ctx.substring(startPos, ctx.pos());
+        var matchedText = Option.option(tokenCapture[0])
+                                .or(ctx.substring(startPos,
+                                                  ctx.pos()));
         var span = ctx.spanFrom(startLoc);
         // Execute action if present
-        var action = actions.get(rule.name());
-        if (action != null) {
+        var actionOpt = Option.option(actions.get(rule.name()));
+        if (actionOpt.isPresent()) {
             var sv = SemanticValues.of(matchedText, span, childValues);
             try{
-                var value = action.apply(sv);
+                var value = actionOpt.unwrap()
+                                     .apply(sv);
                 var node = wrapWithRuleName(success.node(), rule.name(), List.of());
                 return ParseResult.Success.withValue(node, ctx.location(), value);
             } catch (Exception e) {
@@ -455,18 +457,18 @@ public final class PegEngine implements Parser {
         var startLoc = ctx.location();
         var words = dict.words();
         var caseInsensitive = dict.caseInsensitive();
-        // Build Trie and find longest match
-        String longestMatch = null;
+        // Find longest match
+        Option<String> longestMatch = Option.none();
         int longestLen = 0;
         for (var word : words) {
             if (matchesWord(ctx, word, caseInsensitive)) {
                 if (word.length() > longestLen) {
-                    longestMatch = word;
+                    longestMatch = Option.some(word);
                     longestLen = word.length();
                 }
             }
         }
-        if (longestMatch == null) {
+        if (longestMatch.isEmpty()) {
             var expected = String.join(" | ",
                                        words.stream()
                                             .map(w -> "'" + w + "'")
@@ -479,7 +481,7 @@ public final class PegEngine implements Parser {
             ctx.advance();
         }
         var span = ctx.spanFrom(startLoc);
-        var node = new CstNode.Terminal(span, "", longestMatch, List.of(), List.of());
+        var node = new CstNode.Terminal(span, "", longestMatch.unwrap(), List.of(), List.of());
         return ParseResult.Success.of(node, ctx.location());
     }
 
@@ -743,12 +745,12 @@ public final class PegEngine implements Parser {
 
     // === Helpers ===
     private List<Trivia> skipWhitespace(ParsingContext ctx) {
-        var trivia = new ArrayList<Trivia>();
         // Don't skip whitespace inside token boundaries or during whitespace parsing
         if (grammar.whitespace()
                    .isEmpty() || ctx.isSkippingWhitespace() || ctx.inTokenBoundary()) {
-            return trivia;
+            return List.of();
         }
+        var trivia = new ArrayList<Trivia>();
         ctx.enterWhitespaceSkip();
         try{
             var wsExpr = grammar.whitespace()
@@ -887,10 +889,9 @@ public final class PegEngine implements Parser {
                     mode.semanticValues()
                         .unwrap()
                         .addAll(localValues);
-                    if (localTokenCapture[0] != null) {
-                        mode.tokenCapture()
-                            .unwrap() [0] = localTokenCapture[0];
-                    }
+                    Option.option(localTokenCapture[0])
+                          .onPresent(text -> mode.tokenCapture()
+                                                 .unwrap() [0] = text);
                     return result;
                 }
             }else {
@@ -935,10 +936,9 @@ public final class PegEngine implements Parser {
                     mode.semanticValues()
                         .unwrap()
                         .addAll(localValues);
-                    if (localTokenCapture[0] != null) {
-                        mode.tokenCapture()
-                            .unwrap() [0] = localTokenCapture[0];
-                    }
+                    Option.option(localTokenCapture[0])
+                          .onPresent(text -> mode.tokenCapture()
+                                                 .unwrap() [0] = text);
                 }
             }else {
                 result = parseExpressionWithMode(ctx, zom.expression(), ruleName, mode);
@@ -999,10 +999,9 @@ public final class PegEngine implements Parser {
                     mode.semanticValues()
                         .unwrap()
                         .addAll(localValues);
-                    if (localTokenCapture[0] != null) {
-                        mode.tokenCapture()
-                            .unwrap() [0] = localTokenCapture[0];
-                    }
+                    Option.option(localTokenCapture[0])
+                          .onPresent(text -> mode.tokenCapture()
+                                                 .unwrap() [0] = text);
                 }
             }else {
                 result = parseExpressionWithMode(ctx, oom.expression(), ruleName, mode);
@@ -1083,10 +1082,9 @@ public final class PegEngine implements Parser {
                     mode.semanticValues()
                         .unwrap()
                         .addAll(localValues);
-                    if (localTokenCapture[0] != null) {
-                        mode.tokenCapture()
-                            .unwrap() [0] = localTokenCapture[0];
-                    }
+                    Option.option(localTokenCapture[0])
+                          .onPresent(text -> mode.tokenCapture()
+                                                 .unwrap() [0] = text);
                 }
             }else {
                 result = parseExpressionWithMode(ctx, rep.expression(), ruleName, mode);

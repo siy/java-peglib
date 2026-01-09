@@ -10,6 +10,9 @@ import java.util.List;
  * Lexer for PEG grammar syntax.
  */
 public final class GrammarLexer {
+    private static final int MAX_INPUT_SIZE = 1_000_000;
+    private static final int DEFAULT_TOKEN_CAPACITY = 32;
+
     private final String input;
     private int pos;
     private int line;
@@ -23,6 +26,10 @@ public final class GrammarLexer {
     }
 
     public static List<GrammarToken> tokenize(String input) {
+        if (input.length() > MAX_INPUT_SIZE) {
+            throw new IllegalArgumentException(
+            "Grammar input exceeds maximum size of " + MAX_INPUT_SIZE + " characters");
+        }
         return new GrammarLexer(input).tokenizeAll();
     }
 
@@ -75,7 +82,7 @@ public final class GrammarLexer {
     }
 
     private GrammarToken scanIdentifier(SourceLocation start) {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(DEFAULT_TOKEN_CAPACITY);
         while (!isAtEnd() && isIdentifierPart(peek())) {
             sb.append(advance());
         }
@@ -85,7 +92,7 @@ public final class GrammarLexer {
     private GrammarToken scanDirective(SourceLocation start) {
         advance();
         // skip %
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(DEFAULT_TOKEN_CAPACITY);
         while (!isAtEnd() && isIdentifierPart(peek())) {
             sb.append(advance());
         }
@@ -94,7 +101,7 @@ public final class GrammarLexer {
 
     private GrammarToken scanStringLiteral(SourceLocation start) {
         char quote = advance();
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(DEFAULT_TOKEN_CAPACITY);
         while (!isAtEnd() && peek() != quote) {
             if (peek() == '\\' && pos + 1 < input.length()) {
                 advance();
@@ -125,7 +132,7 @@ public final class GrammarLexer {
             negated = true;
             advance();
         }
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(DEFAULT_TOKEN_CAPACITY);
         while (!isAtEnd() && peek() != ']') {
             if (peek() == '\\' && pos + 1 < input.length()) {
                 advance();
@@ -163,7 +170,7 @@ public final class GrammarLexer {
     private GrammarToken scanActionCode(SourceLocation start) {
         advance();
         // skip {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(DEFAULT_TOKEN_CAPACITY);
         int braceDepth = 1;
         while (!isAtEnd() && braceDepth > 0) {
             char c = peek();
@@ -192,7 +199,7 @@ public final class GrammarLexer {
     }
 
     private String scanJavaString() {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(DEFAULT_TOKEN_CAPACITY);
         char quote = advance();
         sb.append(quote);
         while (!isAtEnd() && peek() != quote) {
@@ -208,7 +215,7 @@ public final class GrammarLexer {
     }
 
     private GrammarToken scanNumber(SourceLocation start) {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(DEFAULT_TOKEN_CAPACITY);
         while (!isAtEnd() && isDigit(peek())) {
             sb.append(advance());
         }
