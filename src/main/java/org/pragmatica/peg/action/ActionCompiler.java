@@ -32,10 +32,10 @@ import java.util.regex.Pattern;
  * before compilation.
  */
 public final class ActionCompiler {
-    private static final AtomicInteger COUNTER = new AtomicInteger(0);
     private static final String PACKAGE = "org.pragmatica.peg.action.generated";
 
     private final ClassLoader parentLoader;
+    private final AtomicInteger counter = new AtomicInteger(0);
 
     private ActionCompiler(ClassLoader parentLoader) {
         this.parentLoader = parentLoader;
@@ -91,7 +91,7 @@ public final class ActionCompiler {
      * Compile action code string.
      */
     public Result<Action> compileActionCode(String ruleName, String actionCode, SourceLocation location) {
-        var className = "Action_" + sanitize(ruleName) + "_" + COUNTER.incrementAndGet();
+        var className = "Action_" + sanitize(ruleName) + "_" + counter.incrementAndGet();
         var fullClassName = PACKAGE + "." + className;
         // Transform action code: $0 -> sv.token(), $1 -> sv.get(0), etc.
         var transformedCode = transformActionCode(actionCode);

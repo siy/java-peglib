@@ -10,6 +10,7 @@ import org.pragmatica.peg.tree.Trivia;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -17,6 +18,8 @@ import java.util.Map;
  * Mutable parsing context that tracks state during parsing.
  */
 public final class ParsingContext {
+    private static final int MAX_CACHE_SIZE = 10_000;
+
     private final String input;
     private final Grammar grammar;
     private final ParserConfig config;
@@ -30,13 +33,13 @@ public final class ParsingContext {
     private int furthestPos;
     private int furthestLine;
     private int furthestColumn;
-    private String furthestExpected;
+    private final StringBuilder furthestExpected;
     private int tokenBoundaryDepth;
 
     // Error recovery state
     private final List<Diagnostic> diagnostics;
     private boolean inRecovery;
-    private int recoveryStartPos;
+    private Option<Integer> recoveryStartPos;
 
     // Whitespace skipping guard (prevents recursive whitespace parsing)
     private boolean skippingWhitespace;
@@ -46,7 +49,7 @@ public final class ParsingContext {
         this.grammar = grammar;
         this.config = config;
         this.packratCache = config.packratEnabled()
-                            ? Option.some(new HashMap<>())
+                            ? Option.some(createBoundedCache())
                             : Option.none();
         this.ruleIds = config.packratEnabled()
                        ? Option.some(new HashMap<>())
@@ -59,9 +62,9 @@ public final class ParsingContext {
         this.furthestPos = 0;
         this.furthestLine = 1;
         this.furthestColumn = 1;
-        this.furthestExpected = "";
+        this.furthestExpected = new StringBuilder();
         this.inRecovery = false;
-        this.recoveryStartPos = - 1;
+        this.recoveryStartPos = Option.none();
     }
 
     public static ParsingContext create(String input, Grammar grammar, ParserConfig config) {
@@ -129,11 +132,13 @@ public final class ParsingContext {
             furthestPos = pos;
             furthestLine = line;
             furthestColumn = column;
-            furthestExpected = expected;
-        }else if (pos == furthestPos && !furthestExpected.contains(expected)) {
-            furthestExpected = furthestExpected.isEmpty()
-                               ? expected
-                               : furthestExpected + " or " + expected;
+            furthestExpected.setLength(0);
+            furthestExpected.append(expected);
+        } else if (pos == furthestPos && furthestExpected.indexOf(expected) < 0) {
+            if (!furthestExpected.isEmpty()) {
+                furthestExpected.append(" or ");
+            }
+            furthestExpected.append(expected);
         }
     }
 
@@ -146,7 +151,7 @@ public final class ParsingContext {
     }
 
     public String furthestExpected() {
-        return furthestExpected;
+        return furthestExpected.toString();
     }
 
     // === Diagnostic Collection (for advanced error recovery) ===
@@ -217,7 +222,7 @@ public final class ParsingContext {
     public void enterRecovery() {
         if (!inRecovery) {
             inRecovery = true;
-            recoveryStartPos = pos;
+            recoveryStartPos = Option.some(pos);
         }
     }
 
@@ -226,7 +231,7 @@ public final class ParsingContext {
      */
     public void exitRecovery() {
         inRecovery = false;
-        recoveryStartPos = - 1;
+        recoveryStartPos = Option.none();
     }
 
     /**
@@ -350,7 +355,17 @@ public final class ParsingContext {
                             .computeIfAbsent(ruleName,
                                              k -> ruleIds.unwrap()
                                                          .size());
-        return ((long) ruleId<< 32) | (position & 0xFFFFFFFFL);
+        // Encode rule ID in upper 32 bits, position in lower 32 bits
+        return ((long) ruleId << 32) | (position & 0xFFFFFFFFL);
+    }
+
+    private static Map<Long, ParseResult> createBoundedCache() {
+        return new LinkedHashMap<>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Long, ParseResult> eldest) {
+                return size() > MAX_CACHE_SIZE;
+            }
+        };
     }
 
     // === Accessors ===
