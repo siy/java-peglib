@@ -162,8 +162,8 @@ public final class PegEngine implements Parser {
         if (config.recoveryStrategy() != RecoveryStrategy.ADVANCED) {
             var result = parseCst(input, startRule);
             return result.fold(
-                cause -> toDiagnosticsResult((ParseError) cause, input),
-                node -> ParseResultWithDiagnostics.success(node, input));
+            cause -> toDiagnosticsResult((ParseError) cause, input),
+            node -> ParseResultWithDiagnostics.success(node, input));
         }
         // Advanced recovery: try to parse fragments with error collection
         return parseWithRecovery(ctx, ruleOpt.unwrap(), input);
@@ -314,14 +314,16 @@ public final class PegEngine implements Parser {
         var success = (ParseResult.Success) result;
         // Use token capture if available, otherwise full match
         var matchedText = Option.option(tokenCapture[0])
-                                .or(ctx.substring(startPos, ctx.pos()));
+                                .or(ctx.substring(startPos,
+                                                  ctx.pos()));
         var span = ctx.spanFrom(startLoc);
         // Execute action if present
         var actionOpt = Option.option(actions.get(rule.name()));
         if (actionOpt.isPresent()) {
             var sv = SemanticValues.of(matchedText, span, childValues);
-            try {
-                var value = actionOpt.unwrap().apply(sv);
+            try{
+                var value = actionOpt.unwrap()
+                                     .apply(sv);
                 var node = wrapWithRuleName(success.node(), rule.name(), List.of());
                 return ParseResult.Success.withValue(node, ctx.location(), value);
             } catch (Exception e) {
@@ -475,7 +477,7 @@ public final class PegEngine implements Parser {
             return ParseResult.Failure.at(ctx.location(), expected);
         }
         // Consume the matched text
-        for (int i = 0; i < longestLen; i++) {
+        for (int i = 0; i < longestLen; i++ ) {
             ctx.advance();
         }
         var span = ctx.spanFrom(startLoc);
@@ -744,7 +746,8 @@ public final class PegEngine implements Parser {
     // === Helpers ===
     private List<Trivia> skipWhitespace(ParsingContext ctx) {
         // Don't skip whitespace inside token boundaries or during whitespace parsing
-        if (grammar.whitespace().isEmpty() || ctx.isSkippingWhitespace() || ctx.inTokenBoundary()) {
+        if (grammar.whitespace()
+                   .isEmpty() || ctx.isSkippingWhitespace() || ctx.inTokenBoundary()) {
             return List.of();
         }
         var trivia = new ArrayList<Trivia>();
@@ -887,7 +890,8 @@ public final class PegEngine implements Parser {
                         .unwrap()
                         .addAll(localValues);
                     Option.option(localTokenCapture[0])
-                          .onPresent(text -> mode.tokenCapture().unwrap()[0] = text);
+                          .onPresent(text -> mode.tokenCapture()
+                                                 .unwrap() [0] = text);
                     return result;
                 }
             }else {
@@ -933,7 +937,8 @@ public final class PegEngine implements Parser {
                         .unwrap()
                         .addAll(localValues);
                     Option.option(localTokenCapture[0])
-                          .onPresent(text -> mode.tokenCapture().unwrap()[0] = text);
+                          .onPresent(text -> mode.tokenCapture()
+                                                 .unwrap() [0] = text);
                 }
             }else {
                 result = parseExpressionWithMode(ctx, zom.expression(), ruleName, mode);
@@ -995,7 +1000,8 @@ public final class PegEngine implements Parser {
                         .unwrap()
                         .addAll(localValues);
                     Option.option(localTokenCapture[0])
-                          .onPresent(text -> mode.tokenCapture().unwrap()[0] = text);
+                          .onPresent(text -> mode.tokenCapture()
+                                                 .unwrap() [0] = text);
                 }
             }else {
                 result = parseExpressionWithMode(ctx, oom.expression(), ruleName, mode);
@@ -1077,7 +1083,8 @@ public final class PegEngine implements Parser {
                         .unwrap()
                         .addAll(localValues);
                     Option.option(localTokenCapture[0])
-                          .onPresent(text -> mode.tokenCapture().unwrap()[0] = text);
+                          .onPresent(text -> mode.tokenCapture()
+                                                 .unwrap() [0] = text);
                 }
             }else {
                 result = parseExpressionWithMode(ctx, rep.expression(), ruleName, mode);

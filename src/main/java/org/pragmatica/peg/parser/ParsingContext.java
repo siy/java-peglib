@@ -134,7 +134,7 @@ public final class ParsingContext {
             furthestColumn = column;
             furthestExpected.setLength(0);
             furthestExpected.append(expected);
-        } else if (pos == furthestPos && furthestExpected.indexOf(expected) < 0) {
+        }else if (pos == furthestPos && furthestExpected.indexOf(expected) < 0) {
             if (!furthestExpected.isEmpty()) {
                 furthestExpected.append(" or ");
             }
@@ -356,7 +356,7 @@ public final class ParsingContext {
                                              k -> ruleIds.unwrap()
                                                          .size());
         // Encode rule ID in upper 32 bits, position in lower 32 bits
-        return ((long) ruleId << 32) | (position & 0xFFFFFFFFL);
+        return ((long) ruleId<< 32) | (position & 0xFFFFFFFFL);
     }
 
     private static Map<Long, ParseResult> createBoundedCache() {

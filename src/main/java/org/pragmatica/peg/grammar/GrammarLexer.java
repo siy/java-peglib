@@ -28,7 +28,7 @@ public final class GrammarLexer {
     public static List<GrammarToken> tokenize(String input) {
         if (input.length() > MAX_INPUT_SIZE) {
             throw new IllegalArgumentException(
-                "Grammar input exceeds maximum size of " + MAX_INPUT_SIZE + " characters");
+            "Grammar input exceeds maximum size of " + MAX_INPUT_SIZE + " characters");
         }
         return new GrammarLexer(input).tokenizeAll();
     }

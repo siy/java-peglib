@@ -11,6 +11,7 @@ import org.pragmatica.peg.grammar.Rule;
 public final class ParserGenerator {
     private static final int INITIAL_BUFFER_SIZE = 32_000;
     private static final int MAX_RECURSION_DEPTH = 100;
+
     // Shared generated code fragments
     private static final String MATCHES_WORD_METHOD = """
             private boolean matchesWord(String word, boolean caseInsensitive) {

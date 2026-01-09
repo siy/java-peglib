@@ -21,10 +21,12 @@ public final class ParseMode {
     private final boolean skipWhitespace;
     private final boolean collectActions;
     private final Option<List<Object>> semanticValues;
-    private final Option<String[]> tokenCapture;
+    private final Option<String[] > tokenCapture;
 
-    private ParseMode(boolean skipWhitespace, boolean collectActions,
-                      Option<List<Object>> semanticValues, Option<String[]> tokenCapture) {
+    private ParseMode(boolean skipWhitespace,
+                      boolean collectActions,
+                      Option<List<Object>> semanticValues,
+                      Option<String[] > tokenCapture) {
         this.skipWhitespace = skipWhitespace;
         this.collectActions = collectActions;
         this.semanticValues = semanticValues;
@@ -74,7 +76,7 @@ public final class ParseMode {
         return semanticValues;
     }
 
-    public Option<String[]> tokenCapture() {
+    public Option<String[] > tokenCapture() {
         return tokenCapture;
     }
 

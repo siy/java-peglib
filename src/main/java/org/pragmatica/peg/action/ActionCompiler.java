@@ -59,7 +59,7 @@ public final class ActionCompiler {
         for (var rule : grammar.rules()) {
             if (rule.hasAction()) {
                 var result = compileAction(rule);
-                if (result instanceof Result.Failure<?> f) {
+                if (result instanceof Result.Failure< ? > f) {
                     return Result.failure(f.cause());
                 }
                 actions.put(rule.name(), result.unwrap());
@@ -153,26 +153,26 @@ public final class ActionCompiler {
         var compiler = ToolProvider.getSystemJavaCompiler();
         if (compiler == null) {
             return Result.failure(new ParseError.SemanticError(
-                location, "No Java compiler available. Run with JDK, not JRE."));
+            location, "No Java compiler available. Run with JDK, not JRE."));
         }
         try (var standardFileManager = compiler.getStandardFileManager(null, null, null)) {
             var fileManager = new InMemoryFileManager(standardFileManager);
             var sourceFile = new StringJavaFileObject(className, sourceCode);
             var diagnostics = new StringWriter();
             var task = compiler.getTask(
-                diagnostics, fileManager, null, List.of("--release", "25"), null, List.of(sourceFile));
+            diagnostics, fileManager, null, List.of("--release", "25"), null, List.of(sourceFile));
             if (!task.call()) {
                 return Result.failure(new ParseError.SemanticError(
-                    location, "Action compilation failed: " + diagnostics));
+                location, "Action compilation failed: " + diagnostics));
             }
             var classLoader = new InMemoryClassLoader(fileManager, parentLoader);
             var actionClass = classLoader.loadClass(className);
             var action = (Action) actionClass.getDeclaredConstructor()
-                                             .newInstance();
+                                            .newInstance();
             return Result.success(action);
         } catch (Exception e) {
             return Result.failure(new ParseError.ActionError(
-                location, sourceCode, e));
+            location, sourceCode, e));
         }
     }
 
@@ -236,7 +236,7 @@ public final class ActionCompiler {
             return fileObject;
         }
 
-        Option<byte[]> getClassBytes(String className) {
+        Option<byte[] > getClassBytes(String className) {
             return Option.option(classFiles.get(className))
                          .map(ByteArrayJavaFileObject::getBytes);
         }
@@ -251,7 +251,7 @@ public final class ActionCompiler {
         }
 
         @Override
-        protected Class<?> findClass(String name) throws ClassNotFoundException {
+        protected Class< ? > findClass(String name) throws ClassNotFoundException {
             var bytesOpt = fileManager.getClassBytes(name);
             if (bytesOpt.isEmpty()) {
                 throw new ClassNotFoundException(name);

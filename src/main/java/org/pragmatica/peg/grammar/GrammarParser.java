@@ -49,7 +49,7 @@ public final class GrammarParser {
             if (token instanceof GrammarToken.Directive directive) {
                 advance();
                 var result = parseDirective(directive);
-                if (result instanceof Result.Failure<?> f) {
+                if (result instanceof Result.Failure< ? > f) {
                     return Result.failure(f.cause());
                 }
                 var expr = result.unwrap();
@@ -59,7 +59,7 @@ public final class GrammarParser {
                 }
             }else if (token instanceof GrammarToken.Identifier) {
                 var result = parseRule();
-                if (result instanceof Result.Failure<?> f) {
+                if (result instanceof Result.Failure< ? > f) {
                     return Result.failure(f.cause());
                 }
                 rules.add(result.unwrap());
@@ -110,7 +110,7 @@ public final class GrammarParser {
             "'<-'"));
         }
         var exprResult = parseExpression();
-        if (exprResult instanceof Result.Failure<?> f) {
+        if (exprResult instanceof Result.Failure< ? > f) {
             return Result.failure(f.cause());
         }
         var expression = exprResult.unwrap();
