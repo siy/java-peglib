@@ -1,5 +1,6 @@
 package org.pragmatica.peg.action;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.error.ParseError;
 import org.pragmatica.peg.grammar.Grammar;
@@ -21,6 +22,14 @@ import java.util.regex.Pattern;
 /**
  * Compiles inline Java actions from grammar rules.
  * Uses the JDK Compiler API for runtime compilation.
+ *
+ * <p><strong>Security Note:</strong> This class compiles and executes arbitrary Java code
+ * provided in grammar action blocks. Only use with trusted grammar sources. Never compile
+ * actions from untrusted user input as this enables arbitrary code execution.
+ *
+ * <p>For sandboxed execution of untrusted grammars, use source generation mode
+ * ({@link org.pragmatica.peg.generator.ParserGenerator}) and review generated code
+ * before compilation.
  */
 public final class ActionCompiler {
     private static final AtomicInteger COUNTER = new AtomicInteger(0);
@@ -50,8 +59,8 @@ public final class ActionCompiler {
         for (var rule : grammar.rules()) {
             if (rule.hasAction()) {
                 var result = compileAction(rule);
-                if (result.isFailure()) {
-                    return result.fold(Result::failure, _ -> null);
+                if (result instanceof Result.Failure<?> f) {
+                    return Result.failure(f.cause());
                 }
                 actions.put(rule.name(), result.unwrap());
             }
@@ -144,27 +153,26 @@ public final class ActionCompiler {
         var compiler = ToolProvider.getSystemJavaCompiler();
         if (compiler == null) {
             return Result.failure(new ParseError.SemanticError(
-            location, "No Java compiler available. Run with JDK, not JRE."));
+                location, "No Java compiler available. Run with JDK, not JRE."));
         }
-        var fileManager = new InMemoryFileManager(
-        compiler.getStandardFileManager(null, null, null));
-        var sourceFile = new StringJavaFileObject(className, sourceCode);
-        var diagnostics = new StringWriter();
-        var task = compiler.getTask(
-        diagnostics, fileManager, null, List.of("--release", "25"), null, List.of(sourceFile));
-        if (!task.call()) {
-            return Result.failure(new ParseError.SemanticError(
-            location, "Action compilation failed: " + diagnostics));
-        }
-        try{
+        try (var standardFileManager = compiler.getStandardFileManager(null, null, null)) {
+            var fileManager = new InMemoryFileManager(standardFileManager);
+            var sourceFile = new StringJavaFileObject(className, sourceCode);
+            var diagnostics = new StringWriter();
+            var task = compiler.getTask(
+                diagnostics, fileManager, null, List.of("--release", "25"), null, List.of(sourceFile));
+            if (!task.call()) {
+                return Result.failure(new ParseError.SemanticError(
+                    location, "Action compilation failed: " + diagnostics));
+            }
             var classLoader = new InMemoryClassLoader(fileManager, parentLoader);
             var actionClass = classLoader.loadClass(className);
             var action = (Action) actionClass.getDeclaredConstructor()
-                                            .newInstance();
+                                             .newInstance();
             return Result.success(action);
         } catch (Exception e) {
             return Result.failure(new ParseError.ActionError(
-            location, sourceCode, e));
+                location, sourceCode, e));
         }
     }
 
@@ -228,11 +236,9 @@ public final class ActionCompiler {
             return fileObject;
         }
 
-        byte[] getClassBytes(String className) {
-            var file = classFiles.get(className);
-            return file != null
-                   ? file.getBytes()
-                   : null;
+        Option<byte[]> getClassBytes(String className) {
+            return Option.option(classFiles.get(className))
+                         .map(ByteArrayJavaFileObject::getBytes);
         }
     }
 
@@ -245,11 +251,12 @@ public final class ActionCompiler {
         }
 
         @Override
-        protected Class< ? > findClass(String name) throws ClassNotFoundException {
-            var bytes = fileManager.getClassBytes(name);
-            if (bytes == null) {
+        protected Class<?> findClass(String name) throws ClassNotFoundException {
+            var bytesOpt = fileManager.getClassBytes(name);
+            if (bytesOpt.isEmpty()) {
                 throw new ClassNotFoundException(name);
             }
+            var bytes = bytesOpt.unwrap();
             return defineClass(name, bytes, 0, bytes.length);
         }
     }

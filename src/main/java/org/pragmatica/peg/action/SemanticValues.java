@@ -1,6 +1,8 @@
 package org.pragmatica.peg.action;
 
 import org.pragmatica.lang.Option;
+import org.pragmatica.lang.Result;
+import org.pragmatica.lang.parse.Number;
 import org.pragmatica.peg.tree.SourceSpan;
 
 import java.util.List;
@@ -58,6 +60,30 @@ public final class SemanticValues {
      */
     public double toDouble() {
         return Double.parseDouble(matchedText.trim());
+    }
+
+    /**
+     * Parse matched text as integer safely.
+     * Returns Result with parsed value or parsing error.
+     */
+    public Result<Integer> toIntSafe() {
+        return Number.parseInt(matchedText.trim());
+    }
+
+    /**
+     * Parse matched text as long safely.
+     * Returns Result with parsed value or parsing error.
+     */
+    public Result<Long> toLongSafe() {
+        return Number.parseLong(matchedText.trim());
+    }
+
+    /**
+     * Parse matched text as double safely.
+     * Returns Result with parsed value or parsing error.
+     */
+    public Result<Double> toDoubleSafe() {
+        return Number.parseDouble(matchedText.trim());
     }
 
     /**
@@ -141,9 +167,10 @@ public final class SemanticValues {
 
     /**
      * Get all child values.
+     * Returns a defensive copy to preserve immutability.
      */
     public List<Object> values() {
-        return values;
+        return List.copyOf(values);
     }
 
     /**

@@ -162,18 +162,19 @@ public final class PegEngine implements Parser {
         if (config.recoveryStrategy() != RecoveryStrategy.ADVANCED) {
             var result = parseCst(input, startRule);
             return result.fold(
-            cause -> {
-                var parseError = (ParseError) cause;
-                var loc = parseError.location();
-                var span = SourceSpan.at(loc);
-                var diag = Diagnostic.error("parse error", span)
-                                     .withLabel(parseError.message());
-                return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
-            },
-            node -> ParseResultWithDiagnostics.success(node, input));
+                cause -> toDiagnosticsResult((ParseError) cause, input),
+                node -> ParseResultWithDiagnostics.success(node, input));
         }
         // Advanced recovery: try to parse fragments with error collection
         return parseWithRecovery(ctx, ruleOpt.unwrap(), input);
+    }
+
+    private ParseResultWithDiagnostics toDiagnosticsResult(ParseError parseError, String input) {
+        var loc = parseError.location();
+        var span = SourceSpan.at(loc);
+        var diag = Diagnostic.error("parse error", span)
+                             .withLabel(parseError.message());
+        return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
     }
 
     /**
@@ -743,12 +744,11 @@ public final class PegEngine implements Parser {
 
     // === Helpers ===
     private List<Trivia> skipWhitespace(ParsingContext ctx) {
-        var trivia = new ArrayList<Trivia>();
         // Don't skip whitespace inside token boundaries or during whitespace parsing
-        if (grammar.whitespace()
-                   .isEmpty() || ctx.isSkippingWhitespace() || ctx.inTokenBoundary()) {
-            return trivia;
+        if (grammar.whitespace().isEmpty() || ctx.isSkippingWhitespace() || ctx.inTokenBoundary()) {
+            return List.of();
         }
+        var trivia = new ArrayList<Trivia>();
         ctx.enterWhitespaceSkip();
         try{
             var wsExpr = grammar.whitespace()
