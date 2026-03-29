@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-03-29
 
+### Fixed
+
+- Generated parser (CST and AST) incorrectly skipped whitespace before predicate expressions (`!` and `&`) inside sequences, causing negative lookahead on keyword rules to fail
+
 ### Changed
 
-- Version bump to 0.2.0
+- Updated pragmatica-lite dependency: 0.9.10 → 0.24.0
 
 ## [0.1.9] - 2026-01-09
 

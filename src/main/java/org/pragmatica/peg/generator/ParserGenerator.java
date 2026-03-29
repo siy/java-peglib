@@ -479,7 +479,7 @@ public final class ParserGenerator {
                   .append(" = false;\n");
                 int i = 0;
                 for (var elem : seq.elements()) {
-                    if (!inWhitespaceRuleGeneration) {
+                    if (!inWhitespaceRuleGeneration && !isPredicate(elem)) {
                         sb.append(pad)
                           .append("skipWhitespace();\n");
                     }
@@ -2085,6 +2085,15 @@ public final class ParserGenerator {
         };
     }
 
+    private boolean isPredicate(Expression expr) {
+        return switch (expr) {
+            case Expression.And ignored -> true;
+            case Expression.Not ignored -> true;
+            case Expression.Group grp -> isPredicate(grp.expression());
+            default -> false;
+        };
+    }
+
     private boolean isOptionalLike(Expression expr) {
         return switch (expr) {
             case Expression.Optional o -> true;
@@ -2283,7 +2292,8 @@ public final class ParserGenerator {
                       .append(".isSuccess()) {\n");
                     // Skip whitespace before non-Reference elements (References capture trivia themselves)
                     // Also don't skip for Optional/ZeroOrMore/Choice - they handle trivia internally (isOptionalLike)
-                    if (i > 0 && !inWhitespaceRule && !isReference(elem) && !isOptionalLike(elem)) {
+                    // Also don't skip for predicates (And/Not) - they must check the character immediately at current position
+                    if (i > 0 && !inWhitespaceRule && !isReference(elem) && !isOptionalLike(elem) && !isPredicate(elem)) {
                         sb.append(pad)
                           .append("    if (!inTokenBoundary) skipWhitespace();\n");
                     }
