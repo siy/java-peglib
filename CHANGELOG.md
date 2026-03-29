@@ -22,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Generator conformance test suite (36 tests) comparing interpreted vs generated parser behavior
-- Test count: 310 → 346
+- Generator conformance test suite (40 tests) comparing interpreted vs generated parser behavior
+- Test count: 310 → 350
 
 ## [0.2.0] - 2026-03-29
 

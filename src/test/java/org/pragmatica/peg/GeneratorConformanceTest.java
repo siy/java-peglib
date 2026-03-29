@@ -245,6 +245,37 @@ class GeneratorConformanceTest {
         assertConformance(REPETITION_GRAMMAR, "a b c d e", false);
     }
 
+    // --- NonTerminal wrappers: rules with optional suffixes ---
+
+    static final String NONTERMINAL_WRAPPER_GRAMMAR = """
+        DataType    <- ArrayType
+        ArrayType   <- ScalarType ('[' ']')*
+        ScalarType  <- IntType / BoolType
+        IntType     <- < 'integer'i >
+        BoolType    <- < 'boolean'i >
+        %whitespace <- [ \\t\\r\\n]*
+        """;
+
+    @Test
+    void nonTerminalWrapper_integerArray() throws Exception {
+        assertConformance(NONTERMINAL_WRAPPER_GRAMMAR, "integer[]", true);
+    }
+
+    @Test
+    void nonTerminalWrapper_plainInteger() throws Exception {
+        assertConformance(NONTERMINAL_WRAPPER_GRAMMAR, "integer", true);
+    }
+
+    @Test
+    void nonTerminalWrapper_booleanArrayArray() throws Exception {
+        assertConformance(NONTERMINAL_WRAPPER_GRAMMAR, "boolean[][]", true);
+    }
+
+    @Test
+    void nonTerminalWrapper_invalid() throws Exception {
+        assertConformance(NONTERMINAL_WRAPPER_GRAMMAR, "varchar", false);
+    }
+
     // --- Token rule names: < > captures should use parent rule name ---
 
     static final String TOKEN_RULE_NAME_GRAMMAR = """
