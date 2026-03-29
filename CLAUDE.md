@@ -148,7 +148,7 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
 - [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
-- [x] 310 passing tests
+- [x] 338 passing tests
 
 ### Remaining Work
 - [ ] Performance optimization
@@ -289,7 +289,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (310 tests)
+## Test Coverage (338 tests)
 
 ### Grammar Parser Tests (17 tests)
 - Simple rules, actions, sequences, choices
@@ -419,6 +419,6 @@ The `Keyword` rule should only include hard keywords. Contextual keywords are ma
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (310 passing)
+mvn test             # Run tests (338 passing)
 mvn verify           # Full verification
 ```

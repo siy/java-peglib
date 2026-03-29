@@ -694,6 +694,15 @@ public final class ParserGenerator {
                       .append("    skipWhitespace();\n");
                 }
                 generateExpressionCode(sb, zom.expression(), zomElem, indent + 1, counter);
+                // CutFailure must propagate
+                sb.append(pad)
+                  .append("    if (")
+                  .append(zomElem)
+                  .append(".isCutFailure()) { ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(zomElem)
+                  .append("; break; }\n");
                 sb.append(pad)
                   .append("    if (")
                   .append(zomElem)
@@ -753,6 +762,15 @@ public final class ParserGenerator {
                       .append("        skipWhitespace();\n");
                 }
                 generateExpressionCode(sb, oom.expression(), oomElem, indent + 2, counter);
+                // CutFailure must propagate
+                sb.append(pad)
+                  .append("        if (")
+                  .append(oomElem)
+                  .append(".isCutFailure()) { ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(oomElem)
+                  .append("; break; }\n");
                 sb.append(pad)
                   .append("        if (")
                   .append(oomElem)
@@ -796,30 +814,53 @@ public final class ParserGenerator {
                   .append(optStart)
                   .append("Column = column;\n");
                 generateExpressionCode(sb, opt.expression(), optElem, indent, counter);
+                // CutFailure must propagate - don't treat as success
                 sb.append(pad)
-                  .append("var ")
+                  .append("ParseResult ")
                   .append(resultVar)
-                  .append(" = ")
-                  .append(optElem)
-                  .append(".isSuccess() ? ")
-                  .append(optElem)
-                  .append(" : ParseResult.success(null, pos, line, column);\n");
+                  .append(";\n");
                 sb.append(pad)
                   .append("if (")
                   .append(optElem)
-                  .append(".isFailure()) {\n");
+                  .append(".isCutFailure()) {\n");
                 sb.append(pad)
                   .append("    pos = ")
                   .append(optStart)
-                  .append(";\n");
-                sb.append(pad)
-                  .append("    line = ")
+                  .append("; line = ")
                   .append(optStart)
-                  .append("Line;\n");
-                sb.append(pad)
-                  .append("    column = ")
+                  .append("Line; column = ")
                   .append(optStart)
                   .append("Column;\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(optElem)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("} else if (")
+                  .append(optElem)
+                  .append(".isSuccess()) {\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(optElem)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("} else {\n");
+                sb.append(pad)
+                  .append("    pos = ")
+                  .append(optStart)
+                  .append("; line = ")
+                  .append(optStart)
+                  .append("Line; column = ")
+                  .append(optStart)
+                  .append("Column;\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = ParseResult.success(null, pos, line, column);\n");
                 sb.append(pad)
                   .append("}\n");
             }
@@ -828,6 +869,7 @@ public final class ParserGenerator {
                 var repStart = "repStart" + id;
                 var repElem = "repElem" + id;
                 var beforePos = "beforePos" + id;
+                var repCutFailed = "repCutFailed" + id;
                 sb.append(pad)
                   .append("int ")
                   .append(repCount)
@@ -844,6 +886,10 @@ public final class ParserGenerator {
                   .append("int ")
                   .append(repStart)
                   .append("Column = column;\n");
+                sb.append(pad)
+                  .append("ParseResult ")
+                  .append(repCutFailed)
+                  .append(" = null;\n");
                 var maxStr = rep.max()
                                 .isPresent()
                              ? String.valueOf(rep.max()
@@ -874,6 +920,15 @@ public final class ParserGenerator {
                       .append(" > 0) skipWhitespace();\n");
                 }
                 generateExpressionCode(sb, rep.expression(), repElem, indent + 1, counter);
+                // CutFailure must propagate
+                sb.append(pad)
+                  .append("    if (")
+                  .append(repElem)
+                  .append(".isCutFailure()) { ")
+                  .append(repCutFailed)
+                  .append(" = ")
+                  .append(repElem)
+                  .append("; break; }\n");
                 sb.append(pad)
                   .append("    if (")
                   .append(repElem)
@@ -903,31 +958,45 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("}\n");
                 sb.append(pad)
-                  .append("var ")
+                  .append("ParseResult ")
+                  .append(resultVar)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(repCutFailed)
+                  .append(" != null) {\n");
+                sb.append(pad)
+                  .append("    ")
                   .append(resultVar)
                   .append(" = ")
+                  .append(repCutFailed)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("} else if (")
                   .append(repCount)
                   .append(" >= ")
                   .append(rep.min())
-                  .append(" ? ParseResult.success(null, pos, line, column) : ParseResult.failure(\"at least ")
-                  .append(rep.min())
-                  .append(" repetitions\");\n");
+                  .append(") {\n");
                 sb.append(pad)
-                  .append("if (")
+                  .append("    ")
                   .append(resultVar)
-                  .append(".isFailure()) {\n");
+                  .append(" = ParseResult.success(null, pos, line, column);\n");
+                sb.append(pad)
+                  .append("} else {\n");
                 sb.append(pad)
                   .append("    pos = ")
                   .append(repStart)
-                  .append(";\n");
-                sb.append(pad)
-                  .append("    line = ")
+                  .append("; line = ")
                   .append(repStart)
-                  .append("Line;\n");
-                sb.append(pad)
-                  .append("    column = ")
+                  .append("Line; column = ")
                   .append(repStart)
                   .append("Column;\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = ParseResult.failure(\"at least ")
+                  .append(rep.min())
+                  .append(" repetitions\");\n");
                 sb.append(pad)
                   .append("}\n");
             }
@@ -1767,7 +1836,7 @@ public final class ParserGenerator {
                 private int column;
                 private Map<Long, CstParseResult> cache;
                 private Map<String, String> captures;
-                private boolean inTokenBoundary;
+                private int tokenBoundaryDepth;
                 private boolean packratEnabled = true;
                 private Option<SourceLocation> furthestFailure;
                 private Option<String> furthestExpected;
@@ -1794,7 +1863,7 @@ public final class ParserGenerator {
                     this.column = 1;
                     this.cache = packratEnabled ? new HashMap<>() : null;
                     this.captures = new HashMap<>();
-                    this.inTokenBoundary = false;
+                    this.tokenBoundaryDepth = 0;
                     this.furthestFailure = Option.none();
                     this.furthestExpected = Option.none();
             """);
@@ -1902,8 +1971,7 @@ public final class ParserGenerator {
 
                 public Result<CstNode> parse(String input) {
                     init(input);
-                    var leadingTrivia = skipWhitespace();
-                    var result = parse_%s(leadingTrivia);
+                    var result = parse_%s();
                     if (result.isFailure()) {
                         var errorLoc = furthestFailure.or(location());
                         var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
@@ -1949,8 +2017,7 @@ public final class ParserGenerator {
                      */
                     public ParseResultWithDiagnostics parseWithDiagnostics(String input) {
                         init(input);
-                        var leadingTrivia = skipWhitespace();
-                        var result = parse_%s(leadingTrivia);
+                        var result = parse_%s();
 
                         if (result.isFailure()) {
                             // Record the failure and attempt recovery
@@ -1963,7 +2030,7 @@ public final class ParserGenerator {
                             var skippedSpan = skipToRecoveryPoint();
                             if (skippedSpan.length() > 0) {
                                 var skippedText = skippedSpan.extract(input);
-                                var errorNode = new CstNode.Error(skippedSpan, skippedText, expected, leadingTrivia, List.of());
+                                var errorNode = new CstNode.Error(skippedSpan, skippedText, expected, List.of(), List.of());
                                 return ParseResultWithDiagnostics.withErrors(Option.some(errorNode), diagnostics, input);
                             }
                             return ParseResultWithDiagnostics.withErrors(Option.none(), diagnostics, input);
@@ -2006,10 +2073,10 @@ public final class ParserGenerator {
         var ruleName = rule.name();
         sb.append("    private CstParseResult ")
           .append(methodName)
-          .append("(List<Trivia> leadingTrivia) {\n");
+          .append("() {\n");
         sb.append("        var startLoc = location();\n");
         sb.append("        \n");
-        sb.append("        // Check cache\n");
+        sb.append("        // Check cache at pre-whitespace position\n");
         sb.append("        long key = cacheKey(")
           .append(ruleId)
           .append(", startLoc.offset());\n");
@@ -2021,6 +2088,8 @@ public final class ParserGenerator {
         sb.append("            }\n");
         sb.append("        }\n");
         sb.append("        \n");
+        sb.append("        // Skip leading whitespace (collect trivia)\n");
+        sb.append("        var leadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
         sb.append("        var children = new ArrayList<CstNode>();\n");
         sb.append("        \n");
         var counter = new int[]{0};
@@ -2074,33 +2143,11 @@ public final class ParserGenerator {
         };
     }
 
-    private boolean isReference(Expression expr) {
-        return switch (expr) {
-            case Expression.Reference ref -> true;
-            case Expression.Group grp -> isReference(grp.expression());
-            case Expression.Optional opt -> isReference(opt.expression());
-            case Expression.ZeroOrMore zom -> isReference(zom.expression());
-            case Expression.OneOrMore oom -> isReference(oom.expression());
-            default -> false;
-        };
-    }
-
     private boolean isPredicate(Expression expr) {
         return switch (expr) {
             case Expression.And ignored -> true;
             case Expression.Not ignored -> true;
             case Expression.Group grp -> isPredicate(grp.expression());
-            default -> false;
-        };
-    }
-
-    private boolean isOptionalLike(Expression expr) {
-        return switch (expr) {
-            case Expression.Optional o -> true;
-            case Expression.ZeroOrMore z -> true;
-            case Expression.Choice c -> true;
-            // Choice saves position and may restore on failure
-            case Expression.Group g -> isOptionalLike(g.expression());
             default -> false;
         };
     }
@@ -2234,26 +2281,12 @@ public final class ParserGenerator {
                 }
             }
             case Expression.Reference ref -> {
-                var triviaVar = "trivia" + id;
-                if (inWhitespaceRule) {
-                    sb.append(pad)
-                      .append("var ")
-                      .append(triviaVar)
-                      .append(" = List.<Trivia>of();\n");
-                }else {
-                    sb.append(pad)
-                      .append("var ")
-                      .append(triviaVar)
-                      .append(" = inTokenBoundary ? List.<Trivia>of() : skipWhitespace();\n");
-                }
                 sb.append(pad)
                   .append("var ")
                   .append(resultVar)
                   .append(" = parse_")
                   .append(sanitize(ref.ruleName()))
-                  .append("(")
-                  .append(triviaVar)
-                  .append(");\n");
+                  .append("();\n");
                 if (addToChildren) {
                     sb.append(pad)
                       .append("if (")
@@ -2290,12 +2323,10 @@ public final class ParserGenerator {
                       .append("if (")
                       .append(resultVar)
                       .append(".isSuccess()) {\n");
-                    // Skip whitespace before non-Reference elements (References capture trivia themselves)
-                    // Also don't skip for Optional/ZeroOrMore/Choice - they handle trivia internally (isOptionalLike)
-                    // Also don't skip for predicates (And/Not) - they must check the character immediately at current position
-                    if (i > 0 && !inWhitespaceRule && !isReference(elem) && !isOptionalLike(elem) && !isPredicate(elem)) {
+                    // Skip whitespace before non-predicate elements (matching interpreter behavior)
+                    if (!inWhitespaceRule && !isPredicate(elem)) {
                         sb.append(pad)
-                          .append("    if (!inTokenBoundary) skipWhitespace();\n");
+                          .append("    if (tokenBoundaryDepth == 0) skipWhitespace();\n");
                     }
                     var elemVar = "elem" + id + "_" + i;
                     generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
@@ -2458,10 +2489,9 @@ public final class ParserGenerator {
                   .append("    var ")
                   .append(beforeLoc)
                   .append(" = location();\n");
-                // Skip whitespace before non-Reference elements (References capture trivia themselves)
-                if (!inWhitespaceRule && !isReference(zom.expression())) {
+                if (!inWhitespaceRule) {
                     sb.append(pad)
-                      .append("    if (!inTokenBoundary) skipWhitespace();\n");
+                      .append("    if (tokenBoundaryDepth == 0) skipWhitespace();\n");
                 }
                 generateCstExpressionCode(sb,
                                           zom.expression(),
@@ -2470,6 +2500,21 @@ public final class ParserGenerator {
                                           addToChildren,
                                           counter,
                                           inWhitespaceRule);
+                // CutFailure must propagate
+                sb.append(pad)
+                  .append("    if (")
+                  .append(zomElem)
+                  .append(".isCutFailure()) {\n");
+                sb.append(pad)
+                  .append("        ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(zomElem)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("        break;\n");
+                sb.append(pad)
+                  .append("    }\n");
                 sb.append(pad)
                   .append("    if (")
                   .append(zomElem)
@@ -2486,11 +2531,19 @@ public final class ParserGenerator {
                   .append("    }\n");
                 sb.append(pad)
                   .append("}\n");
+                // If loop ended due to CutFailure, propagate it
                 sb.append(pad)
+                  .append("if (!")
+                  .append(resultVar)
+                  .append(".isCutFailure()) {\n");
+                sb.append(pad)
+                  .append("    ")
                   .append(resultVar)
                   .append(" = CstParseResult.success(null, substring(")
                   .append(zomStart)
                   .append(".offset(), pos), location());\n");
+                sb.append(pad)
+                  .append("}\n");
             }
             case Expression.OneOrMore oom -> {
                 var oomFirst = "oomFirst" + id;
@@ -2505,7 +2558,7 @@ public final class ParserGenerator {
                                           counter,
                                           inWhitespaceRule);
                 sb.append(pad)
-                  .append("var ")
+                  .append("CstParseResult ")
                   .append(resultVar)
                   .append(" = ")
                   .append(oomFirst)
@@ -2524,10 +2577,9 @@ public final class ParserGenerator {
                   .append("        var ")
                   .append(beforeLoc)
                   .append(" = location();\n");
-                // Skip whitespace before non-Reference elements (References capture trivia themselves)
-                if (!inWhitespaceRule && !isReference(oom.expression())) {
+                if (!inWhitespaceRule) {
                     sb.append(pad)
-                      .append("        if (!inTokenBoundary) skipWhitespace();\n");
+                      .append("        if (tokenBoundaryDepth == 0) skipWhitespace();\n");
                 }
                 generateCstExpressionCode(sb,
                                           oom.expression(),
@@ -2536,6 +2588,21 @@ public final class ParserGenerator {
                                           addToChildren,
                                           counter,
                                           inWhitespaceRule);
+                // CutFailure must propagate
+                sb.append(pad)
+                  .append("        if (")
+                  .append(oomElem)
+                  .append(".isCutFailure()) {\n");
+                sb.append(pad)
+                  .append("            ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(oomElem)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("            break;\n");
+                sb.append(pad)
+                  .append("        }\n");
                 sb.append(pad)
                   .append("        if (")
                   .append(oomElem)
@@ -2562,11 +2629,7 @@ public final class ParserGenerator {
                   .append("var ")
                   .append(optStart)
                   .append(" = location();\n");
-                // Skip whitespace before non-Reference elements (References capture trivia themselves)
-                if (!inWhitespaceRule && !isReference(opt.expression())) {
-                    sb.append(pad)
-                      .append("if (!inTokenBoundary) skipWhitespace();\n");
-                }
+                // No whitespace skip in Optional (matching interpreter behavior)
                 generateCstExpressionCode(sb,
                                           opt.expression(),
                                           optElem,
@@ -2574,22 +2637,45 @@ public final class ParserGenerator {
                                           addToChildren,
                                           counter,
                                           inWhitespaceRule);
+                // CutFailure must propagate - don't treat as success
                 sb.append(pad)
-                  .append("var ")
+                  .append("CstParseResult ")
                   .append(resultVar)
-                  .append(" = ")
-                  .append(optElem)
-                  .append(".isSuccess() ? ")
-                  .append(optElem)
-                  .append(" : CstParseResult.success(null, \"\", location());\n");
+                  .append(";\n");
                 sb.append(pad)
                   .append("if (")
                   .append(optElem)
-                  .append(".isFailure()) {\n");
+                  .append(".isCutFailure()) {\n");
                 sb.append(pad)
                   .append("    restoreLocation(")
                   .append(optStart)
                   .append(");\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(optElem)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("} else if (")
+                  .append(optElem)
+                  .append(".isSuccess()) {\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(optElem)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("} else {\n");
+                sb.append(pad)
+                  .append("    restoreLocation(")
+                  .append(optStart)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = CstParseResult.success(null, \"\", location());\n");
                 sb.append(pad)
                   .append("}\n");
             }
@@ -2598,6 +2684,7 @@ public final class ParserGenerator {
                 var repStart = "repStart" + id;
                 var beforeLoc = "beforeLoc" + id;
                 var repElem = "repElem" + id;
+                var repCutFailed = "repCutFailed" + id;
                 sb.append(pad)
                   .append("int ")
                   .append(repCount)
@@ -2606,6 +2693,10 @@ public final class ParserGenerator {
                   .append("var ")
                   .append(repStart)
                   .append(" = location();\n");
+                sb.append(pad)
+                  .append("CstParseResult ")
+                  .append(repCutFailed)
+                  .append(" = null;\n");
                 var maxStr = rep.max()
                                 .isPresent()
                              ? String.valueOf(rep.max()
@@ -2621,12 +2712,11 @@ public final class ParserGenerator {
                   .append("    var ")
                   .append(beforeLoc)
                   .append(" = location();\n");
-                // Skip whitespace before non-Reference elements (References capture trivia themselves)
-                if (!inWhitespaceRule && !isReference(rep.expression())) {
+                if (!inWhitespaceRule) {
                     sb.append(pad)
                       .append("    if (")
                       .append(repCount)
-                      .append(" > 0 && !inTokenBoundary) skipWhitespace();\n");
+                      .append(" > 0 && tokenBoundaryDepth == 0) skipWhitespace();\n");
                 }
                 generateCstExpressionCode(sb,
                                           rep.expression(),
@@ -2635,6 +2725,21 @@ public final class ParserGenerator {
                                           addToChildren,
                                           counter,
                                           inWhitespaceRule);
+                // CutFailure must propagate
+                sb.append(pad)
+                  .append("    if (")
+                  .append(repElem)
+                  .append(".isCutFailure()) {\n");
+                sb.append(pad)
+                  .append("        ")
+                  .append(repCutFailed)
+                  .append(" = ")
+                  .append(repElem)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("        break;\n");
+                sb.append(pad)
+                  .append("    }\n");
                 sb.append(pad)
                   .append("    if (")
                   .append(repElem)
@@ -2656,25 +2761,43 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("}\n");
                 sb.append(pad)
-                  .append("var ")
+                  .append("CstParseResult ")
+                  .append(resultVar)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("if (")
+                  .append(repCutFailed)
+                  .append(" != null) {\n");
+                sb.append(pad)
+                  .append("    ")
                   .append(resultVar)
                   .append(" = ")
+                  .append(repCutFailed)
+                  .append(";\n");
+                sb.append(pad)
+                  .append("} else if (")
                   .append(repCount)
                   .append(" >= ")
                   .append(rep.min())
-                  .append(" ? CstParseResult.success(null, substring(")
-                  .append(repStart)
-                  .append(".offset(), pos), location()) : CstParseResult.failure(\"at least ")
-                  .append(rep.min())
-                  .append(" repetitions\");\n");
+                  .append(") {\n");
                 sb.append(pad)
-                  .append("if (")
+                  .append("    ")
                   .append(resultVar)
-                  .append(".isFailure()) {\n");
+                  .append(" = CstParseResult.success(null, substring(")
+                  .append(repStart)
+                  .append(".offset(), pos), location());\n");
+                sb.append(pad)
+                  .append("} else {\n");
                 sb.append(pad)
                   .append("    restoreLocation(")
                   .append(repStart)
                   .append(");\n");
+                sb.append(pad)
+                  .append("    ")
+                  .append(resultVar)
+                  .append(" = CstParseResult.failure(\"at least ")
+                  .append(rep.min())
+                  .append(" repetitions\");\n");
                 sb.append(pad)
                   .append("}\n");
             }
@@ -2757,7 +2880,7 @@ public final class ParserGenerator {
                   .append(tbStart)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("inTokenBoundary = true;\n");
+                  .append("tokenBoundaryDepth++;\n");
                 if (addToChildren) {
                     sb.append(pad)
                       .append("var ")
@@ -2766,7 +2889,7 @@ public final class ParserGenerator {
                 }
                 generateCstExpressionCode(sb, tb.expression(), tbElem, indent, false, counter, inWhitespaceRule);
                 sb.append(pad)
-                  .append("inTokenBoundary = false;\n");
+                  .append("tokenBoundaryDepth--;\n");
                 if (addToChildren) {
                     sb.append(pad)
                       .append("children.clear();\n");
@@ -2964,7 +3087,7 @@ public final class ParserGenerator {
 
                 private List<Trivia> skipWhitespace() {
                     var trivia = new ArrayList<Trivia>();
-                    if (inTokenBoundary) return trivia;
+                    if (tokenBoundaryDepth > 0) return trivia;
             """);
         if (grammar.whitespace()
                    .isPresent()) {

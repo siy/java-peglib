@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.1] - 2026-03-29
 
+### Fixed
+
+- Rewrote CST and AST parser generators to exactly match interpreter (PegEngine) behavior
+  - Sequence now skips whitespace before all non-predicate elements (removed incorrect `isReference`/`isOptionalLike` exclusions)
+  - Optional no longer skips whitespace independently (relies on containing Sequence)
+  - ZeroOrMore/OneOrMore/Repetition propagate CutFailure instead of silently breaking
+  - Token boundary uses depth counter instead of boolean flag (handles nesting)
+  - Rule methods collect their own leading trivia at entry (no trivia parameter)
+  - Reference handler delegates whitespace to rule methods
+- Fixed generated parser failing on optional suffixes after multi-alternative choices (e.g., `OverClause?` after `FuncCall` alternatives)
+
+### Added
+
+- Generator conformance test suite (28 tests) comparing interpreted vs generated parser behavior
+- Test count: 310 → 338
+
 ## [0.2.0] - 2026-03-29
 
 ### Fixed
