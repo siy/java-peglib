@@ -245,6 +245,38 @@ class GeneratorConformanceTest {
         assertConformance(REPETITION_GRAMMAR, "a b c d e", false);
     }
 
+    // --- Token rule names: < > captures should use parent rule name ---
+
+    static final String TOKEN_RULE_NAME_GRAMMAR = """
+        Input     <- Statement
+        Statement <- TypeTest
+        TypeTest  <- BoolType / IntType / TextType
+        BoolType  <- < 'boolean' >
+        IntType   <- < 'integer' >
+        TextType  <- < 'text' >
+        %whitespace <- [ \\t\\r\\n]*
+        """;
+
+    @Test
+    void tokenRuleName_intType() throws Exception {
+        assertConformance(TOKEN_RULE_NAME_GRAMMAR, "integer", true);
+    }
+
+    @Test
+    void tokenRuleName_boolType() throws Exception {
+        assertConformance(TOKEN_RULE_NAME_GRAMMAR, "boolean", true);
+    }
+
+    @Test
+    void tokenRuleName_textType() throws Exception {
+        assertConformance(TOKEN_RULE_NAME_GRAMMAR, "text", true);
+    }
+
+    @Test
+    void tokenRuleName_unknown() throws Exception {
+        assertConformance(TOKEN_RULE_NAME_GRAMMAR, "varchar", false);
+    }
+
     // --- Whitespace with named comment rules (StackOverflow bug) ---
 
     static final String WHITESPACE_COMMENT_GRAMMAR = """

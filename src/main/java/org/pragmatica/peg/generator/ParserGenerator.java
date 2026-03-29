@@ -2101,17 +2101,11 @@ public final class ParserGenerator {
         sb.append("        if (result.isSuccess()) {\n");
         sb.append("            var endLoc = location();\n");
         sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
-        // Check if this rule contains only a token boundary or simple terminals
+        // Match interpreter's wrapWithRuleName: replace the rule name on whatever node was produced
         var ruleIdConst = toConstantName(ruleName);
-        if (isTokenRule(rule.expression())) {
-            sb.append("            var node = new CstNode.Token(span, ")
-              .append(ruleIdConst)
-              .append(", result.text.unwrap(), leadingTrivia, List.of());\n");
-        }else {
-            sb.append("            var node = new CstNode.NonTerminal(span, ")
-              .append(ruleIdConst)
-              .append(", children, leadingTrivia, List.of());\n");
-        }
+        sb.append("            var node = wrapWithRuleName(result, children, span, ")
+          .append(ruleIdConst)
+          .append(", leadingTrivia);\n");
         sb.append("            finalResult = CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
         sb.append("        } else {\n");
         sb.append("            restoreLocation(startLoc);\n");
@@ -3113,6 +3107,29 @@ public final class ParserGenerator {
                         skippingWhitespace = false;
                     }
                     return trivia;
+                }
+
+                private CstNode wrapWithRuleName(CstParseResult result, List<CstNode> children, SourceSpan span, RuleId ruleId, List<Trivia> leadingTrivia) {
+                    // If result produced a single node (Token or Terminal), re-wrap with rule name and trivia
+                    // This matches PegEngine.wrapWithRuleName behavior
+                    if (result.node.isPresent()) {
+                        var inner = result.node.unwrap();
+                        return switch (inner) {
+                            case CstNode.Token tok -> new CstNode.Token(span, ruleId, tok.text(), leadingTrivia, List.of());
+                            case CstNode.Terminal t -> new CstNode.Terminal(span, ruleId, t.text(), leadingTrivia, List.of());
+                            case CstNode.NonTerminal nt -> new CstNode.NonTerminal(span, ruleId, nt.children(), leadingTrivia, List.of());
+            """);
+        // Add Error case only for ADVANCED mode
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("""
+                            case CstNode.Error err -> new CstNode.NonTerminal(span, ruleId, children, leadingTrivia, List.of());
+                """);
+        }
+        sb.append("""
+                        };
+                    }
+                    // No inner node — wrap children in NonTerminal
+                    return new CstNode.NonTerminal(span, ruleId, children, leadingTrivia, List.of());
                 }
 
                 private Trivia classifyTrivia(SourceSpan span, String text) {

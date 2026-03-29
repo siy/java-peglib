@@ -18,11 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reference handler delegates whitespace to rule methods
 - Fixed generated parser failing on optional suffixes after multi-alternative choices (e.g., `OverClause?` after `FuncCall` alternatives)
 - Fixed StackOverflowError in generated parser when `%whitespace` references named rules (e.g., `LineComment`, `BlockComment`) — added reentrant guard to `skipWhitespace()` matching interpreter's `enterWhitespaceSkip`/`exitWhitespaceSkip` pattern
+- Fixed generated parser Token nodes using generic rule name `"token"` instead of parent rule name for `< >` captures — now uses `wrapWithRuleName` matching interpreter behavior
 
 ### Added
 
-- Generator conformance test suite (32 tests) comparing interpreted vs generated parser behavior
-- Test count: 310 → 342
+- Generator conformance test suite (36 tests) comparing interpreted vs generated parser behavior
+- Test count: 310 → 346
 
 ## [0.2.0] - 2026-03-29
 
