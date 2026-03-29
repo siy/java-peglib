@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-03-29
+
+### Fixed
+
+- Rewrote CST and AST parser generators to exactly match interpreter (PegEngine) behavior
+  - Sequence now skips whitespace before all non-predicate elements (removed incorrect `isReference`/`isOptionalLike` exclusions)
+  - Optional no longer skips whitespace independently (relies on containing Sequence)
+  - ZeroOrMore/OneOrMore/Repetition propagate CutFailure instead of silently breaking
+  - Token boundary uses depth counter instead of boolean flag (handles nesting)
+  - Rule methods collect their own leading trivia at entry (no trivia parameter)
+  - Reference handler delegates whitespace to rule methods
+- Fixed generated parser failing on optional suffixes after multi-alternative choices (e.g., `OverClause?` after `FuncCall` alternatives)
+- Fixed StackOverflowError in generated parser when `%whitespace` references named rules (e.g., `LineComment`, `BlockComment`) — added reentrant guard to `skipWhitespace()` matching interpreter's `enterWhitespaceSkip`/`exitWhitespaceSkip` pattern
+- Fixed generated parser Token nodes using generic rule name `"token"` instead of parent rule name for `< >` captures — now uses `wrapWithRuleName` matching interpreter behavior
+- Fixed generated parser CST structure: container expressions (ZeroOrMore, OneOrMore, Optional, Repetition) now wrap children in NonTerminal nodes matching interpreter behavior instead of flattening into parent
+
+### Added
+
+- Generator conformance test suite (40 tests) comparing interpreted vs generated parser behavior
+- Test count: 310 → 350
+
 ## [0.2.0] - 2026-03-29
 
 ### Fixed
