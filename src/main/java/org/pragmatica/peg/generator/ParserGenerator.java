@@ -1837,6 +1837,7 @@ public final class ParserGenerator {
                 private Map<Long, CstParseResult> cache;
                 private Map<String, String> captures;
                 private int tokenBoundaryDepth;
+                private boolean skippingWhitespace;
                 private boolean packratEnabled = true;
                 private Option<SourceLocation> furthestFailure;
                 private Option<String> furthestExpected;
@@ -3087,7 +3088,9 @@ public final class ParserGenerator {
 
                 private List<Trivia> skipWhitespace() {
                     var trivia = new ArrayList<Trivia>();
-                    if (tokenBoundaryDepth > 0) return trivia;
+                    if (skippingWhitespace || tokenBoundaryDepth > 0) return trivia;
+                    skippingWhitespace = true;
+                    try {
             """);
         if (grammar.whitespace()
                    .isPresent()) {
@@ -3106,6 +3109,9 @@ public final class ParserGenerator {
             sb.append("        }\n");
         }
         sb.append("""
+                    } finally {
+                        skippingWhitespace = false;
+                    }
                     return trivia;
                 }
 

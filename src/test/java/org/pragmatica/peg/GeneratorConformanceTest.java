@@ -245,6 +245,36 @@ class GeneratorConformanceTest {
         assertConformance(REPETITION_GRAMMAR, "a b c d e", false);
     }
 
+    // --- Whitespace with named comment rules (StackOverflow bug) ---
+
+    static final String WHITESPACE_COMMENT_GRAMMAR = """
+        Input       <- Statement ';'?
+        Statement   <- 'SELECT'i [a-zA-Z0-9_ ]+
+        %whitespace <- ([ \\t\\r\\n]+ / LineComment / BlockComment)*
+        LineComment <- '--' [^\\n]*
+        BlockComment <- '/*' (!'*/' .)* '*/'
+        """;
+
+    @Test
+    void whitespaceComment_simpleSelect() throws Exception {
+        assertConformance(WHITESPACE_COMMENT_GRAMMAR, "select 1", true);
+    }
+
+    @Test
+    void whitespaceComment_withLineComment() throws Exception {
+        assertConformance(WHITESPACE_COMMENT_GRAMMAR, "select 1 -- comment", true);
+    }
+
+    @Test
+    void whitespaceComment_withBlockComment() throws Exception {
+        assertConformance(WHITESPACE_COMMENT_GRAMMAR, "select /* hi */ 1", true);
+    }
+
+    @Test
+    void whitespaceComment_withSemicolon() throws Exception {
+        assertConformance(WHITESPACE_COMMENT_GRAMMAR, "select 1;", true);
+    }
+
     // --- Conformance helper ---
 
     private void assertConformance(String grammar, String input, boolean expectedSuccess) throws Exception {

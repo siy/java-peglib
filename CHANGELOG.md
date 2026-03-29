@@ -17,11 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Rule methods collect their own leading trivia at entry (no trivia parameter)
   - Reference handler delegates whitespace to rule methods
 - Fixed generated parser failing on optional suffixes after multi-alternative choices (e.g., `OverClause?` after `FuncCall` alternatives)
+- Fixed StackOverflowError in generated parser when `%whitespace` references named rules (e.g., `LineComment`, `BlockComment`) — added reentrant guard to `skipWhitespace()` matching interpreter's `enterWhitespaceSkip`/`exitWhitespaceSkip` pattern
 
 ### Added
 
-- Generator conformance test suite (28 tests) comparing interpreted vs generated parser behavior
-- Test count: 310 → 338
+- Generator conformance test suite (32 tests) comparing interpreted vs generated parser behavior
+- Test count: 310 → 342
 
 ## [0.2.0] - 2026-03-29
 
