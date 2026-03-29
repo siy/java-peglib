@@ -2091,7 +2091,11 @@ public final class ParserGenerator {
         sb.append("        \n");
         sb.append("        // Skip leading whitespace (collect trivia)\n");
         sb.append("        var leadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+        var ruleIdConst = toConstantName(ruleName);
         sb.append("        var children = new ArrayList<CstNode>();\n");
+        sb.append("        var __ruleName = ")
+          .append(ruleIdConst)
+          .append(";\n");
         sb.append("        \n");
         var counter = new int[]{0};
         // Mutable counter for unique variable names
@@ -2102,7 +2106,6 @@ public final class ParserGenerator {
         sb.append("            var endLoc = location();\n");
         sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
         // Match interpreter's wrapWithRuleName: replace the rule name on whatever node was produced
-        var ruleIdConst = toConstantName(ruleName);
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", leadingTrivia);\n");
@@ -2470,6 +2473,7 @@ public final class ParserGenerator {
                 var zomStart = "zomStart" + id;
                 var beforeLoc = "beforeLoc" + id;
                 var zomElem = "zomElem" + id;
+                var savedChildrenZom = "savedChildrenZom" + id;
                 sb.append(pad)
                   .append("CstParseResult ")
                   .append(resultVar)
@@ -2478,6 +2482,15 @@ public final class ParserGenerator {
                   .append("var ")
                   .append(zomStart)
                   .append(" = location();\n");
+                // Save parent children and collect loop children separately
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildrenZom)
+                      .append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("children.clear();\n");
+                }
                 sb.append(pad)
                   .append("while (true) {\n");
                 sb.append(pad)
@@ -2526,25 +2539,95 @@ public final class ParserGenerator {
                   .append("    }\n");
                 sb.append(pad)
                   .append("}\n");
-                // If loop ended due to CutFailure, propagate it
-                sb.append(pad)
-                  .append("if (!")
-                  .append(resultVar)
-                  .append(".isCutFailure()) {\n");
-                sb.append(pad)
-                  .append("    ")
-                  .append(resultVar)
-                  .append(" = CstParseResult.success(null, substring(")
-                  .append(zomStart)
-                  .append(".offset(), pos), location());\n");
-                sb.append(pad)
-                  .append("}\n");
+                // Wrap collected children and restore parent children
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("if (!")
+                      .append(resultVar)
+                      .append(".isCutFailure()) {\n");
+                    sb.append(pad)
+                      .append("    var zomChildren")
+                      .append(id)
+                      .append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenZom)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("    if (zomChildren")
+                      .append(id)
+                      .append(".size() == 1) {\n");
+                    sb.append(pad)
+                      .append("        children.add(zomChildren")
+                      .append(id)
+                      .append(".getFirst());\n");
+                    sb.append(pad)
+                      .append("    } else if (!zomChildren")
+                      .append(id)
+                      .append(".isEmpty()) {\n");
+                    sb.append(pad)
+                      .append("        var zomSpan")
+                      .append(id)
+                      .append(" = SourceSpan.of(")
+                      .append(zomStart)
+                      .append(", location());\n");
+                    sb.append(pad)
+                      .append("        children.add(new CstNode.NonTerminal(zomSpan")
+                      .append(id)
+                      .append(", __ruleName, zomChildren")
+                      .append(id)
+                      .append(", List.of(), List.of()));\n");
+                    sb.append(pad)
+                      .append("    }\n");
+                    sb.append(pad)
+                      .append("    ")
+                      .append(resultVar)
+                      .append(" = CstParseResult.success(null, substring(")
+                      .append(zomStart)
+                      .append(".offset(), pos), location());\n");
+                    sb.append(pad)
+                      .append("} else {\n");
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenZom)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("}\n");
+                }else {
+                    // If loop ended due to CutFailure, propagate it
+                    sb.append(pad)
+                      .append("if (!")
+                      .append(resultVar)
+                      .append(".isCutFailure()) {\n");
+                    sb.append(pad)
+                      .append("    ")
+                      .append(resultVar)
+                      .append(" = CstParseResult.success(null, substring(")
+                      .append(zomStart)
+                      .append(".offset(), pos), location());\n");
+                    sb.append(pad)
+                      .append("}\n");
+                }
             }
             case Expression.OneOrMore oom -> {
                 var oomFirst = "oomFirst" + id;
                 var oomStart = "oomStart" + id;
                 var beforeLoc = "beforeLoc" + id;
                 var oomElem = "oomElem" + id;
+                var savedChildrenOom = "savedChildrenOom" + id;
+                // Save parent children before first match
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildrenOom)
+                      .append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("children.clear();\n");
+                }
                 generateCstExpressionCode(sb,
                                           oom.expression(),
                                           oomFirst,
@@ -2559,13 +2642,13 @@ public final class ParserGenerator {
                   .append(oomFirst)
                   .append(";\n");
                 sb.append(pad)
+                  .append("var ")
+                  .append(oomStart)
+                  .append(" = location();\n");
+                sb.append(pad)
                   .append("if (")
                   .append(oomFirst)
                   .append(".isSuccess()) {\n");
-                sb.append(pad)
-                  .append("    var ")
-                  .append(oomStart)
-                  .append(" = location();\n");
                 sb.append(pad)
                   .append("    while (true) {\n");
                 sb.append(pad)
@@ -2616,14 +2699,77 @@ public final class ParserGenerator {
                   .append("    }\n");
                 sb.append(pad)
                   .append("}\n");
+                // Wrap collected children and restore parent children
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("if (")
+                      .append(resultVar)
+                      .append(".isSuccess()) {\n");
+                    sb.append(pad)
+                      .append("    var oomChildren")
+                      .append(id)
+                      .append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenOom)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("    if (oomChildren")
+                      .append(id)
+                      .append(".size() == 1) {\n");
+                    sb.append(pad)
+                      .append("        children.add(oomChildren")
+                      .append(id)
+                      .append(".getFirst());\n");
+                    sb.append(pad)
+                      .append("    } else if (!oomChildren")
+                      .append(id)
+                      .append(".isEmpty()) {\n");
+                    sb.append(pad)
+                      .append("        var oomSpan")
+                      .append(id)
+                      .append(" = SourceSpan.of(")
+                      .append(oomStart)
+                      .append(", location());\n");
+                    sb.append(pad)
+                      .append("        children.add(new CstNode.NonTerminal(oomSpan")
+                      .append(id)
+                      .append(", __ruleName, oomChildren")
+                      .append(id)
+                      .append(", List.of(), List.of()));\n");
+                    sb.append(pad)
+                      .append("    }\n");
+                    sb.append(pad)
+                      .append("} else {\n");
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenOom)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("}\n");
+                }
             }
             case Expression.Optional opt -> {
                 var optStart = "optStart" + id;
                 var optElem = "optElem" + id;
+                var savedChildrenOpt = "savedChildrenOpt" + id;
                 sb.append(pad)
                   .append("var ")
                   .append(optStart)
                   .append(" = location();\n");
+                // Save parent children before inner expression
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildrenOpt)
+                      .append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("children.clear();\n");
+                }
                 // No whitespace skip in Optional (matching interpreter behavior)
                 generateCstExpressionCode(sb,
                                           opt.expression(),
@@ -2645,6 +2791,14 @@ public final class ParserGenerator {
                   .append("    restoreLocation(")
                   .append(optStart)
                   .append(");\n");
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenOpt)
+                      .append(");\n");
+                }
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
@@ -2655,6 +2809,24 @@ public final class ParserGenerator {
                   .append("} else if (")
                   .append(optElem)
                   .append(".isSuccess()) {\n");
+                if (addToChildren) {
+                    // Collect inner children, restore parent, add inner result
+                    sb.append(pad)
+                      .append("    var optChildren")
+                      .append(id)
+                      .append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenOpt)
+                      .append(");\n");
+                    // Add collected children — matching interpreter which returns inner result directly
+                    sb.append(pad)
+                      .append("    children.addAll(optChildren")
+                      .append(id)
+                      .append(");\n");
+                }
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
@@ -2667,6 +2839,14 @@ public final class ParserGenerator {
                   .append("    restoreLocation(")
                   .append(optStart)
                   .append(");\n");
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenOpt)
+                      .append(");\n");
+                }
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
@@ -2680,6 +2860,7 @@ public final class ParserGenerator {
                 var beforeLoc = "beforeLoc" + id;
                 var repElem = "repElem" + id;
                 var repCutFailed = "repCutFailed" + id;
+                var savedChildrenRep = "savedChildrenRep" + id;
                 sb.append(pad)
                   .append("int ")
                   .append(repCount)
@@ -2692,6 +2873,15 @@ public final class ParserGenerator {
                   .append("CstParseResult ")
                   .append(repCutFailed)
                   .append(" = null;\n");
+                // Save parent children and collect loop children separately
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("var ")
+                      .append(savedChildrenRep)
+                      .append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("children.clear();\n");
+                }
                 var maxStr = rep.max()
                                 .isPresent()
                              ? String.valueOf(rep.max()
@@ -2763,6 +2953,14 @@ public final class ParserGenerator {
                   .append("if (")
                   .append(repCutFailed)
                   .append(" != null) {\n");
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenRep)
+                      .append(");\n");
+                }
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
@@ -2775,6 +2973,44 @@ public final class ParserGenerator {
                   .append(" >= ")
                   .append(rep.min())
                   .append(") {\n");
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("    var repChildren")
+                      .append(id)
+                      .append(" = new ArrayList<>(children);\n");
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenRep)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("    if (repChildren")
+                      .append(id)
+                      .append(".size() == 1) {\n");
+                    sb.append(pad)
+                      .append("        children.add(repChildren")
+                      .append(id)
+                      .append(".getFirst());\n");
+                    sb.append(pad)
+                      .append("    } else if (!repChildren")
+                      .append(id)
+                      .append(".isEmpty()) {\n");
+                    sb.append(pad)
+                      .append("        var repSpan")
+                      .append(id)
+                      .append(" = SourceSpan.of(")
+                      .append(repStart)
+                      .append(", location());\n");
+                    sb.append(pad)
+                      .append("        children.add(new CstNode.NonTerminal(repSpan")
+                      .append(id)
+                      .append(", __ruleName, repChildren")
+                      .append(id)
+                      .append(", List.of(), List.of()));\n");
+                    sb.append(pad)
+                      .append("    }\n");
+                }
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
@@ -2783,6 +3019,14 @@ public final class ParserGenerator {
                   .append(".offset(), pos), location());\n");
                 sb.append(pad)
                   .append("} else {\n");
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("    children.clear();\n");
+                    sb.append(pad)
+                      .append("    children.addAll(")
+                      .append(savedChildrenRep)
+                      .append(");\n");
+                }
                 sb.append(pad)
                   .append("    restoreLocation(")
                   .append(repStart)
@@ -2913,12 +3157,17 @@ public final class ParserGenerator {
                   .append(" = SourceSpan.of(")
                   .append(tbStart)
                   .append(", location());\n");
+                var tokenRuleId = inWhitespaceRule
+                                  ? "RULE_PEG_TOKEN"
+                                  : "__ruleName";
                 sb.append(pad)
                   .append("    var tbNode")
                   .append(id)
                   .append(" = new CstNode.Token(tbSpan")
                   .append(id)
-                  .append(", RULE_PEG_TOKEN, tbText")
+                  .append(", ")
+                  .append(tokenRuleId)
+                  .append(", tbText")
                   .append(id)
                   .append(", List.of(), List.of());\n");
                 if (addToChildren) {
