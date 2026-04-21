@@ -16,22 +16,29 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Phase-2 §7.1 + §7.2 combined CST parity: for every file in {@code perf-corpus/}, the CST
- * hash produced by the generator with all phase-1 flags on plus <b>both</b>
- * {@code choiceDispatch=true} and {@code markResetChildren=true} must match the checked-in
- * baseline. Both flags touch Choice emission, so parity of the combination is a distinct
- * invariant from either flag alone.
+ * Phase-2 §7.4 CST parity: for every file in {@code perf-corpus/}, the CST hash produced
+ * by the generator with all phase-1 flags on <b>and</b> {@code selectivePackrat=true}
+ * (with a non-trivial skip set covering three substantial rules: {@code Identifier},
+ * {@code QualifiedName}, {@code Type}) must match the checked-in baseline. Proves the
+ * fundamental correctness invariant for §7.4: packrat is an optimization, not a
+ * correctness feature — skipping the cache for any subset of rules must never change
+ * the parsed CST.
  *
- * <p>A failure here means the dispatch+mark-trim combination diverges from the slow-chain
- * clone+addAll path on some input — report the file and the first divergent node and
- * leave the baselines untouched.
+ * <p>The other phase-2 structural flags ({@code choiceDispatch}, {@code markResetChildren},
+ * {@code inlineLocations}) are OFF here so this test isolates §7.4 from their emission
+ * changes.
+ *
+ * <p>A failure here would mean skipping the cache for some rule produces a different CST
+ * than caching it — which would indicate a packrat semantics bug (e.g. a rule whose
+ * side-effects are observed by packrat-cached siblings). Report the file and the first
+ * divergent node and leave the baselines untouched.
  */
-class Phase2ChoiceDispatchAndMarkResetParityTest {
+class Phase2SelectivePackratParityTest {
 
     private static final Path CORPUS_ROOT = Path.of("src/test/resources/perf-corpus");
     private static final Path BASELINE_ROOT = Path.of("src/test/resources/perf-corpus-baseline");
 
-    private static final ParserConfig PHASE2_COMBINED = new ParserConfig(
+    private static final ParserConfig PHASE2_SELECTIVE_PACKRAT_ON = new ParserConfig(
         /* packratEnabled         */ true,
         /* recoveryStrategy       */ RecoveryStrategy.BASIC,
         /* captureTrivia          */ true,
@@ -41,11 +48,11 @@ class Phase2ChoiceDispatchAndMarkResetParityTest {
         /* bulkAdvanceLiteral     */ true,
         /* skipWhitespaceFastPath */ true,
         /* reuseEndLocation       */ true,
-        /* choiceDispatch         */ true,
-        /* markResetChildren      */ true,
+        /* choiceDispatch         */ false,
+        /* markResetChildren      */ false,
         /* inlineLocations        */ false,
-        /* selectivePackrat       */ false,
-        /* packratSkipRules       */ Set.of()
+        /* selectivePackrat       */ true,
+        /* packratSkipRules       */ Set.of("Identifier", "QualifiedName", "Type")
     );
 
     static Stream<Path> corpusFiles() throws IOException {
@@ -61,9 +68,9 @@ class Phase2ChoiceDispatchAndMarkResetParityTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("corpusFiles")
-    void phase2ChoiceDispatchAndMarkResetCstHashMatchesBaseline(Path file) throws Exception {
+    void phase2SelectivePackratCstHashMatchesBaseline(Path file) throws Exception {
         String source = Files.readString(file, StandardCharsets.UTF_8);
-        var cst = GeneratedJava25Parser.parseToCst(source, PHASE2_COMBINED);
+        var cst = GeneratedJava25Parser.parseToCst(source, PHASE2_SELECTIVE_PACKRAT_ON);
         String actual = CstHash.of(cst);
 
         Path relative = CORPUS_ROOT.relativize(file);
@@ -74,8 +81,8 @@ class Phase2ChoiceDispatchAndMarkResetParityTest {
         String expected = Files.readString(hashFile, StandardCharsets.UTF_8).trim();
 
         assertThat(actual)
-            .as("Phase-2 combined (choiceDispatch + markResetChildren) CST hash mismatch for %s%nexpected: %s%nactual:   %s",
-                relative, expected, actual)
+            .as("Phase-2 selectivePackrat (skip=%s) CST hash mismatch for %s%nexpected: %s%nactual:   %s",
+                PHASE2_SELECTIVE_PACKRAT_ON.packratSkipRules(), relative, expected, actual)
             .isEqualTo(expected);
     }
 }

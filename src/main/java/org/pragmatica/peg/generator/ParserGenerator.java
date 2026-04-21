@@ -1973,7 +1973,7 @@ public final class ParserGenerator {
                     }
 
                 """);
-        } else {
+        }else {
             sb.append("""
                     private void trackFailure(String expected) {
                         var loc = location();
@@ -2128,6 +2128,12 @@ public final class ParserGenerator {
         var methodName = "parse_" + sanitize(rule.name());
         var ruleName = rule.name();
         boolean inlineLocations = config.inlineLocations();
+        // §7.4 selective packrat: when the flag is on AND this rule's (unsanitized) name is in
+        // the skip-set, omit the cache lookup and cache put within this rule method. The cache
+        // field itself and its use by other rules are preserved. When either the flag is off
+        // or the rule is absent from the skip-set, emission is byte-identical to pre-§7.4.
+        boolean skipCache = config.selectivePackrat() && config.packratSkipRules()
+                                                               .contains(ruleName);
         sb.append("    private CstParseResult ")
           .append(methodName)
           .append("() {\n");
@@ -2138,24 +2144,28 @@ public final class ParserGenerator {
             sb.append("        int startOffset = pos;\n");
             sb.append("        int startLine = line;\n");
             sb.append("        int startColumn = column;\n");
-        } else {
+        }else {
             sb.append("        var startLoc = location();\n");
         }
         sb.append("        \n");
-        sb.append("        // Check cache at pre-whitespace position\n");
-        sb.append("        long key = cacheKey(")
-          .append(ruleId)
-          .append(", ")
-          .append(inlineLocations ? "startOffset" : "startLoc.offset()")
-          .append(");\n");
-        sb.append("        if (cache != null) {\n");
-        sb.append("            var cached = cache.get(key);\n");
-        sb.append("            if (cached != null) {\n");
-        sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation.unwrap());\n");
-        sb.append("                return cached;\n");
-        sb.append("            }\n");
-        sb.append("        }\n");
-        sb.append("        \n");
+        if (!skipCache) {
+            sb.append("        // Check cache at pre-whitespace position\n");
+            sb.append("        long key = cacheKey(")
+              .append(ruleId)
+              .append(", ")
+              .append(inlineLocations
+                      ? "startOffset"
+                      : "startLoc.offset()")
+              .append(");\n");
+            sb.append("        if (cache != null) {\n");
+            sb.append("            var cached = cache.get(key);\n");
+            sb.append("            if (cached != null) {\n");
+            sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation.unwrap());\n");
+            sb.append("                return cached;\n");
+            sb.append("            }\n");
+            sb.append("        }\n");
+            sb.append("        \n");
+        }
         sb.append("        // Skip leading whitespace (collect trivia)\n");
         sb.append("        var leadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
         var ruleIdConst = toConstantName(ruleName);
@@ -2173,7 +2183,7 @@ public final class ParserGenerator {
         sb.append("            var endLoc = location();\n");
         if (inlineLocations) {
             sb.append("            var span = SourceSpan.of(new SourceLocation(startLine, startColumn, startOffset), endLoc);\n");
-        } else {
+        }else {
             sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
         }
         // Match interpreter's wrapWithRuleName: replace the rule name on whatever node was produced
@@ -2187,7 +2197,7 @@ public final class ParserGenerator {
             sb.append("            this.pos = startOffset;\n");
             sb.append("            this.line = startLine;\n");
             sb.append("            this.column = startColumn;\n");
-        } else {
+        }else {
             sb.append("            restoreLocation(startLoc);\n");
         }
         // Use custom error message if available
@@ -2201,7 +2211,9 @@ public final class ParserGenerator {
         }
         sb.append("        }\n");
         sb.append("        \n");
-        sb.append("        if (cache != null) cache.put(key, finalResult);\n");
+        if (!skipCache) {
+            sb.append("        if (cache != null) cache.put(key, finalResult);\n");
+        }
         sb.append("        return finalResult;\n");
         sb.append("    }\n\n");
     }
@@ -2267,18 +2279,21 @@ public final class ParserGenerator {
     private boolean collectFirstChars(Expression expr, java.util.Set<Character> out, java.util.Set<String> visiting) {
         return switch (expr) {
             case Expression.Literal lit -> {
-                if (lit.text().isEmpty()) yield false;
-                char first = lit.text().charAt(0);
+                if (lit.text()
+                       .isEmpty()) yield false;
+                char first = lit.text()
+                                .charAt(0);
                 if (lit.caseInsensitive()) {
                     out.add(Character.toLowerCase(first));
                     out.add(Character.toUpperCase(first));
-                } else {
+                }else {
                     out.add(first);
                 }
                 yield true;
             }
             case Expression.CharClass cc -> {
-                if (cc.negated()) yield false; // conservative: don't enumerate complement
+                if (cc.negated()) yield false;
+                // conservative: don't enumerate complement
                 yield enumerateCharClass(cc.pattern(), cc.caseInsensitive(), out);
             }
             case Expression.Choice ch -> {
@@ -2304,12 +2319,18 @@ public final class ParserGenerator {
             case Expression.Capture cap -> collectFirstChars(cap.expression(), out, visiting);
             case Expression.CaptureScope cs -> collectFirstChars(cs.expression(), out, visiting);
             case Expression.Reference ref -> {
-                if (!visiting.add(ref.ruleName())) yield false; // recursion — bail
-                var target = grammar.rules().stream()
-                                    .filter(r -> r.name().equals(ref.ruleName()))
+                if (!visiting.add(ref.ruleName())) yield false;
+                // recursion — bail
+                var target = grammar.rules()
+                                    .stream()
+                                    .filter(r -> r.name()
+                                                  .equals(ref.ruleName()))
                                     .findFirst();
                 if (target.isEmpty()) yield false;
-                yield collectFirstChars(target.get().expression(), out, visiting);
+                yield collectFirstChars(target.get()
+                                              .expression(),
+                                        out,
+                                        visiting);
             }
             default -> false;
         };
@@ -2324,13 +2345,13 @@ public final class ParserGenerator {
                 char ch;
                 int consumed = 2;
                 switch (escaped) {
-                    case 'n': ch = '\n'; break;
-                    case 'r': ch = '\r'; break;
-                    case 't': ch = '\t'; break;
-                    case '\\': ch = '\\'; break;
-                    case ']': ch = ']'; break;
-                    case '-': ch = '-'; break;
-                    default: return false;
+                    case'n' : ch = '\n'; break;
+                    case'r' : ch = '\r'; break;
+                    case't' : ch = '\t'; break;
+                    case'\\' : ch = '\\'; break;
+                    case']' : ch = ']'; break;
+                    case'-' : ch = '-'; break;
+                    default : return false;
                 }
                 addCaseInsensitive(out, ch, caseInsensitive);
                 i += consumed;
@@ -2338,14 +2359,15 @@ public final class ParserGenerator {
             }
             if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
                 char end = pattern.charAt(i + 2);
-                if (end - start > 128) return false; // too many — bail
-                for (char c = start; c <= end; c++) {
+                if (end - start > 128) return false;
+                // too many — bail
+                for (char c = start; c <= end; c++ ) {
                     addCaseInsensitive(out, c, caseInsensitive);
                 }
                 i += 3;
-            } else {
+            }else {
                 addCaseInsensitive(out, start, caseInsensitive);
-                i++;
+                i++ ;
             }
         }
         return true;
@@ -2355,7 +2377,7 @@ public final class ParserGenerator {
         if (caseInsensitive) {
             out.add(Character.toLowerCase(c));
             out.add(Character.toUpperCase(c));
-        } else {
+        }else {
             out.add(c);
         }
     }
@@ -2375,11 +2397,11 @@ public final class ParserGenerator {
 
     private static String charLiteral(char c) {
         return switch (c) {
-            case '\n' -> "'\\n'";
-            case '\r' -> "'\\r'";
-            case '\t' -> "'\\t'";
-            case '\\' -> "'\\\\'";
-            case '\'' -> "'\\''";
+            case'\n' -> "'\\n'";
+            case'\r' -> "'\\r'";
+            case'\t' -> "'\\t'";
+            case'\\' -> "'\\\\'";
+            case'\'' -> "'\\''";
             default -> "'" + c + "'";
         };
     }
@@ -2625,29 +2647,45 @@ public final class ParserGenerator {
                   .append(" = location();\n");
                 // Don't skip whitespace here - let alternatives capture trivia themselves
                 emitChildrenSave(sb, pad, childrenState, addToChildren);
-
                 var classified = config.choiceDispatch()
-                    ? ChoiceDispatchAnalyzer.classify(choice)
-                    : java.util.Optional.<java.util.List<ChoiceDispatchAnalyzer.AltEntry>>empty();
-
+                                 ? ChoiceDispatchAnalyzer.classify(choice)
+                                 : java.util.Optional.<java.util.List<ChoiceDispatchAnalyzer.AltEntry>>empty();
                 if (classified.isPresent()) {
                     var grouped = ChoiceDispatchAnalyzer.groupByChar(classified.get());
                     var buckets = ChoiceDispatchAnalyzer.buckets(grouped);
-                    emitCstChoiceDispatch(sb, buckets, id, indent, addToChildren, counter, inWhitespaceRule,
-                                          resultVar, choiceStart, childrenState);
-                } else {
+                    emitCstChoiceDispatch(sb,
+                                          buckets,
+                                          id,
+                                          indent,
+                                          addToChildren,
+                                          counter,
+                                          inWhitespaceRule,
+                                          resultVar,
+                                          choiceStart,
+                                          childrenState);
+                }else {
                     int i = 0;
                     for (var alt : choice.alternatives()) {
-                        emitCstChoiceAlt(sb, alt, id, i, indent, addToChildren, counter, inWhitespaceRule,
-                                         resultVar, choiceStart, childrenState, pad);
-                        i++;
+                        emitCstChoiceAlt(sb,
+                                         alt,
+                                         id,
+                                         i,
+                                         indent,
+                                         addToChildren,
+                                         counter,
+                                         inWhitespaceRule,
+                                         resultVar,
+                                         choiceStart,
+                                         childrenState,
+                                         pad);
+                        i++ ;
                     }
-                    for (int j = 0; j < choice.alternatives().size(); j++) {
+                    for (int j = 0; j < choice.alternatives()
+                                              .size(); j++ ) {
                         sb.append(pad)
                           .append("}\n");
                     }
                 }
-
                 sb.append(pad)
                   .append("if (")
                   .append(resultVar)
@@ -3537,13 +3575,33 @@ public final class ParserGenerator {
         emitChildrenRestore(sb, pad, childrenState, addToChildren);
         var altVar = "alt" + id + "_" + origIndex;
         generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter, inWhitespaceRule);
-        sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
-        sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
-        sb.append(pad).append("} else if (").append(altVar).append(".isCutFailure()) {\n");
+        sb.append(pad)
+          .append("if (")
+          .append(altVar)
+          .append(".isSuccess()) {\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = ")
+          .append(altVar)
+          .append(";\n");
+        sb.append(pad)
+          .append("} else if (")
+          .append(altVar)
+          .append(".isCutFailure()) {\n");
         // Convert CutFailure to regular failure so enclosing choices can still fail-forward.
-        sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(".asRegularFailure();\n");
-        sb.append(pad).append("} else {\n");
-        sb.append(pad).append("    restoreLocation(").append(choiceStart).append(");\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = ")
+          .append(altVar)
+          .append(".asRegularFailure();\n");
+        sb.append(pad)
+          .append("} else {\n");
+        sb.append(pad)
+          .append("    restoreLocation(")
+          .append(choiceStart)
+          .append(");\n");
     }
 
     /**
@@ -3564,11 +3622,22 @@ public final class ParserGenerator {
                                              String childrenState,
                                              String pad) {
         for (var entry : alts) {
-            emitCstChoiceAlt(sb, entry.alt(), id, entry.originalIndex(), indent, addToChildren, counter,
-                             inWhitespaceRule, resultVar, choiceStart, childrenState, pad);
+            emitCstChoiceAlt(sb,
+                             entry.alt(),
+                             id,
+                             entry.originalIndex(),
+                             indent,
+                             addToChildren,
+                             counter,
+                             inWhitespaceRule,
+                             resultVar,
+                             choiceStart,
+                             childrenState,
+                             pad);
         }
-        for (int j = 0; j < alts.size(); j++) {
-            sb.append(pad).append("}\n");
+        for (int j = 0; j < alts.size(); j++ ) {
+            sb.append(pad)
+              .append("}\n");
         }
     }
 
@@ -3591,23 +3660,47 @@ public final class ParserGenerator {
                                        String childrenState) {
         var pad = "    ".repeat(indent);
         var dispatchVar = "dispatchChar" + id;
-        sb.append(pad).append("if (pos < input.length()) {\n");
-        sb.append(pad).append("    char ").append(dispatchVar).append(" = input.charAt(pos);\n");
-        sb.append(pad).append("    switch (").append(dispatchVar).append(") {\n");
+        sb.append(pad)
+          .append("if (pos < input.length()) {\n");
+        sb.append(pad)
+          .append("    char ")
+          .append(dispatchVar)
+          .append(" = input.charAt(pos);\n");
+        sb.append(pad)
+          .append("    switch (")
+          .append(dispatchVar)
+          .append(") {\n");
         var casePad = pad + "        ";
         var bodyPad = pad + "            ";
         for (var bucket : buckets) {
             for (var c : bucket.chars()) {
-                sb.append(casePad).append("case ").append(literalChar(c)).append(":\n");
+                sb.append(casePad)
+                  .append("case ")
+                  .append(literalChar(c))
+                  .append(":\n");
             }
-            sb.append(casePad).append("{\n");
-            emitCstChoiceAltChainClosed(sb, bucket.alts(), id, indent + 3, addToChildren, counter,
-                                        inWhitespaceRule, resultVar, choiceStart, childrenState, bodyPad);
-            sb.append(bodyPad).append("break;\n");
-            sb.append(casePad).append("}\n");
+            sb.append(casePad)
+              .append("{\n");
+            emitCstChoiceAltChainClosed(sb,
+                                        bucket.alts(),
+                                        id,
+                                        indent + 3,
+                                        addToChildren,
+                                        counter,
+                                        inWhitespaceRule,
+                                        resultVar,
+                                        choiceStart,
+                                        childrenState,
+                                        bodyPad);
+            sb.append(bodyPad)
+              .append("break;\n");
+            sb.append(casePad)
+              .append("}\n");
         }
-        sb.append(pad).append("    }\n");
-        sb.append(pad).append("}\n");
+        sb.append(pad)
+          .append("    }\n");
+        sb.append(pad)
+          .append("}\n");
     }
 
     /**
@@ -3618,9 +3711,15 @@ public final class ParserGenerator {
     private void emitChildrenSave(StringBuilder sb, String pad, String stateVar, boolean addToChildren) {
         if (!addToChildren) return;
         if (config.markResetChildren()) {
-            sb.append(pad).append("int ").append(stateVar).append(" = children.size();\n");
-        } else {
-            sb.append(pad).append("var ").append(stateVar).append(" = new ArrayList<>(children);\n");
+            sb.append(pad)
+              .append("int ")
+              .append(stateVar)
+              .append(" = children.size();\n");
+        }else {
+            sb.append(pad)
+              .append("var ")
+              .append(stateVar)
+              .append(" = new ArrayList<>(children);\n");
         }
     }
 
@@ -3633,22 +3732,33 @@ public final class ParserGenerator {
     private void emitChildrenRestore(StringBuilder sb, String pad, String stateVar, boolean addToChildren) {
         if (!addToChildren) return;
         if (config.markResetChildren()) {
-            sb.append(pad).append("if (children.size() > ").append(stateVar).append(") {\n");
-            sb.append(pad).append("    children.subList(").append(stateVar).append(", children.size()).clear();\n");
-            sb.append(pad).append("}\n");
-        } else {
-            sb.append(pad).append("children.clear();\n");
-            sb.append(pad).append("children.addAll(").append(stateVar).append(");\n");
+            sb.append(pad)
+              .append("if (children.size() > ")
+              .append(stateVar)
+              .append(") {\n");
+            sb.append(pad)
+              .append("    children.subList(")
+              .append(stateVar)
+              .append(", children.size()).clear();\n");
+            sb.append(pad)
+              .append("}\n");
+        }else {
+            sb.append(pad)
+              .append("children.clear();\n");
+            sb.append(pad)
+              .append("children.addAll(")
+              .append(stateVar)
+              .append(");\n");
         }
     }
 
     private static String literalChar(char c) {
         return switch (c) {
-            case '\n' -> "'\\n'";
-            case '\r' -> "'\\r'";
-            case '\t' -> "'\\t'";
-            case '\\' -> "'\\\\'";
-            case '\'' -> "'\\''";
+            case'\n' -> "'\\n'";
+            case'\r' -> "'\\r'";
+            case'\t' -> "'\\t'";
+            case'\\' -> "'\\\\'";
+            case'\'' -> "'\\''";
             default -> "'" + c + "'";
         };
     }
@@ -3663,14 +3773,18 @@ public final class ParserGenerator {
         // Only emitted when the flag is on AND the grammar has a %whitespace rule
         // AND the inner expression is analyzable (otherwise fall through to the
         // existing unconditional slow-path setup).
-        if (config.skipWhitespaceFastPath() && grammar.whitespace().isPresent()) {
-            var wsInner = extractInnerExpression(grammar.whitespace().unwrap());
+        if (config.skipWhitespaceFastPath() && grammar.whitespace()
+                                                      .isPresent()) {
+            var wsInner = extractInnerExpression(grammar.whitespace()
+                                                        .unwrap());
             var charsOpt = whitespaceFirstChars(wsInner);
             if (charsOpt.isPresent()) {
                 var chars = charsOpt.get();
                 sb.append("        if (skippingWhitespace || tokenBoundaryDepth > 0 || pos >= input.length()) return List.of();\n");
                 sb.append("        char c = input.charAt(pos);\n");
-                sb.append("        if (").append(renderNotInSetCheck(chars)).append(") return List.of();\n");
+                sb.append("        if (")
+                  .append(renderNotInSetCheck(chars))
+                  .append(") return List.of();\n");
             }
         }
         sb.append("""
@@ -3822,10 +3936,13 @@ public final class ParserGenerator {
     }
 
     // === Match-method emitters (phase 1 perf flags) ===
-
     private void emitMatchLiteralCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation() ? "endLoc" : "location()";
-        var endLocDecl = config.reuseEndLocation() ? "        var endLoc = location();\n" : "";
+        var endLocVar = config.reuseEndLocation()
+                        ? "endLoc"
+                        : "location()";
+        var endLocDecl = config.reuseEndLocation()
+                         ? "        var endLoc = location();\n"
+                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {\n");
         if (config.literalFailureCache()) {
@@ -3853,7 +3970,7 @@ public final class ParserGenerator {
             sb.append("                }\n");
             sb.append("            }\n");
             sb.append("        }\n");
-        } else {
+        }else {
             sb.append("        if (remaining() < text.length()) {\n");
             sb.append("            trackFailure(\"'\" + text + \"'\");\n");
             sb.append("            return CstParseResult.failure(\"'\" + text + \"'\");\n");
@@ -3877,22 +3994,34 @@ public final class ParserGenerator {
         }
         // success-path advance
         if (config.bulkAdvanceLiteral()) {
-            var lenExpr = config.literalFailureCache() ? "len" : "text.length()";
+            var lenExpr = config.literalFailureCache()
+                          ? "len"
+                          : "text.length()";
             sb.append("        if (text.indexOf('\\n') < 0) {\n");
-            sb.append("            pos += ").append(lenExpr).append(";\n");
-            sb.append("            column += ").append(lenExpr).append(";\n");
+            sb.append("            pos += ")
+              .append(lenExpr)
+              .append(";\n");
+            sb.append("            column += ")
+              .append(lenExpr)
+              .append(";\n");
             sb.append("        } else {\n");
-            sb.append("            for (int i = 0; i < ").append(lenExpr).append("; i++) advance();\n");
+            sb.append("            for (int i = 0; i < ")
+              .append(lenExpr)
+              .append("; i++) advance();\n");
             sb.append("        }\n");
-        } else {
+        }else {
             sb.append("        for (int i = 0; i < text.length(); i++) {\n");
             sb.append("            advance();\n");
             sb.append("        }\n");
         }
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.of(startLoc, ").append(endLocVar).append(");\n");
+        sb.append("        var span = SourceSpan.of(startLoc, ")
+          .append(endLocVar)
+          .append(");\n");
         sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, List.of(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ").append(endLocVar).append(");\n");
+        sb.append("        return CstParseResult.success(node, text, ")
+          .append(endLocVar)
+          .append(");\n");
         sb.append("    }\n");
         sb.append("\n");
         if (config.literalFailureCache()) {
@@ -3909,8 +4038,12 @@ public final class ParserGenerator {
     }
 
     private void emitMatchDictionaryCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation() ? "endLoc" : "location()";
-        var endLocDecl = config.reuseEndLocation() ? "        var endLoc = location();\n" : "";
+        var endLocVar = config.reuseEndLocation()
+                        ? "endLoc"
+                        : "location()";
+        var endLocDecl = config.reuseEndLocation()
+                         ? "        var endLoc = location();\n"
+                         : "";
         sb.append("    private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {\n");
         sb.append("        String longestMatch = null;\n");
         sb.append("        int longestLen = 0;\n");
@@ -3929,16 +4062,24 @@ public final class ParserGenerator {
         sb.append("            advance();\n");
         sb.append("        }\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.of(startLoc, ").append(endLocVar).append(");\n");
+        sb.append("        var span = SourceSpan.of(startLoc, ")
+          .append(endLocVar)
+          .append(");\n");
         sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, List.of(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, longestMatch, ").append(endLocVar).append(");\n");
+        sb.append("        return CstParseResult.success(node, longestMatch, ")
+          .append(endLocVar)
+          .append(");\n");
         sb.append("    }\n");
         sb.append("\n");
     }
 
     private void emitMatchCharClassCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation() ? "endLoc" : "location()";
-        var endLocDecl = config.reuseEndLocation() ? "        var endLoc = location();\n" : "";
+        var endLocVar = config.reuseEndLocation()
+                        ? "endLoc"
+                        : "location()";
+        var endLocDecl = config.reuseEndLocation()
+                         ? "        var endLoc = location();\n"
+                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {\n");
         if (config.charClassFailureCache()) {
@@ -3956,7 +4097,7 @@ public final class ParserGenerator {
             sb.append("            trackFailure(f.expected.unwrap());\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
-        } else {
+        }else {
             sb.append("        if (isAtEnd()) {\n");
             sb.append("            trackFailure(\"[\" + (negated ? \"^\" : \"\") + pattern + \"]\");\n");
             sb.append("            return CstParseResult.failure(\"character class\");\n");
@@ -3973,9 +4114,13 @@ public final class ParserGenerator {
         sb.append("        advance();\n");
         sb.append("        var text = String.valueOf(c);\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.of(startLoc, ").append(endLocVar).append(");\n");
+        sb.append("        var span = SourceSpan.of(startLoc, ")
+          .append(endLocVar)
+          .append(");\n");
         sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ").append(endLocVar).append(");\n");
+        sb.append("        return CstParseResult.success(node, text, ")
+          .append(endLocVar)
+          .append(");\n");
         sb.append("    }\n");
         sb.append("\n");
         if (config.charClassFailureCache()) {
@@ -3993,8 +4138,12 @@ public final class ParserGenerator {
     }
 
     private void emitMatchAnyCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation() ? "endLoc" : "location()";
-        var endLocDecl = config.reuseEndLocation() ? "        var endLoc = location();\n" : "";
+        var endLocVar = config.reuseEndLocation()
+                        ? "endLoc"
+                        : "location()";
+        var endLocDecl = config.reuseEndLocation()
+                         ? "        var endLoc = location();\n"
+                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchAnyCst() {\n");
         sb.append("        if (isAtEnd()) {\n");
@@ -4005,9 +4154,13 @@ public final class ParserGenerator {
         sb.append("        char c = advance();\n");
         sb.append("        var text = String.valueOf(c);\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.of(startLoc, ").append(endLocVar).append(");\n");
+        sb.append("        var span = SourceSpan.of(startLoc, ")
+          .append(endLocVar)
+          .append(");\n");
         sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ").append(endLocVar).append(");\n");
+        sb.append("        return CstParseResult.success(node, text, ")
+          .append(endLocVar)
+          .append(");\n");
         sb.append("    }\n");
         sb.append("\n");
     }

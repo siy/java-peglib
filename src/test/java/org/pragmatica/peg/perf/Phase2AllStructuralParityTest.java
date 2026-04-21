@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,7 +48,8 @@ class Phase2AllStructuralParityTest {
         /* choiceDispatch         */ true,
         /* markResetChildren      */ true,
         /* inlineLocations        */ true,
-        /* selectivePackrat       */ false
+        /* selectivePackrat       */ false,
+        /* packratSkipRules       */ Set.of()
     );
 
     static Stream<Path> corpusFiles() throws IOException {

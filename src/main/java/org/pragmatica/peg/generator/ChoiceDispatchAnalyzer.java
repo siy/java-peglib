@@ -26,7 +26,6 @@ import java.util.Optional;
  * is used as the switch value, so case-sensitive alternatives remain sound.
  */
 final class ChoiceDispatchAnalyzer {
-
     record FirstChar(char c, boolean caseInsensitive) {}
 
     record AltEntry(int originalIndex, Expression alt, FirstChar firstChar) {}
@@ -43,7 +42,7 @@ final class ChoiceDispatchAnalyzer {
             return Optional.empty();
         }
         var entries = new ArrayList<AltEntry>(alternatives.size());
-        for (int i = 0; i < alternatives.size(); i++) {
+        for (int i = 0; i < alternatives.size(); i++ ) {
             var alt = alternatives.get(i);
             var first = firstLiteral(alt);
             if (first == null) {
@@ -64,16 +63,24 @@ final class ChoiceDispatchAnalyzer {
     static Map<Character, List<AltEntry>> groupByChar(List<AltEntry> entries) {
         var map = new LinkedHashMap<Character, List<AltEntry>>();
         for (var entry : entries) {
-            char c = entry.firstChar().c();
-            if (entry.firstChar().caseInsensitive()) {
+            char c = entry.firstChar()
+                          .c();
+            if (entry.firstChar()
+                     .caseInsensitive()) {
                 char lower = Character.toLowerCase(c);
                 char upper = Character.toUpperCase(c);
-                map.computeIfAbsent(lower, k -> new ArrayList<>()).add(entry);
+                map.computeIfAbsent(lower,
+                                    k -> new ArrayList<>())
+                   .add(entry);
                 if (upper != lower) {
-                    map.computeIfAbsent(upper, k -> new ArrayList<>()).add(entry);
+                    map.computeIfAbsent(upper,
+                                        k -> new ArrayList<>())
+                       .add(entry);
                 }
-            } else {
-                map.computeIfAbsent(c, k -> new ArrayList<>()).add(entry);
+            }else {
+                map.computeIfAbsent(c,
+                                    k -> new ArrayList<>())
+                   .add(entry);
             }
         }
         return map;
@@ -82,8 +89,10 @@ final class ChoiceDispatchAnalyzer {
     /** Compare two alt-lists by original-index sequence (order matters — grammar priority). */
     private static boolean sameAlts(List<AltEntry> a, List<AltEntry> b) {
         if (a.size() != b.size()) return false;
-        for (int i = 0; i < a.size(); i++) {
-            if (a.get(i).originalIndex() != b.get(i).originalIndex()) return false;
+        for (int i = 0; i < a.size(); i++ ) {
+            if (a.get(i)
+                 .originalIndex() != b.get(i)
+                                      .originalIndex()) return false;
         }
         return true;
     }
@@ -132,9 +141,12 @@ final class ChoiceDispatchAnalyzer {
      */
     private static FirstChar firstLiteral(Expression expr) {
         return switch (expr) {
-            case Expression.Literal lit -> lit.text().isEmpty()
-                ? null
-                : new FirstChar(lit.text().charAt(0), lit.caseInsensitive());
+            case Expression.Literal lit -> lit.text()
+                                              .isEmpty()
+                                           ? null
+                                           : new FirstChar(lit.text()
+                                                              .charAt(0),
+                                                           lit.caseInsensitive());
             case Expression.Sequence seq -> firstLiteralInSequence(seq);
             case Expression.Group grp -> firstLiteral(grp.expression());
             case Expression.TokenBoundary tb -> firstLiteral(tb.expression());

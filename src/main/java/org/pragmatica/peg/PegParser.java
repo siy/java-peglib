@@ -163,7 +163,11 @@ public final class PegParser {
                                                    ParserConfig config) {
         return GrammarParser.parse(grammarText)
                             .flatMap(Grammar::validate)
-                            .map(grammar -> ParserGenerator.create(grammar, packageName, className, errorReporting, config)
+                            .map(grammar -> ParserGenerator.create(grammar,
+                                                                   packageName,
+                                                                   className,
+                                                                   errorReporting,
+                                                                   config)
                                                            .generateCst());
     }
 

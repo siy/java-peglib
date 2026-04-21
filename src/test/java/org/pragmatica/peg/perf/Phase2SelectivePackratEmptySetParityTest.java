@@ -16,22 +16,26 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Phase-2 §7.1 + §7.2 combined CST parity: for every file in {@code perf-corpus/}, the CST
- * hash produced by the generator with all phase-1 flags on plus <b>both</b>
- * {@code choiceDispatch=true} and {@code markResetChildren=true} must match the checked-in
- * baseline. Both flags touch Choice emission, so parity of the combination is a distinct
- * invariant from either flag alone.
+ * Phase-2 §7.4 flag-on / empty-skip-set no-op parity: for every file in
+ * {@code perf-corpus/}, the CST hash produced with {@code selectivePackrat=true} but
+ * {@code packratSkipRules=Set.of()} must match the checked-in baseline. Confirms that
+ * enabling the flag without nominating any rules to skip is a pure no-op — every rule
+ * still consults and populates the packrat cache exactly as it did before §7.4.
  *
- * <p>A failure here means the dispatch+mark-trim combination diverges from the slow-chain
- * clone+addAll path on some input — report the file and the first divergent node and
- * leave the baselines untouched.
+ * <p>This is the defence-in-depth companion to {@code Phase2SelectivePackratParityTest}:
+ * the latter proves that skipping a subset is correct; this one proves that the code
+ * path gate on the flag itself introduces no unintended behaviour change when the skip
+ * set is empty.
+ *
+ * <p>A failure here would mean the {@code selectivePackrat} gate logic diverges from the
+ * unmodified baseline even when the skip-set is empty — a generator emission bug.
  */
-class Phase2ChoiceDispatchAndMarkResetParityTest {
+class Phase2SelectivePackratEmptySetParityTest {
 
     private static final Path CORPUS_ROOT = Path.of("src/test/resources/perf-corpus");
     private static final Path BASELINE_ROOT = Path.of("src/test/resources/perf-corpus-baseline");
 
-    private static final ParserConfig PHASE2_COMBINED = new ParserConfig(
+    private static final ParserConfig PHASE2_SELECTIVE_PACKRAT_EMPTY = new ParserConfig(
         /* packratEnabled         */ true,
         /* recoveryStrategy       */ RecoveryStrategy.BASIC,
         /* captureTrivia          */ true,
@@ -41,10 +45,10 @@ class Phase2ChoiceDispatchAndMarkResetParityTest {
         /* bulkAdvanceLiteral     */ true,
         /* skipWhitespaceFastPath */ true,
         /* reuseEndLocation       */ true,
-        /* choiceDispatch         */ true,
-        /* markResetChildren      */ true,
+        /* choiceDispatch         */ false,
+        /* markResetChildren      */ false,
         /* inlineLocations        */ false,
-        /* selectivePackrat       */ false,
+        /* selectivePackrat       */ true,
         /* packratSkipRules       */ Set.of()
     );
 
@@ -61,9 +65,9 @@ class Phase2ChoiceDispatchAndMarkResetParityTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("corpusFiles")
-    void phase2ChoiceDispatchAndMarkResetCstHashMatchesBaseline(Path file) throws Exception {
+    void phase2SelectivePackratEmptySetCstHashMatchesBaseline(Path file) throws Exception {
         String source = Files.readString(file, StandardCharsets.UTF_8);
-        var cst = GeneratedJava25Parser.parseToCst(source, PHASE2_COMBINED);
+        var cst = GeneratedJava25Parser.parseToCst(source, PHASE2_SELECTIVE_PACKRAT_EMPTY);
         String actual = CstHash.of(cst);
 
         Path relative = CORPUS_ROOT.relativize(file);
@@ -74,7 +78,7 @@ class Phase2ChoiceDispatchAndMarkResetParityTest {
         String expected = Files.readString(hashFile, StandardCharsets.UTF_8).trim();
 
         assertThat(actual)
-            .as("Phase-2 combined (choiceDispatch + markResetChildren) CST hash mismatch for %s%nexpected: %s%nactual:   %s",
+            .as("Phase-2 selectivePackrat (empty skip-set) CST hash mismatch for %s%nexpected: %s%nactual:   %s",
                 relative, expected, actual)
             .isEqualTo(expected);
     }

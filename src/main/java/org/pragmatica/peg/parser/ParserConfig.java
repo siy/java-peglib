@@ -2,6 +2,8 @@ package org.pragmatica.peg.parser;
 
 import org.pragmatica.peg.error.RecoveryStrategy;
 
+import java.util.Set;
+
 /**
  * Parser configuration options.
  *
@@ -26,27 +28,40 @@ import org.pragmatica.peg.error.RecoveryStrategy;
  * <b>CST generator emission only</b> ({@code ParserGenerator#generateCst}).
  * The action-bearing non-CST emission path ({@code ParserGenerator#generate})
  * is unaffected by these flags.
+ *
+ * @param selectivePackrat when {@code true}, rules whose grammar name is listed
+ *     in {@code packratSkipRules} are emitted without packrat cache lookups or
+ *     stores at rule entry/exit. The cache field and its use by other rules are
+ *     preserved; only the listed rules become cache-free. See
+ *     {@code docs/PERF-REWORK-SPEC.md} §7.4. Default: {@code false}. When
+ *     {@code false}, {@code packratSkipRules} is ignored and the emitted
+ *     output is byte-identical to a configuration with the flag off.
+ * @param packratSkipRules unsanitized grammar rule names (matching
+ *     {@code Rule#name()}) whose emitted CST method should skip the packrat
+ *     cache entirely. Only consulted when {@code selectivePackrat} is
+ *     {@code true}. Treated as <b>immutable</b> by {@code ParserGenerator};
+ *     callers constructing this set from a mutable source must wrap it with
+ *     {@code Set.copyOf(...)} to prevent external mutation from changing
+ *     generated output. Default: {@link Set#of()} (empty — flag, if enabled,
+ *     is a no-op).
  */
 public record ParserConfig(
-    boolean packratEnabled,
-    RecoveryStrategy recoveryStrategy,
-    boolean captureTrivia,
-    // perf flags (generator-time; phase 1 default on, phase 2 default off)
-    boolean fastTrackFailure,
-    boolean literalFailureCache,
-    boolean charClassFailureCache,
-    boolean bulkAdvanceLiteral,
-    boolean skipWhitespaceFastPath,
-    boolean reuseEndLocation,
-    boolean choiceDispatch,
-    boolean markResetChildren,
-    boolean inlineLocations,
-    boolean selectivePackrat) {
-
+ boolean packratEnabled,
+ RecoveryStrategy recoveryStrategy,
+ boolean captureTrivia,
+ boolean fastTrackFailure,
+ boolean literalFailureCache,
+ boolean charClassFailureCache,
+ boolean bulkAdvanceLiteral,
+ boolean skipWhitespaceFastPath,
+ boolean reuseEndLocation,
+ boolean choiceDispatch,
+ boolean markResetChildren,
+ boolean inlineLocations,
+ boolean selectivePackrat,
+ Set<String> packratSkipRules) {
     public static final ParserConfig DEFAULT = new ParserConfig(
-        true, RecoveryStrategy.BASIC, true,
-        true, true, true, true, true, true,          // phase 1: all on
-        false, false, false, false);                  // phase 2: all off
+    true, RecoveryStrategy.BASIC, true, true, true, true, true, true, true, false, false, false, false, Set.of());
 
     /**
      * Convenience factory for the three-field runtime configuration. Phase 1
@@ -55,8 +70,20 @@ public record ParserConfig(
      * runtime fields substituted.
      */
     public static ParserConfig of(boolean packratEnabled, RecoveryStrategy recoveryStrategy, boolean captureTrivia) {
-        return new ParserConfig(packratEnabled, recoveryStrategy, captureTrivia,
-            true, true, true, true, true, true,    // phase 1 defaults
-            false, false, false, false);            // phase 2 defaults
+        return new ParserConfig(
+        packratEnabled,
+        recoveryStrategy,
+        captureTrivia,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        Set.of());
     }
 }

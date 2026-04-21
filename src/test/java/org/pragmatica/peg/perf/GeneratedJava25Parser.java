@@ -157,6 +157,13 @@ public final class GeneratedJava25Parser {
         sb.append(c.markResetChildren() ? 'M' : 'm');
         sb.append(c.inlineLocations() ? 'I' : 'i');
         sb.append(c.selectivePackrat() ? 'S' : 's');
+        // Encode the skip-set so different skip-sets compile distinct parsers.
+        // Sorted names joined by '_' keep the key deterministic and filesystem-safe.
+        if (c.selectivePackrat() && !c.packratSkipRules().isEmpty()) {
+            var sorted = new java.util.TreeSet<>(c.packratSkipRules());
+            sb.append('_');
+            sb.append(String.join("_", sorted));
+        }
         return sb.toString();
     }
 
