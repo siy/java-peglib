@@ -422,3 +422,13 @@ mvn compile          # Compile
 mvn test             # Run tests (565 passing, 1 skipped)
 mvn verify           # Full verification
 ```
+
+## ndx
+
+`ndx` is available in this project. Use `/ndx` for full CLI reference.
+
+Key commands: `ndx recall search "query"` (hybrid search), `ndx recall wake` (context), `ndx xref drawer <file>` (cross-ref).
+
+Skills: `/ndx-recall-classify`, `/ndx-recall-score`, `/ndx-recall-dedupe`, `/ndx-recall-contradict`, `/ndx-recall-summarize`, `/ndx-recall-handover`.
+
+If recall palace is not initialized, run `ndx recall init` then `ndx recall mine --from-memory`.
