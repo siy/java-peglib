@@ -56,10 +56,12 @@ public final class PegEngine implements Parser {
     }
 
     private static Optional<Set<Character>> computeWhitespaceFirstChars(Grammar grammar) {
-        if (grammar.whitespace().isEmpty()) {
+        if (grammar.whitespace()
+                   .isEmpty()) {
             return Optional.empty();
         }
-        var inner = ExpressionShape.extractInnerExpression(grammar.whitespace().unwrap());
+        var inner = ExpressionShape.extractInnerExpression(grammar.whitespace()
+                                                                  .unwrap());
         return FirstCharAnalysis.whitespaceFirstChars(grammar, inner);
     }
 
@@ -462,13 +464,13 @@ public final class PegEngine implements Parser {
         }
         var startLoc = ctx.location();
         if (lit.caseInsensitive()) {
-            for (int i = 0; i < len; i++) {
+            for (int i = 0; i < len; i++ ) {
                 if (Character.toLowerCase(text.charAt(i)) != Character.toLowerCase(ctx.peek(i))) {
                     return literalFailureAt(ctx, text);
                 }
             }
-        } else {
-            for (int i = 0; i < len; i++) {
+        }else {
+            for (int i = 0; i < len; i++ ) {
                 if (text.charAt(i) != ctx.peek(i)) {
                     return literalFailureAt(ctx, text);
                 }
@@ -503,8 +505,8 @@ public final class PegEngine implements Parser {
     private static void advanceLiteral(ParsingContext ctx, String text, int len) {
         if (text.indexOf('\n') < 0) {
             ctx.bulkAdvanceNoNewline(len);
-        } else {
-            for (int i = 0; i < len; i++) {
+        }else {
+            for (int i = 0; i < len; i++ ) {
                 ctx.advance();
             }
         }
@@ -602,10 +604,14 @@ public final class PegEngine implements Parser {
      * {@code "character"} / {@code "character class"} split.
      */
     private ParseResult charClassFailureAt(ParsingContext ctx, Expression.CharClass cc) {
-        var key = cc.negated() ? "^" + cc.pattern() : cc.pattern();
+        var key = cc.negated()
+                  ? "^" + cc.pattern()
+                  : cc.pattern();
         var msg = charClassFailureMessageCache.get(key);
         if (msg == null) {
-            msg = "[" + (cc.negated() ? "^" : "") + cc.pattern() + "]";
+            msg = "[" + (cc.negated()
+                         ? "^"
+                         : "") + cc.pattern() + "]";
             charClassFailureMessageCache.put(key, msg);
         }
         ctx.updateFurthest(msg);

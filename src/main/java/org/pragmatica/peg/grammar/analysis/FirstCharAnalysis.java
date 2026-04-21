@@ -20,7 +20,6 @@ import java.util.Set;
  * caller-supplied accumulator sets.
  */
 public final class FirstCharAnalysis {
-
     private FirstCharAnalysis() {}
 
     /**
@@ -82,23 +81,25 @@ public final class FirstCharAnalysis {
     }
 
     private static boolean collectFromLiteral(Expression.Literal lit, Set<Character> out) {
-        if (lit.text().isEmpty()) {
+        if (lit.text()
+               .isEmpty()) {
             return false;
         }
-        char first = lit.text().charAt(0);
+        char first = lit.text()
+                        .charAt(0);
         if (lit.caseInsensitive()) {
             out.add(Character.toLowerCase(first));
             out.add(Character.toUpperCase(first));
-        } else {
+        }else {
             out.add(first);
         }
         return true;
     }
 
     private static boolean collectFromChoice(Grammar grammar,
-                                              Expression.Choice ch,
-                                              Set<Character> out,
-                                              Set<String> visiting) {
+                                             Expression.Choice ch,
+                                             Set<Character> out,
+                                             Set<String> visiting) {
         for (var alt : ch.alternatives()) {
             if (!collectFirstChars(grammar, alt, out, visiting)) {
                 return false;
@@ -108,9 +109,9 @@ public final class FirstCharAnalysis {
     }
 
     private static boolean collectFromSequence(Grammar grammar,
-                                                Expression.Sequence seq,
-                                                Set<Character> out,
-                                                Set<String> visiting) {
+                                               Expression.Sequence seq,
+                                               Set<Character> out,
+                                               Set<String> visiting) {
         for (var el : seq.elements()) {
             // skip over leading predicates - they don't consume
             if (el instanceof Expression.And || el instanceof Expression.Not) {
@@ -122,9 +123,9 @@ public final class FirstCharAnalysis {
     }
 
     private static boolean collectFromReference(Grammar grammar,
-                                                 Expression.Reference ref,
-                                                 Set<Character> out,
-                                                 Set<String> visiting) {
+                                                Expression.Reference ref,
+                                                Set<Character> out,
+                                                Set<String> visiting) {
         if (grammar == null) {
             return false;
         }
@@ -133,12 +134,17 @@ public final class FirstCharAnalysis {
         }
         var target = grammar.rules()
                             .stream()
-                            .filter(r -> r.name().equals(ref.ruleName()))
+                            .filter(r -> r.name()
+                                          .equals(ref.ruleName()))
                             .findFirst();
         if (target.isEmpty()) {
             return false;
         }
-        return collectFirstChars(grammar, target.get().expression(), out, visiting);
+        return collectFirstChars(grammar,
+                                 target.get()
+                                       .expression(),
+                                 out,
+                                 visiting);
     }
 
     /**
@@ -159,13 +165,13 @@ public final class FirstCharAnalysis {
                 char ch;
                 int consumed = 2;
                 switch (escaped) {
-                    case 'n': ch = '\n'; break;
-                    case 'r': ch = '\r'; break;
-                    case 't': ch = '\t'; break;
-                    case '\\': ch = '\\'; break;
-                    case ']': ch = ']'; break;
-                    case '-': ch = '-'; break;
-                    default: return false;
+                    case'n' : ch = '\n'; break;
+                    case'r' : ch = '\r'; break;
+                    case't' : ch = '\t'; break;
+                    case'\\' : ch = '\\'; break;
+                    case']' : ch = ']'; break;
+                    case'-' : ch = '-'; break;
+                    default : return false;
                 }
                 addCaseInsensitive(out, ch, caseInsensitive);
                 i += consumed;
@@ -176,13 +182,13 @@ public final class FirstCharAnalysis {
                 if (end - start > 128) {
                     return false;
                 }
-                for (char c = start; c <= end; c++) {
+                for (char c = start; c <= end; c++ ) {
                     addCaseInsensitive(out, c, caseInsensitive);
                 }
                 i += 3;
-            } else {
+            }else {
                 addCaseInsensitive(out, start, caseInsensitive);
-                i++;
+                i++ ;
             }
         }
         return true;
@@ -196,7 +202,7 @@ public final class FirstCharAnalysis {
         if (caseInsensitive) {
             out.add(Character.toLowerCase(c));
             out.add(Character.toUpperCase(c));
-        } else {
+        }else {
             out.add(c);
         }
     }

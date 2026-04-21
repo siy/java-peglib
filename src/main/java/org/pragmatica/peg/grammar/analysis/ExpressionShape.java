@@ -10,7 +10,6 @@ import org.pragmatica.peg.grammar.Expression;
  * expression of a whitespace rule" and related shape predicates.
  */
 public final class ExpressionShape {
-
     private ExpressionShape() {}
 
     /**
