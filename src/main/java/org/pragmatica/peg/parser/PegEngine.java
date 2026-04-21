@@ -11,6 +11,8 @@ import org.pragmatica.peg.error.RecoveryStrategy;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
+import org.pragmatica.peg.grammar.analysis.ExpressionShape;
+import org.pragmatica.peg.grammar.analysis.FirstCharAnalysis;
 import org.pragmatica.peg.tree.AstNode;
 import org.pragmatica.peg.tree.CstNode;
 import org.pragmatica.peg.tree.SourceLocation;
@@ -21,6 +23,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * PEG parsing engine - interprets Grammar to parse input text.
@@ -30,10 +34,33 @@ public final class PegEngine implements Parser {
     private final ParserConfig config;
     private final Map<String, Action> actions;
 
+    // Phase-1 optimization: cached first-char set for skipWhitespace fast-path (§6.6).
+    // Present iff the grammar has a %whitespace rule whose shape is analyzable.
+    // Unconditional-on for the interpreter; no flag gates this.
+    private final Optional<Set<Character>> whitespaceFirstChars;
+
+    // Phase-1 optimization: per-engine caches for the quoted "'text'" and "[...]" / "[^...]"
+    // expected-message strings (§6.5). The String concatenation "'" + text + "'" allocates a
+    // StringBuilder + final String on every literal/char-class failure — in the hot backtracking
+    // path this happens ~150k times parsing the 1,900-LOC Java fixture. The set of distinct keys
+    // is bounded by the grammar. Caching only the string (not a full Failure record) keeps
+    // Failure.location() accurate per call site; the allocation win is eliding the concat.
+    private final Map<String, String> literalFailureMessageCache = new HashMap<>();
+    private final Map<String, String> charClassFailureMessageCache = new HashMap<>();
+
     private PegEngine(Grammar grammar, ParserConfig config, Map<String, Action> actions) {
         this.grammar = grammar;
         this.config = config;
         this.actions = Map.copyOf(actions);
+        this.whitespaceFirstChars = computeWhitespaceFirstChars(grammar);
+    }
+
+    private static Optional<Set<Character>> computeWhitespaceFirstChars(Grammar grammar) {
+        if (grammar.whitespace().isEmpty()) {
+            return Optional.empty();
+        }
+        var inner = ExpressionShape.extractInnerExpression(grammar.whitespace().unwrap());
+        return FirstCharAnalysis.whitespaceFirstChars(grammar, inner);
     }
 
     public static Result<PegEngine> create(Grammar grammar, ParserConfig config) {
@@ -419,39 +446,73 @@ public final class PegEngine implements Parser {
     }
 
     // === Terminal Parsers ===
+    /**
+     * Parse a literal expression. Phase-1 optimizations (unconditional in the interpreter):
+     *   §6.2: hoist the quoted {@code "'text'"} message (via cached {@link ParseResult.Failure})
+     *   §6.3: split match loop by caseInsensitive (no per-char branch)
+     *   §6.4: bulk-advance pos/column on no-newline successful match
+     *   §6.5: per-engine failure cache keyed on literal text
+     *   §6.7: allocate endLoc once for both span and success
+     */
     private ParseResult parseLiteral(ParsingContext ctx, Expression.Literal lit) {
         var text = lit.text();
-        if (ctx.remaining() < text.length()) {
-            ctx.updateFurthest("'" + text + "'");
-            return ParseResult.Failure.at(ctx.location(), "'" + text + "'");
+        int len = text.length();
+        if (ctx.remaining() < len) {
+            return literalFailureAt(ctx, text);
         }
         var startLoc = ctx.location();
-        for (int i = 0; i < text.length(); i++ ) {
-            char expected = text.charAt(i);
-            char actual = ctx.peek(i);
-            if (lit.caseInsensitive()) {
-                if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
-                    ctx.updateFurthest("'" + text + "'");
-                    return ParseResult.Failure.at(ctx.location(), "'" + text + "'");
+        if (lit.caseInsensitive()) {
+            for (int i = 0; i < len; i++) {
+                if (Character.toLowerCase(text.charAt(i)) != Character.toLowerCase(ctx.peek(i))) {
+                    return literalFailureAt(ctx, text);
                 }
-            }else {
-                if (expected != actual) {
-                    ctx.updateFurthest("'" + text + "'");
-                    return ParseResult.Failure.at(ctx.location(), "'" + text + "'");
+            }
+        } else {
+            for (int i = 0; i < len; i++) {
+                if (text.charAt(i) != ctx.peek(i)) {
+                    return literalFailureAt(ctx, text);
                 }
             }
         }
-        // Consume the matched text
-        for (int i = 0; i < text.length(); i++ ) {
-            ctx.advance();
-        }
-        var span = ctx.spanFrom(startLoc);
+        advanceLiteral(ctx, text, len);
+        var endLoc = ctx.location();
+        var span = SourceSpan.of(startLoc, endLoc);
         var node = new CstNode.Terminal(span, "", text, List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return new ParseResult.Success(node, endLoc, List.of(), Option.none());
+    }
+
+    /**
+     * §6.5 — produce a literal failure for {@code text}, using the cached quoted
+     * {@code "'text'"} message to avoid re-concatenating on every miss. Also calls
+     * {@code updateFurthest} so diagnostics quality is unchanged.
+     */
+    private ParseResult literalFailureAt(ParsingContext ctx, String text) {
+        var msg = literalFailureMessageCache.get(text);
+        if (msg == null) {
+            msg = "'" + text + "'";
+            literalFailureMessageCache.put(text, msg);
+        }
+        ctx.updateFurthest(msg);
+        return ParseResult.Failure.at(ctx.location(), msg);
+    }
+
+    /**
+     * §6.4 — advance the context by {@code len} characters. Bulk-update pos/column
+     * when the matched text contains no newline; fall back to per-char advance otherwise.
+     */
+    private static void advanceLiteral(ParsingContext ctx, String text, int len) {
+        if (text.indexOf('\n') < 0) {
+            ctx.bulkAdvanceNoNewline(len);
+        } else {
+            for (int i = 0; i < len; i++) {
+                ctx.advance();
+            }
+        }
     }
 
     /**
      * Parse dictionary using Trie-based longest match.
+     * Phase-1 optimizations §6.4 + §6.7: bulk-advance on no-newline match; reuse endLoc.
      */
     private ParseResult parseDictionary(ParsingContext ctx, Expression.Dictionary dict) {
         var startLoc = ctx.location();
@@ -476,13 +537,12 @@ public final class PegEngine implements Parser {
             ctx.updateFurthest(expected);
             return ParseResult.Failure.at(ctx.location(), expected);
         }
-        // Consume the matched text
-        for (int i = 0; i < longestLen; i++ ) {
-            ctx.advance();
-        }
-        var span = ctx.spanFrom(startLoc);
-        var node = new CstNode.Terminal(span, "", longestMatch.unwrap(), List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        var matched = longestMatch.unwrap();
+        advanceLiteral(ctx, matched, longestLen);
+        var endLoc = ctx.location();
+        var span = SourceSpan.of(startLoc, endLoc);
+        var node = new CstNode.Terminal(span, "", matched, List.of(), List.of());
+        return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
 
     /**
@@ -508,10 +568,16 @@ public final class PegEngine implements Parser {
         return true;
     }
 
+    /**
+     * Parse a character class. Phase-1 optimizations (unconditional in the interpreter):
+     *   §6.5: per-engine cache of the bracketed expected-message ({@code "[...]"} / {@code "[^...]"}),
+     *         unifying the failure label (previously split between {@code "character"} /
+     *         {@code "character class"} and the bracketed label on {@code updateFurthest}).
+     *   §6.7: allocate endLoc once for both span and success
+     */
     private ParseResult parseCharClass(ParsingContext ctx, Expression.CharClass cc) {
         if (ctx.isAtEnd()) {
-            ctx.updateFurthest("[" + cc.pattern() + "]");
-            return ParseResult.Failure.at(ctx.location(), "character");
+            return charClassFailureAt(ctx, cc);
         }
         var startLoc = ctx.location();
         char c = ctx.peek();
@@ -520,15 +586,30 @@ public final class PegEngine implements Parser {
             matches = !matches;
         }
         if (!matches) {
-            ctx.updateFurthest("[" + (cc.negated()
-                                      ? "^"
-                                      : "") + cc.pattern() + "]");
-            return ParseResult.Failure.at(ctx.location(), "character class");
+            return charClassFailureAt(ctx, cc);
         }
         ctx.advance();
-        var span = ctx.spanFrom(startLoc);
+        var endLoc = ctx.location();
+        var span = SourceSpan.of(startLoc, endLoc);
         var node = new CstNode.Terminal(span, "", String.valueOf(c), List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return new ParseResult.Success(node, endLoc, List.of(), Option.none());
+    }
+
+    /**
+     * §6.5 — produce a char-class failure with the bracketed label, using the
+     * cache to elide repeat concatenation. The message is unified to the bracketed
+     * label (matching the 0.2.2 generator behaviour), replacing the previous
+     * {@code "character"} / {@code "character class"} split.
+     */
+    private ParseResult charClassFailureAt(ParsingContext ctx, Expression.CharClass cc) {
+        var key = cc.negated() ? "^" + cc.pattern() : cc.pattern();
+        var msg = charClassFailureMessageCache.get(key);
+        if (msg == null) {
+            msg = "[" + (cc.negated() ? "^" : "") + cc.pattern() + "]";
+            charClassFailureMessageCache.put(key, msg);
+        }
+        ctx.updateFurthest(msg);
+        return ParseResult.Failure.at(ctx.location(), msg);
     }
 
     private boolean matchesCharClass(char c, String pattern, boolean caseInsensitive) {
@@ -610,6 +691,9 @@ public final class PegEngine implements Parser {
         return false;
     }
 
+    /**
+     * Parse the any-character expression. Phase-1 optimization §6.7: reuse endLoc.
+     */
     private ParseResult parseAny(ParsingContext ctx, Expression.Any any) {
         if (ctx.isAtEnd()) {
             ctx.updateFurthest("any character");
@@ -617,9 +701,10 @@ public final class PegEngine implements Parser {
         }
         var startLoc = ctx.location();
         char c = ctx.advance();
-        var span = ctx.spanFrom(startLoc);
+        var endLoc = ctx.location();
+        var span = SourceSpan.of(startLoc, endLoc);
         var node = new CstNode.Terminal(span, "", String.valueOf(c), List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
 
     // === Combinator Parsers ===
@@ -744,11 +829,25 @@ public final class PegEngine implements Parser {
     }
 
     // === Helpers ===
+    /**
+     * Skip whitespace/trivia. Phase-1 optimization §6.6: when the grammar's
+     * {@code %whitespace} rule has an analyzable first-char set, short-circuit
+     * when the current char cannot begin trivia. This elides the ArrayList and
+     * mini-PEG loop setup on every rule entry for the common "no trivia here" case.
+     */
     private List<Trivia> skipWhitespace(ParsingContext ctx) {
         // Don't skip whitespace inside token boundaries or during whitespace parsing
         if (grammar.whitespace()
                    .isEmpty() || ctx.isSkippingWhitespace() || ctx.inTokenBoundary()) {
             return List.of();
+        }
+        // §6.6 fast-path: if the current char cannot begin any whitespace-rule
+        // alternative, return the shared empty list without any allocation.
+        if (whitespaceFirstChars.isPresent() && !ctx.isAtEnd()) {
+            var firstChars = whitespaceFirstChars.get();
+            if (!firstChars.contains(ctx.peek())) {
+                return List.of();
+            }
         }
         var trivia = new ArrayList<Trivia>();
         ctx.enterWhitespaceSkip();
@@ -778,16 +877,12 @@ public final class PegEngine implements Parser {
     }
 
     /**
-     * Extract inner expression from repetition operators (ZeroOrMore, OneOrMore).
-     * This allows matching whitespace one element at a time for proper trivia collection.
+     * Extract inner expression from repetition operators (ZeroOrMore, OneOrMore,
+     * Optional). Delegates to {@link ExpressionShape#extractInnerExpression} so
+     * both the interpreter and the generator agree on the shape.
      */
     private Expression extractInnerExpression(Expression expr) {
-        return switch (expr) {
-            case Expression.ZeroOrMore zom -> zom.expression();
-            case Expression.OneOrMore oom -> oom.expression();
-            case Expression.Optional opt -> opt.expression();
-            default -> expr;
-        };
+        return ExpressionShape.extractInnerExpression(expr);
     }
 
     /**

@@ -118,6 +118,18 @@ public final class ParsingContext {
         return c;
     }
 
+    /**
+     * Phase-1 optimization (§6.4): bulk-advance {@code count} characters when the
+     * caller has pre-verified the matched text contains no newline. Updates
+     * {@code pos} and {@code column} in O(1) without the per-char newline check.
+     * Caller's responsibility to ensure {@code count} chars from the current
+     * position contain no {@code '\n'}.
+     */
+    public void bulkAdvanceNoNewline(int count) {
+        pos += count;
+        column += count;
+    }
+
     public String substring(int start, int end) {
         return input.substring(start, end);
     }
