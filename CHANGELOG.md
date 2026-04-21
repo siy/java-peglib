@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.2] - 2026-04-21
 
+### Added
+
+- Performance rework infrastructure for the generated CST parser (`ParserGenerator`):
+  - `ParserConfig` carries 10 new generator-time flags — 6 phase-1 (hand-edits) and 4 phase-2 (structural). Flags are consumed at generation time; the emitted parser has no runtime flag branching.
+  - Test corpus under `src/test/resources/perf-corpus/` (22 Java 25 files including a 1,900-LOC fixture) plus committed CST structural-hash baselines at `src/test/resources/perf-corpus-baseline/` for regression detection.
+  - `CstHash` (deterministic pre-order structural hash, excludes trivia and `Error.expected`) and `CstReconstruct` utilities under `src/test/java/org/pragmatica/peg/perf/`.
+  - JMH benchmark harness at `src/jmh/java/`, activated via `mvn -Pbench`. Builds a `target/benchmarks.jar` uber-jar; benchmarks the 1,900-LOC fixture across 7 `@Param` flag combinations.
+  - `PackratStatsProbe` utility reporting per-rule cache put counts against the fixture.
+- Grammar moved from inline `JAVA_GRAMMAR` string to classpath resource `/java25.peg` (single source of truth for tests and perf infra).
+
+### Changed
+
+- Phase-1 flags default **on** in `ParserConfig.DEFAULT`:
+  - `fastTrackFailure` — short-circuits `trackFailure` when the current position is dominated by the furthest-seen failure (avoids `SourceLocation` allocation on ~90% of calls during backtracking).
+  - `literalFailureCache` — per-parser-instance `HashMap` caches literal-match failure results; eliminates `CstParseResult`/`Option` allocation on the failure path after warmup. Loop specialization by `caseInsensitive` also emitted.
+  - `charClassFailureCache` — analogous for `matchCharClassCst`. Unifies failure message to bracketed label (`"[...]"` / `"[^...]"`); previous "character class" string is no longer emitted.
+  - `bulkAdvanceLiteral` — on successful match of literal text with no `\n`, updates `pos` and `column` in bulk rather than looping `advance()` per char.
+  - `skipWhitespaceFastPath` — emits a first-char precheck derived from the grammar's `%whitespace` rule (e.g. `' '`/`'\t'`/`'\r'`/`'\n'`/`'/'` for Java 25); returns `List.of()` immediately when current char can't start trivia.
+  - `reuseEndLocation` — allocates end-position `SourceLocation` once per successful match instead of twice (span end + result endLocation).
+- Phase-2 flag defaults (set per measured win per PERF-REWORK-SPEC §12.6):
+  - `choiceDispatch` default **on** — measured 2.49× speedup over phase-1 baseline.
+  - `markResetChildren`, `inlineLocations` default **off** — no statistically significant individual win on the reference JVM.
+  - `selectivePackrat` default **off** — marginal combo win (~5%) sits inside measurement noise; callers opting in must also provide `packratSkipRules`.
+
+### Performance
+
+Measured on `src/test/resources/perf-corpus/large/FactoryClassGenerator.java.txt` (1,900 LOC) via JMH 1.37 — average time mode, 3 warmup × 2s / 5 measurement × 2s / 2 forks, JDK 25.0.2 on Apple Silicon. Raw data: `docs/bench-results/java25-parse.json`, `docs/bench-results/java25-parse.log`.
+
+| Variant | ms/op (± CI) | Speedup vs `none` | Speedup vs `phase1` |
+|---|---|---|---|
+| `none` (no perf flags) | 425.6 ± 62.2 | 1.00× | 0.59× |
+| `phase1` (legacy DEFAULT — phase-1 flags on, phase-2 off) | 250.2 ± 31.5 | 1.70× | 1.00× |
+| `phase1 + choiceDispatch` (new DEFAULT) | **100.7 ± 32.6** | **4.23×** | **2.49×** |
+| `phase1 + markResetChildren` | 290.3 ± 51.7 | 1.47× | 0.86× (within noise) |
+| `phase1 + inlineLocations` | 307.6 ± 47.9 | 1.38× | 0.81× (within noise) |
+| `phase1 + all structural` | 116.5 ± 20.8 | 3.65× | 2.15× |
+| `phase1 + all structural + selectivePackrat` | 110.7 ± 32.6 | 3.85× | 2.26× |
+
+Spec §12.3 acceptance target: ≥1.5× on the 1,900-LOC fixture. Phase-1 alone reaches 1.70× and the new DEFAULT (phase-1 + `choiceDispatch`) reaches **4.23×**, exceeding the stretch goal of 2×.
+
+### Fixed
+
+- N/A (no regression fixes in this release; see 0.2.1 for the previous correctness pass.)
+
+### Tests
+
+- Test count: 350 → 565. New suites: `CorpusParityTest`, `Phase1ParityTest`, `Phase2ChoiceDispatchParityTest`, `Phase2MarkResetChildrenParityTest`, `Phase2InlineLocationsParityTest`, `Phase2ChoiceDispatchAndMarkResetParityTest`, `Phase2AllStructuralParityTest`, `Phase2SelectivePackratParityTest`, `Phase2SelectivePackratEmptySetParityTest`, `ChoiceDispatchAnalyzerTest`, `GeneratorFlagInertnessTest`. All passing; 1 skipped (`RoundTripTest` — pre-existing trivia-attribution gap in both `PegEngine` and the generated parser, documented in the test).
+
 ## [0.2.1] - 2026-03-29
 
 ### Fixed

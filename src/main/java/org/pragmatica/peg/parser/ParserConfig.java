@@ -19,8 +19,12 @@ import java.util.Set;
  * ({@code fastTrackFailure}, {@code literalFailureCache},
  * {@code charClassFailureCache}, {@code bulkAdvanceLiteral},
  * {@code skipWhitespaceFastPath}, {@code reuseEndLocation}) default to
- * {@code true} in {@link #DEFAULT} after corpus parity validation. Phase 2
- * flags default to {@code false} pending individual validation.
+ * {@code true} in {@link #DEFAULT} after corpus parity validation.
+ * Phase 2 {@code choiceDispatch} defaults to {@code true} (2.49x speedup vs
+ * phase-1 baseline on the reference workload); {@code markResetChildren},
+ * {@code inlineLocations}, and {@code selectivePackrat} default to {@code false}
+ * — no statistically significant individual win measured on the reference JVM
+ * (see {@code docs/bench-results/java25-parse.json}).
  *
  * <p><b>Scope:</b> {@code fastTrackFailure}, {@code literalFailureCache},
  * {@code charClassFailureCache}, {@code bulkAdvanceLiteral},
@@ -61,13 +65,13 @@ public record ParserConfig(
  boolean selectivePackrat,
  Set<String> packratSkipRules) {
     public static final ParserConfig DEFAULT = new ParserConfig(
-    true, RecoveryStrategy.BASIC, true, true, true, true, true, true, true, false, false, false, false, Set.of());
+    true, RecoveryStrategy.BASIC, true, true, true, true, true, true, true, true, false, false, false, Set.of());
 
     /**
      * Convenience factory for the three-field runtime configuration. Phase 1
-     * generator-time perf flags default to {@code true}; phase 2 flags default
-     * to {@code false}. Equivalent to {@link #DEFAULT} with the caller's three
-     * runtime fields substituted.
+     * generator-time perf flags and phase-2 {@code choiceDispatch} default to
+     * {@code true}; remaining phase-2 flags default to {@code false}. Equivalent
+     * to {@link #DEFAULT} with the caller's three runtime fields substituted.
      */
     public static ParserConfig of(boolean packratEnabled, RecoveryStrategy recoveryStrategy, boolean captureTrivia) {
         return new ParserConfig(
@@ -80,7 +84,7 @@ public record ParserConfig(
         true,
         true,
         true,
-        false,
+        true,
         false,
         false,
         false,
