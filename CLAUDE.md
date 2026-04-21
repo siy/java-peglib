@@ -148,10 +148,10 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
 - [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
-- [x] 350 passing tests
+- [x] 565 passing tests, 1 skipped (RoundTripTest — pre-existing trivia gap)
+- [x] Performance rework (0.2.2): 4.23× speedup on 1,900-LOC Java 25 fixture via generator-time perf flags; see `docs/PERF-REWORK-SPEC.md` and `docs/bench-results/`.
 
 ### Remaining Work
-- [ ] Performance optimization
 - [ ] Lambda action attachment (lowest priority) - attach actions programmatically using type-safe RuleId:
   ```java
   parser.rule(RuleId.Number.class).action(sv -> sv.toInt());
@@ -289,7 +289,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (350 tests)
+## Test Coverage (565 tests)
 
 ### Grammar Parser Tests (17 tests)
 - Simple rules, actions, sequences, choices
@@ -419,6 +419,6 @@ The `Keyword` rule should only include hard keywords. Contextual keywords are ma
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (350 passing)
+mvn test             # Run tests (565 passing, 1 skipped)
 mvn verify           # Full verification
 ```
