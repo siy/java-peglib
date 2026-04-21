@@ -2127,15 +2127,27 @@ public final class ParserGenerator {
     private void generateCstRuleMethod(StringBuilder sb, Rule rule, int ruleId) {
         var methodName = "parse_" + sanitize(rule.name());
         var ruleName = rule.name();
+        boolean inlineLocations = config.inlineLocations();
         sb.append("    private CstParseResult ")
           .append(methodName)
           .append("() {\n");
-        sb.append("        var startLoc = location();\n");
+        if (inlineLocations) {
+            // §7.3 option A: inline int locals at rule entry — no SourceLocation
+            // allocation on the failure path. On success we still materialize a
+            // SourceLocation for SourceSpan.of(...), same as before.
+            sb.append("        int startOffset = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
+        } else {
+            sb.append("        var startLoc = location();\n");
+        }
         sb.append("        \n");
         sb.append("        // Check cache at pre-whitespace position\n");
         sb.append("        long key = cacheKey(")
           .append(ruleId)
-          .append(", startLoc.offset());\n");
+          .append(", ")
+          .append(inlineLocations ? "startOffset" : "startLoc.offset()")
+          .append(");\n");
         sb.append("        if (cache != null) {\n");
         sb.append("            var cached = cache.get(key);\n");
         sb.append("            if (cached != null) {\n");
@@ -2159,14 +2171,25 @@ public final class ParserGenerator {
         sb.append("        CstParseResult finalResult;\n");
         sb.append("        if (result.isSuccess()) {\n");
         sb.append("            var endLoc = location();\n");
-        sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
+        if (inlineLocations) {
+            sb.append("            var span = SourceSpan.of(new SourceLocation(startLine, startColumn, startOffset), endLoc);\n");
+        } else {
+            sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
+        }
         // Match interpreter's wrapWithRuleName: replace the rule name on whatever node was produced
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", leadingTrivia);\n");
         sb.append("            finalResult = CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
         sb.append("        } else {\n");
-        sb.append("            restoreLocation(startLoc);\n");
+        if (inlineLocations) {
+            // Inline field restore — no SourceLocation allocation on failure path.
+            sb.append("            this.pos = startOffset;\n");
+            sb.append("            this.line = startLine;\n");
+            sb.append("            this.column = startColumn;\n");
+        } else {
+            sb.append("            restoreLocation(startLoc);\n");
+        }
         // Use custom error message if available
         if (rule.hasErrorMessage()) {
             sb.append("            finalResult = CstParseResult.failure(\"")
