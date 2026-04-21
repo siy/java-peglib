@@ -5,7 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.3] - 2026-04-21
+## [0.2.3] - 2026-04-22
+
+### Added
+
+- Shared grammar-analysis package `org.pragmatica.peg.grammar.analysis` with `FirstCharAnalysis` (recursive first-char set derivation with cycle detection) and `ExpressionShape` (repetition/group inner-expression peeling). Used by both `ParserGenerator` (generator-time emission) and `PegEngine` (interpreter-time fast-path short-circuit); ensures generator and interpreter compute the same first-char set from the same `%whitespace` rule.
+- `Phase1InterpreterParityTest` (22 files × 1 configuration) enforcing interpreter CST stability across the phase-1 port. Dedicated interpreter baseline at `src/test/resources/perf-corpus-interpreter-baseline/` captured from the pre-port interpreter (commit `2f89903`); the test parses each corpus file with the post-port `PegEngine` and asserts the `CstHash` matches the committed baseline.
+- `InterpreterBaselineGenerator` utility for regenerating the interpreter baseline when an interpreter CST shape change has been reviewed.
+- `ParsingContext#bulkAdvanceNoNewline(int)` — O(1) position update used by the interpreter's literal-match success path when the matched text contains no newline.
+- JMH benchmark variant `interpreter` in `Java25ParseBenchmark` — parses the 1,900-LOC fixture through the interpreter path (`PegParser.fromGrammarWithoutActions(...).parseCst`). Raw results: `docs/bench-results/java25-parse-interpreter.json`.
+
+### Changed
+
+- `PegEngine` interpreter now applies all six phase-1 optimizations unconditionally (no configuration surface). Rationale: the interpreter is a single runtime class — there is no code-size trade-off to gate with flags, unlike the emitted parser where `ParserConfig` flags avoid emitting dual paths. Phase-1 is CST-preserving and corpus-validated. The `ParserConfig` flag surface for phase-1 is unchanged and continues to gate generator emission; the flags have no effect on the interpreter path.
+  - §6.2 / §6.3 / §6.5 (literal side) — `parseLiteral` now specializes the match loop by `caseInsensitive` (no per-char branch), hoists the quoted `"'text'"` message, and caches the message string in a per-engine `HashMap<String, String>` to elide `StringBuilder` churn on repeat failures.
+  - §6.5 (char-class side) — `parseCharClass` caches the bracketed expected message (`"[...]"` / `"[^...]"`) per-engine. The interpreter's failure message is now unified to the bracketed label; previously the call site returned `"character"` (at EOF) or `"character class"` (on mismatch) while `updateFurthest` already received the bracketed label. The unified label matches the generator's 0.2.2 behaviour. No tests asserted on the old strings.
+  - §6.4 — `parseLiteral` and `parseDictionary` bulk-update `pos` / `column` on successful match when the matched text has no `\n`.
+  - §6.6 — `PegEngine#skipWhitespace` short-circuits when the current char is not in the first-char set derived from the grammar's `%whitespace` rule; computed once in the constructor via `FirstCharAnalysis`.
+  - §6.7 — `parseLiteral`, `parseCharClass`, `parseAny`, `parseDictionary` allocate end-position `SourceLocation` once per successful match and reuse it for both the span end and the `Success.endLocation`.
+- §6.1 (`fastTrackFailure`) is effectively a no-op port: the interpreter's `ParsingContext#updateFurthest` already short-circuits without allocation when the incoming position is strictly less than the furthest-seen offset. No change required.
+- `ParserGenerator` now delegates first-char analysis and inner-expression extraction to the shared `grammar.analysis` package. Emission output is byte-identical to 0.2.2 (`GeneratorFlagInertnessTest` remains 3/3 green).
+
+### Performance
+
+Measured on `src/test/resources/perf-corpus/large/FactoryClassGenerator.java.txt` (1,900 LOC) via JMH 1.37 — `AverageTime` + `Throughput` modes, 3 warmup × 2 s, 5 measurement × 2 s, 2 forks, JDK 25 on Apple Silicon. Raw data: `docs/bench-results/java25-parse-interpreter.json`.
+
+| Variant | ms/op (± CI) | Speedup vs pre-port interpreter |
+|---|---|---|
+| `interpreter` (0.2.2 pre-port, no phase-1) | 355.0 ± 7.0 | 1.00× |
+| `interpreter` (0.2.3 post-port, all phase-1) | **257.9 ± 5.9** | **1.38×** |
+| `phase1` (generator reference, all phase-1) | 63.2 ± 8.3 | — (generator path; included for context) |
+
+Interpreter speedup is below the 1.5× plan target, reflecting the interpreter's structural cost: per-invocation expression-switch dispatch dominates per-call work, so the allocation-elision wins from caches and bulk-advance deliver a more modest improvement than they do for the generator's per-rule-specialized output. The spec calls this out explicitly — phase-2 optimizations (`choiceDispatch`, `markResetChildren`, `inlineLocations`, `selectivePackrat`) remain generator-only; they do not translate to the interpreter.
+
+### Tests
+
+- Test count: 565 → 587 (+22 from `Phase1InterpreterParityTest`). 1 skipped (pre-existing `RoundTripTest`; addressed in 0.2.4 per plan).
 
 ## [0.2.2] - 2026-04-21
 
