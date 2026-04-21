@@ -2585,7 +2585,13 @@ public final class ParserGenerator {
             }
             case Expression.Choice choice -> {
                 var choiceStart = "choiceStart" + id;
-                var savedChildren = "savedChildren" + id;
+                // §7.2: the child-state variable is either a pre-cloned ArrayList
+                // (legacy path, flag off) or an int size mark (optimized path, flag on).
+                // Emitted identifier differs so byte-identical output is preserved when
+                // the flag is off.
+                var childrenState = config.markResetChildren()
+                                    ? "childrenMark" + id
+                                    : "savedChildren" + id;
                 sb.append(pad)
                   .append("CstParseResult ")
                   .append(resultVar)
@@ -2595,12 +2601,7 @@ public final class ParserGenerator {
                   .append(choiceStart)
                   .append(" = location();\n");
                 // Don't skip whitespace here - let alternatives capture trivia themselves
-                if (addToChildren) {
-                    sb.append(pad)
-                      .append("var ")
-                      .append(savedChildren)
-                      .append(" = new ArrayList<>(children);\n");
-                }
+                emitChildrenSave(sb, pad, childrenState, addToChildren);
 
                 var classified = config.choiceDispatch()
                     ? ChoiceDispatchAnalyzer.classify(choice)
@@ -2610,12 +2611,12 @@ public final class ParserGenerator {
                     var grouped = ChoiceDispatchAnalyzer.groupByChar(classified.get());
                     var buckets = ChoiceDispatchAnalyzer.buckets(grouped);
                     emitCstChoiceDispatch(sb, buckets, id, indent, addToChildren, counter, inWhitespaceRule,
-                                          resultVar, choiceStart, savedChildren);
+                                          resultVar, choiceStart, childrenState);
                 } else {
                     int i = 0;
                     for (var alt : choice.alternatives()) {
                         emitCstChoiceAlt(sb, alt, id, i, indent, addToChildren, counter, inWhitespaceRule,
-                                         resultVar, choiceStart, savedChildren, pad);
+                                         resultVar, choiceStart, childrenState, pad);
                         i++;
                     }
                     for (int j = 0; j < choice.alternatives().size(); j++) {
@@ -2628,14 +2629,7 @@ public final class ParserGenerator {
                   .append("if (")
                   .append(resultVar)
                   .append(" == null) {\n");
-                if (addToChildren) {
-                    sb.append(pad)
-                      .append("    children.clear();\n");
-                    sb.append(pad)
-                      .append("    children.addAll(")
-                      .append(savedChildren)
-                      .append(");\n");
-                }
+                emitChildrenRestore(sb, pad + "    ", childrenState, addToChildren);
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
@@ -3515,12 +3509,9 @@ public final class ParserGenerator {
                                   boolean inWhitespaceRule,
                                   String resultVar,
                                   String choiceStart,
-                                  String savedChildren,
+                                  String childrenState,
                                   String pad) {
-        if (addToChildren) {
-            sb.append(pad).append("children.clear();\n");
-            sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
-        }
+        emitChildrenRestore(sb, pad, childrenState, addToChildren);
         var altVar = "alt" + id + "_" + origIndex;
         generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter, inWhitespaceRule);
         sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
@@ -3547,11 +3538,11 @@ public final class ParserGenerator {
                                              boolean inWhitespaceRule,
                                              String resultVar,
                                              String choiceStart,
-                                             String savedChildren,
+                                             String childrenState,
                                              String pad) {
         for (var entry : alts) {
             emitCstChoiceAlt(sb, entry.alt(), id, entry.originalIndex(), indent, addToChildren, counter,
-                             inWhitespaceRule, resultVar, choiceStart, savedChildren, pad);
+                             inWhitespaceRule, resultVar, choiceStart, childrenState, pad);
         }
         for (int j = 0; j < alts.size(); j++) {
             sb.append(pad).append("}\n");
@@ -3574,7 +3565,7 @@ public final class ParserGenerator {
                                        boolean inWhitespaceRule,
                                        String resultVar,
                                        String choiceStart,
-                                       String savedChildren) {
+                                       String childrenState) {
         var pad = "    ".repeat(indent);
         var dispatchVar = "dispatchChar" + id;
         sb.append(pad).append("if (pos < input.length()) {\n");
@@ -3588,12 +3579,44 @@ public final class ParserGenerator {
             }
             sb.append(casePad).append("{\n");
             emitCstChoiceAltChainClosed(sb, bucket.alts(), id, indent + 3, addToChildren, counter,
-                                        inWhitespaceRule, resultVar, choiceStart, savedChildren, bodyPad);
+                                        inWhitespaceRule, resultVar, choiceStart, childrenState, bodyPad);
             sb.append(bodyPad).append("break;\n");
             sb.append(casePad).append("}\n");
         }
         sb.append(pad).append("    }\n");
         sb.append(pad).append("}\n");
+    }
+
+    /**
+     * §7.2: Emit the per-Choice child-state save. With {@code markResetChildren} off,
+     * clones {@code children} into an ArrayList (legacy path). With the flag on, records
+     * only the current size as an int mark — O(1) save, no copy.
+     */
+    private void emitChildrenSave(StringBuilder sb, String pad, String stateVar, boolean addToChildren) {
+        if (!addToChildren) return;
+        if (config.markResetChildren()) {
+            sb.append(pad).append("int ").append(stateVar).append(" = children.size();\n");
+        } else {
+            sb.append(pad).append("var ").append(stateVar).append(" = new ArrayList<>(children);\n");
+        }
+    }
+
+    /**
+     * §7.2: Emit the per-Choice child-state restore. With {@code markResetChildren} off,
+     * clears and re-populates {@code children} from the saved ArrayList (legacy path).
+     * With the flag on, trims {@code children} back to the recorded mark using
+     * {@code subList(mark, size).clear()} — O(delta) restore, no full-list addAll.
+     */
+    private void emitChildrenRestore(StringBuilder sb, String pad, String stateVar, boolean addToChildren) {
+        if (!addToChildren) return;
+        if (config.markResetChildren()) {
+            sb.append(pad).append("if (children.size() > ").append(stateVar).append(") {\n");
+            sb.append(pad).append("    children.subList(").append(stateVar).append(", children.size()).clear();\n");
+            sb.append(pad).append("}\n");
+        } else {
+            sb.append(pad).append("children.clear();\n");
+            sb.append(pad).append("children.addAll(").append(stateVar).append(");\n");
+        }
     }
 
     private static String literalChar(char c) {
