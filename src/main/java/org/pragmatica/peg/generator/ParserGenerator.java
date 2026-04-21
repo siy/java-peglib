@@ -1877,6 +1877,16 @@ public final class ParserGenerator {
                     private List<Diagnostic> diagnostics;
                 """);
         }
+        if (config.literalFailureCache()) {
+            sb.append("""
+                    private final Map<String, CstParseResult> literalFailureCache = new HashMap<>();
+                """);
+        }
+        if (config.charClassFailureCache()) {
+            sb.append("""
+                    private final Map<String, CstParseResult> charClassFailureCache = new HashMap<>();
+                """);
+        }
         sb.append("""
 
                 private void init(String input) {
@@ -1943,17 +1953,40 @@ public final class ParserGenerator {
                     this.column = loc.column();
                 }
 
-                private void trackFailure(String expected) {
-                    var loc = location();
-                    if (furthestFailure.isEmpty() || loc.offset() > furthestFailure.unwrap().offset()) {
-                        furthestFailure = Option.some(loc);
-                        furthestExpected = Option.some(expected);
-                    } else if (loc.offset() == furthestFailure.unwrap().offset() && !furthestExpected.or("").contains(expected)) {
-                        furthestExpected = Option.some(furthestExpected.or("").isEmpty() ? expected : furthestExpected.or("") + " or " + expected);
-                    }
-                }
-
             """);
+        if (config.fastTrackFailure()) {
+            sb.append("""
+                    private void trackFailure(String expected) {
+                        if (!furthestFailure.isEmpty()) {
+                            int furthestOffset = furthestFailure.unwrap().offset();
+                            if (pos < furthestOffset) return;
+                            if (pos == furthestOffset) {
+                                String existing = furthestExpected.or("");
+                                if (existing.contains(expected)) return;
+                                furthestExpected = Option.some(
+                                    existing.isEmpty() ? expected : existing + " or " + expected);
+                                return;
+                            }
+                        }
+                        furthestFailure = Option.some(location());
+                        furthestExpected = Option.some(expected);
+                    }
+
+                """);
+        } else {
+            sb.append("""
+                    private void trackFailure(String expected) {
+                        var loc = location();
+                        if (furthestFailure.isEmpty() || loc.offset() > furthestFailure.unwrap().offset()) {
+                            furthestFailure = Option.some(loc);
+                            furthestExpected = Option.some(expected);
+                        } else if (loc.offset() == furthestFailure.unwrap().offset() && !furthestExpected.or("").contains(expected)) {
+                            furthestExpected = Option.some(furthestExpected.or("").isEmpty() ? expected : furthestExpected.or("") + " or " + expected);
+                        }
+                    }
+
+                """);
+        }
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     private SourceSpan skipToRecoveryPoint() {
@@ -2183,6 +2216,148 @@ public final class ParserGenerator {
             case Expression.OneOrMore oom -> oom.expression();
             case Expression.Group grp -> extractInnerExpression(grp.expression());
             default -> expr;
+        };
+    }
+
+    /**
+     * Derive the set of characters that can legally start a whitespace-rule match.
+     * Used by the §6.6 skipWhitespace fast-path to short-circuit when the current
+     * character cannot possibly begin trivia. Returns empty Optional if the shape
+     * of the whitespace rule is not analyzable (caller must fall back to the
+     * always-slow path).
+     *
+     * @param expr the inner expression of the grammar's {@code %whitespace} rule
+     *             (after stripping the outer ZeroOrMore/OneOrMore)
+     * @return the set of potential first-chars, or empty if shape unsupported
+     */
+    private java.util.Optional<java.util.Set<Character>> whitespaceFirstChars(Expression expr) {
+        var set = new java.util.LinkedHashSet<Character>();
+        if (!collectFirstChars(expr, set, new java.util.HashSet<>())) {
+            return java.util.Optional.empty();
+        }
+        if (set.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(set);
+    }
+
+    private boolean collectFirstChars(Expression expr, java.util.Set<Character> out, java.util.Set<String> visiting) {
+        return switch (expr) {
+            case Expression.Literal lit -> {
+                if (lit.text().isEmpty()) yield false;
+                char first = lit.text().charAt(0);
+                if (lit.caseInsensitive()) {
+                    out.add(Character.toLowerCase(first));
+                    out.add(Character.toUpperCase(first));
+                } else {
+                    out.add(first);
+                }
+                yield true;
+            }
+            case Expression.CharClass cc -> {
+                if (cc.negated()) yield false; // conservative: don't enumerate complement
+                yield enumerateCharClass(cc.pattern(), cc.caseInsensitive(), out);
+            }
+            case Expression.Choice ch -> {
+                for (var alt : ch.alternatives()) {
+                    if (!collectFirstChars(alt, out, visiting)) yield false;
+                }
+                yield true;
+            }
+            case Expression.Sequence seq -> {
+                for (var el : seq.elements()) {
+                    // skip over leading predicates — they don't consume
+                    if (el instanceof Expression.And || el instanceof Expression.Not) continue;
+                    yield collectFirstChars(el, out, visiting);
+                }
+                yield false;
+            }
+            case Expression.Group grp -> collectFirstChars(grp.expression(), out, visiting);
+            case Expression.ZeroOrMore zom -> collectFirstChars(zom.expression(), out, visiting);
+            case Expression.OneOrMore oom -> collectFirstChars(oom.expression(), out, visiting);
+            case Expression.Optional opt -> collectFirstChars(opt.expression(), out, visiting);
+            case Expression.TokenBoundary tb -> collectFirstChars(tb.expression(), out, visiting);
+            case Expression.Ignore ig -> collectFirstChars(ig.expression(), out, visiting);
+            case Expression.Capture cap -> collectFirstChars(cap.expression(), out, visiting);
+            case Expression.CaptureScope cs -> collectFirstChars(cs.expression(), out, visiting);
+            case Expression.Reference ref -> {
+                if (!visiting.add(ref.ruleName())) yield false; // recursion — bail
+                var target = grammar.rules().stream()
+                                    .filter(r -> r.name().equals(ref.ruleName()))
+                                    .findFirst();
+                if (target.isEmpty()) yield false;
+                yield collectFirstChars(target.get().expression(), out, visiting);
+            }
+            default -> false;
+        };
+    }
+
+    private boolean enumerateCharClass(String pattern, boolean caseInsensitive, java.util.Set<Character> out) {
+        int i = 0;
+        while (i < pattern.length()) {
+            char start = pattern.charAt(i);
+            if (start == '\\' && i + 1 < pattern.length()) {
+                char escaped = pattern.charAt(i + 1);
+                char ch;
+                int consumed = 2;
+                switch (escaped) {
+                    case 'n': ch = '\n'; break;
+                    case 'r': ch = '\r'; break;
+                    case 't': ch = '\t'; break;
+                    case '\\': ch = '\\'; break;
+                    case ']': ch = ']'; break;
+                    case '-': ch = '-'; break;
+                    default: return false;
+                }
+                addCaseInsensitive(out, ch, caseInsensitive);
+                i += consumed;
+                continue;
+            }
+            if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
+                char end = pattern.charAt(i + 2);
+                if (end - start > 128) return false; // too many — bail
+                for (char c = start; c <= end; c++) {
+                    addCaseInsensitive(out, c, caseInsensitive);
+                }
+                i += 3;
+            } else {
+                addCaseInsensitive(out, start, caseInsensitive);
+                i++;
+            }
+        }
+        return true;
+    }
+
+    private void addCaseInsensitive(java.util.Set<Character> out, char c, boolean caseInsensitive) {
+        if (caseInsensitive) {
+            out.add(Character.toLowerCase(c));
+            out.add(Character.toUpperCase(c));
+        } else {
+            out.add(c);
+        }
+    }
+
+    /**
+     * Render a boolean expression that is {@code true} when {@code c} is NOT in
+     * the fast-path set — i.e. the current char cannot start trivia and
+     * {@code skipWhitespace} should return early.
+     */
+    private String renderNotInSetCheck(java.util.Set<Character> chars) {
+        var parts = new java.util.ArrayList<String>();
+        for (char c : chars) {
+            parts.add("c != " + charLiteral(c));
+        }
+        return String.join(" && ", parts);
+    }
+
+    private static String charLiteral(char c) {
+        return switch (c) {
+            case '\n' -> "'\\n'";
+            case '\r' -> "'\\r'";
+            case '\t' -> "'\\t'";
+            case '\\' -> "'\\\\'";
+            case '\'' -> "'\\''";
+            default -> "'" + c + "'";
         };
     }
 
@@ -3352,6 +3527,22 @@ public final class ParserGenerator {
                 // === Helper Methods ===
 
                 private List<Trivia> skipWhitespace() {
+            """);
+        // §6.6 fast-path: short-circuit when the current char cannot start trivia.
+        // Only emitted when the flag is on AND the grammar has a %whitespace rule
+        // AND the inner expression is analyzable (otherwise fall through to the
+        // existing unconditional slow-path setup).
+        if (config.skipWhitespaceFastPath() && grammar.whitespace().isPresent()) {
+            var wsInner = extractInnerExpression(grammar.whitespace().unwrap());
+            var charsOpt = whitespaceFirstChars(wsInner);
+            if (charsOpt.isPresent()) {
+                var chars = charsOpt.get();
+                sb.append("        if (skippingWhitespace || tokenBoundaryDepth > 0 || pos >= input.length()) return List.of();\n");
+                sb.append("        char c = input.charAt(pos);\n");
+                sb.append("        if (").append(renderNotInSetCheck(chars)).append(") return List.of();\n");
+            }
+        }
+        sb.append("""
                     var trivia = new ArrayList<Trivia>();
                     if (skippingWhitespace || tokenBoundaryDepth > 0) return trivia;
                     skippingWhitespace = true;
@@ -3441,157 +3632,16 @@ public final class ParserGenerator {
                 }
 
             """);
-        // Generate match methods with trackFailure calls for ADVANCED mode
-        if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("""
-                    private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {
-                        if (remaining() < text.length()) {
-                            trackFailure("'" + text + "'");
-                            return CstParseResult.failure("'" + text + "'");
-                        }
-                        var startLoc = location();
-                        for (int i = 0; i < text.length(); i++) {
-                            char expected = text.charAt(i);
-                            char actual = peek(i);
-                            if (caseInsensitive) {
-                                if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
-                                    trackFailure("'" + text + "'");
-                                    return CstParseResult.failure("'" + text + "'");
-                                }
-                            } else {
-                                if (expected != actual) {
-                                    trackFailure("'" + text + "'");
-                                    return CstParseResult.failure("'" + text + "'");
-                                }
-                            }
-                        }
-                        for (int i = 0; i < text.length(); i++) {
-                            advance();
-                        }
-                        var span = SourceSpan.of(startLoc, location());
-                        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, List.of(), List.of());
-                        return CstParseResult.success(node, text, location());
-                    }
-
-                    private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {
-                        String longestMatch = null;
-                        int longestLen = 0;
-                        for (var word : words) {
-                            if (matchesWord(word, caseInsensitive) && word.length() > longestLen) {
-                                longestMatch = word;
-                                longestLen = word.length();
-                            }
-                        }
-                        if (longestMatch == null) {
-                            trackFailure("dictionary word");
-                            return CstParseResult.failure("dictionary word");
-                        }
-                        var startLoc = location();
-                        for (int i = 0; i < longestLen; i++) {
-                            advance();
-                        }
-                        var span = SourceSpan.of(startLoc, location());
-                        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, List.of(), List.of());
-                        return CstParseResult.success(node, longestMatch, location());
-                    }
-
-                """);
-        }else {
-            sb.append("""
-                    private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {
-                        if (remaining() < text.length()) {
-                            trackFailure("'" + text + "'");
-                            return CstParseResult.failure("'" + text + "'");
-                        }
-                        var startLoc = location();
-                        for (int i = 0; i < text.length(); i++) {
-                            char expected = text.charAt(i);
-                            char actual = peek(i);
-                            if (caseInsensitive) {
-                                if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {
-                                    trackFailure("'" + text + "'");
-                                    return CstParseResult.failure("'" + text + "'");
-                                }
-                            } else {
-                                if (expected != actual) {
-                                    trackFailure("'" + text + "'");
-                                    return CstParseResult.failure("'" + text + "'");
-                                }
-                            }
-                        }
-                        for (int i = 0; i < text.length(); i++) {
-                            advance();
-                        }
-                        var span = SourceSpan.of(startLoc, location());
-                        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, List.of(), List.of());
-                        return CstParseResult.success(node, text, location());
-                    }
-
-                    private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {
-                        String longestMatch = null;
-                        int longestLen = 0;
-                        for (var word : words) {
-                            if (matchesWord(word, caseInsensitive) && word.length() > longestLen) {
-                                longestMatch = word;
-                                longestLen = word.length();
-                            }
-                        }
-                        if (longestMatch == null) {
-                            trackFailure("dictionary word");
-                            return CstParseResult.failure("dictionary word");
-                        }
-                        var startLoc = location();
-                        for (int i = 0; i < longestLen; i++) {
-                            advance();
-                        }
-                        var span = SourceSpan.of(startLoc, location());
-                        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, List.of(), List.of());
-                        return CstParseResult.success(node, longestMatch, location());
-                    }
-
-                """);
-        }
+        // Generate match methods (identical for BASIC and ADVANCED modes;
+        // trackFailure itself is now emitted unconditionally outside this block).
+        emitMatchLiteralCst(sb);
+        emitMatchDictionaryCst(sb);
         sb.append(MATCHES_WORD_METHOD);
         // trackFailure is now always available (moved out of ADVANCED-only block)
-        sb.append("""
-
-                private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {
-                    if (isAtEnd()) {
-                        trackFailure("[" + (negated ? "^" : "") + pattern + "]");
-                        return CstParseResult.failure("character class");
-                    }
-                    var startLoc = location();
-                    char c = peek();
-                    boolean matches = matchesPattern(c, pattern, caseInsensitive);
-                    if (negated) matches = !matches;
-                    if (!matches) {
-                        trackFailure("[" + (negated ? "^" : "") + pattern + "]");
-                        return CstParseResult.failure("character class");
-                    }
-                    advance();
-                    var text = String.valueOf(c);
-                    var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());
-                    return CstParseResult.success(node, text, location());
-                }
-
-            """);
+        emitMatchCharClassCst(sb);
         sb.append(MATCHES_PATTERN_METHOD);
+        emitMatchAnyCst(sb);
         sb.append("""
-
-                private CstParseResult matchAnyCst() {
-                    if (isAtEnd()) {
-                        trackFailure("any character");
-                        return CstParseResult.failure("any character");
-                    }
-                    var startLoc = location();
-                    char c = advance();
-                    var text = String.valueOf(c);
-                    var span = SourceSpan.of(startLoc, location());
-                    var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());
-                    return CstParseResult.success(node, text, location());
-                }
-
                 // === CST Parse Result ===
             """);
         sb.append("""
@@ -3638,5 +3688,196 @@ public final class ParserGenerator {
                     }
                 }
             """);
+    }
+
+    // === Match-method emitters (phase 1 perf flags) ===
+
+    private void emitMatchLiteralCst(StringBuilder sb) {
+        var endLocVar = config.reuseEndLocation() ? "endLoc" : "location()";
+        var endLocDecl = config.reuseEndLocation() ? "        var endLoc = location();\n" : "";
+        sb.append("\n");
+        sb.append("    private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {\n");
+        if (config.literalFailureCache()) {
+            sb.append("        int len = text.length();\n");
+            sb.append("        if (input.length() - pos < len) {\n");
+            sb.append("            var f = literalFailure(text);\n");
+            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            return f;\n");
+            sb.append("        }\n");
+            sb.append("        var startLoc = location();\n");
+            sb.append("        if (caseInsensitive) {\n");
+            sb.append("            for (int i = 0; i < len; i++) {\n");
+            sb.append("                if (Character.toLowerCase(text.charAt(i)) != Character.toLowerCase(input.charAt(pos + i))) {\n");
+            sb.append("                    var f = literalFailure(text);\n");
+            sb.append("                    trackFailure(f.expected.unwrap());\n");
+            sb.append("                    return f;\n");
+            sb.append("                }\n");
+            sb.append("            }\n");
+            sb.append("        } else {\n");
+            sb.append("            for (int i = 0; i < len; i++) {\n");
+            sb.append("                if (text.charAt(i) != input.charAt(pos + i)) {\n");
+            sb.append("                    var f = literalFailure(text);\n");
+            sb.append("                    trackFailure(f.expected.unwrap());\n");
+            sb.append("                    return f;\n");
+            sb.append("                }\n");
+            sb.append("            }\n");
+            sb.append("        }\n");
+        } else {
+            sb.append("        if (remaining() < text.length()) {\n");
+            sb.append("            trackFailure(\"'\" + text + \"'\");\n");
+            sb.append("            return CstParseResult.failure(\"'\" + text + \"'\");\n");
+            sb.append("        }\n");
+            sb.append("        var startLoc = location();\n");
+            sb.append("        for (int i = 0; i < text.length(); i++) {\n");
+            sb.append("            char expected = text.charAt(i);\n");
+            sb.append("            char actual = peek(i);\n");
+            sb.append("            if (caseInsensitive) {\n");
+            sb.append("                if (Character.toLowerCase(expected) != Character.toLowerCase(actual)) {\n");
+            sb.append("                    trackFailure(\"'\" + text + \"'\");\n");
+            sb.append("                    return CstParseResult.failure(\"'\" + text + \"'\");\n");
+            sb.append("                }\n");
+            sb.append("            } else {\n");
+            sb.append("                if (expected != actual) {\n");
+            sb.append("                    trackFailure(\"'\" + text + \"'\");\n");
+            sb.append("                    return CstParseResult.failure(\"'\" + text + \"'\");\n");
+            sb.append("                }\n");
+            sb.append("            }\n");
+            sb.append("        }\n");
+        }
+        // success-path advance
+        if (config.bulkAdvanceLiteral()) {
+            var lenExpr = config.literalFailureCache() ? "len" : "text.length()";
+            sb.append("        if (text.indexOf('\\n') < 0) {\n");
+            sb.append("            pos += ").append(lenExpr).append(";\n");
+            sb.append("            column += ").append(lenExpr).append(";\n");
+            sb.append("        } else {\n");
+            sb.append("            for (int i = 0; i < ").append(lenExpr).append("; i++) advance();\n");
+            sb.append("        }\n");
+        } else {
+            sb.append("        for (int i = 0; i < text.length(); i++) {\n");
+            sb.append("            advance();\n");
+            sb.append("        }\n");
+        }
+        sb.append(endLocDecl);
+        sb.append("        var span = SourceSpan.of(startLoc, ").append(endLocVar).append(");\n");
+        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, List.of(), List.of());\n");
+        sb.append("        return CstParseResult.success(node, text, ").append(endLocVar).append(");\n");
+        sb.append("    }\n");
+        sb.append("\n");
+        if (config.literalFailureCache()) {
+            sb.append("    private CstParseResult literalFailure(String text) {\n");
+            sb.append("        CstParseResult r = literalFailureCache.get(text);\n");
+            sb.append("        if (r == null) {\n");
+            sb.append("            r = CstParseResult.failure(\"'\" + text + \"'\");\n");
+            sb.append("            literalFailureCache.put(text, r);\n");
+            sb.append("        }\n");
+            sb.append("        return r;\n");
+            sb.append("    }\n");
+            sb.append("\n");
+        }
+    }
+
+    private void emitMatchDictionaryCst(StringBuilder sb) {
+        var endLocVar = config.reuseEndLocation() ? "endLoc" : "location()";
+        var endLocDecl = config.reuseEndLocation() ? "        var endLoc = location();\n" : "";
+        sb.append("    private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {\n");
+        sb.append("        String longestMatch = null;\n");
+        sb.append("        int longestLen = 0;\n");
+        sb.append("        for (var word : words) {\n");
+        sb.append("            if (matchesWord(word, caseInsensitive) && word.length() > longestLen) {\n");
+        sb.append("                longestMatch = word;\n");
+        sb.append("                longestLen = word.length();\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        sb.append("        if (longestMatch == null) {\n");
+        sb.append("            trackFailure(\"dictionary word\");\n");
+        sb.append("            return CstParseResult.failure(\"dictionary word\");\n");
+        sb.append("        }\n");
+        sb.append("        var startLoc = location();\n");
+        sb.append("        for (int i = 0; i < longestLen; i++) {\n");
+        sb.append("            advance();\n");
+        sb.append("        }\n");
+        sb.append(endLocDecl);
+        sb.append("        var span = SourceSpan.of(startLoc, ").append(endLocVar).append(");\n");
+        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, List.of(), List.of());\n");
+        sb.append("        return CstParseResult.success(node, longestMatch, ").append(endLocVar).append(");\n");
+        sb.append("    }\n");
+        sb.append("\n");
+    }
+
+    private void emitMatchCharClassCst(StringBuilder sb) {
+        var endLocVar = config.reuseEndLocation() ? "endLoc" : "location()";
+        var endLocDecl = config.reuseEndLocation() ? "        var endLoc = location();\n" : "";
+        sb.append("\n");
+        sb.append("    private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {\n");
+        if (config.charClassFailureCache()) {
+            sb.append("        if (isAtEnd()) {\n");
+            sb.append("            var f = charClassFailure(pattern, negated);\n");
+            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            return f;\n");
+            sb.append("        }\n");
+            sb.append("        var startLoc = location();\n");
+            sb.append("        char c = peek();\n");
+            sb.append("        boolean matches = matchesPattern(c, pattern, caseInsensitive);\n");
+            sb.append("        if (negated) matches = !matches;\n");
+            sb.append("        if (!matches) {\n");
+            sb.append("            var f = charClassFailure(pattern, negated);\n");
+            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            return f;\n");
+            sb.append("        }\n");
+        } else {
+            sb.append("        if (isAtEnd()) {\n");
+            sb.append("            trackFailure(\"[\" + (negated ? \"^\" : \"\") + pattern + \"]\");\n");
+            sb.append("            return CstParseResult.failure(\"character class\");\n");
+            sb.append("        }\n");
+            sb.append("        var startLoc = location();\n");
+            sb.append("        char c = peek();\n");
+            sb.append("        boolean matches = matchesPattern(c, pattern, caseInsensitive);\n");
+            sb.append("        if (negated) matches = !matches;\n");
+            sb.append("        if (!matches) {\n");
+            sb.append("            trackFailure(\"[\" + (negated ? \"^\" : \"\") + pattern + \"]\");\n");
+            sb.append("            return CstParseResult.failure(\"character class\");\n");
+            sb.append("        }\n");
+        }
+        sb.append("        advance();\n");
+        sb.append("        var text = String.valueOf(c);\n");
+        sb.append(endLocDecl);
+        sb.append("        var span = SourceSpan.of(startLoc, ").append(endLocVar).append(");\n");
+        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, List.of(), List.of());\n");
+        sb.append("        return CstParseResult.success(node, text, ").append(endLocVar).append(");\n");
+        sb.append("    }\n");
+        sb.append("\n");
+        if (config.charClassFailureCache()) {
+            sb.append("    private CstParseResult charClassFailure(String pattern, boolean negated) {\n");
+            sb.append("        String key = negated ? \"^\" + pattern : pattern;\n");
+            sb.append("        CstParseResult r = charClassFailureCache.get(key);\n");
+            sb.append("        if (r == null) {\n");
+            sb.append("            r = CstParseResult.failure(\"[\" + (negated ? \"^\" : \"\") + pattern + \"]\");\n");
+            sb.append("            charClassFailureCache.put(key, r);\n");
+            sb.append("        }\n");
+            sb.append("        return r;\n");
+            sb.append("    }\n");
+            sb.append("\n");
+        }
+    }
+
+    private void emitMatchAnyCst(StringBuilder sb) {
+        var endLocVar = config.reuseEndLocation() ? "endLoc" : "location()";
+        var endLocDecl = config.reuseEndLocation() ? "        var endLoc = location();\n" : "";
+        sb.append("\n");
+        sb.append("    private CstParseResult matchAnyCst() {\n");
+        sb.append("        if (isAtEnd()) {\n");
+        sb.append("            trackFailure(\"any character\");\n");
+        sb.append("            return CstParseResult.failure(\"any character\");\n");
+        sb.append("        }\n");
+        sb.append("        var startLoc = location();\n");
+        sb.append("        char c = advance();\n");
+        sb.append("        var text = String.valueOf(c);\n");
+        sb.append(endLocDecl);
+        sb.append("        var span = SourceSpan.of(startLoc, ").append(endLocVar).append(");\n");
+        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, List.of(), List.of());\n");
+        sb.append("        return CstParseResult.success(node, text, ").append(endLocVar).append(");\n");
+        sb.append("    }\n");
+        sb.append("\n");
     }
 }

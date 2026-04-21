@@ -16,6 +16,13 @@ import org.pragmatica.peg.error.RecoveryStrategy;
  * for the optimizations each flag controls. All perf flags default to
  * {@code false} in {@link #DEFAULT} and are off until individually validated
  * on the perf corpus.
+ *
+ * <p><b>Scope:</b> {@code fastTrackFailure}, {@code literalFailureCache},
+ * {@code charClassFailureCache}, {@code bulkAdvanceLiteral},
+ * {@code skipWhitespaceFastPath}, and {@code reuseEndLocation} affect the
+ * <b>CST generator emission only</b> ({@code ParserGenerator#generateCst}).
+ * The action-bearing non-CST emission path ({@code ParserGenerator#generate})
+ * is unaffected by these flags.
  */
 public record ParserConfig(
     boolean packratEnabled,
