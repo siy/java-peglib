@@ -2601,52 +2601,29 @@ public final class ParserGenerator {
                       .append(savedChildren)
                       .append(" = new ArrayList<>(children);\n");
                 }
-                int i = 0;
-                for (var alt : choice.alternatives()) {
-                    if (addToChildren) {
-                        sb.append(pad)
-                          .append("children.clear();\n");
-                        sb.append(pad)
-                          .append("children.addAll(")
-                          .append(savedChildren)
-                          .append(");\n");
+
+                var classified = config.choiceDispatch()
+                    ? ChoiceDispatchAnalyzer.classify(choice)
+                    : java.util.Optional.<java.util.List<ChoiceDispatchAnalyzer.AltEntry>>empty();
+
+                if (classified.isPresent()) {
+                    var grouped = ChoiceDispatchAnalyzer.groupByChar(classified.get());
+                    var buckets = ChoiceDispatchAnalyzer.buckets(grouped);
+                    emitCstChoiceDispatch(sb, buckets, id, indent, addToChildren, counter, inWhitespaceRule,
+                                          resultVar, choiceStart, savedChildren);
+                } else {
+                    int i = 0;
+                    for (var alt : choice.alternatives()) {
+                        emitCstChoiceAlt(sb, alt, id, i, indent, addToChildren, counter, inWhitespaceRule,
+                                         resultVar, choiceStart, savedChildren, pad);
+                        i++;
                     }
-                    var altVar = "alt" + id + "_" + i;
-                    generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter, inWhitespaceRule);
-                    sb.append(pad)
-                      .append("if (")
-                      .append(altVar)
-                      .append(".isSuccess()) {\n");
-                    sb.append(pad)
-                      .append("    ")
-                      .append(resultVar)
-                      .append(" = ")
-                      .append(altVar)
-                      .append(";\n");
-                    sb.append(pad)
-                      .append("} else if (")
-                      .append(altVar)
-                      .append(".isCutFailure()) {\n");
-                    // Convert CutFailure to regular failure for parent choices to allow backtracking at higher levels
-                    sb.append(pad)
-                      .append("    ")
-                      .append(resultVar)
-                      .append(" = ")
-                      .append(altVar)
-                      .append(".asRegularFailure();\n");
-                    sb.append(pad)
-                      .append("} else {\n");
-                    sb.append(pad)
-                      .append("    restoreLocation(")
-                      .append(choiceStart)
-                      .append(");\n");
-                    i++ ;
+                    for (int j = 0; j < choice.alternatives().size(); j++) {
+                        sb.append(pad)
+                          .append("}\n");
+                    }
                 }
-                for (int j = 0; j < choice.alternatives()
-                                          .size(); j++ ) {
-                    sb.append(pad)
-                      .append("}\n");
-                }
+
                 sb.append(pad)
                   .append("if (")
                   .append(resultVar)
@@ -3520,6 +3497,114 @@ public final class ParserGenerator {
                                           inWhitespaceRule);
             }
         }
+    }
+
+    /**
+     * Emit one alternative's body in the slow-chain CST Choice format. Opens an
+     * {@code if/else if/else} that leaves an open {@code else} brace for the caller
+     * (or the next alt) to nest inside — closing braces are emitted in a loop by
+     * the Choice block. See §7.1 for the dispatch variant.
+     */
+    private void emitCstChoiceAlt(StringBuilder sb,
+                                  Expression alt,
+                                  int id,
+                                  int origIndex,
+                                  int indent,
+                                  boolean addToChildren,
+                                  int[] counter,
+                                  boolean inWhitespaceRule,
+                                  String resultVar,
+                                  String choiceStart,
+                                  String savedChildren,
+                                  String pad) {
+        if (addToChildren) {
+            sb.append(pad).append("children.clear();\n");
+            sb.append(pad).append("children.addAll(").append(savedChildren).append(");\n");
+        }
+        var altVar = "alt" + id + "_" + origIndex;
+        generateCstExpressionCode(sb, alt, altVar, indent, addToChildren, counter, inWhitespaceRule);
+        sb.append(pad).append("if (").append(altVar).append(".isSuccess()) {\n");
+        sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(";\n");
+        sb.append(pad).append("} else if (").append(altVar).append(".isCutFailure()) {\n");
+        // Convert CutFailure to regular failure so enclosing choices can still fail-forward.
+        sb.append(pad).append("    ").append(resultVar).append(" = ").append(altVar).append(".asRegularFailure();\n");
+        sb.append(pad).append("} else {\n");
+        sb.append(pad).append("    restoreLocation(").append(choiceStart).append(");\n");
+    }
+
+    /**
+     * Emit a per-alternative chain (same shape as {@link #emitCstChoiceAlt}) self-closing:
+     * declares all {@code if/else if/else} braces and closes them before returning. Used
+     * inside each {@code case} block of the dispatch switch, where control never falls
+     * through to a sibling case.
+     */
+    private void emitCstChoiceAltChainClosed(StringBuilder sb,
+                                             java.util.List<ChoiceDispatchAnalyzer.AltEntry> alts,
+                                             int id,
+                                             int indent,
+                                             boolean addToChildren,
+                                             int[] counter,
+                                             boolean inWhitespaceRule,
+                                             String resultVar,
+                                             String choiceStart,
+                                             String savedChildren,
+                                             String pad) {
+        for (var entry : alts) {
+            emitCstChoiceAlt(sb, entry.alt(), id, entry.originalIndex(), indent, addToChildren, counter,
+                             inWhitespaceRule, resultVar, choiceStart, savedChildren, pad);
+        }
+        for (int j = 0; j < alts.size(); j++) {
+            sb.append(pad).append("}\n");
+        }
+    }
+
+    /**
+     * Emit the §7.1 character-dispatch variant for a classifiable Choice. Per-bucket
+     * case-blocks try their (one or more) alternatives using the same if/else-if/else
+     * chain as the slow path. When no alt in the matched bucket succeeds, {@code resultVar}
+     * stays null and control flows to the standard "all failed" epilogue emitted by the
+     * caller.
+     */
+    private void emitCstChoiceDispatch(StringBuilder sb,
+                                       java.util.List<ChoiceDispatchAnalyzer.DispatchBucket> buckets,
+                                       int id,
+                                       int indent,
+                                       boolean addToChildren,
+                                       int[] counter,
+                                       boolean inWhitespaceRule,
+                                       String resultVar,
+                                       String choiceStart,
+                                       String savedChildren) {
+        var pad = "    ".repeat(indent);
+        var dispatchVar = "dispatchChar" + id;
+        sb.append(pad).append("if (pos < input.length()) {\n");
+        sb.append(pad).append("    char ").append(dispatchVar).append(" = input.charAt(pos);\n");
+        sb.append(pad).append("    switch (").append(dispatchVar).append(") {\n");
+        var casePad = pad + "        ";
+        var bodyPad = pad + "            ";
+        for (var bucket : buckets) {
+            for (var c : bucket.chars()) {
+                sb.append(casePad).append("case ").append(literalChar(c)).append(":\n");
+            }
+            sb.append(casePad).append("{\n");
+            emitCstChoiceAltChainClosed(sb, bucket.alts(), id, indent + 3, addToChildren, counter,
+                                        inWhitespaceRule, resultVar, choiceStart, savedChildren, bodyPad);
+            sb.append(bodyPad).append("break;\n");
+            sb.append(casePad).append("}\n");
+        }
+        sb.append(pad).append("    }\n");
+        sb.append(pad).append("}\n");
+    }
+
+    private static String literalChar(char c) {
+        return switch (c) {
+            case '\n' -> "'\\n'";
+            case '\r' -> "'\\r'";
+            case '\t' -> "'\\t'";
+            case '\\' -> "'\\\\'";
+            case '\'' -> "'\\''";
+            default -> "'" + c + "'";
+        };
     }
 
     private void generateCstHelperMethods(StringBuilder sb) {
