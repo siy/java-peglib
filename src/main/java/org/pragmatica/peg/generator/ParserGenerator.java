@@ -3,6 +3,8 @@ package org.pragmatica.peg.generator;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
+import org.pragmatica.peg.grammar.analysis.ExpressionShape;
+import org.pragmatica.peg.grammar.analysis.FirstCharAnalysis;
 import org.pragmatica.peg.parser.ParserConfig;
 
 /**
@@ -2242,144 +2244,21 @@ public final class ParserGenerator {
 
     /**
      * Extract inner expression from ZeroOrMore/OneOrMore for trivia matching.
-     * The whitespace rule is typically `(spaces / comments)*` - we want to match
-     * one element at a time for proper trivia classification.
+     * Delegates to {@link ExpressionShape#extractInnerExpression(Expression)}
+     * so the generator and {@code PegEngine} interpreter agree on the shape.
      */
     private Expression extractInnerExpression(Expression expr) {
-        return switch (expr) {
-            case Expression.ZeroOrMore zom -> zom.expression();
-            case Expression.OneOrMore oom -> oom.expression();
-            case Expression.Group grp -> extractInnerExpression(grp.expression());
-            default -> expr;
-        };
+        return ExpressionShape.extractInnerExpression(expr);
     }
 
     /**
      * Derive the set of characters that can legally start a whitespace-rule match.
      * Used by the §6.6 skipWhitespace fast-path to short-circuit when the current
-     * character cannot possibly begin trivia. Returns empty Optional if the shape
-     * of the whitespace rule is not analyzable (caller must fall back to the
-     * always-slow path).
-     *
-     * @param expr the inner expression of the grammar's {@code %whitespace} rule
-     *             (after stripping the outer ZeroOrMore/OneOrMore)
-     * @return the set of potential first-chars, or empty if shape unsupported
+     * character cannot possibly begin trivia. Delegates to the shared analysis
+     * helper so the generator and the interpreter compute the same set.
      */
     private java.util.Optional<java.util.Set<Character>> whitespaceFirstChars(Expression expr) {
-        var set = new java.util.LinkedHashSet<Character>();
-        if (!collectFirstChars(expr, set, new java.util.HashSet<>())) {
-            return java.util.Optional.empty();
-        }
-        if (set.isEmpty()) {
-            return java.util.Optional.empty();
-        }
-        return java.util.Optional.of(set);
-    }
-
-    private boolean collectFirstChars(Expression expr, java.util.Set<Character> out, java.util.Set<String> visiting) {
-        return switch (expr) {
-            case Expression.Literal lit -> {
-                if (lit.text()
-                       .isEmpty()) yield false;
-                char first = lit.text()
-                                .charAt(0);
-                if (lit.caseInsensitive()) {
-                    out.add(Character.toLowerCase(first));
-                    out.add(Character.toUpperCase(first));
-                }else {
-                    out.add(first);
-                }
-                yield true;
-            }
-            case Expression.CharClass cc -> {
-                if (cc.negated()) yield false;
-                // conservative: don't enumerate complement
-                yield enumerateCharClass(cc.pattern(), cc.caseInsensitive(), out);
-            }
-            case Expression.Choice ch -> {
-                for (var alt : ch.alternatives()) {
-                    if (!collectFirstChars(alt, out, visiting)) yield false;
-                }
-                yield true;
-            }
-            case Expression.Sequence seq -> {
-                for (var el : seq.elements()) {
-                    // skip over leading predicates — they don't consume
-                    if (el instanceof Expression.And || el instanceof Expression.Not) continue;
-                    yield collectFirstChars(el, out, visiting);
-                }
-                yield false;
-            }
-            case Expression.Group grp -> collectFirstChars(grp.expression(), out, visiting);
-            case Expression.ZeroOrMore zom -> collectFirstChars(zom.expression(), out, visiting);
-            case Expression.OneOrMore oom -> collectFirstChars(oom.expression(), out, visiting);
-            case Expression.Optional opt -> collectFirstChars(opt.expression(), out, visiting);
-            case Expression.TokenBoundary tb -> collectFirstChars(tb.expression(), out, visiting);
-            case Expression.Ignore ig -> collectFirstChars(ig.expression(), out, visiting);
-            case Expression.Capture cap -> collectFirstChars(cap.expression(), out, visiting);
-            case Expression.CaptureScope cs -> collectFirstChars(cs.expression(), out, visiting);
-            case Expression.Reference ref -> {
-                if (!visiting.add(ref.ruleName())) yield false;
-                // recursion — bail
-                var target = grammar.rules()
-                                    .stream()
-                                    .filter(r -> r.name()
-                                                  .equals(ref.ruleName()))
-                                    .findFirst();
-                if (target.isEmpty()) yield false;
-                yield collectFirstChars(target.get()
-                                              .expression(),
-                                        out,
-                                        visiting);
-            }
-            default -> false;
-        };
-    }
-
-    private boolean enumerateCharClass(String pattern, boolean caseInsensitive, java.util.Set<Character> out) {
-        int i = 0;
-        while (i < pattern.length()) {
-            char start = pattern.charAt(i);
-            if (start == '\\' && i + 1 < pattern.length()) {
-                char escaped = pattern.charAt(i + 1);
-                char ch;
-                int consumed = 2;
-                switch (escaped) {
-                    case'n' : ch = '\n'; break;
-                    case'r' : ch = '\r'; break;
-                    case't' : ch = '\t'; break;
-                    case'\\' : ch = '\\'; break;
-                    case']' : ch = ']'; break;
-                    case'-' : ch = '-'; break;
-                    default : return false;
-                }
-                addCaseInsensitive(out, ch, caseInsensitive);
-                i += consumed;
-                continue;
-            }
-            if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
-                char end = pattern.charAt(i + 2);
-                if (end - start > 128) return false;
-                // too many — bail
-                for (char c = start; c <= end; c++ ) {
-                    addCaseInsensitive(out, c, caseInsensitive);
-                }
-                i += 3;
-            }else {
-                addCaseInsensitive(out, start, caseInsensitive);
-                i++ ;
-            }
-        }
-        return true;
-    }
-
-    private void addCaseInsensitive(java.util.Set<Character> out, char c, boolean caseInsensitive) {
-        if (caseInsensitive) {
-            out.add(Character.toLowerCase(c));
-            out.add(Character.toUpperCase(c));
-        }else {
-            out.add(c);
-        }
+        return FirstCharAnalysis.whitespaceFirstChars(grammar, expr);
     }
 
     /**

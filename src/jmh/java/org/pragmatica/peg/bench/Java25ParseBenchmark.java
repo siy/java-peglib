@@ -16,6 +16,8 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.pragmatica.peg.PegParser;
 import org.pragmatica.peg.error.RecoveryStrategy;
 import org.pragmatica.peg.generator.ErrorReporting;
+import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.parser.Parser;
 import org.pragmatica.peg.parser.ParserConfig;
 
 import javax.tools.ToolProvider;
@@ -58,18 +60,29 @@ public class Java25ParseBenchmark {
         "phase1_markResetChildren",
         "phase1_inlineLocations",
         "phase1_allStructural",
-        "phase1_allStructural_skipPackrat"
+        "phase1_allStructural_skipPackrat",
+        "interpreter"
     })
     public String variant;
 
     private Class<?> parserClass;
     private Method parseMethod;
     private String fixtureSource;
+    // Interpreter path (0.2.3 phase-1 port): PegEngine is reusable across parseCst
+    // calls because each parse allocates its own ParsingContext; hoist construction
+    // to @Setup so the benchmark measures parse time, not engine creation.
+    private Parser interpreterParser;
 
     @Setup(Level.Trial)
     public void setup() throws Exception {
         var grammarText = loadResource(GRAMMAR_RESOURCE);
         fixtureSource = loadResource(FIXTURE_RESOURCE);
+
+        if ("interpreter".equals(variant)) {
+            var grammar = GrammarParser.parse(grammarText).unwrap();
+            interpreterParser = PegParser.fromGrammarWithoutActions(grammar, ParserConfig.DEFAULT).unwrap();
+            return;
+        }
 
         var config = configFor(variant);
         var className = CLASS_BASE + "_" + variant;
@@ -85,6 +98,9 @@ public class Java25ParseBenchmark {
 
     @Benchmark
     public Object parse() throws Exception {
+        if ("interpreter".equals(variant)) {
+            return interpreterParser.parseCst(fixtureSource);
+        }
         var instance = parserClass.getDeclaredConstructor().newInstance();
         return parseMethod.invoke(instance, fixtureSource);
     }
