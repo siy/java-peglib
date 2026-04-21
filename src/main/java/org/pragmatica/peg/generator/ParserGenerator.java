@@ -3,6 +3,7 @@ package org.pragmatica.peg.generator;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
+import org.pragmatica.peg.parser.ParserConfig;
 
 /**
  * Generates standalone parser source code from a Grammar.
@@ -94,25 +95,46 @@ public final class ParserGenerator {
     private final String packageName;
     private final String className;
     private final ErrorReporting errorReporting;
+    private final ParserConfig config;
     private boolean inWhitespaceRuleGeneration;
 
-    private ParserGenerator(Grammar grammar, String packageName, String className, ErrorReporting errorReporting) {
+    private ParserGenerator(Grammar grammar,
+                            String packageName,
+                            String className,
+                            ErrorReporting errorReporting,
+                            ParserConfig config) {
         this.grammar = grammar;
         this.packageName = packageName;
         this.className = className;
         this.errorReporting = errorReporting;
+        this.config = config;
         this.inWhitespaceRuleGeneration = false;
     }
 
     public static ParserGenerator create(Grammar grammar, String packageName, String className) {
-        return new ParserGenerator(grammar, packageName, className, ErrorReporting.BASIC);
+        return new ParserGenerator(grammar, packageName, className, ErrorReporting.BASIC, ParserConfig.DEFAULT);
     }
 
     public static ParserGenerator create(Grammar grammar,
                                          String packageName,
                                          String className,
                                          ErrorReporting errorReporting) {
-        return new ParserGenerator(grammar, packageName, className, errorReporting);
+        return new ParserGenerator(grammar, packageName, className, errorReporting, ParserConfig.DEFAULT);
+    }
+
+    public static ParserGenerator create(Grammar grammar,
+                                         String packageName,
+                                         String className,
+                                         ParserConfig config) {
+        return new ParserGenerator(grammar, packageName, className, ErrorReporting.BASIC, config);
+    }
+
+    public static ParserGenerator create(Grammar grammar,
+                                         String packageName,
+                                         String className,
+                                         ErrorReporting errorReporting,
+                                         ParserConfig config) {
+        return new ParserGenerator(grammar, packageName, className, errorReporting, config);
     }
 
     public String generate() {
