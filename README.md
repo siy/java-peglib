@@ -22,7 +22,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.2.1</version>
+    <version>0.2.2</version>
 </dependency>
 ```
 
@@ -323,11 +323,39 @@ public sealed interface CstNode {
 }
 ```
 
+## Performance
+
+As of 0.2.2 the generated CST parser emits tuned helper variants driven by generator-time flags in `ParserConfig`. On a 1,900-LOC Java 25 fixture (`FactoryClassGenerator.java`), the new `ParserConfig.DEFAULT` yields a **4.23× speedup** over the pre-0.2.2 baseline (JMH 1.37 avgT, JDK 25.0.2, Apple Silicon; raw data in [`docs/bench-results/`](docs/bench-results/)).
+
+Flags (all consumed at generation time — no runtime branching in the emitted parser):
+
+| Flag | Phase | Default | Optimization |
+|---|---|---|---|
+| `fastTrackFailure` | 1 | on | Skip allocation in `trackFailure` when dominated by furthest failure |
+| `literalFailureCache` | 1 | on | Per-parser cache of literal-match failure results; loop specialization |
+| `charClassFailureCache` | 1 | on | Per-parser cache for char-class failures; bracketed error message |
+| `bulkAdvanceLiteral` | 1 | on | Bulk `pos`/`column` update for no-newline literals |
+| `skipWhitespaceFastPath` | 1 | on | First-char precheck derived from `%whitespace` rule |
+| `reuseEndLocation` | 1 | on | Reuse end-position `SourceLocation` across span + result |
+| `choiceDispatch` | 2 | on | `switch(input.charAt(pos))` dispatch for literal-prefixed Choice |
+| `markResetChildren` | 2 | off | Replace children clone+clear+addAll with mark-and-trim |
+| `inlineLocations` | 2 | off | Inline int locals at rule entry instead of SourceLocation |
+| `selectivePackrat` | 2 | off | Skip packrat cache for rules in `packratSkipRules` |
+
+The three default-off flags can be flipped on per-project via a custom `ParserConfig`. See [`docs/PERF-REWORK-SPEC.md`](docs/PERF-REWORK-SPEC.md) for the underlying design and [`docs/bench-results/java25-parse.json`](docs/bench-results/java25-parse.json) for raw JMH data.
+
+To reproduce benchmarks:
+
+```bash
+mvn -Pbench -DskipTests package
+java -jar target/benchmarks.jar org.pragmatica.peg.bench.Java25ParseBenchmark
+```
+
 ## Building
 
 ```bash
 mvn compile    # Compile
-mvn test       # Run tests (308 tests)
+mvn test       # Run tests (565 tests, 1 skipped)
 mvn verify     # Full verification
 ```
 

@@ -76,9 +76,26 @@ public final class PegParser {
      * @return generated Java source code, or error if grammar is invalid
      */
     public static Result<String> generateParser(String grammarText, String packageName, String className) {
+        return generateParser(grammarText, packageName, className, ParserConfig.DEFAULT);
+    }
+
+    /**
+     * Generate standalone parser source code from grammar text with custom parser configuration.
+     * The generated parser returns Object values.
+     *
+     * @param grammarText the PEG grammar
+     * @param packageName target package for generated class
+     * @param className name of generated parser class
+     * @param config parser configuration (perf flags are consumed at generation time)
+     * @return generated Java source code, or error if grammar is invalid
+     */
+    public static Result<String> generateParser(String grammarText,
+                                                String packageName,
+                                                String className,
+                                                ParserConfig config) {
         return GrammarParser.parse(grammarText)
                             .flatMap(Grammar::validate)
-                            .map(grammar -> ParserGenerator.create(grammar, packageName, className)
+                            .map(grammar -> ParserGenerator.create(grammar, packageName, className, config)
                                                            .generate());
     }
 
@@ -92,10 +109,24 @@ public final class PegParser {
      * @return generated Java source code, or error if grammar is invalid
      */
     public static Result<String> generateCstParser(String grammarText, String packageName, String className) {
-        return GrammarParser.parse(grammarText)
-                            .flatMap(Grammar::validate)
-                            .map(grammar -> ParserGenerator.create(grammar, packageName, className)
-                                                           .generateCst());
+        return generateCstParser(grammarText, packageName, className, ErrorReporting.BASIC, ParserConfig.DEFAULT);
+    }
+
+    /**
+     * Generate standalone CST parser source code from grammar text with custom parser configuration.
+     * Uses {@code ErrorReporting.BASIC}.
+     *
+     * @param grammarText the PEG grammar
+     * @param packageName target package for generated class
+     * @param className name of generated parser class
+     * @param config parser configuration (perf flags are consumed at generation time)
+     * @return generated Java source code, or error if grammar is invalid
+     */
+    public static Result<String> generateCstParser(String grammarText,
+                                                   String packageName,
+                                                   String className,
+                                                   ParserConfig config) {
+        return generateCstParser(grammarText, packageName, className, ErrorReporting.BASIC, config);
     }
 
     /**
@@ -112,9 +143,31 @@ public final class PegParser {
                                                    String packageName,
                                                    String className,
                                                    ErrorReporting errorReporting) {
+        return generateCstParser(grammarText, packageName, className, errorReporting, ParserConfig.DEFAULT);
+    }
+
+    /**
+     * Generate standalone CST parser source code with both error reporting and parser configuration.
+     *
+     * @param grammarText the PEG grammar
+     * @param packageName target package for generated class
+     * @param className name of generated parser class
+     * @param errorReporting BASIC for simple errors, ADVANCED for Rust-style diagnostics
+     * @param config parser configuration (perf flags are consumed at generation time)
+     * @return generated Java source code, or error if grammar is invalid
+     */
+    public static Result<String> generateCstParser(String grammarText,
+                                                   String packageName,
+                                                   String className,
+                                                   ErrorReporting errorReporting,
+                                                   ParserConfig config) {
         return GrammarParser.parse(grammarText)
                             .flatMap(Grammar::validate)
-                            .map(grammar -> ParserGenerator.create(grammar, packageName, className, errorReporting)
+                            .map(grammar -> ParserGenerator.create(grammar,
+                                                                   packageName,
+                                                                   className,
+                                                                   errorReporting,
+                                                                   config)
                                                            .generateCst());
     }
 
@@ -151,7 +204,7 @@ public final class PegParser {
         }
 
         public Result<Parser> build() {
-            var config = new ParserConfig(packratEnabled, recoveryStrategy, captureTrivia);
+            var config = ParserConfig.of(packratEnabled, recoveryStrategy, captureTrivia);
             return fromGrammar(grammarText, config);
         }
     }
