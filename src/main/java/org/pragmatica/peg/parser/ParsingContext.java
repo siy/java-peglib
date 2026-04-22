@@ -44,6 +44,14 @@ public final class ParsingContext {
     // Whitespace skipping guard (prevents recursive whitespace parsing)
     private boolean skippingWhitespace;
 
+    // Pending leading trivia — trivia matched between sibling sequence elements
+    // that should attach to the following sibling's leadingTrivia. See
+    // docs/TRIVIA-ATTRIBUTION.md for the attribution rule. Backtracking
+    // combinators (Choice/Optional/And/Not) must save/restore snapshots of
+    // this buffer around each attempt so failed alternatives do not leak
+    // trivia forward.
+    private final List<Trivia> pendingLeadingTrivia = new ArrayList<>();
+
     private ParsingContext(String input, Grammar grammar, ParserConfig config) {
         this.input = input;
         this.grammar = grammar;
@@ -306,6 +314,56 @@ public final class ParsingContext {
 
     public void exitWhitespaceSkip() {
         skippingWhitespace = false;
+    }
+
+    // === Pending Leading Trivia ===
+    /**
+     * Append captured trivia to the pending-leading buffer. Called at sites
+     * between sibling sequence elements (sequence, zero-or-more, one-or-more,
+     * repetition) so the following sibling's leaf or rule can claim it.
+     */
+    public void appendPendingLeadingTrivia(List<Trivia> captured) {
+        if (!captured.isEmpty()) {
+            pendingLeadingTrivia.addAll(captured);
+        }
+    }
+
+    /**
+     * Take and clear the pending-leading buffer. Called when constructing a
+     * CstNode that owns {@code leadingTrivia} — leaf terminals, token
+     * boundaries, or rule wrappers. Returns the previously-pending list; the
+     * buffer is reset to empty.
+     */
+    public List<Trivia> takePendingLeadingTrivia() {
+        if (pendingLeadingTrivia.isEmpty()) {
+            return List.of();
+        }
+        var snapshot = List.copyOf(pendingLeadingTrivia);
+        pendingLeadingTrivia.clear();
+        return snapshot;
+    }
+
+    /**
+     * Snapshot the current pending-leading buffer size for later restoration.
+     * Backtracking combinators (Choice/Optional/And/Not) must call this
+     * before attempting each alternative and call
+     * {@link #restorePendingLeadingTrivia(int)} on failure so that trivia
+     * collected inside the failed attempt does not leak forward to the next
+     * attempt.
+     */
+    public int savePendingLeadingTrivia() {
+        return pendingLeadingTrivia.size();
+    }
+
+    /**
+     * Truncate the pending-leading buffer back to a previously-saved size.
+     * No-op when the buffer is already at or below {@code snapshot}.
+     */
+    public void restorePendingLeadingTrivia(int snapshot) {
+        if (pendingLeadingTrivia.size() > snapshot) {
+            pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size())
+                                .clear();
+        }
     }
 
     // === Captures (for back-references) ===
