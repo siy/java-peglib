@@ -111,15 +111,31 @@ public final class Formatter {
     }
 
     /**
-     * Format {@code cst} into a string. Returns {@code Result.failure} only
-     * if {@code cst} is null or a user rule throws.
+     * Format {@code cst} into a string. Uses an empty source buffer; rules
+     * that rely on {@link FormatContext#nodeText()} should prefer the
+     * {@link #format(CstNode, String)} overload.
      */
     public Result<String> format(CstNode cst) {
+        return format(cst, "");
+    }
+
+    /**
+     * Format {@code cst} into a string, providing the original {@code source}
+     * the CST was parsed from. Rules can recover exact source slices via
+     * {@link FormatContext#nodeText()}.
+     *
+     * <p>Returns {@code Result.failure} only if {@code cst} is null or a
+     * user rule throws.
+     */
+    public Result<String> format(CstNode cst, String source) {
         if (cst == null) {
             return FormatterError.NULL_NODE.result();
         }
+        if (source == null) {
+            return FormatterError.NULL_SOURCE.result();
+        }
         try {
-            var doc = walk(cst);
+            var doc = walk(cst, source);
             var out = Renderer.render(doc, maxLineWidth);
             return Result.success(out);
         } catch (RuntimeException e) {
@@ -127,30 +143,30 @@ public final class Formatter {
         }
     }
 
-    private Doc walk(CstNode node) {
-        var childDocs = collectChildDocs(node);
-        var nodeDoc = applyRule(node, childDocs);
+    private Doc walk(CstNode node, String source) {
+        var childDocs = collectChildDocs(node, source);
+        var nodeDoc = applyRule(node, source, childDocs);
         return wrapWithTrivia(node, nodeDoc);
     }
 
-    private List<Doc> collectChildDocs(CstNode node) {
+    private List<Doc> collectChildDocs(CstNode node, String source) {
         if (node instanceof CstNode.NonTerminal nt) {
             var out = new ArrayList<Doc>(nt.children().size());
             for (var child : nt.children()) {
-                out.add(walk(child));
+                out.add(walk(child, source));
             }
             return out;
         }
         return List.of();
     }
 
-    private Doc applyRule(CstNode node, List<Doc> childDocs) {
+    private Doc applyRule(CstNode node, String source, List<Doc> childDocs) {
         var rule = rules.get(node.rule());
         if (rule != null) {
-            var ctx = new FormatContext(node, defaultIndent, maxLineWidth, triviaPolicy);
+            var ctx = new FormatContext(node, source, defaultIndent, maxLineWidth, triviaPolicy);
             return rule.format(ctx, childDocs);
         }
-        return defaultFallback(node, childDocs);
+        return defaultFallback(node, source, childDocs);
     }
 
     private Doc wrapWithTrivia(CstNode node, Doc nodeDoc) {
@@ -232,11 +248,24 @@ public final class Formatter {
         return new Doc.HardLine();
     }
 
-    private static Doc defaultFallback(CstNode node, List<Doc> childDocs) {
+    private static Doc defaultFallback(CstNode node, String source, List<Doc> childDocs) {
         return switch (node) {
             case CstNode.Terminal t -> Docs.text(t.text());
             case CstNode.Token t -> Docs.text(t.text());
-            case CstNode.NonTerminal nt -> Docs.concat(childDocs);
+            case CstNode.NonTerminal nt -> {
+                // If no children contributed text, fall back to extracting the
+                // node's span from the source buffer. This handles the common
+                // case of rules whose CST is essentially a single literal match.
+                if (childDocs.isEmpty() && !source.isEmpty()) {
+                    var span = nt.span();
+                    int start = Math.max(0, span.start().offset());
+                    int end = Math.min(source.length(), span.end().offset());
+                    if (start < end) {
+                        yield Docs.text(source.substring(start, end));
+                    }
+                }
+                yield Docs.concat(childDocs);
+            }
             case CstNode.Error e -> Docs.text(e.skippedText());
         };
     }
@@ -244,7 +273,8 @@ public final class Formatter {
     /** Errors a formatter may report. */
     public sealed interface FormatterError extends Cause {
         enum General implements FormatterError {
-            NULL_NODE("Cannot format a null CST node");
+            NULL_NODE("Cannot format a null CST node"),
+            NULL_SOURCE("Source buffer must not be null");
 
             private final String message;
 
@@ -258,8 +288,11 @@ public final class Formatter {
             }
         }
 
-        /** Convenience alias. */
+        /** Convenience alias: null CST node. */
         FormatterError NULL_NODE = General.NULL_NODE;
+
+        /** Convenience alias: null source buffer. */
+        FormatterError NULL_SOURCE = General.NULL_SOURCE;
 
         record RuleFailed(String rule, Throwable cause) implements FormatterError {
             @Override
