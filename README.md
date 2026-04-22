@@ -310,6 +310,66 @@ error: expected Number
    |
 ```
 
+## Grammar Analyzer
+
+Static lint checks for PEG grammars. Detects unreachable rules, ambiguous first-char choices, nullable rules, duplicate literals in choices, `%whitespace` self-cycles, and rules using `BackReference` (forward-compat note for incremental parsing).
+
+Run from code:
+
+```java
+import org.pragmatica.peg.analyzer.Analyzer;
+
+var grammar = GrammarParser.parse(grammarText)
+                           .flatMap(Grammar::validate)
+                           .unwrap();
+var report = Analyzer.analyze(grammar);
+
+if (report.hasErrors()) {
+    System.out.print(report.formatRustStyle("grammar.peg"));
+    System.exit(1);
+}
+```
+
+Run from CLI:
+
+```bash
+java -cp peglib.jar org.pragmatica.peg.analyzer.AnalyzerMain grammar.peg
+```
+
+Exit status: `0` when no errors, `1` when errors found, `2` on I/O or parse failure. Findings are emitted in Rust-`cargo check`-style format (`error[grammar.duplicate-literal]: …`).
+
+See [docs/GRAMMAR-DSL.md](docs/GRAMMAR-DSL.md#analyzer) for the full finding catalog.
+
+## Maven Plugin
+
+The `peglib-maven-plugin` module (separate artifact, sibling to `peglib`) wraps the generator and analyzer for build-time use. Goals:
+
+- `peglib:generate` — generate a standalone parser Java source from a grammar, skip when up-to-date
+- `peglib:lint` — run the analyzer, fail build on errors (optionally on warnings)
+- `peglib:check` — lint + build the runtime parser + parse a smoke-test input
+
+```xml
+<plugin>
+    <groupId>org.pragmatica-lite</groupId>
+    <artifactId>peglib-maven-plugin</artifactId>
+    <version>0.2.5</version>
+    <executions>
+        <execution>
+            <goals>
+                <goal>generate</goal>
+            </goals>
+            <configuration>
+                <grammarFile>src/main/peg/MyGrammar.peg</grammarFile>
+                <outputDirectory>${project.build.directory}/generated-sources/peg</outputDirectory>
+                <packageName>com.example.parser</packageName>
+                <className>MyParser</className>
+                <errorReporting>BASIC</errorReporting>
+            </configuration>
+        </execution>
+    </executions>
+</plugin>
+```
+
 ## Examples
 
 See the [examples](src/test/java/org/pragmatica/peg/examples/) directory:
