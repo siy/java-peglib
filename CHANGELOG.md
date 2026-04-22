@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.2] - 2026-04-22
 
+### Added
+
+- **Trivia-aware reparse splice** in `peglib-incremental`. New internal `TriviaRedistribution` helper redistributes `leadingTrivia` / `trailingTrivia` between a spliced subtree and its neighbors after `TreeSplicer` runs.
+- **Trivia-only edit fast-path** in `SessionImpl` — detects edits that land entirely within trivia regions and patches the CST without reinvoking the parser. Flag-gated via `IncrementalParser.builder(...).triviaFastPathEnabled(true)` — **default off** because grammars like Java allow whitespace to affect tokenisation (e.g., deleting whitespace between `>>` changes parse).
+- **`IncrementalBenchmark` (JMH)** in `peglib-incremental/src/jmh/java/`, behind the `bench` Maven profile. Parametrized over `{initialize, singleCharEdit, wordEdit, lineEdit, fullReparse, undoRestore}` variants against the 1,900-LOC fixture. Smoke result committed at `docs/bench-results/incremental-v1-smoke.json`.
+
+### Performance
+
+Smoke benchmark (single iteration, JDK 25, Apple Silicon) measured `singleCharEdit` at **~325 ms/op** on the 1,900-LOC `FactoryClassGenerator.java.txt` fixture — well above the SPEC §8 `< 1 ms median` target. Root causes, honestly reported:
+
+- Wholesale packrat cache invalidation on edit (SPEC §5.4 v1 decision) — cache rebuild dominates.
+- Java grammar's back-reference-bearing rules trigger full-reparse fallback on most edits.
+
+Next lever: **v2.5 span-rewriting cache remap** (SPEC §5.4). Not part of this release. The incremental module ships with its correctness story intact (parity harness green across 2,200 checks) but its performance story honest: today, it's roughly equivalent to a full parse on this workload. v2.5 is where the editor-scale target is unlocked.
+
+### Tests
+
+- `peglib-core`: 674 + 1 skipped — unchanged.
+- `peglib-incremental`: 67 → **100 passing**, 0 failures. +33 tests: `TriviaRedistributionTest` (11) + `IncrementalTriviaParityTest` (22).
+- `peglib-maven-plugin`: 5 (unchanged). `peglib-playground`: 22 (unchanged).
+- **Aggregate: 801 passing**, 1 skipped.
+- Parity harness extensions: `IncrementalTriviaParityTest` adds 22 trivia-biased-edit runs on top of the 22×100 (default) from 0.3.1.
+
+### Deferred
+
+- `v2.5` span-rewriting cache remap — the actual performance unlock for single-char edits. Next release slot.
+- `triviaFastPathEnabled=true` safe-grammar whitelist — currently opt-in blanket; could be grammar-analyzer-driven per rule in a future release.
+
 ## [0.3.1] - 2026-04-22
 
 ### Added
