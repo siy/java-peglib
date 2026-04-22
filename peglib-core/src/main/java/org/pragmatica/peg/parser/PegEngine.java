@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * PEG parsing engine - interprets Grammar to parse input text.
@@ -53,8 +54,8 @@ public final class PegEngine implements Parser {
     // path this happens ~150k times parsing the 1,900-LOC Java fixture. The set of distinct keys
     // is bounded by the grammar. Caching only the string (not a full Failure record) keeps
     // Failure.location() accurate per call site; the allocation win is eliding the concat.
-    private final Map<String, String> literalFailureMessageCache = new HashMap<>();
-    private final Map<String, String> charClassFailureMessageCache = new HashMap<>();
+    private final Map<String, String> literalFailureMessageCache = new ConcurrentHashMap<>();
+    private final Map<String, String> charClassFailureMessageCache = new ConcurrentHashMap<>();
 
     // 0.2.4: suggestion vocabulary computed once at engine construction from
     // grammar rules listed under %suggest. Empty when the directive is absent
