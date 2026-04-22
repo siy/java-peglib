@@ -55,15 +55,26 @@ final class SessionImpl implements Session {
     /** Build the initial session after a fresh full parse. */
     static SessionImpl initial(SessionFactory factory, String text, int cursor, CstNode root) {
         var index = NodeIndex.build(root);
-        var enclosing = index.smallestContaining(cursor).or(root);
-        return new SessionImpl(factory, text, root, cursor, enclosing,
-            index, Stats.INITIAL);
+        var enclosing = index.smallestContaining(cursor)
+                             .or(root);
+        return new SessionImpl(factory, text, root, cursor, enclosing, index, Stats.INITIAL);
     }
 
-    @Override public CstNode root() { return root; }
-    @Override public String text() { return text; }
-    @Override public int cursor() { return cursor; }
-    @Override public Stats stats() { return stats; }
+    @Override public CstNode root() {
+        return root;
+    }
+
+    @Override public String text() {
+        return text;
+    }
+
+    @Override public int cursor() {
+        return cursor;
+    }
+
+    @Override public Stats stats() {
+        return stats;
+    }
 
     @Override
     public Session edit(Edit edit) {
@@ -72,12 +83,11 @@ final class SessionImpl implements Session {
         }
         if (edit.offset() > text.length()) {
             throw new IllegalArgumentException(
-                "edit.offset " + edit.offset() + " exceeds text length " + text.length());
+            "edit.offset " + edit.offset() + " exceeds text length " + text.length());
         }
         if (edit.offset() + edit.oldLen() > text.length()) {
             throw new IllegalArgumentException(
-                "edit range [" + edit.offset() + ", " + (edit.offset() + edit.oldLen())
-                + ") exceeds text length " + text.length());
+            "edit range [" + edit.offset() + ", " + (edit.offset() + edit.oldLen()) + ") exceeds text length " + text.length());
         }
         if (edit.isNoOp()) {
             return this;
@@ -85,7 +95,6 @@ final class SessionImpl implements Session {
         long t0 = System.nanoTime();
         var newText = applyEdit(edit);
         int newCursor = shiftCursor(cursor, edit);
-
         // 0.3.2 v2: trivia-only fast-path. Edits whose range is entirely
         // contained in a single trivia run (whitespace or comment body) and
         // whose replacement remains legal trivia content are handled without
@@ -100,18 +109,13 @@ final class SessionImpl implements Session {
             var triviaRoot = TriviaRedistribution.tryTriviaOnlyEdit(root, newText, edit);
             if (triviaRoot != null) {
                 var nextStats = new Stats(
-                    stats.reparseCount() + 1,
-                    stats.fullReparseCount(),
-                    "<trivia>",
-                    0,
-                    System.nanoTime() - t0);
+                stats.reparseCount() + 1, stats.fullReparseCount(), "<trivia>", 0, System.nanoTime() - t0);
                 var nextIndex = NodeIndex.build(triviaRoot);
-                var nextEnclosing = nextIndex.smallestContaining(newCursor).or(triviaRoot);
-                return new SessionImpl(factory, newText, triviaRoot, newCursor,
-                    nextEnclosing, nextIndex, nextStats);
+                var nextEnclosing = nextIndex.smallestContaining(newCursor)
+                                             .or(triviaRoot);
+                return new SessionImpl(factory, newText, triviaRoot, newCursor, nextEnclosing, nextIndex, nextStats);
             }
         }
-
         // Try incremental reparse next.
         var incremental = tryIncrementalReparse(newText, edit);
         if (incremental != null) {
@@ -119,17 +123,18 @@ final class SessionImpl implements Session {
             // leading-trivia direction since parseRuleAt already attaches
             // trivia per 0.2.4 attribution; the seam exists for v2.5+).
             var normalized = TriviaRedistribution.normalizeSplicedTrivia(
-                incremental.newRoot, incremental.spliced);
+            incremental.newRoot, incremental.spliced);
             var nextStats = new Stats(
-                stats.reparseCount() + 1,
-                stats.fullReparseCount(),
-                incremental.ruleName,
-                NodeIndex.flatten(incremental.spliced).size(),
-                System.nanoTime() - t0);
+            stats.reparseCount() + 1,
+            stats.fullReparseCount(),
+            incremental.ruleName,
+            NodeIndex.flatten(incremental.spliced)
+                     .size(),
+            System.nanoTime() - t0);
             var nextIndex = NodeIndex.build(normalized);
-            var nextEnclosing = nextIndex.smallestContaining(newCursor).or(normalized);
-            return new SessionImpl(factory, newText, normalized, newCursor,
-                nextEnclosing, nextIndex, nextStats);
+            var nextEnclosing = nextIndex.smallestContaining(newCursor)
+                                         .or(normalized);
+            return new SessionImpl(factory, newText, normalized, newCursor, nextEnclosing, nextIndex, nextStats);
         }
         // Fall back to a full reparse.
         return fallback(newText, newCursor, t0);
@@ -137,13 +142,14 @@ final class SessionImpl implements Session {
 
     @Override
     public Session moveCursor(int newOffset) {
-        int clamped = Math.max(0, Math.min(newOffset, text.length()));
+        int clamped = Math.max(0,
+                               Math.min(newOffset, text.length()));
         if (clamped == cursor) {
             return this;
         }
-        var newEnclosing = index.smallestContainingFrom(enclosingNode, clamped).or(root);
-        return new SessionImpl(factory, text, root, clamped,
-            newEnclosing, index, stats);
+        var newEnclosing = index.smallestContainingFrom(enclosingNode, clamped)
+                                .or(root);
+        return new SessionImpl(factory, text, root, clamped, newEnclosing, index, stats);
     }
 
     @Override
@@ -151,29 +157,31 @@ final class SessionImpl implements Session {
         long t0 = System.nanoTime();
         var fresh = factory.parseFull(text);
         var freshIndex = NodeIndex.build(fresh);
-        var enclosing = freshIndex.smallestContaining(cursor).or(fresh);
+        var enclosing = freshIndex.smallestContaining(cursor)
+                                  .or(fresh);
         var nextStats = new Stats(
-            stats.reparseCount() + 1,
-            stats.fullReparseCount() + 1,
-            "<root>",
-            NodeIndex.flatten(fresh).size(),
-            System.nanoTime() - t0);
-        return new SessionImpl(factory, text, fresh, cursor,
-            enclosing, freshIndex, nextStats);
+        stats.reparseCount() + 1,
+        stats.fullReparseCount() + 1,
+        "<root>",
+        NodeIndex.flatten(fresh)
+                 .size(),
+        System.nanoTime() - t0);
+        return new SessionImpl(factory, text, fresh, cursor, enclosing, freshIndex, nextStats);
     }
 
     private Session fallback(String newText, int newCursor, long t0) {
         var fresh = factory.parseFull(newText);
         var freshIndex = NodeIndex.build(fresh);
-        var enclosing = freshIndex.smallestContaining(newCursor).or(fresh);
+        var enclosing = freshIndex.smallestContaining(newCursor)
+                                  .or(fresh);
         var nextStats = new Stats(
-            stats.reparseCount() + 1,
-            stats.fullReparseCount() + 1,
-            "<root>",
-            NodeIndex.flatten(fresh).size(),
-            System.nanoTime() - t0);
-        return new SessionImpl(factory, newText, fresh, newCursor,
-            enclosing, freshIndex, nextStats);
+        stats.reparseCount() + 1,
+        stats.fullReparseCount() + 1,
+        "<root>",
+        NodeIndex.flatten(fresh)
+                 .size(),
+        System.nanoTime() - t0);
+        return new SessionImpl(factory, newText, fresh, newCursor, enclosing, freshIndex, nextStats);
     }
 
     /**
@@ -195,15 +203,18 @@ final class SessionImpl implements Session {
         int editStart = edit.offset();
         int editEnd = edit.offset() + edit.oldLen();
         int delta = edit.delta();
-
         // Find the smallest NonTerminal containing [editStart, editEnd] in the pre-edit buffer.
         var pivot = findBoundaryCandidate(editStart, editEnd);
         while (pivot != null) {
-            if (!(pivot instanceof CstNode.NonTerminal nt)) {
-                pivot = index.parentOf(pivot);
+            if (! (pivot instanceof CstNode.NonTerminal nt)) {
+                // TODO(P3): refactor outward walk to monadic chain once
+                // parentOf returns Option (round 2 sibling landed 0.3.4).
+                pivot = index.parentOf(pivot)
+                             .or((CstNode) null);
                 continue;
             }
-            if (factory.fallbackRules().contains(nt.rule())) {
+            if (factory.fallbackRules()
+                       .contains(nt.rule())) {
                 return null;
             }
             var reparsed = reparseAt(nt, newText, delta);
@@ -217,7 +228,10 @@ final class SessionImpl implements Session {
                 var newRoot = TreeSplicer.spliceAndShift(path, nt, reparsedNode, editEnd, delta);
                 return new IncrementalResult(newRoot, reparsedNode, nt.rule());
             }
-            pivot = index.parentOf(nt);
+            // TODO(P3): refactor outward walk to monadic chain once
+            // parentOf returns Option (round 2 sibling landed 0.3.4).
+            pivot = index.parentOf(nt)
+                         .or((CstNode) null);
         }
         return null;
     }
@@ -235,24 +249,40 @@ final class SessionImpl implements Session {
         }
         // Walk up until the node's span encloses the entire edit region.
         while (cursorNode != null) {
-            int spanStart = cursorNode.span().start().offset();
-            int spanEnd = cursorNode.span().end().offset();
+            int spanStart = cursorNode.span()
+                                      .start()
+                                      .offset();
+            int spanEnd = cursorNode.span()
+                                    .end()
+                                    .offset();
             if (spanStart <= editStart && spanEnd >= editEnd) {
                 return cursorNode;
             }
-            cursorNode = index.parentOf(cursorNode);
+            // TODO(P3): refactor outward walk to monadic chain once
+            // parentOf returns Option (round 2 sibling landed 0.3.4).
+            cursorNode = index.parentOf(cursorNode)
+                              .or((CstNode) null);
         }
         // Root didn't contain the edit (e.g., append past EOF): pivot at root itself.
         return root;
     }
 
     private Option<CstNode> reparseAt(CstNode.NonTerminal nt, String newText, int delta) {
-        int startOffset = nt.span().start().offset();
-        int expectedEnd = nt.span().end().offset() + delta;
-        var ruleId = factory.registry().classFor(nt.rule());
-        var partial = factory.parser().parseRuleAt(ruleId, newText, startOffset);
+        int startOffset = nt.span()
+                            .start()
+                            .offset();
+        int expectedEnd = nt.span()
+                            .end()
+                            .offset() + delta;
+        var ruleId = factory.registry()
+                            .classFor(nt.rule());
+        var partial = factory.parser()
+                             .parseRuleAt(ruleId, newText, startOffset);
         return partial.option()
-                      .filter(p -> p.node().span().end().offset() == expectedEnd)
+                      .filter(p -> p.node()
+                                    .span()
+                                    .end()
+                                    .offset() == expectedEnd)
                       .map(p -> p.node());
     }
 
@@ -264,7 +294,9 @@ final class SessionImpl implements Session {
         var sb = new StringBuilder(text.length() + edit.delta());
         sb.append(text, 0, edit.offset());
         sb.append(edit.newText());
-        sb.append(text, edit.offset() + edit.oldLen(), text.length());
+        sb.append(text,
+                  edit.offset() + edit.oldLen(),
+                  text.length());
         return sb.toString();
     }
 
@@ -291,6 +323,8 @@ final class SessionImpl implements Session {
      * {@link #index} inline.
      */
     static Deque<CstNode> debugPathTo(SessionImpl session, CstNode node) {
-        return session.index.pathTo(node) == null ? new ArrayDeque<>() : session.index.pathTo(node);
+        return session.index.pathTo(node) == null
+               ? new ArrayDeque<>()
+               : session.index.pathTo(node);
     }
 }

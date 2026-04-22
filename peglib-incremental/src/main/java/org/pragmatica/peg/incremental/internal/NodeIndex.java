@@ -64,11 +64,11 @@ public final class NodeIndex {
     }
 
     /**
-     * The parent of {@code node}, or {@code null} when {@code node} is the
-     * root (or not present in this index).
+     * The parent of {@code node}, or empty {@link Option} when {@code node}
+     * is the root (or not present in this index).
      */
-    public CstNode parentOf(CstNode node) {
-        return parents.get(node);
+    public Option<CstNode> parentOf(CstNode node) {
+        return Option.option(parents.get(node));
     }
 
     /**
@@ -127,7 +127,7 @@ public final class NodeIndex {
 
     private static CstNode descendTo(CstNode node, int offset) {
         var current = node;
-        outer:
+        outer :
         while (current instanceof CstNode.NonTerminal nt) {
             for (var child : nt.children()) {
                 if (contains(child, offset)) {
@@ -148,7 +148,9 @@ public final class NodeIndex {
      */
     public static boolean contains(CstNode node, int offset) {
         var span = node.span();
-        return offset >= span.start().offset() && offset <= span.end().offset();
+        return offset >= span.start()
+                             .offset() && offset <= span.end()
+                                                        .offset();
     }
 
     /**

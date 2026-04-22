@@ -65,10 +65,11 @@ public final class Actions {
 
     /**
      * Lookup by {@code RuleId} class. Reserved for {@code parseRuleAt} (0.3.0)
-     * dispatch by rule class.
+     * dispatch by rule class. Returns an empty {@link Option} when no lambda
+     * is attached for the given class.
      */
-    public Function<SemanticValues, Object> get(Class< ? extends RuleId> ruleIdClass) {
-        return byClass.get(ruleIdClass);
+    public Option<Function<SemanticValues, Object>> get(Class< ? extends RuleId> ruleIdClass) {
+        return Option.option(byClass.get(ruleIdClass));
     }
 
     /**

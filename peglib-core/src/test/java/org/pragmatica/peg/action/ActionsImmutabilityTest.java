@@ -60,6 +60,6 @@ class ActionsImmutabilityTest {
     @Test
     void get_byClass_equivalentToGetByName() {
         var actions = Actions.empty().with(Number.class, sv -> 7);
-        assertEquals(actions.get("Number").unwrap().apply(null), actions.get(Number.class).apply(null));
+        assertEquals(actions.get("Number").unwrap().apply(null), actions.get(Number.class).unwrap().apply(null));
     }
 }
