@@ -60,7 +60,8 @@ public final class ActionCompiler {
             if (rule.hasAction()) {
                 var result = compileAction(rule);
                 if (result instanceof Result.Failure< ? > f) {
-                    return Result.failure(f.cause());
+                    return f.cause()
+                            .result();
                 }
                 actions.put(rule.name(), result.unwrap());
             }
@@ -74,10 +75,10 @@ public final class ActionCompiler {
     public Result<Action> compileAction(Rule rule) {
         if (rule.action()
                 .isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
+            return new ParseError.SemanticError(
             rule.span()
                 .start(),
-            "Rule '" + rule.name() + "' has no action"));
+            "Rule '" + rule.name() + "' has no action").result();
         }
         var actionCode = rule.action()
                              .unwrap();
@@ -152,8 +153,8 @@ public final class ActionCompiler {
     private Result<Action> compileAndLoad(String className, String sourceCode, SourceLocation location) {
         var compiler = ToolProvider.getSystemJavaCompiler();
         if (compiler == null) {
-            return Result.failure(new ParseError.SemanticError(
-            location, "No Java compiler available. Run with JDK, not JRE."));
+            return new ParseError.SemanticError(
+            location, "No Java compiler available. Run with JDK, not JRE.").result();
         }
         try (var standardFileManager = compiler.getStandardFileManager(null, null, null)) {
             var fileManager = new InMemoryFileManager(standardFileManager);
@@ -162,8 +163,8 @@ public final class ActionCompiler {
             var task = compiler.getTask(
             diagnostics, fileManager, null, List.of("--release", "25"), null, List.of(sourceFile));
             if (!task.call()) {
-                return Result.failure(new ParseError.SemanticError(
-                location, "Action compilation failed: " + diagnostics));
+                return new ParseError.SemanticError(
+                location, "Action compilation failed: " + diagnostics).result();
             }
             var classLoader = new InMemoryClassLoader(fileManager, parentLoader);
             var actionClass = classLoader.loadClass(className);
@@ -171,8 +172,8 @@ public final class ActionCompiler {
                                             .newInstance();
             return Result.success(action);
         } catch (Exception e) {
-            return Result.failure(new ParseError.ActionError(
-            location, sourceCode, e));
+            return new ParseError.ActionError(
+            location, sourceCode, e).result();
         }
     }
 

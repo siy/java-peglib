@@ -1,5 +1,7 @@
 package org.pragmatica.peg.action;
 
+import org.pragmatica.lang.Option;
+
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -54,19 +56,20 @@ public final class Actions {
     }
 
     /**
-     * Lookup by rule name. Returns {@code null} when no lambda is attached
-     * for the given rule. Used by the interpreter's action dispatch.
+     * Lookup by rule name. Returns an empty {@link Option} when no lambda is
+     * attached for the given rule. Used by the interpreter's action dispatch.
      */
-    public Function<SemanticValues, Object> get(String ruleName) {
-        return byName.get(ruleName);
+    public Option<Function<SemanticValues, Object>> get(String ruleName) {
+        return Option.option(byName.get(ruleName));
     }
 
     /**
      * Lookup by {@code RuleId} class. Reserved for {@code parseRuleAt} (0.3.0)
-     * dispatch by rule class.
+     * dispatch by rule class. Returns an empty {@link Option} when no lambda
+     * is attached for the given class.
      */
-    public Function<SemanticValues, Object> get(Class< ? extends RuleId> ruleIdClass) {
-        return byClass.get(ruleIdClass);
+    public Option<Function<SemanticValues, Object>> get(Class< ? extends RuleId> ruleIdClass) {
+        return Option.option(byClass.get(ruleIdClass));
     }
 
     /**

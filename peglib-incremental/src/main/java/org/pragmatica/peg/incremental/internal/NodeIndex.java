@@ -1,5 +1,6 @@
 package org.pragmatica.peg.incremental.internal;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.peg.tree.CstNode;
 
 import java.util.ArrayDeque;
@@ -63,23 +64,23 @@ public final class NodeIndex {
     }
 
     /**
-     * The parent of {@code node}, or {@code null} when {@code node} is the
-     * root (or not present in this index).
+     * The parent of {@code node}, or empty {@link Option} when {@code node}
+     * is the root (or not present in this index).
      */
-    public CstNode parentOf(CstNode node) {
-        return parents.get(node);
+    public Option<CstNode> parentOf(CstNode node) {
+        return Option.option(parents.get(node));
     }
 
     /**
      * Smallest node whose span contains {@code offset}. Returns the root for
-     * any offset within its span; never returns {@code null} unless the root
-     * itself does not contain the offset.
+     * any offset within its span; empty {@link Option} when the root itself
+     * does not contain the offset.
      */
-    public CstNode smallestContaining(int offset) {
+    public Option<CstNode> smallestContaining(int offset) {
         if (!contains(root, offset)) {
-            return null;
+            return Option.none();
         }
-        return descendTo(root, offset);
+        return Option.some(descendTo(root, offset));
     }
 
     /**
@@ -90,7 +91,7 @@ public final class NodeIndex {
      * <p>When {@code start} is not in this index (e.g., session fork), falls
      * back to {@link #smallestContaining(int)} from the root.
      */
-    public CstNode smallestContainingFrom(CstNode start, int offset) {
+    public Option<CstNode> smallestContainingFrom(CstNode start, int offset) {
         if (start == null || !parents.containsKey(start) && start != root) {
             return smallestContaining(offset);
         }
@@ -99,9 +100,9 @@ public final class NodeIndex {
             cursor = parents.get(cursor);
         }
         if (cursor == null) {
-            return null;
+            return Option.none();
         }
-        return descendTo(cursor, offset);
+        return Option.some(descendTo(cursor, offset));
     }
 
     /**
@@ -126,7 +127,7 @@ public final class NodeIndex {
 
     private static CstNode descendTo(CstNode node, int offset) {
         var current = node;
-        outer:
+        outer :
         while (current instanceof CstNode.NonTerminal nt) {
             for (var child : nt.children()) {
                 if (contains(child, offset)) {
@@ -147,7 +148,9 @@ public final class NodeIndex {
      */
     public static boolean contains(CstNode node, int offset) {
         var span = node.span();
-        return offset >= span.start().offset() && offset <= span.end().offset();
+        return offset >= span.start()
+                             .offset() && offset <= span.end()
+                                                        .offset();
     }
 
     /**

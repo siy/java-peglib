@@ -105,17 +105,17 @@ public record Grammar(
             var undefinedRef = findUndefinedReference(rule.expression(), ruleNames);
             if (undefinedRef.isPresent()) {
                 var ref = undefinedRef.unwrap();
-                return Result.failure(new ParseError.SemanticError(
+                return new ParseError.SemanticError(
                 ref.span()
                    .start(),
-                "Undefined rule reference: '" + ref.ruleName() + "'"));
+                "Undefined rule reference: '" + ref.ruleName() + "'").result();
             }
         }
         var indirect = LeftRecursionAnalysis.findIndirectCycle(this);
         if (!indirect.isEmpty()) {
             var chain = String.join(" -> ", indirect);
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "indirect left-recursion detected in rule chain " + chain + "; not supported in 0.2.9"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "indirect left-recursion detected in rule chain " + chain + "; not supported in 0.2.9").result();
         }
         return Result.success(this);
     }

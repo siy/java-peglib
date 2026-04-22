@@ -5,13 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-04-22
+
+Post-roadmap cleanup release. Two rounds of parallel JBCT review (10 focus-area reviewers + docs-backreference + test-coverage audit, run twice) identified priorities. This release lands the P0 (correctness + security) and P1 (highest-leverage mechanical) fixes; architectural refactors remain tracked as P3 items in `docs/AUDIT-REPORTS/CONSOLIDATED-BACKLOG.md`.
+
+### Fixed
+
+- **Thread-safety data race.** `PegEngine`'s per-engine literal / char-class failure-message caches now use `ConcurrentHashMap`. Previous `HashMap` was unsafe under concurrent access through a shared `Parser` instance — contradicted `IncrementalParser`'s documented thread-safety contract, which is now honored in practice. Upgraded to `computeIfAbsent` in round 2 for atomic populate-on-miss.
+- **Playground server hardening.**
+  - Path traversal: static-file handler rejects `..` segments, control chars, backslashes, and anything outside a strict allowlist before resolving classpath resources.
+  - Request-body size cap: `POST /parse` reads at most 1 MiB; larger requests get HTTP 413 before parsing begins.
+  - Security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
+  - Locale-safe `toUpperCase(Locale.ROOT)` replaces locale-sensitive uppercasing in `PlaygroundServer` and `PlaygroundRepl` (prevents the Turkish-i bug on `RecoveryStrategy.valueOf`).
+
+### Changed
+
+- `Actions#get(String)` and `Actions#get(Class<? extends RuleId>)` now return `Option<Action>` / `Option<Function<SemanticValues, Object>>` instead of raw nullable types. Callers use `.onPresent(...)` or `.or(...)`. **This is a minor API break**; consumer sites in `PegEngine.mergeActions` and the project's own tests migrated; external consumers need a one-line update.
+- `NodeIndex#smallestContaining(int)`, `NodeIndex#smallestContainingFrom(CstNode, int)`, and `NodeIndex#parentOf(CstNode)` now return `Option<CstNode>` — null sentinels removed from the incremental-parser's navigation surface.
+- `SessionImpl#reparseAt(...)` and related helpers propagate `Option<CstNode>` end-to-end; the `fold(cause -> null, ...)` anti-pattern that silently swallowed failure is gone.
+- `PegEngine.whitespaceFirstChars` and the underlying `FirstCharAnalysis.whitespaceFirstChars(...)` now use Pragmatica `Option` rather than `java.util.Optional`.
+- `Result.failure(cause)` → `cause.result()` mechanical rewrite across `peglib-core`, `peglib-incremental`, `peglib-formatter`, `peglib-maven-plugin`, `peglib-playground` main sources (~50 sites). String-literal templates inside `ParserGenerator` that emit generated-parser code remain untouched.
+- `PlaygroundEngine.parseWithRecovery` no longer uses the `Option.or((String) null)` anti-pattern — rewritten via `Option.filter(...).fold(...)`.
+- `ParsingContext.getCachedAt` replaces hand-rolled null-check with `Option.option(...).map(CacheEntry::result)`.
+- Defensive null-checks removed from `JsonEncoder.writeNode` / `writeString` and `ParseTracer.visit` / `countTrivia` / `countNodes` — sealed `CstNode` hierarchy and by-construction non-null children make them dead code.
+
+### Added
+
+- `docs/AUDIT-REPORTS/` directory with four artefacts from the review rounds:
+  - `docs-backreference.md` — per-release feature matrix (impl / docs / wiring ✓/✗/partial).
+  - `docs-fixups-needed.md` — CHANGELOG drift fix list (resolved in this release).
+  - `test-coverage-proof.md` — assertion-strength audit (proven / partial / smoke / missing).
+  - `tests-fixups-needed.md` — test gaps identified.
+  - `CONSOLIDATED-BACKLOG.md` — P0/P1/P2/P3-DEFERRED findings across 10 JBCT focus areas.
+- New tests in `LeftRecursionTest`: asserts left-leaning CST shape on `1+2+3` — a right-recursive workaround would fail this assertion, proving the feature is real.
+- New smoke test in `RuleRecoveryTest` for `%recover` directive with a documented follow-up (current implementation produces identical diagnostics on the tested input; full proof test needs deeper %recover wiring audit — tracked as P3).
+
+### Fixed (CHANGELOG drift)
+
+- CHANGELOG entries for 0.2.7, 0.3.2, 0.3.3 contained inaccurate usage snippets (mentioned non-existent `repl` / `server` sub-commands, `IncrementalParser.builder(...)` method, missing `HardLine` / `Docs.hardline()` from the `Doc` enumeration). Corrected to match actual API surface.
+
+### Deferred (P3-DEFERRED — see `docs/AUDIT-REPORTS/CONSOLIDATED-BACKLOG.md`)
+
+Architectural refactors surfaced by the audit but intentionally not shipped in 0.3.4:
+
+- Parse-don't-validate refactor: collapse `Grammar#validate()` into a factory returning `Result<Grammar>`.
+- Factory naming: `of()` / `create()` / `at()` → `typeName()` across ~20 public API sites.
+- `SessionImpl` → record rename away from `*Impl` anti-pattern.
+- Mojo `execute()` decomposition to Result pipelines + `@Contract` boundaries.
+- `Formatter` mutable builder → immutable `FormatterConfig` + builder.
+- Mass test-idiom rewrite: `assertTrue(result.isSuccess())` → `.onFailure(Assertions::fail).onSuccess(...)` (~1000 sites).
+- `@Contract` annotations on all CLI `main` / Maven Mojo boundary methods.
+- `parseRequestBody` / HttpHandler IOException propagation → `Result.lift` boundary.
+- `PegEngine.createWithoutActions` throw → `Result<PegEngine>` symmetry with `create(...)`.
+- Action-dispatch try/catch boundary → `Result.lift` with typed `Cause`.
+- Trivia round-trip completion (rule-exit pos-rewind + baseline regen) — still the primary outstanding feature from the 0.2.4 deferral.
+
+### Tests
+
+- Aggregate: **874 passing**, 1 skipped (pre-existing `RoundTripTest`), 0 failures, 0 errors.
+- `peglib-core`: 676 (+2 new). `peglib-incremental`: 100. `peglib-formatter`: 66. `peglib-maven-plugin`: 5. `peglib-playground`: 27 (+5 adversarial smoke tests).
+
+### Notes
+
+- This release is mostly internal cleanup + minor API tightening on two low-traffic methods (`Actions#get`, `NodeIndex#parentOf` / `smallestContaining`). The primary public API surface (`PegParser`, `ParserConfig`, `Grammar`, `CstNode`, `IncrementalParser.initialize` / `edit`) is unchanged.
+- P3-deferred items are now fully enumerated in-repo, sized, and ready for a future maintenance arc.
+
 ## [0.3.3] - 2026-04-22
 
 ### Added
 
 - **`peglib-formatter` module — pretty-printer framework v1.** Wadler-Lindig doc algebra + rule DSL + renderer. Lets grammar authors write declarative formatters in Java with minimal boilerplate. Final release in the roadmap from `docs/bench-results/` era — closes `peglib` as a complete language-tool substrate (parser → incremental reparse → formatter).
 - Public API in `org.pragmatica.peg.formatter`:
-  - `Doc` sealed interface with records: `Text`, `Line`, `Softline`, `Group`, `Indent`, `Concat`, `Empty`.
+  - `Doc` sealed interface with records: `Text`, `Line`, `HardLine`, `Softline`, `Group`, `Indent`, `Concat`, `Empty`.
   - `Docs` static builders: `text(String)`, `line()`, `softline()`, `group(Doc...)`, `indent(int, Doc)`, `concat(Doc...)`, `empty()`.
   - `FormatterRule` — functional interface `(FormatContext, List<Doc> childDocs) -> Doc`.
   - `Formatter` — fluent builder with `.rule(name, lambda)`, `.defaultIndent(n)`, `.maxLineWidth(n)`, `.format(CstNode) → Result<String>`.
@@ -40,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Trivia-aware reparse splice** in `peglib-incremental`. New internal `TriviaRedistribution` helper redistributes `leadingTrivia` / `trailingTrivia` between a spliced subtree and its neighbors after `TreeSplicer` runs.
-- **Trivia-only edit fast-path** in `SessionImpl` — detects edits that land entirely within trivia regions and patches the CST without reinvoking the parser. Flag-gated via `IncrementalParser.builder(...).triviaFastPathEnabled(true)` — **default off** because grammars like Java allow whitespace to affect tokenisation (e.g., deleting whitespace between `>>` changes parse).
+- **Trivia-only edit fast-path** in `SessionImpl` — detects edits that land entirely within trivia regions and patches the CST without reinvoking the parser. Flag-gated via `IncrementalParser.create(grammar, config, /*triviaFastPathEnabled=*/true)` — **default off** because grammars like Java allow whitespace to affect tokenisation (e.g., deleting whitespace between `>>` changes parse).
 - **`IncrementalBenchmark` (JMH)** in `peglib-incremental/src/jmh/java/`, behind the `bench` Maven profile. Parametrized over `{initialize, singleCharEdit, wordEdit, lineEdit, fullReparse, undoRestore}` variants against the 1,900-LOC fixture. Smoke result committed at `docs/bench-results/incremental-v1-smoke.json`.
 
 ### Performance
@@ -220,8 +285,8 @@ Infrastructure-only minor-bump release. No new user-facing features beyond the `
 ### Added
 
 - New `peglib-playground/` sibling module shipping a grammar REPL and web UI:
-  - **CLI REPL:** `java -jar peglib-playground-0.2.7-uber.jar repl <grammar.peg>` — watches the grammar file, re-parses on save, exposes a prompt for input strings. Meta-commands: `:trace`, `:quit`, config toggles.
-  - **Web UI:** `java -jar peglib-playground-0.2.7-uber.jar server [--port 8080]` — embedded `com.sun.net.httpserver.HttpServer` serving a three-pane SPA (grammar / input / output) plus controls strip (start-rule selector, packrat toggle, CST/AST toggle, trivia show/hide, recovery strategy picker, auto-refresh). `POST /parse` returns `{ok, tree, diagnostics, stats}` JSON. Neutral styling (system font stack, muted palette).
+  - **CLI REPL** via `PlaygroundRepl.main(...)` — watches the grammar file, re-parses on save, exposes a prompt for input strings. Meta-commands: `:trace`, `:quit`, config toggles. Invoke via `java -cp peglib-playground-0.2.7-uber.jar org.pragmatica.peg.playground.PlaygroundRepl <grammar.peg>`.
+  - **Web UI** via `PlaygroundServer.main(...)` — embedded `com.sun.net.httpserver.HttpServer` serving a three-pane SPA (grammar / input / output) plus controls strip (start-rule selector, packrat toggle, CST/AST toggle, trivia show/hide, recovery strategy picker, auto-refresh). `POST /parse` returns `{ok, tree, diagnostics, stats}` JSON. Uber-jar's main class is `PlaygroundServer`, so `java -jar peglib-playground-0.2.7-uber.jar [port]` starts the server directly. Neutral styling (system font stack, muted palette).
   - **ParseTracer:** strictly additive, post-parse walker that synthesizes rule-entry/exit events, cache-hit statistics, node/trivia counts. No engine hooks; no impact on parse performance when not attached.
 - New documentation `docs/PLAYGROUND.md` covering CLI usage, web UI, HTTP API, programmatic access, tracer limitations, and scope boundaries. README cross-linked.
 

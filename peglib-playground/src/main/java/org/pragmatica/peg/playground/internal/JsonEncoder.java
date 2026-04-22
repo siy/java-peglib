@@ -79,10 +79,6 @@ public final class JsonEncoder {
     }
 
     private static void writeNode(StringBuilder sb, CstNode node) {
-        if (node == null) {
-            sb.append("null");
-            return;
-        }
         sb.append('{');
         sb.append("\"kind\":");
         writeString(sb, nodeKind(node));
@@ -208,10 +204,6 @@ public final class JsonEncoder {
     }
 
     private static void writeString(StringBuilder sb, String s) {
-        if (s == null) {
-            sb.append("null");
-            return;
-        }
         sb.append('"');
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

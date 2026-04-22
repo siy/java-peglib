@@ -25,8 +25,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * PEG parsing engine - interprets Grammar to parse input text.
@@ -39,7 +39,7 @@ public final class PegEngine implements Parser {
     // Phase-1 optimization: cached first-char set for skipWhitespace fast-path (§6.6).
     // Present iff the grammar has a %whitespace rule whose shape is analyzable.
     // Unconditional-on for the interpreter; no flag gates this.
-    private final Optional<Set<Character>> whitespaceFirstChars;
+    private final Option<Set<Character>> whitespaceFirstChars;
 
     // 0.2.9: direct-left-recursive rule names. Empty for grammars without LR
     // (hot path: no extra work per rule entry). When non-empty, parseRule()
@@ -53,8 +53,8 @@ public final class PegEngine implements Parser {
     // path this happens ~150k times parsing the 1,900-LOC Java fixture. The set of distinct keys
     // is bounded by the grammar. Caching only the string (not a full Failure record) keeps
     // Failure.location() accurate per call site; the allocation win is eliding the concat.
-    private final Map<String, String> literalFailureMessageCache = new HashMap<>();
-    private final Map<String, String> charClassFailureMessageCache = new HashMap<>();
+    private final Map<String, String> literalFailureMessageCache = new ConcurrentHashMap<>();
+    private final Map<String, String> charClassFailureMessageCache = new ConcurrentHashMap<>();
 
     // 0.2.4: suggestion vocabulary computed once at engine construction from
     // grammar rules listed under %suggest. Empty when the directive is absent
@@ -121,10 +121,10 @@ public final class PegEngine implements Parser {
         }
     }
 
-    private static Optional<Set<Character>> computeWhitespaceFirstChars(Grammar grammar) {
+    private static Option<Set<Character>> computeWhitespaceFirstChars(Grammar grammar) {
         if (grammar.whitespace()
                    .isEmpty()) {
-            return Optional.empty();
+            return Option.none();
         }
         var inner = ExpressionShape.extractInnerExpression(grammar.whitespace()
                                                                   .unwrap());
@@ -188,8 +188,8 @@ public final class PegEngine implements Parser {
         }
         for (var skip : config.packratSkipRules()) {
             if (lrRules.contains(skip)) {
-                return Result.failure(new ParseError.SemanticError(
-                SourceLocation.START, "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules"));
+                return new ParseError.SemanticError(
+                SourceLocation.START, "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules").result();
             }
         }
         return Result.success(grammar);
@@ -209,10 +209,9 @@ public final class PegEngine implements Parser {
         }
         var merged = new HashMap<>(inlineActions);
         for (var rule : grammar.rules()) {
-            var lambda = lambdaActions.get(rule.name());
-            if (lambda != null) {
-                merged.put(rule.name(), lambda::apply);
-            }
+            lambdaActions.get(rule.name())
+                         .onPresent(lambda -> merged.put(rule.name(),
+                                                         lambda::apply));
         }
         return merged;
     }
@@ -221,8 +220,8 @@ public final class PegEngine implements Parser {
     public Result<CstNode> parseCst(String input) {
         var startRule = grammar.effectiveStartRule();
         if (startRule.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "No start rule defined in grammar"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "No start rule defined in grammar").result();
         }
         return parseCst(input,
                         startRule.unwrap()
@@ -233,23 +232,24 @@ public final class PegEngine implements Parser {
     public Result<CstNode> parseCst(String input, String startRule) {
         var ruleOpt = grammar.rule(startRule);
         if (ruleOpt.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Unknown rule: " + startRule));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Unknown rule: " + startRule).result();
         }
         var ctx = ParsingContext.create(input, grammar, config);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRule(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return Result.failure(buildParseError(result, ctx, input));
+            return buildParseError(result, ctx, input)
+                   .result();
         }
         // Capture trailing trivia
         var trailingTrivia = skipWhitespace(ctx);
         // Check if we consumed all input
         if (!ctx.isAtEnd()) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             ctx.location(),
             String.valueOf(ctx.peek()),
-            "end of input"));
+            "end of input").result();
         }
         var success = (ParseResult.Success) result;
         // Attach trailing trivia to root node
@@ -273,8 +273,8 @@ public final class PegEngine implements Parser {
     public Result<Object> parse(String input) {
         var startRule = grammar.effectiveStartRule();
         if (startRule.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "No start rule defined in grammar"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "No start rule defined in grammar").result();
         }
         return parse(input,
                      startRule.unwrap()
@@ -285,22 +285,23 @@ public final class PegEngine implements Parser {
     public Result<Object> parse(String input, String startRule) {
         var ruleOpt = grammar.rule(startRule);
         if (ruleOpt.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Unknown rule: " + startRule));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Unknown rule: " + startRule).result();
         }
         var ctx = ParsingContext.create(input, grammar, config);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRuleWithActions(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return Result.failure(buildParseError(result, ctx, input));
+            return buildParseError(result, ctx, input)
+                   .result();
         }
         // Skip trailing whitespace before checking end
         skipWhitespace(ctx);
         if (!ctx.isAtEnd()) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             ctx.location(),
             String.valueOf(ctx.peek()),
-            "end of input"));
+            "end of input").result();
         }
         var success = (ParseResult.Success) result;
         return Result.success(success.semanticValueOpt()
@@ -363,29 +364,30 @@ public final class PegEngine implements Parser {
     @Override
     public Result<PartialParse> parseRuleAt(Class< ? extends RuleId> ruleId, String input, int offset) {
         if (ruleId == null) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Rule id class is null"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Rule id class is null").result();
         }
         if (input == null) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Input is null"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Input is null").result();
         }
         if (offset < 0 || offset > input.length()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Offset " + offset + " out of range [0, " + input.length() + "]"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Offset " + offset + " out of range [0, " + input.length() + "]").result();
         }
         var ruleName = resolveRuleName(ruleId);
         var ruleOpt = grammar.rule(ruleName);
         if (ruleOpt.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Unknown rule for class " + ruleId.getSimpleName() + ": " + ruleName));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Unknown rule for class " + ruleId.getSimpleName() + ": " + ruleName).result();
         }
         var ctx = ParsingContext.create(input, grammar, config);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         ctx.restoreLocation(computeLocation(input, offset));
         var result = parseRule(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return Result.failure(buildParseError(result, ctx, input));
+            return buildParseError(result, ctx, input)
+                   .result();
         }
         var success = (ParseResult.Success) result;
         return Result.success(new PartialParse(success.node(), ctx.pos()));
@@ -1043,11 +1045,7 @@ public final class PegEngine implements Parser {
      * {@code updateFurthest} so diagnostics quality is unchanged.
      */
     private ParseResult literalFailureAt(ParsingContext ctx, String text) {
-        var msg = literalFailureMessageCache.get(text);
-        if (msg == null) {
-            msg = "'" + text + "'";
-            literalFailureMessageCache.put(text, msg);
-        }
+        var msg = literalFailureMessageCache.computeIfAbsent(text, t -> "'" + t + "'");
         ctx.updateFurthest(msg);
         return ParseResult.Failure.at(ctx.location(), msg);
     }
@@ -1161,13 +1159,10 @@ public final class PegEngine implements Parser {
         var key = cc.negated()
                   ? "^" + cc.pattern()
                   : cc.pattern();
-        var msg = charClassFailureMessageCache.get(key);
-        if (msg == null) {
-            msg = "[" + (cc.negated()
-                         ? "^"
-                         : "") + cc.pattern() + "]";
-            charClassFailureMessageCache.put(key, msg);
-        }
+        var msg = charClassFailureMessageCache.computeIfAbsent(key,
+                                                               k -> "[" + (cc.negated()
+                                                                           ? "^"
+                                                                           : "") + cc.pattern() + "]");
         ctx.updateFurthest(msg);
         return ParseResult.Failure.at(ctx.location(), msg);
     }
@@ -1408,7 +1403,7 @@ public final class PegEngine implements Parser {
         // §6.6 fast-path: if the current char cannot begin any whitespace-rule
         // alternative, return the shared empty list without any allocation.
         if (whitespaceFirstChars.isPresent() && !ctx.isAtEnd()) {
-            var firstChars = whitespaceFirstChars.get();
+            var firstChars = whitespaceFirstChars.unwrap();
             if (!firstChars.contains(ctx.peek())) {
                 return List.of();
             }

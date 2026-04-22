@@ -128,9 +128,6 @@ public final class ParseTracer {
         int trivia;
 
         void visit(CstNode node) {
-            if (node == null) {
-                return;
-            }
             nodes++;
             trivia += node.leadingTrivia().size() + node.trailingTrivia().size();
             int offset = node.span().start().offset();
@@ -201,9 +198,6 @@ public final class ParseTracer {
      * need the count without constructing a WalkResult.
      */
     public static int countTrivia(CstNode root) {
-        if (root == null) {
-            return 0;
-        }
         int count = root.leadingTrivia().size() + root.trailingTrivia().size();
         if (root instanceof CstNode.NonTerminal nt) {
             for (var child : nt.children()) {
@@ -217,9 +211,6 @@ public final class ParseTracer {
      * Count nodes recursively.
      */
     public static int countNodes(CstNode root) {
-        if (root == null) {
-            return 0;
-        }
         int count = 1;
         if (root instanceof CstNode.NonTerminal nt) {
             for (var child : nt.children()) {

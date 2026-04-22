@@ -1,11 +1,13 @@
 package org.pragmatica.peg.grammar;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.PegParser;
 import org.pragmatica.peg.error.RecoveryStrategy;
 import org.pragmatica.peg.grammar.analysis.LeftRecursionAnalysis;
 import org.pragmatica.peg.parser.ParserConfig;
+import org.pragmatica.peg.tree.CstNode;
 
 import java.util.Set;
 
@@ -91,6 +93,39 @@ class LeftRecursionTest {
             var cst = parser.parseCst("42");
 
             assertThat(cst.isSuccess()).as("parse lone 42").isTrue();
+        }
+
+        @Test
+        void leftAssociativeAdditionChain_producesLeftLeaningCst() {
+            // Grammar with direct left-recursion. Expected tree shape for
+            // "1+2+3" is left-leaning:
+            //   Expr(Expr(Expr(Term(1)) + Term(2)) + Term(3))
+            // A right-recursive workaround would produce the opposite shape:
+            //   Expr(Term(1) + Expr(Term(2) + Expr(Term(3))))
+            // Test: the outer Expr's first non-terminal content child must
+            // itself be an Expr (containing "1+2"), not a bare Term.
+            var parser = PegParser.fromGrammar("""
+                Expr <- Expr '+' Term / Term
+                Term <- [0-9]+
+                """)
+                .onFailure(cause -> Assertions.fail(cause.message()))
+                .unwrap();
+            var cst = parser.parseCst("1+2+3")
+                            .onFailure(cause -> Assertions.fail(cause.message()))
+                            .unwrap();
+
+            assertThat(cst).isInstanceOf(CstNode.NonTerminal.class);
+            var outer = (CstNode.NonTerminal) cst;
+            assertThat(outer.rule()).isEqualTo("Expr");
+
+            var firstContent = outer.children().stream()
+                                    .filter(c -> c instanceof CstNode.NonTerminal)
+                                    .findFirst()
+                                    .orElseThrow();
+            assertThat(firstContent).isInstanceOf(CstNode.NonTerminal.class);
+            assertThat(((CstNode.NonTerminal) firstContent).rule())
+                .as("left-recursive tree: outer Expr's first subtree must itself be an Expr (containing 1+2), not a bare Term")
+                .isEqualTo("Expr");
         }
     }
 

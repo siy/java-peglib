@@ -1,11 +1,11 @@
 package org.pragmatica.peg.grammar.analysis;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 
 import java.util.HashSet;
 import java.util.LinkedHashSet;
-import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -24,7 +24,7 @@ public final class FirstCharAnalysis {
 
     /**
      * Derive the set of characters that can legally start a whitespace-rule
-     * match. Returns empty {@link Optional} when the shape of the expression
+     * match. Returns empty {@link Option} when the shape of the expression
      * is not analyzable (caller must fall back to the always-slow path).
      *
      * @param grammar the grammar providing rule resolution for {@link Expression.Reference}s
@@ -32,15 +32,15 @@ public final class FirstCharAnalysis {
      *             (after stripping the outer {@code ZeroOrMore}/{@code OneOrMore})
      * @return the set of potential first chars, or empty if shape unsupported
      */
-    public static Optional<Set<Character>> whitespaceFirstChars(Grammar grammar, Expression expr) {
+    public static Option<Set<Character>> whitespaceFirstChars(Grammar grammar, Expression expr) {
         var set = new LinkedHashSet<Character>();
         if (!collectFirstChars(grammar, expr, set, new HashSet<>())) {
-            return Optional.empty();
+            return Option.none();
         }
         if (set.isEmpty()) {
-            return Optional.empty();
+            return Option.none();
         }
-        return Optional.of(set);
+        return Option.some(set);
     }
 
     /**

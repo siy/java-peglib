@@ -16,7 +16,9 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Embedded HTTP server for the peglib playground. Binds to localhost on the
@@ -32,6 +34,10 @@ import java.util.Map;
 public final class PlaygroundServer {
     private static final int DEFAULT_PORT = 8080;
     private static final int STATIC_READ_BUFFER = 4096;
+    /** Max size of an inbound request body (1 MiB). Larger bodies are rejected with HTTP 413. */
+    private static final int MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+    /** Allow-list for static-asset paths after slash normalization. */
+    private static final Pattern STATIC_PATH_ALLOWLIST = Pattern.compile("^/[A-Za-z0-9._/-]*$");
 
     private final HttpServer httpServer;
     private final int port;
@@ -79,7 +85,17 @@ public final class PlaygroundServer {
         }
         String body;
         try (InputStream in = exchange.getRequestBody()) {
-            body = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            // Read one more byte than the cap — if the stream still has data,
+            // the request exceeds the limit and is rejected without buffering
+            // the whole payload.
+            byte[] bytes = in.readNBytes(MAX_REQUEST_BODY_BYTES + 1);
+            if (bytes.length > MAX_REQUEST_BODY_BYTES) {
+                sendJson(exchange, 413,
+                         Map.of("error", "payload too large",
+                                "detail", "request body exceeds " + MAX_REQUEST_BODY_BYTES + " bytes"));
+                return;
+            }
+            body = new String(bytes, StandardCharsets.UTF_8);
         }
         ParseRequest request;
         try {
@@ -135,7 +151,7 @@ public final class PlaygroundServer {
             return RecoveryStrategy.BASIC;
         }
         try {
-            return RecoveryStrategy.valueOf(raw.toUpperCase());
+            return RecoveryStrategy.valueOf(raw.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             return RecoveryStrategy.BASIC;
         }
@@ -169,21 +185,67 @@ public final class PlaygroundServer {
             return;
         }
         URI uri = exchange.getRequestURI();
-        String path = uri.getPath();
-        if (path == null || path.isEmpty() || path.equals("/")) {
-            path = "/index.html";
-        }
-        String resourcePath = "/playground" + path;
-        byte[] body = readResource(resourcePath);
-        if (body == null) {
-            sendPlain(exchange, 404, "not found: " + path);
+        String rawPath = uri.getPath();
+        String safePath = sanitizeStaticPath(rawPath);
+        if (safePath == null) {
+            sendPlain(exchange, 400, "bad request");
             return;
         }
-        exchange.getResponseHeaders().add("Content-Type", contentType(path));
+        String resourcePath = "/playground" + safePath;
+        byte[] body = readResource(resourcePath);
+        if (body == null) {
+            sendPlain(exchange, 404, "not found: " + safePath);
+            return;
+        }
+        addSecurityHeaders(exchange);
+        exchange.getResponseHeaders().add("Content-Type", contentType(safePath));
         exchange.sendResponseHeaders(200, body.length);
         try (var out = exchange.getResponseBody()) {
             out.write(body);
         }
+    }
+
+    /**
+     * Normalise and validate a static-asset path from an inbound URI. Rejects
+     * traversal segments ({@code ..}), backslashes, control characters, and
+     * anything not matching the {@link #STATIC_PATH_ALLOWLIST} regex after
+     * collapsing repeated slashes. Returns the sanitized path or {@code null}
+     * when the input is unsafe.
+     */
+    static String sanitizeStaticPath(String rawPath) {
+        if (rawPath == null || rawPath.isEmpty() || rawPath.equals("/")) {
+            return "/index.html";
+        }
+        for (int i = 0; i < rawPath.length(); i++) {
+            char c = rawPath.charAt(i);
+            if (c < 0x20 || c == '\\') {
+                return null;
+            }
+        }
+        // Collapse repeated slashes; reject any ".." segment.
+        String collapsed = rawPath.replaceAll("/+", "/");
+        for (var segment : collapsed.split("/")) {
+            if ("..".equals(segment)) {
+                return null;
+            }
+        }
+        if (!STATIC_PATH_ALLOWLIST.matcher(collapsed).matches()) {
+            return null;
+        }
+        return collapsed;
+    }
+
+    /**
+     * Attach a conservative set of security headers to every response. Applied
+     * to both JSON and static routes so tests or intermediaries can rely on
+     * their presence.
+     */
+    private static void addSecurityHeaders(HttpExchange exchange) {
+        var headers = exchange.getResponseHeaders();
+        headers.add("X-Content-Type-Options", "nosniff");
+        headers.add("X-Frame-Options", "DENY");
+        headers.add("Referrer-Policy", "no-referrer");
+        headers.add("Cache-Control", "no-store");
     }
 
     private static byte[] readResource(String path) throws IOException {
@@ -213,6 +275,7 @@ public final class PlaygroundServer {
     // === response helpers ===
     private static void sendJson(HttpExchange exchange, int status, Object payload) throws IOException {
         byte[] body = JsonEncoder.encode(payload).getBytes(StandardCharsets.UTF_8);
+        addSecurityHeaders(exchange);
         exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
         exchange.sendResponseHeaders(status, body.length);
         try (var out = exchange.getResponseBody()) {
@@ -222,6 +285,7 @@ public final class PlaygroundServer {
 
     private static void sendPlain(HttpExchange exchange, int status, String message) throws IOException {
         byte[] body = message.getBytes(StandardCharsets.UTF_8);
+        addSecurityHeaders(exchange);
         exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=utf-8");
         exchange.sendResponseHeaders(status, body.length);
         try (var out = exchange.getResponseBody()) {

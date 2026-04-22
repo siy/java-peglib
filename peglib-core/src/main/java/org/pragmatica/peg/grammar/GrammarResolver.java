@@ -82,25 +82,26 @@ public final class GrammarResolver {
             // of G.R only collides with a root rule literally named "G_R".
             var localName = imp.localName();
             if (rootRuleNames.contains(localName)) {
-                return Result.failure(new ParseError.SemanticError(
+                return new ParseError.SemanticError(
                 imp.span()
                    .start(),
                 "Import name collision: '" + localName
-                + "' is already defined in the root grammar; add 'as <LocalName>' to rename"));
+                + "' is already defined in the root grammar; add 'as <LocalName>' to rename").result();
             }
             if (composedRules.containsKey(localName)) {
                 // Two imports resolved to the same local name — a hard error.
-                return Result.failure(new ParseError.SemanticError(
+                return new ParseError.SemanticError(
                 imp.span()
                    .start(),
-                "Import name collision: '" + localName + "' already imported; use different aliases"));
+                "Import name collision: '" + localName + "' already imported; use different aliases").result();
             }
             var importedGrammar = loadGrammarOrFail(imp.grammarName(),
                                                     imp.span()
                                                        .start(),
                                                     List.of(imp.grammarName()));
             if (importedGrammar instanceof Result.Failure<Grammar> f) {
-                return Result.failure(f.cause());
+                return f.cause()
+                        .result();
             }
             var g = importedGrammar.unwrap();
             // Detect cycle in the imports of the imported grammar, starting from
@@ -110,15 +111,16 @@ public final class GrammarResolver {
             var cycleCheck = detectCycle(g,
                                          new ArrayList<>(List.of(imp.grammarName())));
             if (cycleCheck instanceof Result.Failure<Boolean> f) {
-                return Result.failure(f.cause());
+                return f.cause()
+                        .result();
             }
             // Build transitive closure of rule names needed from this imported grammar.
             var ruleMap = g.ruleMap();
             if (!ruleMap.containsKey(imp.ruleName())) {
-                return Result.failure(new ParseError.SemanticError(
+                return new ParseError.SemanticError(
                 imp.span()
                    .start(),
-                "Imported rule '" + imp.ruleName() + "' not found in grammar '" + imp.grammarName() + "'"));
+                "Imported rule '" + imp.ruleName() + "' not found in grammar '" + imp.grammarName() + "'").result();
             }
             var closure = new LinkedHashSet<String>();
             collectClosure(imp.ruleName(), ruleMap, closure);
@@ -176,15 +178,16 @@ public final class GrammarResolver {
         }
         var loaded = source.load(grammarName);
         if (loaded.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
+            return new ParseError.SemanticError(
             errorLocation,
             "Grammar '" + grammarName + "' not found via configured GrammarSource" + " (import chain: " + String.join(" -> ",
                                                                                                                       chain)
-            + ")"));
+            + ")").result();
         }
         var parsed = GrammarParser.parse(loaded.unwrap());
         if (parsed instanceof Result.Failure<Grammar> f) {
-            return Result.failure(f.cause());
+            return f.cause()
+                    .result();
         }
         var g = parsed.unwrap();
         loadedGrammars.put(grammarName, g);
@@ -198,22 +201,24 @@ public final class GrammarResolver {
     private Result<Boolean> detectCycle(Grammar g, List<String> chain) {
         for (var imp : g.imports()) {
             if (chain.contains(imp.grammarName())) {
-                return Result.failure(new ParseError.SemanticError(
+                return new ParseError.SemanticError(
                 imp.span()
                    .start(),
-                "Cyclic grammar import detected: " + String.join(" -> ", chain) + " -> " + imp.grammarName()));
+                "Cyclic grammar import detected: " + String.join(" -> ", chain) + " -> " + imp.grammarName()).result();
             }
             var loaded = loadGrammarOrFail(imp.grammarName(),
                                            imp.span()
                                               .start(),
                                            appendChain(chain, imp.grammarName()));
             if (loaded instanceof Result.Failure<Grammar> f) {
-                return Result.failure(f.cause());
+                return f.cause()
+                        .result();
             }
             var newChain = appendChain(chain, imp.grammarName());
             var sub = detectCycle(loaded.unwrap(), newChain);
             if (sub instanceof Result.Failure<Boolean> f) {
-                return Result.failure(f.cause());
+                return f.cause()
+                        .result();
             }
         }
         return Result.success(true);

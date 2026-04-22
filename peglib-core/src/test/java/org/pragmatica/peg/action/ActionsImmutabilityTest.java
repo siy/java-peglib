@@ -32,7 +32,7 @@ class ActionsImmutabilityTest {
         assertTrue(base.isEmpty());
         assertEquals(0, base.size());
         assertEquals(1, extended.size());
-        assertNull(base.get("Number"));
+        assertTrue(base.get("Number").isEmpty());
     }
 
     @Test
@@ -43,8 +43,8 @@ class ActionsImmutabilityTest {
         assertNotSame(step1, step2);
         assertEquals(1, step1.size());
         assertEquals(2, step2.size());
-        assertNull(step1.get("Sum"));
-        assertEquals(Integer.valueOf(2), step2.get("Sum").apply(null));
+        assertTrue(step1.get("Sum").isEmpty());
+        assertEquals(Integer.valueOf(2), step2.get("Sum").unwrap().apply(null));
     }
 
     @Test
@@ -53,13 +53,13 @@ class ActionsImmutabilityTest {
         var second = first.with(Number.class, sv -> 99);
 
         assertEquals(1, second.size());
-        assertEquals(Integer.valueOf(99), second.get("Number").apply(null));
-        assertEquals(Integer.valueOf(1), first.get("Number").apply(null));
+        assertEquals(Integer.valueOf(99), second.get("Number").unwrap().apply(null));
+        assertEquals(Integer.valueOf(1), first.get("Number").unwrap().apply(null));
     }
 
     @Test
     void get_byClass_equivalentToGetByName() {
         var actions = Actions.empty().with(Number.class, sv -> 7);
-        assertEquals(actions.get("Number").apply(null), actions.get(Number.class).apply(null));
+        assertEquals(actions.get("Number").unwrap().apply(null), actions.get(Number.class).unwrap().apply(null));
     }
 }
