@@ -11,6 +11,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 - **Trivia preservation** - Whitespace and comments captured for round-trip transformations
 - **Advanced error recovery** - Continue parsing after errors with Rust-style diagnostics
 - **Packrat memoization** - O(n) parsing complexity
+- **Direct left-recursion** - Warth-style seed-and-grow (0.2.9); see [GRAMMAR-DSL.md](docs/GRAMMAR-DSL.md#left-recursion)
 - **Source code generation** - Generate standalone parser Java files
 - **Java 25** - Uses latest Java features (records, sealed interfaces, pattern matching)
 
@@ -22,7 +23,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.2.8</version>
+    <version>0.2.9</version>
 </dependency>
 ```
 
@@ -353,7 +354,7 @@ The `peglib-maven-plugin` module (separate artifact, sibling to `peglib`) wraps 
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.2.8</version>
+    <version>0.2.9</version>
     <executions>
         <execution>
             <goals>

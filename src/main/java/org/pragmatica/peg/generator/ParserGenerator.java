@@ -105,12 +105,37 @@ public final class ParserGenerator {
                             String className,
                             ErrorReporting errorReporting,
                             ParserConfig config) {
+        validateConfig(grammar, config);
         this.grammar = grammar;
         this.packageName = packageName;
         this.className = className;
         this.errorReporting = errorReporting;
         this.config = config;
         this.inWhitespaceRuleGeneration = false;
+    }
+
+    /**
+     * 0.2.9 — reject configurations that would produce incorrect generated code
+     * for left-recursive grammars. Currently enforces the rule that LR rules
+     * cannot appear in {@link ParserConfig#packratSkipRules()}: the Warth
+     * seed-and-grow loop requires the packrat cache to persist seeds across
+     * iterations.
+     */
+    private static void validateConfig(Grammar grammar, ParserConfig config) {
+        if (!config.selectivePackrat() || config.packratSkipRules()
+                                                .isEmpty()) {
+            return;
+        }
+        var lrRules = grammar.leftRecursiveRules();
+        if (lrRules.isEmpty()) {
+            return;
+        }
+        for (var skip : config.packratSkipRules()) {
+            if (lrRules.contains(skip)) {
+                throw new IllegalArgumentException(
+                "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules");
+            }
+        }
     }
 
     public static ParserGenerator create(Grammar grammar, String packageName, String className) {
@@ -1944,6 +1969,12 @@ public final class ParserGenerator {
                 private int line;
                 private int column;
                 private Map<Long, CstParseResult> cache;
+                // 0.2.9: in-flight growing seeds for direct left-recursive rules.
+                // Keyed by the same (ruleId, position) encoding as cache. When an
+                // entry is present, a Warth seed-and-grow loop is active for that
+                // rule at that position and self-recursive calls should return the
+                // current seed instead of re-entering the body.
+                private Map<Long, CstParseResult> growingSeeds;
                 private Map<String, String> captures;
                 private int tokenBoundaryDepth;
                 private boolean skippingWhitespace;
@@ -1987,6 +2018,7 @@ public final class ParserGenerator {
                     this.line = 1;
                     this.column = 1;
                     this.cache = packratEnabled ? new HashMap<>() : null;
+                    this.growingSeeds = new HashMap<>();
                     this.captures = new HashMap<>();
                     this.tokenBoundaryDepth = 0;
                     this.furthestFailure = Option.none();
@@ -2319,6 +2351,16 @@ public final class ParserGenerator {
         var methodName = "parse_" + sanitize(rule.name());
         var ruleName = rule.name();
         boolean inlineLocations = config.inlineLocations();
+        // 0.2.9: direct left-recursive rules are emitted as a thin seed-and-grow
+        // wrapper around the original body emission. The wrapper dispatches to
+        // parse_<rule>_body() whose contents are the unchanged rule method.
+        boolean leftRecursive = grammar.leftRecursiveRules()
+                                       .contains(ruleName);
+        if (leftRecursive) {
+            emitCstLeftRecursiveWrapper(sb, rule, ruleId);
+            generateCstRuleBodyMethod(sb, rule, ruleId);
+            return;
+        }
         // §7.4 selective packrat: when the flag is on AND this rule's (unsanitized) name is in
         // the skip-set, omit the cache lookup and cache put within this rule method. The cache
         // field itself and its use by other rules are preserved. When either the flag is off
@@ -2421,6 +2463,162 @@ public final class ParserGenerator {
             sb.append("        if (cache != null) cache.put(key, finalResult);\n");
         }
         sb.append("        return finalResult;\n");
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * 0.2.9 — emit a Warth-style seed-and-grow wrapper for a directly left-recursive
+     * rule. The wrapper handles cache lookup, seed-and-grow iteration, leading-trivia
+     * attribution, and delegates the rule body parsing to {@code parse_<rule>_body()}.
+     *
+     * <p>Cut inside an LR rule freezes the current seed: when the body returns a
+     * cut-failure during a growth iteration, the wrapper stops growing and uses the
+     * last successful seed.
+     */
+    private void emitCstLeftRecursiveWrapper(StringBuilder sb, Rule rule, int ruleId) {
+        var methodName = "parse_" + sanitize(rule.name());
+        var bodyMethodName = methodName + "_body";
+        var ruleName = rule.name();
+        var ruleIdConst = toConstantName(ruleName);
+        boolean inlineLocations = config.inlineLocations();
+        sb.append("    // 0.2.9: Warth seed-and-grow wrapper for left-recursive rule ")
+          .append(ruleName)
+          .append("\n");
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("() {\n");
+        if (inlineLocations) {
+            sb.append("        int startOffset = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
+        }else {
+            sb.append("        var startLoc = location();\n");
+        }
+        sb.append("        long key = cacheKey(")
+          .append(ruleId)
+          .append(", ")
+          .append(inlineLocations
+                  ? "startOffset"
+                  : "startLoc.offset()")
+          .append(");\n");
+        // Settled cache hit — return immediately.
+        sb.append("        if (cache != null) {\n");
+        sb.append("            var cached = cache.get(key);\n");
+        sb.append("            if (cached != null) {\n");
+        sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation.unwrap());\n");
+        sb.append("                return cached;\n");
+        sb.append("            }\n");
+        sb.append("        }\n");
+        // Growing-seed hit — self-recursive call observes the current seed.
+        sb.append("        var activeSeed = growingSeeds.get(key);\n");
+        sb.append("        if (activeSeed != null) {\n");
+        sb.append("            if (activeSeed.isSuccess()) restoreLocation(activeSeed.endLocation.unwrap());\n");
+        sb.append("            return activeSeed;\n");
+        sb.append("        }\n");
+        // Capture leading whitespace & carried pending at the outer level.
+        sb.append("        var carriedLeading = takePendingLeading();\n");
+        sb.append("        var localLeadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+        sb.append("        var leadingTrivia = concatTrivia(carriedLeading, localLeadingTrivia);\n");
+        sb.append("        int bodyStartPos = pos;\n");
+        sb.append("        int bodyStartLine = line;\n");
+        sb.append("        int bodyStartColumn = column;\n");
+        sb.append("        // Seed with Failure so the first recursive self-invocation sees a failing base.\n");
+        sb.append("        CstParseResult lastSeed = CstParseResult.failure(\"left-recursion seed\");\n");
+        sb.append("        growingSeeds.put(key, lastSeed);\n");
+        sb.append("        boolean cutFired = false;\n");
+        sb.append("        while (true) {\n");
+        sb.append("            pos = bodyStartPos;\n");
+        sb.append("            line = bodyStartLine;\n");
+        sb.append("            column = bodyStartColumn;\n");
+        sb.append("            var iter = ")
+          .append(bodyMethodName)
+          .append("();\n");
+        sb.append("            if (iter.isCutFailure()) { cutFired = true; break; }\n");
+        sb.append("            if (iter.isFailure()) break;\n");
+        sb.append("            int newEnd = iter.endLocation.unwrap().offset();\n");
+        sb.append("            int prevEnd = lastSeed.isSuccess() ? lastSeed.endLocation.unwrap().offset() : bodyStartPos;\n");
+        sb.append("            if (newEnd <= prevEnd) break;\n");
+        sb.append("            lastSeed = iter;\n");
+        sb.append("            growingSeeds.put(key, lastSeed);\n");
+        sb.append("        }\n");
+        sb.append("        growingSeeds.remove(key);\n");
+        sb.append("        CstParseResult finalResult;\n");
+        sb.append("        if (lastSeed.isSuccess()) {\n");
+        sb.append("            restoreLocation(lastSeed.endLocation.unwrap());\n");
+        sb.append("            var node = attachLeadingTrivia(lastSeed.node.unwrap(), leadingTrivia);\n");
+        sb.append("            finalResult = CstParseResult.success(node, lastSeed.text.or(\"\"), lastSeed.endLocation.unwrap());\n");
+        sb.append("        } else {\n");
+        if (inlineLocations) {
+            sb.append("            this.pos = startOffset;\n");
+            sb.append("            this.line = startLine;\n");
+            sb.append("            this.column = startColumn;\n");
+        }else {
+            sb.append("            restoreLocation(startLoc);\n");
+        }
+        sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        if (rule.hasErrorMessage()) {
+            sb.append("            finalResult = CstParseResult.failure(\"")
+              .append(escape(rule.errorMessage()
+                                 .unwrap()))
+              .append("\");\n");
+        }else if (rule.hasExpected()) {
+            sb.append("            trackFailure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("            finalResult = CstParseResult.failure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
+        }else if (rule.hasTag()) {
+            sb.append("            finalResult = cutFired ? CstParseResult.cutFailure(\"cut inside left-recursive rule '")
+              .append(escape(ruleName))
+              .append("'\") : lastSeed;\n");
+        }else {
+            sb.append("            finalResult = cutFired ? CstParseResult.cutFailure(\"cut inside left-recursive rule '")
+              .append(escape(ruleName))
+              .append("'\") : lastSeed;\n");
+        }
+        sb.append("        }\n");
+        sb.append("        if (cache != null) cache.put(key, finalResult);\n");
+        sb.append("        return finalResult;\n");
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * 0.2.9 — emit the body helper for an LR rule. This is the equivalent of
+     * {@link #generateCstRuleMethod} but:
+     *   - uses the {@code _body} method name
+     *   - skips cache lookup/store (handled by the wrapper)
+     *   - skips leading-trivia capture (handled by the wrapper)
+     *   - skips custom %expected / %error substitution (handled by the wrapper)
+     *   - returns the raw body result so the wrapper can decide growth
+     */
+    private void generateCstRuleBodyMethod(StringBuilder sb, Rule rule, int ruleId) {
+        var bodyMethodName = "parse_" + sanitize(rule.name()) + "_body";
+        var ruleName = rule.name();
+        var ruleIdConst = toConstantName(ruleName);
+        sb.append("    private CstParseResult ")
+          .append(bodyMethodName)
+          .append("() {\n");
+        sb.append("        var startLoc = location();\n");
+        sb.append("        var children = new ArrayList<CstNode>();\n");
+        sb.append("        var __ruleName = ")
+          .append(ruleIdConst)
+          .append(";\n");
+        sb.append("        \n");
+        var counter = new int[]{0};
+        generateCstExpressionCode(sb, rule.expression(), "result", 2, true, counter, false);
+        sb.append("        \n");
+        sb.append("        if (result.isSuccess()) {\n");
+        sb.append("            var endLoc = location();\n");
+        sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
+        sb.append("            var node = wrapWithRuleName(result, children, span, ")
+          .append(ruleIdConst)
+          .append(", List.<Trivia>of());\n");
+        sb.append("            return CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
+        sb.append("        }\n");
+        sb.append("        return result;\n");
         sb.append("    }\n\n");
     }
 
@@ -4119,6 +4317,32 @@ public final class ParserGenerator {
                     combined.addAll(first);
                     combined.addAll(second);
                     return List.copyOf(combined);
+                }
+
+                private CstNode attachLeadingTrivia(CstNode node, List<Trivia> leadingTrivia) {
+                    if (leadingTrivia.isEmpty()) {
+                        return node;
+                    }
+                    return switch (node) {
+                        case CstNode.Terminal t -> new CstNode.Terminal(
+                            t.span(), t.rule(), t.text(), leadingTrivia, t.trailingTrivia()
+                        );
+                        case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
+                            nt.span(), nt.rule(), nt.children(), leadingTrivia, nt.trailingTrivia()
+                        );
+                        case CstNode.Token tok -> new CstNode.Token(
+                            tok.span(), tok.rule(), tok.text(), leadingTrivia, tok.trailingTrivia()
+                        );
+            """);
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("""
+                            case CstNode.Error err -> new CstNode.Error(
+                                err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia()
+                            );
+                """);
+        }
+        sb.append("""
+                    };
                 }
 
                 private CstNode attachTrailingTrivia(CstNode node, List<Trivia> trailingTrivia) {

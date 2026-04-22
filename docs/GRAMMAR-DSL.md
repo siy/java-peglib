@@ -21,6 +21,7 @@ repeated here.
 5. [Analyzer](#analyzer)
 6. [Programmatic action attachment (lambda actions)](#programmatic-action-attachment)
 7. [Grammar composition (`%import`)](#grammar-composition)
+8. [Direct left-recursion (0.2.9)](#left-recursion)
 
 ## Cut operator
 
@@ -478,6 +479,68 @@ Built-in `GrammarSource` strategies:
 
 If your root grammar declares no `%import` directives, you can keep
 using the two-arg `fromGrammar` overload — no behaviour change.
+
+<a id="left-recursion"></a>
+## Direct left-recursion (0.2.9)
+
+Peglib 0.2.9 supports **direct** left-recursion via Warth-style
+seed-and-grow parsing (Warth et al. 2008, *Packrat Parsers Can Support
+Left Recursion*). A rule is directly left-recursive when it references
+itself as the first element of one of its alternatives:
+
+```peg
+Expr <- Expr '+' Term / Term
+Term <- [0-9]+
+```
+
+This parses left-associatively: `1+2+3` is grouped as `(1+2)+3`.
+
+### Algorithm summary
+
+At rule entry the packrat cache is seeded with `Failure`. The first
+recursive self-invocation sees this seed and fails, so parsing falls
+through to the non-recursive alternative (the base case). That result
+becomes the initial seed. The rule body is then re-parsed in a loop
+using the current seed; each iteration that consumes strictly more
+input replaces the seed. Growth stops when the seed stabilizes.
+
+### Scope and limitations
+
+- **Direct only.** Indirect left-recursion (`A → B → A`) is *not*
+  supported. `Grammar.validate()` rejects such grammars with a clear
+  error message:
+  `indirect left-recursion detected in rule chain A -> B -> A; not supported in 0.2.9`.
+- **Cut inside an LR rule freezes the current seed.** When a `^` cut
+  fires during a growth iteration, the seed is taken as final and no
+  further growth is attempted.
+- **`selectivePackrat` × LR.** A left-recursive rule cannot appear in
+  `ParserConfig.packratSkipRules()`. The Warth seed-and-grow loop
+  requires the packrat cache to persist seeds across iterations;
+  skipping the cache for an LR rule would break correctness. This is
+  enforced at engine/generator construction time with a configuration
+  error.
+- **Actions-on-LR.** In 0.2.9, rule actions on left-recursive rules are
+  not supported. Calling `parse()` on an LR grammar routes the LR rule
+  through the CST seed-and-grow path; inline and lambda actions on LR
+  rules will not receive aggregated semantic values from recursive
+  iterations. Use CST-level parsing (`parseCst` / `parseAst`) for LR
+  grammars.
+
+### Detection API
+
+`Grammar.leftRecursiveRules()` returns the set of directly
+left-recursive rule names:
+
+```java
+var grammar = GrammarParser.parse(grammarText).unwrap();
+Set<String> lrRules = grammar.leftRecursiveRules();
+// -> {"Expr"} for the grammar above
+```
+
+Lower-level detection is also exposed via
+`LeftRecursionAnalysis.directLeftRecursiveRules(grammar)` and
+`LeftRecursionAnalysis.findIndirectCycle(grammar)` for analyzer /
+tooling integrations.
 
 ## Related
 

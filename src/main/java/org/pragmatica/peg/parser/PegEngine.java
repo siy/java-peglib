@@ -40,6 +40,12 @@ public final class PegEngine implements Parser {
     // Unconditional-on for the interpreter; no flag gates this.
     private final Optional<Set<Character>> whitespaceFirstChars;
 
+    // 0.2.9: direct-left-recursive rule names. Empty for grammars without LR
+    // (hot path: no extra work per rule entry). When non-empty, parseRule()
+    // dispatches into the Warth seed-and-grow loop for these rules instead of
+    // the regular single-pass path.
+    private final Set<String> leftRecursiveRules;
+
     // Phase-1 optimization: per-engine caches for the quoted "'text'" and "[...]" / "[^...]"
     // expected-message strings (§6.5). The String concatenation "'" + text + "'" allocates a
     // StringBuilder + final String on every literal/char-class failure — in the hot backtracking
@@ -60,6 +66,7 @@ public final class PegEngine implements Parser {
         this.actions = Map.copyOf(actions);
         this.whitespaceFirstChars = computeWhitespaceFirstChars(grammar);
         this.suggestionVocabulary = computeSuggestionVocabulary(grammar);
+        this.leftRecursiveRules = grammar.leftRecursiveRules();
     }
 
     private static List<String> computeSuggestionVocabulary(Grammar grammar) {
@@ -124,6 +131,10 @@ public final class PegEngine implements Parser {
     }
 
     public static Result<PegEngine> create(Grammar grammar, ParserConfig config) {
+        var configCheck = validateConfig(grammar, config);
+        if (configCheck.isFailure()) {
+            return configCheck.map(unused -> (PegEngine) null);
+        }
         // Compile all actions in the grammar
         var compiler = ActionCompiler.create();
         return compiler.compileGrammar(grammar)
@@ -137,6 +148,10 @@ public final class PegEngine implements Parser {
      * counterparts.
      */
     public static Result<PegEngine> create(Grammar grammar, ParserConfig config, Actions lambdaActions) {
+        var configCheck = validateConfig(grammar, config);
+        if (configCheck.isFailure()) {
+            return configCheck.map(unused -> (PegEngine) null);
+        }
         var compiler = ActionCompiler.create();
         return compiler.compileGrammar(grammar)
                        .map(inlineActions -> new PegEngine(grammar,
@@ -145,7 +160,38 @@ public final class PegEngine implements Parser {
     }
 
     public static PegEngine createWithoutActions(Grammar grammar, ParserConfig config) {
+        var configCheck = validateConfig(grammar, config);
+        if (configCheck.isFailure()) {
+            throw new IllegalArgumentException(
+            ((ParseError.SemanticError) configCheck.fold(c -> c, r -> null)).reason());
+        }
         return new PegEngine(grammar, config, Map.of());
+    }
+
+    /**
+     * 0.2.9 — validate the runtime configuration against the grammar. Currently
+     * enforces the rule that a left-recursive rule cannot appear in
+     * {@link ParserConfig#packratSkipRules()} when
+     * {@link ParserConfig#selectivePackrat()} is enabled: LR rules require the
+     * packrat cache to hold the Warth seed during growth, so skipping the
+     * cache would break correctness.
+     */
+    private static Result<Grammar> validateConfig(Grammar grammar, ParserConfig config) {
+        if (!config.selectivePackrat() || config.packratSkipRules()
+                                                .isEmpty()) {
+            return Result.success(grammar);
+        }
+        var lrRules = grammar.leftRecursiveRules();
+        if (lrRules.isEmpty()) {
+            return Result.success(grammar);
+        }
+        for (var skip : config.packratSkipRules()) {
+            if (lrRules.contains(skip)) {
+                return Result.failure(new ParseError.SemanticError(
+                SourceLocation.START, "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules"));
+            }
+        }
+        return Result.success(grammar);
     }
 
     /**
@@ -483,12 +529,18 @@ public final class PegEngine implements Parser {
 
     // === Rule Parsing ===
     private ParseResult parseRule(ParsingContext ctx, Rule rule) {
+        // 0.2.9: dispatch to Warth seed-and-grow for direct left-recursive rules.
+        // Non-LR rules take the original fast path unchanged.
+        if (leftRecursiveRules.contains(rule.name())) {
+            return parseRuleWithLeftRecursion(ctx, rule);
+        }
         var startPos = ctx.pos();
         var startLoc = ctx.location();
         // Check packrat cache at START position
-        var cached = ctx.getCachedAt(rule.name(), startPos);
-        if (cached.isPresent()) {
-            var result = cached.unwrap();
+        var cachedEntry = ctx.getCachedEntryAt(rule.name(), startPos);
+        if (cachedEntry.isPresent()) {
+            var entry = cachedEntry.unwrap();
+            var result = entry.result();
             if (result.isSuccess()) {
                 var success = (ParseResult.Success) result;
                 ctx.restoreLocation(success.endLocation());
@@ -554,10 +606,158 @@ public final class PegEngine implements Parser {
     }
 
     /**
+     * 0.2.9 — Warth-style seed-and-grow parsing for a directly left-recursive
+     * rule. See Warth et al. 2008, "Packrat Parsers Can Support Left Recursion."
+     *
+     * <p>Algorithm:
+     * <ol>
+     *   <li>At rule entry, check the cache at pre-whitespace {@code startPos}.
+     *       If an entry exists with {@code growing=true}, return the current
+     *       seed (the recursive self-reference sees the current seed instead
+     *       of re-entering the body).</li>
+     *   <li>If no entry exists, seed the cache with a growing {@code Failure}
+     *       and parse the body. On the first iteration the self-reference
+     *       returns {@code Failure}, so the rule's non-recursive alternative
+     *       (e.g. the base case) succeeds and becomes the initial seed.</li>
+     *   <li>Iteratively reparse the body. After each successful iteration,
+     *       if the new result consumed strictly more input than the previous
+     *       seed, update the seed and loop; otherwise stop.</li>
+     *   <li>Mark the final entry {@code growing=false} and return it.</li>
+     * </ol>
+     *
+     * <p>Cut interaction: if a {@code ^} cut fires inside a growing iteration
+     * (i.e. the body returns {@link ParseResult.CutFailure}), the current seed
+     * is frozen as-is and no further growth is attempted. This matches the
+     * documented 0.2.9 behaviour: cut-inside-LR forces the current seed final.
+     */
+    private ParseResult parseRuleWithLeftRecursion(ParsingContext ctx, Rule rule) {
+        var startPos = ctx.pos();
+        var startLoc = ctx.location();
+        // Cache hit: either a settled entry (from a previous top-level call)
+        // or a growing entry from an in-progress outer invocation (the self-
+        // reference case). Both paths return the cached result directly —
+        // the outer loop is responsible for driving further iterations.
+        var cachedEntry = ctx.getCachedEntryAt(rule.name(), startPos);
+        if (cachedEntry.isPresent()) {
+            var entry = cachedEntry.unwrap();
+            var result = entry.result();
+            if (result.isSuccess()) {
+                var success = (ParseResult.Success) result;
+                ctx.restoreLocation(success.endLocation());
+            }
+            return result;
+        }
+        // Claim caller's pending-leading + our own leading whitespace. The
+        // trivia snapshot lives across all growth iterations; each iteration
+        // re-enters the body at the same post-whitespace position.
+        var carriedLeading = ctx.takePendingLeadingTrivia();
+        var localTrivia = skipWhitespace(ctx);
+        List<Trivia> ruleLeading = carriedLeading.isEmpty()
+                                   ? localTrivia
+                                   : (localTrivia.isEmpty()
+                                      ? carriedLeading
+                                      : concatTrivia(carriedLeading, localTrivia));
+        int bodyStartPos = ctx.pos();
+        var bodyStartLoc = ctx.location();
+        // Seed with Failure so the first recursive self-invocation sees a
+        // failing base and falls through to the non-recursive alternative.
+        int generation = 0;
+        var seedFailure = ParseResult.Failure.at(startLoc, "left-recursion seed");
+        ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.seed(seedFailure, generation));
+        boolean pushedRecover = false;
+        if (rule.hasRecover()) {
+            ctx.pushRecoveryOverride(rule.recover()
+                                         .unwrap());
+            pushedRecover = true;
+        }
+        ParseResult lastSeed = seedFailure;
+        boolean cutFired = false;
+        try{
+            while (true) {
+                // Rewind to the body-start position so each iteration parses
+                // the same physical text with the latest seed in the cache.
+                ctx.restoreLocation(bodyStartLoc);
+                var iter = parseExpressionWithMode(ctx, rule.expression(), rule.name(), ParseMode.standard());
+                // Cut-inside-LR: freeze the current seed and exit the loop.
+                if (iter instanceof ParseResult.CutFailure) {
+                    cutFired = true;
+                    break;
+                }
+                if (iter.isFailure()) {
+                    // Body no longer matches; keep the previous seed as final.
+                    break;
+                }
+                var success = (ParseResult.Success) iter;
+                int newEnd = success.endLocation()
+                                    .offset();
+                int prevEnd = lastSeed.isSuccess()
+                              ? ((ParseResult.Success) lastSeed).endLocation()
+                                             .offset()
+                              : bodyStartPos;
+                if (newEnd <= prevEnd) {
+                    // Seed stabilized — stop growing.
+                    break;
+                }
+                // Wrap the seed with the rule name so self-references observe
+                // it as an Expr-named child (matching the non-LR wrapWithRuleName
+                // behaviour at parseRule exit). Leading-trivia is consumed at
+                // the outer level only; intermediate seeds carry an empty list.
+                var wrapped = wrapWithRuleName(success.node(), rule.name(), List.of());
+                var wrappedSeed = ParseResult.Success.of(wrapped, success.endLocation());
+                lastSeed = wrappedSeed;
+                generation++ ;
+                ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.seed(lastSeed, generation));
+            }
+        } finally{
+            if (pushedRecover) {
+                ctx.popRecoveryOverride();
+            }
+        }
+        // Publish the settled result at the pre-whitespace position.
+        ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.settled(lastSeed));
+        if (lastSeed instanceof ParseResult.Success finalSuccess) {
+            ctx.restoreLocation(finalSuccess.endLocation());
+            // Re-wrap at the outer level with leadingTrivia attached. The inner
+            // wrap used an empty leading list for self-reference purposes.
+            var outerNode = attachLeadingTrivia(finalSuccess.node(), ruleLeading);
+            return ParseResult.Success.of(outerNode, ctx.location());
+        }
+        // Failure path — restore the original caller state and re-deposit
+        // pending-leading so enclosing backtracking combinators can roll back.
+        ctx.restoreLocation(startLoc);
+        if (!carriedLeading.isEmpty()) {
+            ctx.appendPendingLeadingTrivia(carriedLeading);
+        }
+        if (rule.hasErrorMessage()) {
+            return ParseResult.Failure.at(startLoc,
+                                          rule.errorMessage()
+                                              .unwrap());
+        }
+        if (rule.hasExpected()) {
+            var label = rule.expected()
+                            .unwrap();
+            ctx.updateFurthest(label);
+            return ParseResult.Failure.at(startLoc, label);
+        }
+        if (cutFired) {
+            return ParseResult.CutFailure.at(startLoc, "cut inside left-recursive rule '" + rule.name() + "'");
+        }
+        return lastSeed;
+    }
+
+    /**
      * Parse rule with action execution.
      * Collects child semantic values and executes rule action if present.
      */
     private ParseResult parseRuleWithActions(ParsingContext ctx, Rule rule) {
+        // 0.2.9: actions-on-LR is not supported in this release; delegate to
+        // the CST seed-and-grow path so parsing terminates without collecting
+        // child semantic values. Callers invoking parse() on a grammar with LR
+        // rules will still get a CST-level result; action evaluation on LR
+        // rules is scoped out.
+        if (leftRecursiveRules.contains(rule.name())) {
+            return parseRuleWithLeftRecursion(ctx, rule);
+        }
         var startPos = ctx.pos();
         var startLoc = ctx.location();
         // Claim pending-leading (caller deposit) + this rule's leading ws. Same
@@ -1586,6 +1786,27 @@ public final class PegEngine implements Parser {
             nt.span(), ruleName, nt.children(), leadingTrivia, nt.trailingTrivia());
             case CstNode.Token tok -> new CstNode.Token(
             tok.span(), ruleName, tok.text(), leadingTrivia, tok.trailingTrivia());
+            case CstNode.Error err -> new CstNode.Error(
+            err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia());
+        };
+    }
+
+    /**
+     * Attach leading trivia to a node without changing its rule name. Used by
+     * {@link #parseRuleWithLeftRecursion} to apply outer leading-trivia after
+     * the seed-and-grow loop has stored wrapped seeds with empty leading lists.
+     */
+    private CstNode attachLeadingTrivia(CstNode node, List<Trivia> leadingTrivia) {
+        if (leadingTrivia.isEmpty()) {
+            return node;
+        }
+        return switch (node) {
+            case CstNode.Terminal t -> new CstNode.Terminal(
+            t.span(), t.rule(), t.text(), leadingTrivia, t.trailingTrivia());
+            case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
+            nt.span(), nt.rule(), nt.children(), leadingTrivia, nt.trailingTrivia());
+            case CstNode.Token tok -> new CstNode.Token(
+            tok.span(), tok.rule(), tok.text(), leadingTrivia, tok.trailingTrivia());
             case CstNode.Error err -> new CstNode.Error(
             err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia());
         };

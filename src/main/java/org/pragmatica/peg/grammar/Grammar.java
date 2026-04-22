@@ -3,9 +3,12 @@ package org.pragmatica.peg.grammar;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.error.ParseError;
+import org.pragmatica.peg.grammar.analysis.LeftRecursionAnalysis;
+import org.pragmatica.peg.tree.SourceLocation;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -86,7 +89,13 @@ public record Grammar(
     }
 
     /**
-     * Validate the grammar for undefined references.
+     * Validate the grammar for undefined references and unsupported recursion
+     * shapes.
+     *
+     * <p>0.2.9: rejects grammars that contain <b>indirect</b> left-recursion
+     * (cycle length &gt; 1 in the left-position reference graph). Direct
+     * left-recursion ({@code Expr <- Expr '+' Term / Term}) is supported via
+     * Warth-style seeding. See {@link LeftRecursionAnalysis}.
      */
     public Result<Grammar> validate() {
         var ruleNames = rules.stream()
@@ -102,7 +111,23 @@ public record Grammar(
                 "Undefined rule reference: '" + ref.ruleName() + "'"));
             }
         }
+        var indirect = LeftRecursionAnalysis.findIndirectCycle(this);
+        if (!indirect.isEmpty()) {
+            var chain = String.join(" -> ", indirect);
+            return Result.failure(new ParseError.SemanticError(
+            SourceLocation.START, "indirect left-recursion detected in rule chain " + chain + "; not supported in 0.2.9"));
+        }
         return Result.success(this);
+    }
+
+    /**
+     * 0.2.9 — the set of directly left-recursive rule names in this grammar.
+     * Computed on demand from {@link LeftRecursionAnalysis}. Empty when the
+     * grammar has no LR rules (the common case). Engines and generators use
+     * this set to wrap each LR rule's body in a Warth seed-and-grow loop.
+     */
+    public Set<String> leftRecursiveRules() {
+        return LeftRecursionAnalysis.directLeftRecursiveRules(this);
     }
 
     /**
