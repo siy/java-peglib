@@ -269,6 +269,22 @@ Total P3-DEFERRED items carried forward: **~45** (22 explicit entries + ~23 aggr
 
 ---
 
+## Round 2 residuals
+
+Surfaced while completing the round-2 sibling fixes (`NodeIndex.parentOf` → `Option`, `Actions.get(Class)` → `Option`, `computeIfAbsent` on failure caches, `whitespaceFirstChars` → Pragmatica `Option`). Not in scope for round 2; captured here for future rounds.
+
+- **[P3-DEFERRED]** `PegEngine.createWithoutActions` throws `IllegalArgumentException` on config failure — should return `Result<PegEngine>` for symmetry with `create(...)`. File: `peglib-core/src/main/java/org/pragmatica/peg/parser/PegEngine.java:164`. Tag: `[JBCT-no-business-exceptions]`.
+- **[P3-DEFERRED]** PegEngine action dispatch uses try/catch around lambda invocation (~line 905) — should use `Result.lift` at the boundary to convert exceptions from user action code into typed `Cause`s. File: `peglib-core/src/main/java/org/pragmatica/peg/parser/PegEngine.java:905`. Tag: `[JBCT-adapter-boundary]`.
+- **[P3-DEFERRED]** Playground `parseRequestBody` throws `IllegalArgumentException` on malformed JSON — should return `Result<ParseRequest>`. File: `peglib-playground/src/main/java/org/pragmatica/peg/playground/PlaygroundServer.java`. Tag: `[JBCT-no-business-exceptions]`.
+- **[P3-DEFERRED]** Playground `HttpHandler` methods propagate `IOException` — the HTTP-boundary adapter should use `Result.lift` to convert into a typed `Cause` and translate to an HTTP error response at the edge. File: `peglib-playground/src/main/java/org/pragmatica/peg/playground/PlaygroundServer.java`. Tag: `[JBCT-adapter-boundary]`.
+- **[P3-DEFERRED]** `SessionImpl.tryIncrementalReparse` returns `null` to signal fall-back to full reparse — should return `Option<IncrementalResult>`. File: `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/internal/SessionImpl.java:194`. Tag: `[JBCT-no-null]`.
+- **[P3-DEFERRED]** `SessionImpl.findBoundaryCandidate` uses a null-terminated outward walk; callers likewise use `.or(null)` bridges (marked `TODO(P3)`) after the round-2 `parentOf → Option` flip. Convert to `Stream.iterate(start, Objects::nonNull, index::parentOf)` or a recursive helper that returns `Option<CstNode>`. Files: `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/internal/SessionImpl.java:194, 231`. Tag: `[JBCT-no-null]` + `[JBCT-lambda-rules]`.
+- **[P3-DEFERRED]** `SessionImpl.edit` throws `IllegalArgumentException` for null/out-of-range edits — should return `Result<Session>`. File: `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/internal/SessionImpl.java:80`. Tag: `[JBCT-no-business-exceptions]`.
+- **[P3-DEFERRED]** `ParsingContext.recoveryOverrideStack.peek()` returns nullable — should wrap with `Option.option(...)` at read sites. File: `peglib-core/src/main/java/org/pragmatica/peg/parser/ParsingContext.java`. Tag: `[JBCT-no-null]`.
+- **[P3-DEFERRED]** `ParsingContext` uses an anonymous `LinkedHashMap` subclass to implement a bounded cache (`removeEldestEntry` override) — extract to a named `BoundedLinkedHashMap<K,V>` class for testability and for consistency with other cache types in the codebase. File: `peglib-core/src/main/java/org/pragmatica/peg/parser/ParsingContext.java`. Tag: `[JBCT-validated-constructors]`.
+
+---
+
 ## Round 1 Summary
 
 - **Commits planned:** 8 on `cleanup-round-1` branch.
