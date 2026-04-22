@@ -5,6 +5,7 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.peg.action.Action;
 import org.pragmatica.peg.action.ActionCompiler;
 import org.pragmatica.peg.action.Actions;
+import org.pragmatica.peg.action.RuleId;
 import org.pragmatica.peg.action.SemanticValues;
 import org.pragmatica.peg.error.Diagnostic;
 import org.pragmatica.peg.error.ParseError;
@@ -343,6 +344,91 @@ public final class PegEngine implements Parser {
         }
         // Advanced recovery: try to parse fragments with error collection
         return parseWithRecovery(ctx, ruleOpt.unwrap(), input);
+    }
+
+    /**
+     * 0.3.0 — parse a specific rule starting at a given offset. See
+     * {@link Parser#parseRuleAt(Class, String, int)}.
+     *
+     * <p>The rule is resolved from {@code ruleId.name()} (defaults to
+     * {@link Class#getSimpleName()}, matching the sanitized rule-name
+     * convention used by {@link org.pragmatica.peg.generator.ParserGenerator}).
+     * The parsing context is positioned at {@code offset} with a computed
+     * line/column, then {@link #parseRule(ParsingContext, Rule)} is invoked.
+     * Trailing whitespace after the rule is not consumed here — the
+     * returned {@link PartialParse#endOffset()} is the absolute offset
+     * immediately after the rule's matched span (including trailing trivia
+     * attached by the rule itself).
+     */
+    @Override
+    public Result<PartialParse> parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset) {
+        if (ruleId == null) {
+            return Result.failure(new ParseError.SemanticError(
+            SourceLocation.START, "Rule id class is null"));
+        }
+        if (input == null) {
+            return Result.failure(new ParseError.SemanticError(
+            SourceLocation.START, "Input is null"));
+        }
+        if (offset < 0 || offset > input.length()) {
+            return Result.failure(new ParseError.SemanticError(
+            SourceLocation.START,
+            "Offset " + offset + " out of range [0, " + input.length() + "]"));
+        }
+        var ruleName = resolveRuleName(ruleId);
+        var ruleOpt = grammar.rule(ruleName);
+        if (ruleOpt.isEmpty()) {
+            return Result.failure(new ParseError.SemanticError(
+            SourceLocation.START, "Unknown rule for class "
+                                  + ruleId.getSimpleName() + ": " + ruleName));
+        }
+        var ctx = ParsingContext.create(input, grammar, config);
+        ctx.setSuggestionVocabulary(suggestionVocabulary);
+        ctx.restoreLocation(computeLocation(input, offset));
+        var result = parseRule(ctx, ruleOpt.unwrap());
+        if (result.isFailure()) {
+            return Result.failure(buildParseError(result, ctx, input));
+        }
+        var success = (ParseResult.Success) result;
+        return Result.success(new PartialParse(success.node(), ctx.pos()));
+    }
+
+    /**
+     * Resolve the sanitized rule name associated with a {@link RuleId} class.
+     * Instantiates the class when it is a parameterless record so
+     * {@link RuleId#name()} can override the default {@code Class#getSimpleName()}
+     * lookup. Falls back to the simple class name when no zero-arg constructor
+     * is available.
+     */
+    private static String resolveRuleName(Class<? extends RuleId> ruleId) {
+        try {
+            var ctor = ruleId.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            return ctor.newInstance()
+                       .name();
+        }catch (ReflectiveOperationException ignored) {
+            return ruleId.getSimpleName();
+        }
+    }
+
+    /**
+     * Compute the {@link SourceLocation} at {@code offset} in {@code input} by
+     * walking the prefix. Matches the line/column convention used elsewhere in
+     * the engine (1-based, {@code '\n'} advances to the next line, column
+     * resets to 1).
+     */
+    private static SourceLocation computeLocation(String input, int offset) {
+        int line = 1;
+        int column = 1;
+        for (int i = 0; i < offset; i++ ) {
+            if (input.charAt(i) == '\n') {
+                line++ ;
+                column = 1;
+            }else {
+                column++ ;
+            }
+        }
+        return SourceLocation.at(line, column, offset);
     }
 
     private ParseResultWithDiagnostics toDiagnosticsResult(ParseError parseError, String input) {

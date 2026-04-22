@@ -1,6 +1,7 @@
 package org.pragmatica.peg.parser;
 
 import org.pragmatica.lang.Result;
+import org.pragmatica.peg.action.RuleId;
 import org.pragmatica.peg.tree.AstNode;
 import org.pragmatica.peg.tree.CstNode;
 
@@ -53,4 +54,28 @@ public interface Parser {
      * Parse input with error recovery starting from a specific rule.
      */
     ParseResultWithDiagnostics parseCstWithDiagnostics(String input, String startRule);
+
+    /**
+     * Parse the rule identified by {@code ruleId} starting at {@code offset} in
+     * {@code input}. Unlike {@link #parseCst(String)}, the matched rule is not
+     * required to consume all remaining input — parsing stops when the rule
+     * itself finishes, and the returned {@link PartialParse#endOffset()}
+     * reports the absolute offset at which it stopped.
+     *
+     * <p>Intended for cursor-anchored incremental reparsing (see
+     * {@code docs/incremental/SPEC.md} §5.6) and grammar-debugging tooling.
+     * Uses the same packrat cache, trivia capture, and action machinery as
+     * {@link #parseCst(String)}.
+     *
+     * @param ruleId class whose {@link RuleId#name()} identifies the rule to
+     *               invoke (default: {@link Class#getSimpleName()})
+     * @param input  full buffer text
+     * @param offset absolute input offset at which to begin parsing
+     * @return {@code Result.success} with the CST subtree and the absolute
+     *         offset where parsing stopped, or {@code Result.failure} when
+     *         the rule class is unknown, {@code offset} is out of range, or
+     *         the rule fails to match at {@code offset}.
+     * @since 0.3.0
+     */
+    Result<PartialParse> parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset);
 }
