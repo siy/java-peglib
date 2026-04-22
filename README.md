@@ -28,8 +28,9 @@ peglib-parent (pom)
 └── peglib-playground      # interactive REPL / web playground
 ```
 
-The artifact id `peglib` is reserved for the parent pom; production consumers depend on
-`peglib-core`. The other modules are optional add-ons.
+The `peglib-core` module directory ships the primary artifact `org.pragmatica-lite:peglib` —
+the Maven coordinate is preserved from 0.2.x for downstream compatibility. The other modules
+are optional add-ons.
 
 ## Quick Start
 
@@ -38,7 +39,7 @@ The artifact id `peglib` is reserved for the parent pom; production consumers de
 ```xml
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
-    <artifactId>peglib-core</artifactId>
+    <artifactId>peglib</artifactId>
     <version>0.3.0</version>
 </dependency>
 ```
