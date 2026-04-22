@@ -22,8 +22,8 @@ Peglib is a multi-module Maven reactor. Pick the module you need; transitive dep
 ```
 peglib-parent (pom)
 ├── peglib-core            # engine, generator, analyzer — the core parser
-├── peglib-incremental     # cursor-anchored incremental reparsing (shell; spec-driven)
-├── peglib-formatter       # grammar-driven source formatter (shell)
+├── peglib-incremental     # cursor-anchored incremental reparsing (v2 — 0.3.2)
+├── peglib-formatter       # Wadler-style pretty-printer framework (v1 — 0.3.3)
 ├── peglib-maven-plugin    # codegen + analyzer goals for Maven builds
 └── peglib-playground      # interactive REPL / web playground
 ```
@@ -31,6 +31,12 @@ peglib-parent (pom)
 The `peglib-core` module directory ships the primary artifact `org.pragmatica-lite:peglib` —
 the Maven coordinate is preserved from 0.2.x for downstream compatibility. The other modules
 are optional add-ons.
+
+Quick links:
+- [`peglib-incremental` README](peglib-incremental/README.md) — incremental reparsing
+- [`peglib-formatter` README](peglib-formatter/README.md) — pretty-printer framework
+- [`docs/PRETTY-PRINTING.md`](docs/PRETTY-PRINTING.md) — formatter design notes
+- [`docs/incremental/SPEC.md`](docs/incremental/SPEC.md) — incremental parsing spec
 
 ## Quick Start
 
@@ -40,7 +46,7 @@ are optional add-ons.
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.3.2</version>
+    <version>0.3.3</version>
 </dependency>
 ```
 
@@ -389,7 +395,7 @@ The `peglib-maven-plugin` module (separate artifact, sibling to `peglib`) wraps 
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.3.2</version>
+    <version>0.3.3</version>
     <executions>
         <execution>
             <goals>
