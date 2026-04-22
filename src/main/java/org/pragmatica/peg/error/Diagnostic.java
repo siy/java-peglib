@@ -19,12 +19,18 @@ import java.util.List;
  *    = help: expressions can start with identifiers, literals, or '('
  * </pre>
  *
- * @param severity    Error severity level
- * @param code        Optional error code (e.g., "E0001")
- * @param message     Primary error message
- * @param span        Source span where error occurred
- * @param labels      Additional labeled spans for context
- * @param notes       Additional notes or suggestions
+ * <p>The {@code tag} field (0.2.4) is a stable machine-readable identifier for
+ * tooling integration (e.g. {@code "error.unexpected-input"},
+ * {@code "error.expected"}). Default tag is empty; it does not affect the
+ * user-facing {@link #format} / {@link #formatSimple} output.
+ *
+ * @param severity Error severity level
+ * @param code     Optional error code (e.g., "E0001")
+ * @param message  Primary error message
+ * @param span     Source span where error occurred
+ * @param labels   Additional labeled spans for context
+ * @param notes    Additional notes or suggestions
+ * @param tag      Optional machine-readable tag (0.2.4)
  */
 public record Diagnostic(
  Severity severity,
@@ -32,7 +38,20 @@ public record Diagnostic(
  String message,
  SourceSpan span,
  List<Label> labels,
- List<String> notes) {
+ List<String> notes,
+ Option<String> tag) {
+
+    /**
+     * Backwards-compatible constructor (pre-0.2.4 signature).
+     */
+    public Diagnostic(Severity severity,
+                      Option<String> code,
+                      String message,
+                      SourceSpan span,
+                      List<Label> labels,
+                      List<String> notes) {
+        this(severity, code, message, span, labels, notes, Option.none());
+    }
     /**
      * Error severity levels.
      */
@@ -94,7 +113,7 @@ public record Diagnostic(
     public Diagnostic withLabel(String message) {
         var newLabels = new java.util.ArrayList<>(labels);
         newLabels.add(Label.primary(span, message));
-        return new Diagnostic(severity, code, this.message, span, List.copyOf(newLabels), notes);
+        return new Diagnostic(severity, code, this.message, span, List.copyOf(newLabels), notes, tag);
     }
 
     /**
@@ -103,7 +122,7 @@ public record Diagnostic(
     public Diagnostic withSecondaryLabel(SourceSpan labelSpan, String message) {
         var newLabels = new java.util.ArrayList<>(labels);
         newLabels.add(Label.secondary(labelSpan, message));
-        return new Diagnostic(severity, code, this.message, span, List.copyOf(newLabels), notes);
+        return new Diagnostic(severity, code, this.message, span, List.copyOf(newLabels), notes, tag);
     }
 
     /**
@@ -112,7 +131,7 @@ public record Diagnostic(
     public Diagnostic withNote(String note) {
         var newNotes = new java.util.ArrayList<>(notes);
         newNotes.add(note);
-        return new Diagnostic(severity, code, message, span, labels, List.copyOf(newNotes));
+        return new Diagnostic(severity, code, message, span, labels, List.copyOf(newNotes), tag);
     }
 
     /**
@@ -120,6 +139,16 @@ public record Diagnostic(
      */
     public Diagnostic withHelp(String help) {
         return withNote("help: " + help);
+    }
+
+    /**
+     * Attach a machine-readable tag (0.2.4). Built-in tag values:
+     * {@code "error.unexpected-input"}, {@code "error.expected"},
+     * {@code "error.unclosed"}. User-defined tags can be attached via
+     * the {@code %tag "name"} rule-level grammar directive.
+     */
+    public Diagnostic withTag(String newTag) {
+        return new Diagnostic(severity, code, message, span, labels, notes, Option.some(newTag));
     }
 
     /**

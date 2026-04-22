@@ -48,11 +48,70 @@ public final class PegEngine implements Parser {
     private final Map<String, String> literalFailureMessageCache = new HashMap<>();
     private final Map<String, String> charClassFailureMessageCache = new HashMap<>();
 
+    // 0.2.4: suggestion vocabulary computed once at engine construction from
+    // grammar rules listed under %suggest. Empty when the directive is absent
+    // so hot paths can short-circuit.
+    private final List<String> suggestionVocabulary;
+
     private PegEngine(Grammar grammar, ParserConfig config, Map<String, Action> actions) {
         this.grammar = grammar;
         this.config = config;
         this.actions = Map.copyOf(actions);
         this.whitespaceFirstChars = computeWhitespaceFirstChars(grammar);
+        this.suggestionVocabulary = computeSuggestionVocabulary(grammar);
+    }
+
+    private static List<String> computeSuggestionVocabulary(Grammar grammar) {
+        if (grammar.suggestRules()
+                   .isEmpty()) {
+            return List.of();
+        }
+        var vocab = new ArrayList<String>();
+        for (var ruleName : grammar.suggestRules()) {
+            grammar.rule(ruleName)
+                   .onPresent(rule -> collectLiterals(rule.expression(), vocab));
+        }
+        return List.copyOf(vocab);
+    }
+
+    /**
+     * Recursively collect all {@link Expression.Literal} alternatives reachable
+     * from the given expression. Walks choice/sequence/group/optional/etc. so a
+     * rule like {@code Keyword <- 'class' / 'interface' / 'enum'} yields
+     * {@code [class, interface, enum]}. Each word is added at most once.
+     */
+    private static void collectLiterals(Expression expr, List<String> out) {
+        switch (expr) {
+            case Expression.Literal lit -> {
+                if (!out.contains(lit.text())) {
+                    out.add(lit.text());
+                }
+            }
+            case Expression.Dictionary dict -> {
+                for (var w : dict.words()) {
+                    if (!out.contains(w)) {
+                        out.add(w);
+                    }
+                }
+            }
+            case Expression.Choice c -> c.alternatives()
+                                         .forEach(e -> collectLiterals(e, out));
+            case Expression.Sequence s -> s.elements()
+                                           .forEach(e -> collectLiterals(e, out));
+            case Expression.Group g -> collectLiterals(g.expression(), out);
+            case Expression.Optional o -> collectLiterals(o.expression(), out);
+            case Expression.ZeroOrMore zm -> collectLiterals(zm.expression(), out);
+            case Expression.OneOrMore om -> collectLiterals(om.expression(), out);
+            case Expression.Repetition r -> collectLiterals(r.expression(), out);
+            case Expression.TokenBoundary tb -> collectLiterals(tb.expression(), out);
+            case Expression.Ignore ig -> collectLiterals(ig.expression(), out);
+            case Expression.Capture cap -> collectLiterals(cap.expression(), out);
+            case Expression.CaptureScope cs -> collectLiterals(cs.expression(), out);
+            default -> {
+                // Terminals without inner literals: CharClass/Any/Reference/
+                // BackReference/Cut/And/Not — skip.
+            }
+        }
     }
 
     private static Optional<Set<Character>> computeWhitespaceFirstChars(Grammar grammar) {
@@ -96,6 +155,7 @@ public final class PegEngine implements Parser {
             SourceLocation.START, "Unknown rule: " + startRule));
         }
         var ctx = ParsingContext.create(input, grammar, config);
+        ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRule(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
             return Result.failure(buildParseError(result, ctx, input));
@@ -147,6 +207,7 @@ public final class PegEngine implements Parser {
             SourceLocation.START, "Unknown rule: " + startRule));
         }
         var ctx = ParsingContext.create(input, grammar, config);
+        ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRuleWithActions(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
             return Result.failure(buildParseError(result, ctx, input));
@@ -171,7 +232,8 @@ public final class PegEngine implements Parser {
     public ParseResultWithDiagnostics parseCstWithDiagnostics(String input) {
         var startRule = grammar.effectiveStartRule();
         if (startRule.isEmpty()) {
-            var diag = Diagnostic.error("no start rule defined in grammar", SourceSpan.at(SourceLocation.START));
+            var diag = Diagnostic.error("no start rule defined in grammar", SourceSpan.at(SourceLocation.START))
+                                 .withTag("error.unexpected-input");
             return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
         }
         return parseCstWithDiagnostics(input,
@@ -183,10 +245,12 @@ public final class PegEngine implements Parser {
     public ParseResultWithDiagnostics parseCstWithDiagnostics(String input, String startRule) {
         var ruleOpt = grammar.rule(startRule);
         if (ruleOpt.isEmpty()) {
-            var diag = Diagnostic.error("unknown rule: " + startRule, SourceSpan.at(SourceLocation.START));
+            var diag = Diagnostic.error("unknown rule: " + startRule, SourceSpan.at(SourceLocation.START))
+                                 .withTag("error.unexpected-input");
             return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
         }
         var ctx = ParsingContext.create(input, grammar, config);
+        ctx.setSuggestionVocabulary(suggestionVocabulary);
         // If not using advanced recovery, delegate to normal parsing
         if (config.recoveryStrategy() != RecoveryStrategy.ADVANCED) {
             var result = parseCst(input, startRule);
@@ -202,8 +266,94 @@ public final class PegEngine implements Parser {
         var loc = parseError.location();
         var span = SourceSpan.at(loc);
         var diag = Diagnostic.error("parse error", span)
-                             .withLabel(parseError.message());
+                             .withLabel(parseError.message())
+                             .withTag("error.expected");
         return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
+    }
+
+    /**
+     * 0.2.4 — attach a "did you mean 'X'?" help note when the token at the
+     * failure position is identifier-like and the suggestion vocabulary has a
+     * close match (Levenshtein distance ≤ 2). Returns the diagnostic unchanged
+     * when no match is found or the vocabulary is empty (the common case).
+     */
+    private Diagnostic attachSuggestionHint(Diagnostic diag, String input, SourceLocation loc, ParsingContext ctx) {
+        var vocab = ctx.suggestionVocabulary();
+        if (vocab.isEmpty()) {
+            return diag;
+        }
+        var word = readIdentifierLike(input, loc.offset());
+        if (word.isEmpty()) {
+            return diag;
+        }
+        var best = findBestSuggestion(word, vocab);
+        return best.map(s -> diag.withHelp("did you mean '" + s + "'?"))
+                   .or(diag);
+    }
+
+    private static String readIdentifierLike(String input, int offset) {
+        var sb = new StringBuilder();
+        int i = offset;
+        while (i < input.length()) {
+            char c = input.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '_') {
+                sb.append(c);
+                i++ ;
+            }else {
+                break;
+            }
+        }
+        return sb.toString();
+    }
+
+    private static Option<String> findBestSuggestion(String word, List<String> vocab) {
+        String best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (var candidate : vocab) {
+            // Skip exact matches — no hint needed (would be redundant).
+            if (candidate.equals(word)) {
+                return Option.none();
+            }
+            int d = levenshtein(word, candidate);
+            if (d < bestDistance) {
+                bestDistance = d;
+                best = candidate;
+            }
+        }
+        if (best != null && bestDistance <= 2) {
+            return Option.some(best);
+        }
+        return Option.none();
+    }
+
+    /**
+     * Iterative Levenshtein distance between two strings. Small-string
+     * implementation — vocabularies here are expected to be grammar-scoped
+     * and tiny (order of tens), so naive O(m*n) suffices.
+     */
+    private static int levenshtein(String a, String b) {
+        int m = a.length();
+        int n = b.length();
+        if (m == 0) return n;
+        if (n == 0) return m;
+        int[] prev = new int[n + 1];
+        int[] curr = new int[n + 1];
+        for (int j = 0; j <= n; j++ ) {
+            prev[j] = j;
+        }
+        for (int i = 1; i <= m; i++ ) {
+            curr[0] = i;
+            for (int j = 1; j <= n; j++ ) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1)
+                           ? 0
+                           : 1;
+                curr[j] = Math.min(Math.min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+            }
+            var tmp = prev;
+            prev = curr;
+            curr = tmp;
+        }
+        return prev[n];
     }
 
     /**
@@ -236,9 +386,24 @@ public final class PegEngine implements Parser {
                             ? "EOF"
                             : String.valueOf(ctx.peek());
                 var errorSpan = SourceSpan.at(startLoc);
+                // 0.2.4: tag every recovery diagnostic. CutFailure means a
+                // commit point was passed — use the "unclosed" tag family so
+                // tooling can distinguish it from plain unexpected input.
+                boolean wasCut = result instanceof ParseResult.CutFailure;
+                var tag = startRule.hasTag()
+                          ? startRule.tag()
+                                     .unwrap()
+                          : (wasCut
+                             ? "error.unclosed"
+                             : "error.unexpected-input");
                 var diag = Diagnostic.error("unexpected input", errorSpan)
                                      .withLabel("found '" + found + "'")
-                                     .withHelp("expected " + failureExpected);
+                                     .withHelp("expected " + failureExpected)
+                                     .withTag(tag);
+                // 0.2.4: suggestion vocabulary — if the token at failure is
+                // identifier-like, Levenshtein-match against the vocab and
+                // add a "did you mean" hint when distance ≤ 2.
+                diag = attachSuggestionHint(diag, input, startLoc, ctx);
                 ctx.addDiagnostic(diag);
                 // Skip to recovery point
                 ctx.enterRecovery();
@@ -305,7 +470,22 @@ public final class PegEngine implements Parser {
                                    : (localTrivia.isEmpty()
                                       ? carriedLeading
                                       : concatTrivia(carriedLeading, localTrivia));
-        var result = parseExpressionWithMode(ctx, rule.expression(), rule.name(), ParseMode.standard());
+        // 0.2.4: push %recover terminator so the rule's body recovers on that
+        // literal rather than the global char-set. Popped in the finally block.
+        boolean pushedRecover = false;
+        if (rule.hasRecover()) {
+            ctx.pushRecoveryOverride(rule.recover()
+                                         .unwrap());
+            pushedRecover = true;
+        }
+        ParseResult result;
+        try{
+            result = parseExpressionWithMode(ctx, rule.expression(), rule.name(), ParseMode.standard());
+        } finally{
+            if (pushedRecover) {
+                ctx.popRecoveryOverride();
+            }
+        }
         // Cache the result at START position
         ctx.cacheAt(rule.name(), startPos, result);
         if (result instanceof ParseResult.Success success) {
@@ -323,6 +503,15 @@ public final class PegEngine implements Parser {
             return ParseResult.Failure.at(startLoc,
                                           rule.errorMessage()
                                               .unwrap());
+        }
+        // 0.2.4: %expected semantic label — emit as the rule's failure message
+        // and push into the furthest-failure tracker so diagnostics use the
+        // label verbatim instead of the raw-token " or " join.
+        if (rule.hasExpected()) {
+            var label = rule.expected()
+                            .unwrap();
+            ctx.updateFurthest(label);
+            return ParseResult.Failure.at(startLoc, label);
         }
         return result;
     }
@@ -346,10 +535,24 @@ public final class PegEngine implements Parser {
         var childValues = new ArrayList<Object>();
         var tokenCapture = new String[1];
         // Holder for token boundary capture
-        var result = parseExpressionWithMode(ctx,
+        // 0.2.4: push %recover terminator for the rule's body scope.
+        boolean pushedRecover = false;
+        if (rule.hasRecover()) {
+            ctx.pushRecoveryOverride(rule.recover()
+                                         .unwrap());
+            pushedRecover = true;
+        }
+        ParseResult result;
+        try{
+            result = parseExpressionWithMode(ctx,
                                              rule.expression(),
                                              rule.name(),
                                              ParseMode.withActions(childValues, tokenCapture));
+        } finally{
+            if (pushedRecover) {
+                ctx.popRecoveryOverride();
+            }
+        }
         if (result.isFailure()) {
             ctx.restoreLocation(startLoc);
             if (!carriedLeading.isEmpty()) {
@@ -360,6 +563,13 @@ public final class PegEngine implements Parser {
                 return ParseResult.Failure.at(startLoc,
                                               rule.errorMessage()
                                                   .unwrap());
+            }
+            // 0.2.4: %expected semantic label — see parseRule for rationale.
+            if (rule.hasExpected()) {
+                var label = rule.expected()
+                                .unwrap();
+                ctx.updateFurthest(label);
+                return ParseResult.Failure.at(startLoc, label);
             }
             return result;
         }

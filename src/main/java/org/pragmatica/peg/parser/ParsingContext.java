@@ -52,6 +52,17 @@ public final class ParsingContext {
     // trivia forward.
     private final List<Trivia> pendingLeadingTrivia = new ArrayList<>();
 
+    // 0.2.4: suggestion vocabulary derived once from rules marked with
+    // %suggest. Shared list, never recomputed. When empty, no hint logic
+    // runs. Stored on the context so incremental-parse sessions can carry it
+    // forward without recomputation.
+    private List<String> suggestionVocabulary = List.of();
+
+    // 0.2.4: stack of per-rule recovery terminators in scope. The top of
+    // the stack wins; an empty stack falls back to the global recovery
+    // point set. Rules pushing a %recover terminator must pop on exit.
+    private final java.util.ArrayDeque<String> recoveryOverrideStack = new java.util.ArrayDeque<>();
+
     private ParsingContext(String input, Grammar grammar, ParserConfig config) {
         this.input = input;
         this.grammar = grammar;
@@ -203,7 +214,8 @@ public final class ParsingContext {
                              .withLabel("found '" + (found.isEmpty()
                                                      ? "EOF"
                                                      : found) + "'")
-                             .withHelp("expected " + expected);
+                             .withHelp("expected " + expected)
+                             .withTag("error.unexpected-input");
         diagnostics.add(diag);
     }
 
@@ -276,9 +288,20 @@ public final class ParsingContext {
     /**
      * Skip characters until a recovery point is found.
      * Recovery points are typically: newlines, semicolons, closing braces.
+     *
+     * <p>0.2.4: when a rule has a {@code %recover '<term>'} directive active
+     * (via {@link #pushRecoveryOverride}), only the specified terminator
+     * string stops recovery; the global char-set fallback is suppressed.
      */
     public SourceSpan skipToRecoveryPoint() {
         var start = location();
+        var override = recoveryOverrideStack.peek();
+        if (override != null && !override.isEmpty()) {
+            while (!isAtEnd() && !matchesOverrideAt(override)) {
+                advance();
+            }
+            return spanFrom(start);
+        }
         while (!isAtEnd()) {
             char c = peek();
             // Stop at common synchronization points
@@ -288,6 +311,68 @@ public final class ParsingContext {
             advance();
         }
         return spanFrom(start);
+    }
+
+    private boolean matchesOverrideAt(String term) {
+        if (remaining() < term.length()) {
+            return false;
+        }
+        for (int i = 0; i < term.length(); i++ ) {
+            if (peek(i) != term.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // === 0.2.4: %recover rule-scope terminator stack ===
+
+    /**
+     * Push a per-rule recovery terminator onto the active stack. The rule
+     * body that follows will recover by skipping until this literal is
+     * seen, instead of the global char-set. Must be paired with
+     * {@link #popRecoveryOverride()}.
+     */
+    public void pushRecoveryOverride(String terminator) {
+        recoveryOverrideStack.push(terminator);
+    }
+
+    /**
+     * Pop the top rule-scope recovery terminator. No-op if the stack is
+     * empty (defensive — shouldn't happen with balanced push/pop).
+     */
+    public void popRecoveryOverride() {
+        if (!recoveryOverrideStack.isEmpty()) {
+            recoveryOverrideStack.pop();
+        }
+    }
+
+    /**
+     * Check whether any rule-scope recovery override is currently active.
+     */
+    public boolean hasRecoveryOverride() {
+        return !recoveryOverrideStack.isEmpty();
+    }
+
+    // === 0.2.4: Suggestion Vocabulary ===
+
+    /**
+     * Install the suggestion vocabulary computed once from
+     * {@code %suggest}-designated rules. Called by the engine at context
+     * creation or by a Session when carrying state forward. The list is
+     * shared; callers must not mutate it.
+     */
+    public void setSuggestionVocabulary(List<String> vocabulary) {
+        this.suggestionVocabulary = vocabulary;
+    }
+
+    /**
+     * Access the installed suggestion vocabulary. Returns an empty list
+     * when no {@code %suggest} directive designated any rule; callers use
+     * that as the zero-cost signal that no hint logic should run.
+     */
+    public List<String> suggestionVocabulary() {
+        return suggestionVocabulary;
     }
 
     // === Token Boundary Tracking ===
