@@ -144,6 +144,8 @@ public final class ParserGenerator {
         generatePackage(sb);
         generateImports(sb);
         generateClassStart(sb);
+        generateRuleIdInterface(sb);
+        generateActionsField(sb);
         generateParseContext(sb);
         generateParseMethods(sb);
         generateRuleMethods(sb);
@@ -187,6 +189,7 @@ public final class ParserGenerator {
             import java.util.HashMap;
             import java.util.List;
             import java.util.Map;
+            import java.util.function.Function;
 
             """);
     }
@@ -368,21 +371,35 @@ public final class ParserGenerator {
         generateExpressionCode(sb, rule.expression(), "result", 2, counter);
         sb.append("        \n");
         sb.append("        if (result.isSuccess()) {\n");
+        // 0.2.6 — lambda override dispatch. If a lambda is attached for this rule's
+        // RuleId class (keyed by simple class name), it wins over any inline action.
+        var ruleClassName = toClassName(rule.name());
+        sb.append("            var __lambda = lambdaActions.get(\"")
+          .append(ruleClassName)
+          .append("\");\n");
+        sb.append("            if (__lambda != null) {\n");
+        sb.append("                var __sv = new SemanticValues(substring(startPos, pos), values);\n");
+        sb.append("                result = ParseResult.success(__lambda.apply(__sv), pos, line, column);\n");
+        sb.append("            } else ");
         // Generate action if present
         if (rule.action()
                 .isPresent()) {
             var actionCode = transformActionCode(rule.action()
                                                      .unwrap());
+            sb.append("{\n");
             sb.append("            String $0 = substring(startPos, pos);\n");
             sb.append("            Object value;\n");
             sb.append("            ")
               .append(wrapActionCode(actionCode))
               .append("\n");
             sb.append("            result = ParseResult.success(value, pos, line, column);\n");
+            sb.append("            }\n");
         }else {
+            sb.append("{\n");
             sb.append("            result = ParseResult.success(\n");
             sb.append("                values.isEmpty() ? substring(startPos, pos) : values.size() == 1 ? values.getFirst() : values,\n");
             sb.append("                pos, line, column);\n");
+            sb.append("            }\n");
         }
         sb.append("        } else {\n");
         sb.append("            pos = startPos;\n");
@@ -1366,6 +1383,55 @@ public final class ParserGenerator {
             """);
     }
 
+    /**
+     * 0.2.6 — emit the Actions dispatch field + setter + nested SemanticValues.
+     * Used only by the AST path (generate()). Lambdas attached here override any
+     * inline grammar actions for the matching rule class. Generated parsers
+     * continue to depend only on pragmatica-lite:core plus peglib's RuleId type.
+     */
+    private void generateActionsField(StringBuilder sb) {
+        sb.append("""
+                // === Programmatic Action Attachment (0.2.6) ===
+
+                /**
+                 * Values exposed to lambda actions. Mirrors peglib's SemanticValues
+                 * surface so generated parsers stay self-contained.
+                 */
+                public static final class SemanticValues {
+                    private final String token;
+                    private final List<Object> values;
+                    private SemanticValues(String token, List<Object> values) {
+                        this.token = token;
+                        this.values = values;
+                    }
+                    public String token() { return token; }
+                    public String str() { return token; }
+                    public int toInt() { return Integer.parseInt(token.trim()); }
+                    public long toLong() { return Long.parseLong(token.trim()); }
+                    public double toDouble() { return Double.parseDouble(token.trim()); }
+                    public int size() { return values.size(); }
+                    public boolean isEmpty() { return values.isEmpty(); }
+                    @SuppressWarnings("unchecked")
+                    public <T> T get(int index) { return (T) values.get(index); }
+                    public List<Object> values() { return List.copyOf(values); }
+                }
+
+                private final Map<String, Function<SemanticValues, Object>> lambdaActions = new HashMap<>();
+
+                /**
+                 * Attach a lambda action for the given RuleId class. The lambda runs in
+                 * place of any inline grammar action for the matching rule. Returns this
+                 * parser for chaining.
+                 */
+                public %s withAction(Class<? extends RuleId> ruleIdClass,
+                                     Function<SemanticValues, Object> action) {
+                    lambdaActions.put(ruleIdClass.getSimpleName(), action);
+                    return this;
+                }
+
+            """.formatted(className));
+    }
+
     private void generateClassEnd(StringBuilder sb) {
         sb.append("}\n");
     }
@@ -1421,6 +1487,7 @@ public final class ParserGenerator {
             import java.util.HashMap;
             import java.util.List;
             import java.util.Map;
+            import java.util.function.Function;
 
             """);
     }
@@ -1439,10 +1506,12 @@ public final class ParserGenerator {
     private void generateRuleIdInterface(StringBuilder sb) {
         var rules = grammar.rules();
         sb.append("    // === Rule ID Types ===\n\n");
-        // Nested records are implicitly permitted - no need for explicit permits clause
-        sb.append("    public sealed interface RuleId {\n");
+        // Nested records are implicitly permitted - no need for explicit permits clause.
+        // Extends the library's RuleId so callers can pass RuleId classes through the
+        // peglib Actions API (0.2.6) and, forward-compat, parseRuleAt (0.3.0).
+        sb.append("    public sealed interface RuleId extends org.pragmatica.peg.action.RuleId {\n");
         sb.append("        int ordinal();\n");
-        sb.append("        String name();\n\n");
+        sb.append("        @Override String name();\n\n");
         // Generate record for each rule
         int ordinal = 0;
         for (var rule : rules) {
