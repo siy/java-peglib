@@ -17,6 +17,7 @@ repeated here.
 3. [Grammar-level directives](#grammar-level-directives)
    - [`%suggest RuleName`](#suggest)
 4. [Directive interaction matrix](#directive-interaction-matrix)
+5. [Analyzer](#analyzer)
 
 ## Cut operator
 
@@ -229,6 +230,50 @@ error-path cost is unchanged.
 None of the four affects the success path. All four are opt-in: a grammar
 that uses none of them produces output byte-identical to pre-0.2.4
 parsers, per the `Phase1ParityTest` / `CorpusParityTest` suites.
+
+## Analyzer
+
+Added in 0.2.5. Static lint checks over a parsed `Grammar` IR — run from
+code via `Analyzer.analyze(grammar)` or from the CLI via
+`org.pragmatica.peg.analyzer.AnalyzerMain <grammar.peg>`. The
+`peglib-maven-plugin` also wraps this as a `peglib:lint` goal.
+
+Each finding has a stable tag for tooling integration. The full catalog:
+
+| Tag | Severity | Description |
+|---|---|---|
+| `grammar.unreachable-rule` | WARNING | Rule not transitively reachable from the start rule |
+| `grammar.ambiguous-choice` | WARNING | Choice alternatives begin with identical literal first char |
+| `grammar.nullable-rule` | INFO / WARNING | Rule can match the empty string. Promoted to WARNING when the rule is on a direct left-recursive path (infinite-loop risk) |
+| `grammar.duplicate-literal` | ERROR | Literal repeated verbatim within the same `Choice` |
+| `grammar.whitespace-cycle` | ERROR | `%whitespace` expression transitively references itself |
+| `grammar.has-backreference` | INFO | Rule uses `$name` back-reference — forward-compat note: incremental parsing (planned for 0.3.1) falls back to full reparse on such rules |
+
+The ambiguous-choice check is conservative: it flags only choices where
+*every* alternative has a fixed literal prefix. Rule-reference-prefixed or
+char-class-prefixed alternatives are never flagged, since overlap may be
+legitimately resolved downstream.
+
+Nullable analysis is a fix-point over the rule map; direct left-recursion
+detection walks first-non-predicate elements through transparent wrappers
+(`Sequence`, `Group`, `TokenBoundary`, `Ignore`, `Capture`,
+`CaptureScope`).
+
+Output format (Rust-`cargo check` style):
+
+```text
+warning[grammar.ambiguous-choice]: choice alternatives at positions [0, 1] share first char 'f' (potential ambiguity)
+  --> grammar.peg: Start
+
+error[grammar.duplicate-literal]: rule 'Start' has duplicate literal 'foo' in Choice
+  --> grammar.peg: Start
+
+analyzer: 1 error, 1 warning, 0 info
+```
+
+The CLI exits with status `0` when no errors, `1` when errors found,
+`2` on I/O or grammar-parse failure. Warnings/info alone do not fail
+the CLI — only `ERROR` findings do.
 
 ## Related
 
