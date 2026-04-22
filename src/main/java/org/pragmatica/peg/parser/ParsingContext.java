@@ -23,7 +23,7 @@ public final class ParsingContext {
     private final String input;
     private final Grammar grammar;
     private final ParserConfig config;
-    private final Option<Map<Long, ParseResult>> packratCache;
+    private final Option<Map<Long, CacheEntry>> packratCache;
     private final Option<Map<String, Integer>> ruleIds;
     private final Map<String, String> captures;
 
@@ -479,11 +479,56 @@ public final class ParsingContext {
     }
 
     // === Packrat Cache ===
+    /**
+     * 0.2.9 — a cache entry carries the memoized {@link ParseResult} along with
+     * Warth-style growing-state. For non-LR rules, entries are always
+     * {@code growing=false} with generation {@code 0} and behave exactly like
+     * the pre-0.2.9 cached results. LR rules seed the cache with a growing
+     * entry whose {@link #result()} is updated on each reparse iteration until
+     * the seed stabilizes.
+     *
+     * @param result          the memoized parse result
+     * @param growing         {@code true} during the seed-and-grow loop for a
+     *                        left-recursive rule
+     * @param seedGeneration  Warth-style generation counter; incremented on
+     *                        every iteration that extends the seed. Used by
+     *                        the interpreter to distinguish stale lookups from
+     *                        fresh ones during nested invocations.
+     */
+    public record CacheEntry(ParseResult result, boolean growing, int seedGeneration) {
+        public static CacheEntry settled(ParseResult result) {
+            return new CacheEntry(result, false, 0);
+        }
+
+        public static CacheEntry seed(ParseResult result, int generation) {
+            return new CacheEntry(result, true, generation);
+        }
+    }
+
     public Option<ParseResult> getCached(String ruleName) {
         return getCachedAt(ruleName, pos);
     }
 
     public Option<ParseResult> getCachedAt(String ruleName, int position) {
+        if (packratCache.isEmpty()) {
+            return Option.none();
+        }
+        long key = packratKey(ruleName, position);
+        var entry = packratCache.unwrap()
+                                .get(key);
+        if (entry == null) {
+            return Option.none();
+        }
+        return Option.some(entry.result());
+    }
+
+    /**
+     * 0.2.9 — look up the full cache entry (including growing state) at
+     * {@code position}. Used by the LR seed-and-grow loop to detect an
+     * in-progress growing entry and return the current seed immediately
+     * instead of re-entering the rule body.
+     */
+    public Option<CacheEntry> getCachedEntryAt(String ruleName, int position) {
         if (packratCache.isEmpty()) {
             return Option.none();
         }
@@ -497,10 +542,19 @@ public final class ParsingContext {
     }
 
     public void cacheAt(String ruleName, int position, ParseResult result) {
+        cacheEntryAt(ruleName, position, CacheEntry.settled(result));
+    }
+
+    /**
+     * 0.2.9 — store a complete {@link CacheEntry} at {@code position}. Used by
+     * the LR seed-and-grow loop to publish the current growing seed so
+     * recursive self-invocations observe it via {@link #getCachedEntryAt}.
+     */
+    public void cacheEntryAt(String ruleName, int position, CacheEntry entry) {
         if (packratCache.isPresent()) {
             long key = packratKey(ruleName, position);
             packratCache.unwrap()
-                        .put(key, result);
+                        .put(key, entry);
         }
     }
 
@@ -513,10 +567,10 @@ public final class ParsingContext {
         return ((long) ruleId<< 32) | (position & 0xFFFFFFFFL);
     }
 
-    private static Map<Long, ParseResult> createBoundedCache() {
+    private static Map<Long, CacheEntry> createBoundedCache() {
         return new LinkedHashMap<>(16, 0.75f, true) {
             @Override
-            protected boolean removeEldestEntry(Map.Entry<Long, ParseResult> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<Long, CacheEntry> eldest) {
                 return size() > MAX_CACHE_SIZE;
             }
         };
