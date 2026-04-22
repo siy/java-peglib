@@ -18,6 +18,7 @@ repeated here.
    - [`%suggest RuleName`](#suggest)
 4. [Directive interaction matrix](#directive-interaction-matrix)
 5. [Analyzer](#analyzer)
+6. [Programmatic action attachment (lambda actions)](#programmatic-action-attachment)
 
 ## Cut operator
 
@@ -274,6 +275,93 @@ analyzer: 1 error, 1 warning, 0 info
 The CLI exits with status `0` when no errors, `1` when errors found,
 `2` on I/O or grammar-parse failure. Warnings/info alone do not fail
 the CLI — only `ERROR` findings do.
+
+## Programmatic action attachment
+
+*Since 0.2.6.*
+
+Actions can be attached to rules **programmatically** — via Java lambdas
+keyed by a type-safe `RuleId` class — without modifying the grammar file.
+The existing inline `{ ... }` actions still work; the two mechanisms
+coexist.
+
+### API shape
+
+The library ships two small types under `org.pragmatica.peg.action`:
+
+- `RuleId` — a marker interface. A rule identifier is an implementing
+  record whose simple class name matches the rule name.
+- `Actions` — an immutable, composable map from `RuleId` classes to
+  `Function<SemanticValues, Object>` lambdas. Every mutation returns a
+  new instance; the original is untouched.
+
+```java
+import org.pragmatica.peg.action.Actions;
+import org.pragmatica.peg.action.RuleId;
+
+record Number() implements RuleId {}
+record Sum() implements RuleId {}
+
+var actions = Actions.empty()
+    .with(Number.class, sv -> sv.toInt())
+    .with(Sum.class,    sv -> (Integer) sv.get(0) + (Integer) sv.get(1));
+
+var grammar = """
+    Sum    <- Number '+' Number
+    Number <- < [0-9]+ >
+    %whitespace <- [ ]*
+    """;
+
+var parser = PegParser.fromGrammar(grammar, actions).unwrap();
+parser.parse("2 + 3").unwrap();   // → 5
+```
+
+`PegParser.fromGrammar(String, Actions)` and
+`PegParser.fromGrammar(String, ParserConfig, Actions)` thread the
+attachments through to the interpreter.
+
+### Lambda vs inline action precedence
+
+When a rule has **both** an inline action in the grammar and a lambda
+attached via `Actions`, the **lambda wins**. The inline action is still
+parsed — it just isn't executed for that rule. This lets callers override
+specific rules without rewriting the grammar.
+
+```java
+// Grammar says: return sv.toInt(); Lambda says: multiply by 10.
+var grammar = "Number <- < [0-9]+ > { return sv.toInt(); }";
+var actions = Actions.empty().with(Number.class, sv -> sv.toInt() * 10);
+PegParser.fromGrammar(grammar, actions).unwrap().parse("42");  // → 420
+```
+
+Rules without a lambda attachment fall back to their inline action (if
+any), or return the CST node as before.
+
+### Generated parsers
+
+The standalone parsers emitted by
+`PegParser.generateParser(...)` / `PegParser.generateCstParser(...)`
+expose a nested `sealed interface RuleId extends
+org.pragmatica.peg.action.RuleId` with one parameter-less record per
+grammar rule. AST-path parsers additionally expose a `withAction` fluent
+setter and a nested `SemanticValues` record, so the same lambda override
+mechanism works against a pre-compiled parser:
+
+```java
+// Using the generated parser as a plain class.
+var parser = new MyGeneratedParser()
+    .withAction(MyGeneratedParser.RuleId.Number.class, sv -> sv.toInt() * 10);
+parser.parse("42");
+```
+
+### Forward-compatibility with `parseRuleAt` (0.3.0)
+
+The `RuleId` shape is deliberately minimal — parameter-less marker
+records whose identity is the class itself — so that the upcoming
+`parseRuleAt(Class<? extends RuleId>, String input, int offset)` entry
+point can dispatch on the same types without a migration. Callers who
+adopt lambda actions on 0.2.6 will not need to rewrite `RuleId` usages
+when `parseRuleAt` lands.
 
 ## Related
 

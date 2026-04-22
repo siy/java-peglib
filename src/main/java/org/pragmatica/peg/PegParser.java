@@ -1,6 +1,7 @@
 package org.pragmatica.peg;
 
 import org.pragmatica.lang.Result;
+import org.pragmatica.peg.action.Actions;
 import org.pragmatica.peg.error.RecoveryStrategy;
 import org.pragmatica.peg.generator.ErrorReporting;
 import org.pragmatica.peg.generator.ParserGenerator;
@@ -55,6 +56,35 @@ public final class PegParser {
         return grammar.validate()
                       .flatMap(g -> PegEngine.create(g, config)
                                              .map(engine -> (Parser) engine));
+    }
+
+    /**
+     * 0.2.6 — create a parser with programmatically attached lambda actions.
+     * Lambdas override any inline grammar actions for rules whose name matches
+     * the attached {@link org.pragmatica.peg.action.RuleId} class's simple name.
+     * See {@link Actions} for the composable, immutable builder API.
+     */
+    public static Result<Parser> fromGrammar(String grammarText, ParserConfig config, Actions actions) {
+        return GrammarParser.parse(grammarText)
+                            .flatMap(grammar -> fromGrammar(grammar, config, actions));
+    }
+
+    /**
+     * 0.2.6 — as {@link #fromGrammar(String, ParserConfig, Actions)} but
+     * starting from an already-parsed {@link Grammar}.
+     */
+    public static Result<Parser> fromGrammar(Grammar grammar, ParserConfig config, Actions actions) {
+        return grammar.validate()
+                      .flatMap(g -> PegEngine.create(g, config, actions)
+                                             .map(engine -> (Parser) engine));
+    }
+
+    /**
+     * 0.2.6 — as {@link #fromGrammar(String, ParserConfig, Actions)} with the
+     * {@link ParserConfig#DEFAULT} configuration.
+     */
+    public static Result<Parser> fromGrammar(String grammarText, Actions actions) {
+        return fromGrammar(grammarText, ParserConfig.DEFAULT, actions);
     }
 
     /**

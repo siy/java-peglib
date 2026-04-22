@@ -4,6 +4,7 @@ import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.action.Action;
 import org.pragmatica.peg.action.ActionCompiler;
+import org.pragmatica.peg.action.Actions;
 import org.pragmatica.peg.action.SemanticValues;
 import org.pragmatica.peg.error.Diagnostic;
 import org.pragmatica.peg.error.ParseError;
@@ -129,8 +130,44 @@ public final class PegEngine implements Parser {
                        .map(actions -> new PegEngine(grammar, config, actions));
     }
 
+    /**
+     * 0.2.6 — create a parser whose rule-action dispatch table is built from
+     * programmatically attached lambdas in {@link Actions}, overlaid on top of
+     * any inline grammar actions. Lambda-attached rules override their inline
+     * counterparts.
+     */
+    public static Result<PegEngine> create(Grammar grammar, ParserConfig config, Actions lambdaActions) {
+        var compiler = ActionCompiler.create();
+        return compiler.compileGrammar(grammar)
+                       .map(inlineActions -> new PegEngine(grammar,
+                                                           config,
+                                                           mergeActions(grammar, inlineActions, lambdaActions)));
+    }
+
     public static PegEngine createWithoutActions(Grammar grammar, ParserConfig config) {
         return new PegEngine(grammar, config, Map.of());
+    }
+
+    /**
+     * Merge inline-compiled actions with programmatic lambda actions. Lambdas
+     * win when both are attached for the same rule. The lambda is wrapped in an
+     * {@link Action} adapter — {@code Action} is a {@code @FunctionalInterface}
+     * over {@code SemanticValues}, same as {@code Function<SemanticValues,Object>}.
+     */
+    private static Map<String, Action> mergeActions(Grammar grammar,
+                                                    Map<String, Action> inlineActions,
+                                                    Actions lambdaActions) {
+        if (lambdaActions.isEmpty()) {
+            return inlineActions;
+        }
+        var merged = new HashMap<>(inlineActions);
+        for (var rule : grammar.rules()) {
+            var lambda = lambdaActions.get(rule.name());
+            if (lambda != null) {
+                merged.put(rule.name(), lambda::apply);
+            }
+        }
+        return merged;
     }
 
     @Override
