@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.6] - 2026-04-22
 
+### Added
+
+- Programmatic action attachment via type-safe `RuleId`. Callers can attach action lambdas to grammar rules without modifying the grammar file:
+  ```java
+  var actions = Actions.empty()
+      .with(RuleId.Number.class, sv -> sv.toInt())
+      .with(RuleId.Sum.class, sv -> (Integer) sv.get(0) + (Integer) sv.get(1));
+
+  var parser = PegParser.fromGrammar(grammarText, config, actions).unwrap();
+  parser.parse(input);
+  ```
+- New `org.pragmatica.peg.action.Actions` — immutable composable API. `Actions.empty()`, `Actions.with(Class<? extends RuleId>, Function<SemanticValues, Object>)`. Each `with(...)` returns a new instance.
+- New `org.pragmatica.peg.action.RuleId` sealed interface (base). `ParserGenerator` emits a concrete sealed `RuleId` nested in each generated parser, with one parameter-less marker record per grammar rule. Designed forward-compatible with `parseRuleAt(Class<? extends RuleId>, String input, int offset)` scheduled for 0.3.0.
+- `PegParser.fromGrammar(grammarText, config, actions)` and generated-parser instances now accept an `Actions` parameter.
+
+### Changed
+
+- Inline grammar actions (`{ return ...; }` blocks) remain fully supported. When both an inline action and a lambda are attached to the same rule, **the lambda wins**. Documented in `docs/GRAMMAR-DSL.md`.
+- AST generator path now emits a nested `SemanticValues` record so generated parsers stay self-contained (no peglib runtime dependency beyond `RuleId`).
+
+### Tests
+
+- Test count: 618 → 635 passing, 1 skipped (`RoundTripTest`), 0 failures, 0 errors. +17 across new suites: `RuleIdEmissionTest`, `LambdaActionTest`, `LambdaVsInlineActionTest`, `ActionsImmutabilityTest`.
+- All corpus parity suites stay 22/22. `GeneratorFlagInertnessTest` 3/3 green — RuleId emission is in both sides of the config-vs-no-config comparison.
+
 ## [0.2.5] - 2026-04-22
 
 ### Added
