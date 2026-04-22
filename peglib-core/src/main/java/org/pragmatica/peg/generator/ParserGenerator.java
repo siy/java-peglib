@@ -2337,6 +2337,109 @@ public final class ParserGenerator {
 
                 """.formatted(sanitizedName));
         }
+        generateCstParseRuleAt(sb);
+    }
+
+    /**
+     * 0.3.0 — emit {@code parseRuleAt(Class&lt;? extends RuleId&gt;, String, int)}
+     * plus its supporting dispatch table for the generated CST parser. Each
+     * grammar rule contributes a map entry keyed by its {@code RuleId} marker
+     * record class; invocation seeks the parsing context to {@code offset}
+     * (computing {@code line}/{@code column} from the prefix) and calls the
+     * rule's generated {@code parse_<name>()} method.
+     */
+    private void generateCstParseRuleAt(StringBuilder sb) {
+        sb.append("""
+                // === PartialParse (0.3.0) ===
+
+                /**
+                 * Result of a partial parse via
+                 * {@link #parseRuleAt(Class, String, int)}. Pairs the produced CST
+                 * subtree with the absolute offset where parsing stopped.
+                 */
+                public record PartialParse(CstNode node, int endOffset) {}
+
+                // Dispatch table: RuleId marker class -> rule method.
+                private final Map<Class<? extends org.pragmatica.peg.action.RuleId>,
+                                  java.util.function.Supplier<CstParseResult>> ruleDispatch = buildRuleDispatch();
+
+                private Map<Class<? extends org.pragmatica.peg.action.RuleId>,
+                            java.util.function.Supplier<CstParseResult>> buildRuleDispatch() {
+                    var m = new java.util.HashMap<Class<? extends org.pragmatica.peg.action.RuleId>,
+                                                  java.util.function.Supplier<CstParseResult>>();
+                """);
+        for (var rule : grammar.rules()) {
+            var ruleClassName = toClassName(rule.name());
+            var methodName = "parse_" + sanitize(rule.name());
+            sb.append("        m.put(RuleId.")
+              .append(ruleClassName)
+              .append(".class, this::")
+              .append(methodName)
+              .append(");\n");
+        }
+        sb.append("""
+                    return java.util.Map.copyOf(m);
+                }
+
+                /**
+                 * Parse the rule identified by {@code ruleId} starting at {@code offset}
+                 * in {@code input}. Unlike {@link #parse(String)}, the matched rule is
+                 * not required to consume all remaining input — parsing stops when the
+                 * rule itself finishes, and the returned {@link PartialParse#endOffset()}
+                 * reports the absolute offset at which it stopped.
+                 *
+                 * @since 0.3.0
+                 */
+                public Result<PartialParse> parseRuleAt(
+                        Class<? extends org.pragmatica.peg.action.RuleId> ruleId,
+                        String input, int offset) {
+                    if (ruleId == null) {
+                        return Result.failure(new ParseError(SourceLocation.START, "Rule id class is null"));
+                    }
+                    if (input == null) {
+                        return Result.failure(new ParseError(SourceLocation.START, "Input is null"));
+                    }
+                    if (offset < 0 || offset > input.length()) {
+                        return Result.failure(new ParseError(SourceLocation.START,
+                                "Offset " + offset + " out of range [0, " + input.length() + "]"));
+                    }
+                    var supplier = ruleDispatch.get(ruleId);
+                    if (supplier == null) {
+                        return Result.failure(new ParseError(SourceLocation.START,
+                                "Unknown rule for class " + ruleId.getSimpleName()));
+                    }
+                    init(input);
+                    seekTo(offset);
+                    var result = supplier.get();
+                    if (result.isFailure()) {
+                        var errorLoc = furthestFailure.or(location());
+                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                        return Result.failure(new ParseError(errorLoc, "expected " + expected));
+                    }
+                    return Result.success(new PartialParse(result.node.unwrap(), pos));
+                }
+
+                /**
+                 * Seek the parsing context to {@code offset}, computing
+                 * {@code line}/{@code column} from the prefix. Shared by
+                 * {@link #parseRuleAt(Class, String, int)}.
+                 */
+                private void seekTo(int offset) {
+                    this.pos = 0;
+                    this.line = 1;
+                    this.column = 1;
+                    for (int i = 0; i < offset; i++) {
+                        if (input.charAt(i) == '\\n') {
+                            line++;
+                            column = 1;
+                        } else {
+                            column++;
+                        }
+                    }
+                    this.pos = offset;
+                }
+
+            """);
     }
 
     private void generateCstRuleMethods(StringBuilder sb) {
