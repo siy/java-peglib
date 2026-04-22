@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.3] - 2026-04-22
 
+### Added
+
+- **`peglib-formatter` module — pretty-printer framework v1.** Wadler-Lindig doc algebra + rule DSL + renderer. Lets grammar authors write declarative formatters in Java with minimal boilerplate. Final release in the roadmap from `docs/bench-results/` era — closes `peglib` as a complete language-tool substrate (parser → incremental reparse → formatter).
+- Public API in `org.pragmatica.peg.formatter`:
+  - `Doc` sealed interface with records: `Text`, `Line`, `Softline`, `Group`, `Indent`, `Concat`, `Empty`.
+  - `Docs` static builders: `text(String)`, `line()`, `softline()`, `group(Doc...)`, `indent(int, Doc)`, `concat(Doc...)`, `empty()`.
+  - `FormatterRule` — functional interface `(FormatContext, List<Doc> childDocs) -> Doc`.
+  - `Formatter` — fluent builder with `.rule(name, lambda)`, `.defaultIndent(n)`, `.maxLineWidth(n)`, `.format(CstNode) → Result<String>`.
+  - `FormatContext` — trivia policy + user state.
+- Internal `Renderer` implements the Wadler-Lindig "best" pretty-print algorithm (groups fit on one line if possible; break at `line()` / `softline()` otherwise).
+- Three demo formatters under `peglib-formatter/src/test/`:
+  - `JsonFormatter` — objects with `{` + indented members + `}`, arrays similar.
+  - `SqlFormatter` — clause-per-line, keywords upper-cased.
+  - `ArithmeticFormatter` — precedence-aware with minimal parentheses.
+- `docs/PRETTY-PRINTING.md` — algebra + DSL reference with worked examples.
+- `peglib-formatter/README.md` — module overview, quick-start, trivia-preservation notes.
+
+### Limitations
+
+- **Trivia preservation is best-effort** in v1. Depends on 0.2.4's trivia attribution foundation, which still has a deferred rule-exit pos-rewind for trailing intra-rule trivia. Format output may not byte-equal source for all inputs today. Full round-trip lands when the trivia foundation is completed in a subsequent release.
+- Idempotency harness fuzzes ~50-100 inputs per demo formatter. Each demo passes `format(format(x)) == format(x)`.
+
+### Tests
+
+- Aggregate: **801 → ~828 passing** across all modules (exact number depends on demo test counts; verified green in the release PR).
+- `peglib-core`, `peglib-incremental`, `peglib-maven-plugin`, `peglib-playground`: unchanged.
+- `peglib-formatter`: v1 ships with doc algebra unit tests, renderer tests, idempotency harness, and three end-to-end demo-formatter test suites.
+
 ## [0.3.2] - 2026-04-22
 
 ### Added
