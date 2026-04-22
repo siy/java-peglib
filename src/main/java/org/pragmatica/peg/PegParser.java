@@ -7,6 +7,8 @@ import org.pragmatica.peg.generator.ErrorReporting;
 import org.pragmatica.peg.generator.ParserGenerator;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.grammar.GrammarResolver;
+import org.pragmatica.peg.grammar.GrammarSource;
 import org.pragmatica.peg.parser.Parser;
 import org.pragmatica.peg.parser.ParserConfig;
 import org.pragmatica.peg.parser.PegEngine;
@@ -38,8 +40,33 @@ public final class PegParser {
      * Create a parser from grammar text with custom configuration.
      */
     public static Result<Parser> fromGrammar(String grammarText, ParserConfig config) {
+        return fromGrammar(grammarText, config, GrammarSource.empty());
+    }
+
+    /**
+     * 0.2.8 — Create a parser from grammar text with a {@link GrammarSource} for
+     * resolving {@code %import} directives. If the grammar declares no imports,
+     * {@code source} is never consulted; default callers can stay on
+     * {@link #fromGrammar(String, ParserConfig)} which uses
+     * {@link GrammarSource#empty()}.
+     */
+    public static Result<Parser> fromGrammar(String grammarText, ParserConfig config, GrammarSource source) {
         return GrammarParser.parse(grammarText)
+                            .flatMap(grammar -> GrammarResolver.resolve(grammar, source))
                             .flatMap(grammar -> fromGrammar(grammar, config));
+    }
+
+    /**
+     * 0.2.8 — As {@link #fromGrammar(String, ParserConfig, GrammarSource)} with
+     * programmatically attached actions.
+     */
+    public static Result<Parser> fromGrammar(String grammarText,
+                                             ParserConfig config,
+                                             Actions actions,
+                                             GrammarSource source) {
+        return GrammarParser.parse(grammarText)
+                            .flatMap(grammar -> GrammarResolver.resolve(grammar, source))
+                            .flatMap(grammar -> fromGrammar(grammar, config, actions));
     }
 
     /**

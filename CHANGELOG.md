@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-04-22
+
+### Added
+
+- Grammar composition via `%import` directive:
+  ```peg
+  %import Java25.Type
+  %import Java25.Expression as JavaExpr
+
+  MyAnnotation <- '@' Identifier '(' (JavaExpr (',' JavaExpr)*)? ')'
+  ```
+  - `%import <Grammar>.<Rule>` — imports a named rule from another grammar, with its transitive dependencies inlined.
+  - `%import <Grammar>.<Rule> as <LocalName>` — imports with local rename.
+- New `org.pragmatica.peg.grammar.GrammarResolver` — takes the root grammar + a `GrammarSource` and returns a composed `Grammar` IR with all imported rules + their transitive closure inlined. Cycle detection and collision enforcement run at resolve time, not runtime.
+- New `GrammarSource` interface with four implementations:
+  - `GrammarSource.inMemory(Map<String, String>)` — useful for tests.
+  - `GrammarSource.classpath()` — resolves `<name>.peg` from the classpath.
+  - `GrammarSource.filesystem(Path)` — resolves from a configured directory.
+  - `GrammarSource.chained(...)` — tries each in order.
+  - `GrammarSource.empty()` — default when no source is configured; `%import` fails with a clear error.
+- `PegParser.fromGrammar(grammarText, config, source)` and `fromGrammar(grammarText, config, actions, source)` overloads accept a `GrammarSource`.
+
+### Resolution semantics (surface-level)
+
+- **Transitive closure:** imported rule pulls in every rule it references, recursively. Unresolvable transitive references → error with the dependency path in the message.
+- **Whitespace:** composed grammar has one `%whitespace` binding (the root's). Imported grammars' own `%whitespace` directives are ignored for their inlined rules. Users must ensure imported grammars share a whitespace convention with the root, or rename explicitly via `as`.
+- **Explicit collisions:** if root defines `Foo` and `%import G.Foo` is used without `as`, error.
+- **Transitive shadowing:** if root defines `Identifier` and an import transitively pulls in `G.Identifier`, root's definition wins silently (the transitive copy is dropped). Users wanting both must `%import G.Identifier as G_Identifier`.
+- **Cycle detection:** `A → B → A` imports chain errors at resolve time.
+- **RuleId naming:** unqualified `%import G.R` → `RuleId.GR` (grammar-qualified, underscore stripped by the existing sanitizer); aliased `%import G.R as Local` → `RuleId.Local`; transitives keep their grammar-qualified names.
+
+### Deferred
+
+- Semantic composition (per-rule whitespace context) — imported grammars' whitespace remains ignored in v1.
+
+### Tests
+
+- Test count: 635 → 651 passing, 1 skipped, 0 failures, 0 errors. +16 new tests in `GrammarCompositionTest` across cycle / collision / transitive-closure / classpath-loader / in-memory / alias-rename scenarios.
+- `GeneratorFlagInertnessTest` 3/3 (grammars without `%import` unchanged).
+- All 22-file corpus parity suites stay 22/22 (`java25.peg` has no `%import`).
+
 ## [0.2.7] - 2026-04-22
 
 ### Added

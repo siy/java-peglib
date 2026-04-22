@@ -42,6 +42,7 @@ public final class GrammarParser {
     private Result<Grammar> parseGrammar() {
         var rules = new ArrayList<Rule>();
         var suggestRules = new ArrayList<String>();
+        var imports = new ArrayList<Import>();
         Option<String> startRule = Option.none();
         Option<Expression> whitespace = Option.none();
         Option<Expression> word = Option.none();
@@ -59,6 +60,21 @@ public final class GrammarParser {
                         return Result.failure(f.cause());
                     }
                     suggestRules.add(result.unwrap());
+                    continue;
+                }
+                // 0.2.8 — Grammar-level %import GrammarName.RuleName [as LocalName]
+                // Argument is a dotted identifier pair, optionally followed by
+                // "as <LocalName>". Parsed specially because the argument is not
+                // an expression.
+                if ("import".equals(directive.name())) {
+                    var start = directive.span()
+                                         .start();
+                    advance();
+                    var result = parseImportDirective(start);
+                    if (result instanceof Result.Failure< ? > f) {
+                        return Result.failure(f.cause());
+                    }
+                    imports.add(result.unwrap());
                     continue;
                 }
                 advance();
@@ -87,7 +103,58 @@ public final class GrammarParser {
                 "rule definition or directive"));
             }
         }
-        return Result.success(new Grammar(rules, startRule, whitespace, word, List.copyOf(suggestRules)));
+        return Result.success(new Grammar(rules,
+                                          startRule,
+                                          whitespace,
+                                          word,
+                                          List.copyOf(suggestRules),
+                                          List.copyOf(imports)));
+    }
+
+    private Result<Import> parseImportDirective(SourceLocation start) {
+        if (! (peek() instanceof GrammarToken.Identifier grammarId)) {
+            return Result.failure(new ParseError.UnexpectedInput(
+            peek()
+            .span()
+            .start(),
+            tokenDescription(peek()),
+            "grammar name for '%import'"));
+        }
+        advance();
+        if (! (peek() instanceof GrammarToken.Dot)) {
+            return Result.failure(new ParseError.UnexpectedInput(
+            peek()
+            .span()
+            .start(),
+            tokenDescription(peek()),
+            "'.' between grammar name and rule name"));
+        }
+        advance();
+        if (! (peek() instanceof GrammarToken.Identifier ruleId)) {
+            return Result.failure(new ParseError.UnexpectedInput(
+            peek()
+            .span()
+            .start(),
+            tokenDescription(peek()),
+            "rule name after '.'"));
+        }
+        advance();
+        Option<String> alias = Option.none();
+        if (peek() instanceof GrammarToken.Identifier asId && "as".equals(asId.name())) {
+            advance();
+            if (! (peek() instanceof GrammarToken.Identifier aliasId)) {
+                return Result.failure(new ParseError.UnexpectedInput(
+                peek()
+                .span()
+                .start(),
+                tokenDescription(peek()),
+                "local name after 'as'"));
+            }
+            advance();
+            alias = Option.some(aliasId.name());
+        }
+        var span = SourceSpan.of(start, currentLocation());
+        return Result.success(new Import(span, grammarId.name(), ruleId.name(), alias));
     }
 
     private Result<String> parseSuggestDirective() {
