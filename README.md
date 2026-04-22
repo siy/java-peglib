@@ -23,7 +23,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.2.9</version>
+    <version>0.3.0</version>
 </dependency>
 ```
 
@@ -354,7 +354,7 @@ The `peglib-maven-plugin` module (separate artifact, sibling to `peglib`) wraps 
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.2.9</version>
+    <version>0.3.0</version>
     <executions>
         <execution>
             <goals>
