@@ -24,7 +24,6 @@ public record Rule(
  Option<String> expected,
  Option<String> recover,
  Option<String> tag) {
-
     /**
      * Backwards-compatible constructor matching the pre-0.2.4 signature.
      */
@@ -33,8 +32,7 @@ public record Rule(
                 Expression expression,
                 Option<String> action,
                 Option<String> errorMessage) {
-        this(span, name, expression, action, errorMessage,
-             Option.none(), Option.none(), Option.none());
+        this(span, name, expression, action, errorMessage, Option.none(), Option.none(), Option.none());
     }
 
     public boolean hasAction() {

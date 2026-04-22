@@ -326,7 +326,6 @@ public final class ParsingContext {
     }
 
     // === 0.2.4: %recover rule-scope terminator stack ===
-
     /**
      * Push a per-rule recovery terminator onto the active stack. The rule
      * body that follows will recover by skipping until this literal is
@@ -355,7 +354,6 @@ public final class ParsingContext {
     }
 
     // === 0.2.4: Suggestion Vocabulary ===
-
     /**
      * Install the suggestion vocabulary computed once from
      * {@code %suggest}-designated rules. Called by the engine at context

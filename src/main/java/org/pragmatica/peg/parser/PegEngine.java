@@ -69,7 +69,8 @@ public final class PegEngine implements Parser {
         var vocab = new ArrayList<String>();
         for (var ruleName : grammar.suggestRules()) {
             grammar.rule(ruleName)
-                   .onPresent(rule -> collectLiterals(rule.expression(), vocab));
+                   .onPresent(rule -> collectLiterals(rule.expression(),
+                                                      vocab));
         }
         return List.copyOf(vocab);
     }
@@ -107,10 +108,7 @@ public final class PegEngine implements Parser {
             case Expression.Ignore ig -> collectLiterals(ig.expression(), out);
             case Expression.Capture cap -> collectLiterals(cap.expression(), out);
             case Expression.CaptureScope cs -> collectLiterals(cs.expression(), out);
-            default -> {
-                // Terminals without inner literals: CharClass/Any/Reference/
-                // BackReference/Cut/And/Not — skip.
-            }
+            default -> {}
         }
     }
 
@@ -232,7 +230,8 @@ public final class PegEngine implements Parser {
     public ParseResultWithDiagnostics parseCstWithDiagnostics(String input) {
         var startRule = grammar.effectiveStartRule();
         if (startRule.isEmpty()) {
-            var diag = Diagnostic.error("no start rule defined in grammar", SourceSpan.at(SourceLocation.START))
+            var diag = Diagnostic.error("no start rule defined in grammar",
+                                        SourceSpan.at(SourceLocation.START))
                                  .withTag("error.unexpected-input");
             return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
         }
@@ -245,7 +244,8 @@ public final class PegEngine implements Parser {
     public ParseResultWithDiagnostics parseCstWithDiagnostics(String input, String startRule) {
         var ruleOpt = grammar.rule(startRule);
         if (ruleOpt.isEmpty()) {
-            var diag = Diagnostic.error("unknown rule: " + startRule, SourceSpan.at(SourceLocation.START))
+            var diag = Diagnostic.error("unknown rule: " + startRule,
+                                        SourceSpan.at(SourceLocation.START))
                                  .withTag("error.unexpected-input");
             return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
         }

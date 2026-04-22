@@ -23,7 +23,6 @@ public record Grammar(
  Option<Expression> whitespace,
  Option<Expression> word,
  List<String> suggestRules) {
-
     /**
      * Backwards-compatible constructor matching the pre-0.2.4 signature.
      */

@@ -2400,7 +2400,8 @@ public final class ParserGenerator {
         var out = new java.util.ArrayList<String>();
         for (var ruleName : grammar.suggestRules()) {
             grammar.rule(ruleName)
-                   .onPresent(rule -> collectVocabLiterals(rule.expression(), out));
+                   .onPresent(rule -> collectVocabLiterals(rule.expression(),
+                                                           out));
         }
         return java.util.List.copyOf(out);
     }
@@ -2432,9 +2433,7 @@ public final class ParserGenerator {
             case Expression.Ignore ig -> collectVocabLiterals(ig.expression(), out);
             case Expression.Capture cap -> collectVocabLiterals(cap.expression(), out);
             case Expression.CaptureScope cs -> collectVocabLiterals(cs.expression(), out);
-            default -> {
-                // Terminals without inner literals — skip.
-            }
+            default -> {}
         }
     }
 

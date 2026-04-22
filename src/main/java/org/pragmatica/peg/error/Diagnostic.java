@@ -40,7 +40,6 @@ public record Diagnostic(
  List<Label> labels,
  List<String> notes,
  Option<String> tag) {
-
     /**
      * Backwards-compatible constructor (pre-0.2.4 signature).
      */
@@ -52,6 +51,7 @@ public record Diagnostic(
                       List<String> notes) {
         this(severity, code, message, span, labels, notes, Option.none());
     }
+
     /**
      * Error severity levels.
      */

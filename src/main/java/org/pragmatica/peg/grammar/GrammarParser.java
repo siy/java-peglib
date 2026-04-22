@@ -165,11 +165,10 @@ public final class GrammarParser {
         Option<String> expected = Option.none();
         Option<String> recover = Option.none();
         Option<String> tag = Option.none();
-        while (peek() instanceof GrammarToken.Directive d
-               && (d.name()
-                    .equals("expected") || d.name()
-                                            .equals("recover") || d.name()
-                                                                   .equals("tag"))) {
+        while (peek() instanceof GrammarToken.Directive d && (d.name()
+                                                               .equals("expected") || d.name()
+                                                                                       .equals("recover") || d.name()
+                                                                                                              .equals("tag"))) {
             advance();
             var argResult = parseStringLiteralArg(d.name());
             if (argResult instanceof Result.Failure< ? > f) {
