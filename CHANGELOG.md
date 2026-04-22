@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.1] - 2026-04-22
 
+### Added
+
+- **`peglib-incremental` module — v1 implementation** per `docs/incremental/SPEC.md`. Cursor-anchored stateful parser that reparses only the subtree affected by an edit, falling back to full reparse when needed. Designed for editor-scale workflows (formatters on save, live diagnostics, LSP backends).
+- Public API in `org.pragmatica.peg.incremental`:
+  - `IncrementalParser.create(grammar)` / `create(grammar, config)` — factory.
+  - `Session initialize(String buffer)` / `initialize(String buffer, int cursorOffset)` — immutable session.
+  - `Session edit(int offset, int oldLen, String newText)` / `edit(Edit)` — returns a new session.
+  - `Session moveCursor(int offset)` — pure hint, no reparse.
+  - `Session reparseAll()` — diagnostic escape hatch.
+  - `CstNode root()`, `String text()`, `int cursor()`, `Stats stats()` — session accessors.
+  - `Edit(int offset, int oldLen, String newText)` record.
+  - `Stats` record with `reparseCount`, `fullReparseCount`, `lastReparsedRuleOrd`, `lastReparsedNodeCount`, `lastReparseMs`, `cacheSize`.
+- Internal machinery (package-private under `internal/`): `SessionImpl`, `NodeIndex` (span → enclosing node), `TreeSplicer` (splice subtree + shift descendant offsets), `BackReferenceScan` (grammar analysis), `RuleIdRegistry` (bytecode-generated `RuleId` classes via JEP 457 classfile API to bridge the 0.2.6 `Class<? extends RuleId>` API with rule-name-based dispatch), `CstHash` (parity oracle).
+- `peglib-incremental/README.md` — module overview, API examples, limitations.
+
+### Semantics (v1 scope)
+
+- **CST-only.** Actions run on full reparse only (no action replay — SPEC §6.4).
+- **Wholesale packrat cache invalidation on edit** (SPEC §5.4 v1). Span-rewriting remap is v2.5 material.
+- **Back-reference rules fall back to full reparse.** Grammar analysis marks `BackReference`-containing rules at `Grammar.validate()` time; reparse boundary promotes to full reparse whenever an edit lands inside one.
+- **Trivia attribution** during splice is inherited from 0.2.4's foundation; full trivia-aware redistribution (SPEC §5.4 v2) is scheduled for 0.3.2.
+- Immutable sessions enable O(1) undo via session retention and safe cross-thread reads.
+
+### Tests
+
+- `peglib-core`: 674 passing + 1 skipped — unchanged (zero regression).
+- `peglib-incremental`: **67 passing**, 0 failures, 0 disabled. 45 unit tests (`SessionApiTest`, `ReparseBoundaryTest`, `IdempotencyTest`, `BackReferenceFallbackTest`) + 22 from `IncrementalParityTest`.
+- **Parity harness:** 22 corpus files × 100 random edits = **2,200 CstHash parity checks** under deterministic seed `0xC0FFEE42`. All green. Scales to 22,000 via `-Dincremental.parity.editsPerFile=1000`.
+- `peglib-maven-plugin`: 5 passing (unchanged).
+- `peglib-playground`: 22 passing (unchanged).
+- **Aggregate:** 768 passing + 1 skipped, 0 failures, 0 errors.
+
+### Deferred to 0.3.2
+
+- JMH `IncrementalBenchmark` (SPEC §7.4) — performance gates; single-char / word / line median targets.
+- Trivia-aware reparse splice (v2 proper) — rides on 0.2.4's trivia threading foundation.
+
+### Notes
+
+- Parity harness ran 2,200 checks per invocation; scale to 22,000 via system property when CI time budget allows. Zero divergences observed under the default seed.
+- `RuleIdRegistry` uses `java.lang.classfile` (JEP 457) to synthesize marker `RuleId` subclasses at runtime for the interpreter's `parseRuleAt(Class<? extends RuleId>, ...)` dispatch. Pragmatic bridge between the 0.2.6 `Class`-based API and rule-name lookup.
+
 ## [0.3.0] - 2026-04-22
 
 Infrastructure-only minor-bump release. No new user-facing features beyond the `parseRuleAt` API. Sets up the project structure and API additions that `peglib-incremental` (0.3.1) and `peglib-formatter` (0.3.3) will build against.
