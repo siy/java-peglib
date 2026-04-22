@@ -394,6 +394,17 @@ public final class ParserGenerator {
               .append(escape(rule.errorMessage()
                                  .unwrap()))
               .append("\");\n");
+        }else if (rule.hasExpected()) {
+            // 0.2.4: %expected semantic label replaces raw-token join at this
+            // rule's failure site so diagnostics read naturally.
+            sb.append("            trackFailure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("            result = ParseResult.failure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
         }
         sb.append("        }\n");
         sb.append("        \n");
@@ -1640,40 +1651,45 @@ public final class ParserGenerator {
                     String message,
                     SourceSpan span,
                     List<DiagnosticLabel> labels,
-                    List<String> notes
+                    List<String> notes,
+                    String tag
                 ) {
                     public static Diagnostic error(String message, SourceSpan span) {
-                        return new Diagnostic(Severity.ERROR, null, message, span, List.of(), List.of());
+                        return new Diagnostic(Severity.ERROR, null, message, span, List.of(), List.of(), null);
                     }
 
                     public static Diagnostic error(String code, String message, SourceSpan span) {
-                        return new Diagnostic(Severity.ERROR, code, message, span, List.of(), List.of());
+                        return new Diagnostic(Severity.ERROR, code, message, span, List.of(), List.of(), null);
                     }
 
                     public static Diagnostic warning(String message, SourceSpan span) {
-                        return new Diagnostic(Severity.WARNING, null, message, span, List.of(), List.of());
+                        return new Diagnostic(Severity.WARNING, null, message, span, List.of(), List.of(), null);
                     }
 
                     public Diagnostic withLabel(String labelMessage) {
                         var newLabels = new ArrayList<>(labels);
                         newLabels.add(DiagnosticLabel.primary(span, labelMessage));
-                        return new Diagnostic(severity, code, message, span, List.copyOf(newLabels), notes);
+                        return new Diagnostic(severity, code, message, span, List.copyOf(newLabels), notes, tag);
                     }
 
                     public Diagnostic withSecondaryLabel(SourceSpan labelSpan, String labelMessage) {
                         var newLabels = new ArrayList<>(labels);
                         newLabels.add(DiagnosticLabel.secondary(labelSpan, labelMessage));
-                        return new Diagnostic(severity, code, message, span, List.copyOf(newLabels), notes);
+                        return new Diagnostic(severity, code, message, span, List.copyOf(newLabels), notes, tag);
                     }
 
                     public Diagnostic withNote(String note) {
                         var newNotes = new ArrayList<>(notes);
                         newNotes.add(note);
-                        return new Diagnostic(severity, code, message, span, labels, List.copyOf(newNotes));
+                        return new Diagnostic(severity, code, message, span, labels, List.copyOf(newNotes), tag);
                     }
 
                     public Diagnostic withHelp(String help) {
                         return withNote("help: " + help);
+                    }
+
+                    public Diagnostic withTag(String newTag) {
+                        return new Diagnostic(severity, code, message, span, labels, notes, newTag);
                     }
 
                     public String format(String source, String filename) {
@@ -1996,28 +2012,126 @@ public final class ParserGenerator {
                 """);
         }
         if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("""
-                    private SourceSpan skipToRecoveryPoint() {
-                        var start = location();
-                        while (!isAtEnd()) {
-                            char c = peek();
-                            if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
-                                break;
+            // 0.2.4: emit %recover override around the top-level recovery skip
+            // when the start rule carries a %recover directive. Per-rule stacks
+            // are not threaded into generated code (scope kept minimal);
+            // interpreter-side rule-scoped recovery is available via PegEngine.
+            var startRuleOpt = grammar.effectiveStartRule();
+            String topRecover = startRuleOpt.isPresent() && startRuleOpt.unwrap()
+                                                                        .hasRecover()
+                                ? startRuleOpt.unwrap()
+                                              .recover()
+                                              .unwrap()
+                                : "";
+            if (!topRecover.isEmpty()) {
+                sb.append("        private static final String RECOVERY_OVERRIDE = \"")
+                  .append(escape(topRecover))
+                  .append("\";\n\n");
+                sb.append("""
+                        private SourceSpan skipToRecoveryPoint() {
+                            var start = location();
+                            while (!isAtEnd()) {
+                                if (matchesRecoveryOverride()) break;
+                                advance();
                             }
-                            advance();
+                            return SourceSpan.of(start, location());
                         }
-                        return SourceSpan.of(start, location());
-                    }
 
+                        private boolean matchesRecoveryOverride() {
+                            if (remaining() < RECOVERY_OVERRIDE.length()) return false;
+                            for (int i = 0; i < RECOVERY_OVERRIDE.length(); i++) {
+                                if (peek(i) != RECOVERY_OVERRIDE.charAt(i)) return false;
+                            }
+                            return true;
+                        }
+
+                    """);
+            }else {
+                sb.append("""
+                        private SourceSpan skipToRecoveryPoint() {
+                            var start = location();
+                            while (!isAtEnd()) {
+                                char c = peek();
+                                if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
+                                    break;
+                                }
+                                advance();
+                            }
+                            return SourceSpan.of(start, location());
+                        }
+
+                    """);
+            }
+            sb.append("""
                     private void addDiagnostic(String message, SourceSpan span) {
-                        diagnostics.add(Diagnostic.error(message, span));
+                        diagnostics.add(Diagnostic.error(message, span).withTag("error.unexpected-input"));
                     }
 
                     private void addDiagnostic(String message, SourceSpan span, String label) {
-                        diagnostics.add(Diagnostic.error(message, span).withLabel(label));
+                        diagnostics.add(Diagnostic.error(message, span).withLabel(label).withTag("error.unexpected-input"));
                     }
 
                 """);
+            // 0.2.4: suggestion vocabulary + Levenshtein helper. Emitted only
+            // when %suggest designates at least one rule with literal
+            // alternatives. When empty, nothing extra is emitted and the
+            // generated parser's hot paths stay byte-identical to pre-0.2.4.
+            var vocab = computeSuggestionVocabulary(grammar);
+            if (!vocab.isEmpty()) {
+                sb.append("        private static final String[] SUGGESTION_VOCAB = new String[] {\n");
+                for (int i = 0; i < vocab.size(); i++ ) {
+                    sb.append("            \"")
+                      .append(escape(vocab.get(i)))
+                      .append("\"");
+                    if (i + 1 < vocab.size()) {
+                        sb.append(",");
+                    }
+                    sb.append("\n");
+                }
+                sb.append("        };\n\n");
+                sb.append("""
+                        private String readIdentifierLikeAt(int offset) {
+                            var sb = new StringBuilder();
+                            int i = offset;
+                            while (i < input.length()) {
+                                char c = input.charAt(i);
+                                if (Character.isLetterOrDigit(c) || c == '_') { sb.append(c); i++; }
+                                else break;
+                            }
+                            return sb.toString();
+                        }
+
+                        private Option<String> findBestSuggestion(String word) {
+                            String best = null;
+                            int bestDist = Integer.MAX_VALUE;
+                            for (var candidate : SUGGESTION_VOCAB) {
+                                if (candidate.equals(word)) return Option.none();
+                                int d = levenshtein(word, candidate);
+                                if (d < bestDist) { bestDist = d; best = candidate; }
+                            }
+                            return (best != null && bestDist <= 2) ? Option.some(best) : Option.none();
+                        }
+
+                        private int levenshtein(String a, String b) {
+                            int m = a.length(), n = b.length();
+                            if (m == 0) return n;
+                            if (n == 0) return m;
+                            int[] prev = new int[n + 1];
+                            int[] curr = new int[n + 1];
+                            for (int j = 0; j <= n; j++) prev[j] = j;
+                            for (int i = 1; i <= m; i++) {
+                                curr[0] = i;
+                                for (int j = 1; j <= n; j++) {
+                                    int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                                    curr[j] = Math.min(Math.min(curr[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+                                }
+                                var tmp = prev; prev = curr; curr = tmp;
+                            }
+                            return prev[n];
+                        }
+
+                    """);
+            }
         }
     }
 
@@ -2219,6 +2333,16 @@ public final class ParserGenerator {
               .append(escape(rule.errorMessage()
                                  .unwrap()))
               .append("\");\n");
+        }else if (rule.hasExpected()) {
+            // 0.2.4: %expected — see AST path above.
+            sb.append("            trackFailure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("            finalResult = CstParseResult.failure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
         }else {
             sb.append("            finalResult = result;\n");
         }
@@ -2260,6 +2384,58 @@ public final class ParserGenerator {
      */
     private Expression extractInnerExpression(Expression expr) {
         return ExpressionShape.extractInnerExpression(expr);
+    }
+
+    /**
+     * 0.2.4 — compute the suggestion vocabulary from rules designated by
+     * {@code %suggest}. Walks literal alternatives recursively. Result is used
+     * by the generator to emit a {@code SUGGESTION_VOCAB} constant inside the
+     * generated ADVANCED parser.
+     */
+    private static java.util.List<String> computeSuggestionVocabulary(org.pragmatica.peg.grammar.Grammar grammar) {
+        if (grammar.suggestRules()
+                   .isEmpty()) {
+            return java.util.List.of();
+        }
+        var out = new java.util.ArrayList<String>();
+        for (var ruleName : grammar.suggestRules()) {
+            grammar.rule(ruleName)
+                   .onPresent(rule -> collectVocabLiterals(rule.expression(), out));
+        }
+        return java.util.List.copyOf(out);
+    }
+
+    private static void collectVocabLiterals(Expression expr, java.util.List<String> out) {
+        switch (expr) {
+            case Expression.Literal lit -> {
+                if (!out.contains(lit.text())) {
+                    out.add(lit.text());
+                }
+            }
+            case Expression.Dictionary dict -> {
+                for (var w : dict.words()) {
+                    if (!out.contains(w)) {
+                        out.add(w);
+                    }
+                }
+            }
+            case Expression.Choice c -> c.alternatives()
+                                         .forEach(e -> collectVocabLiterals(e, out));
+            case Expression.Sequence s -> s.elements()
+                                           .forEach(e -> collectVocabLiterals(e, out));
+            case Expression.Group g -> collectVocabLiterals(g.expression(), out);
+            case Expression.Optional o -> collectVocabLiterals(o.expression(), out);
+            case Expression.ZeroOrMore zm -> collectVocabLiterals(zm.expression(), out);
+            case Expression.OneOrMore om -> collectVocabLiterals(om.expression(), out);
+            case Expression.Repetition r -> collectVocabLiterals(r.expression(), out);
+            case Expression.TokenBoundary tb -> collectVocabLiterals(tb.expression(), out);
+            case Expression.Ignore ig -> collectVocabLiterals(ig.expression(), out);
+            case Expression.Capture cap -> collectVocabLiterals(cap.expression(), out);
+            case Expression.CaptureScope cs -> collectVocabLiterals(cs.expression(), out);
+            default -> {
+                // Terminals without inner literals — skip.
+            }
+        }
     }
 
     /**
