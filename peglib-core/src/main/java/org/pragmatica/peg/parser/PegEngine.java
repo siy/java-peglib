@@ -25,7 +25,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -40,7 +39,7 @@ public final class PegEngine implements Parser {
     // Phase-1 optimization: cached first-char set for skipWhitespace fast-path (§6.6).
     // Present iff the grammar has a %whitespace rule whose shape is analyzable.
     // Unconditional-on for the interpreter; no flag gates this.
-    private final Optional<Set<Character>> whitespaceFirstChars;
+    private final Option<Set<Character>> whitespaceFirstChars;
 
     // 0.2.9: direct-left-recursive rule names. Empty for grammars without LR
     // (hot path: no extra work per rule entry). When non-empty, parseRule()
@@ -122,10 +121,10 @@ public final class PegEngine implements Parser {
         }
     }
 
-    private static Optional<Set<Character>> computeWhitespaceFirstChars(Grammar grammar) {
+    private static Option<Set<Character>> computeWhitespaceFirstChars(Grammar grammar) {
         if (grammar.whitespace()
                    .isEmpty()) {
-            return Optional.empty();
+            return Option.none();
         }
         var inner = ExpressionShape.extractInnerExpression(grammar.whitespace()
                                                                   .unwrap());
@@ -210,7 +209,9 @@ public final class PegEngine implements Parser {
         }
         var merged = new HashMap<>(inlineActions);
         for (var rule : grammar.rules()) {
-            lambdaActions.get(rule.name()).onPresent(lambda -> merged.put(rule.name(), lambda::apply));
+            lambdaActions.get(rule.name())
+                         .onPresent(lambda -> merged.put(rule.name(),
+                                                         lambda::apply));
         }
         return merged;
     }
@@ -238,7 +239,8 @@ public final class PegEngine implements Parser {
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRule(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return buildParseError(result, ctx, input).result();
+            return buildParseError(result, ctx, input)
+                   .result();
         }
         // Capture trailing trivia
         var trailingTrivia = skipWhitespace(ctx);
@@ -290,7 +292,8 @@ public final class PegEngine implements Parser {
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRuleWithActions(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return buildParseError(result, ctx, input).result();
+            return buildParseError(result, ctx, input)
+                   .result();
         }
         // Skip trailing whitespace before checking end
         skipWhitespace(ctx);
@@ -383,7 +386,8 @@ public final class PegEngine implements Parser {
         ctx.restoreLocation(computeLocation(input, offset));
         var result = parseRule(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return buildParseError(result, ctx, input).result();
+            return buildParseError(result, ctx, input)
+                   .result();
         }
         var success = (ParseResult.Success) result;
         return Result.success(new PartialParse(success.node(), ctx.pos()));
@@ -1041,11 +1045,7 @@ public final class PegEngine implements Parser {
      * {@code updateFurthest} so diagnostics quality is unchanged.
      */
     private ParseResult literalFailureAt(ParsingContext ctx, String text) {
-        var msg = literalFailureMessageCache.get(text);
-        if (msg == null) {
-            msg = "'" + text + "'";
-            literalFailureMessageCache.put(text, msg);
-        }
+        var msg = literalFailureMessageCache.computeIfAbsent(text, t -> "'" + t + "'");
         ctx.updateFurthest(msg);
         return ParseResult.Failure.at(ctx.location(), msg);
     }
@@ -1159,13 +1159,10 @@ public final class PegEngine implements Parser {
         var key = cc.negated()
                   ? "^" + cc.pattern()
                   : cc.pattern();
-        var msg = charClassFailureMessageCache.get(key);
-        if (msg == null) {
-            msg = "[" + (cc.negated()
-                         ? "^"
-                         : "") + cc.pattern() + "]";
-            charClassFailureMessageCache.put(key, msg);
-        }
+        var msg = charClassFailureMessageCache.computeIfAbsent(key,
+                                                               k -> "[" + (cc.negated()
+                                                                           ? "^"
+                                                                           : "") + cc.pattern() + "]");
         ctx.updateFurthest(msg);
         return ParseResult.Failure.at(ctx.location(), msg);
     }
@@ -1406,7 +1403,7 @@ public final class PegEngine implements Parser {
         // §6.6 fast-path: if the current char cannot begin any whitespace-rule
         // alternative, return the shared empty list without any allocation.
         if (whitespaceFirstChars.isPresent() && !ctx.isAtEnd()) {
-            var firstChars = whitespaceFirstChars.get();
+            var firstChars = whitespaceFirstChars.unwrap();
             if (!firstChars.contains(ctx.peek())) {
                 return List.of();
             }

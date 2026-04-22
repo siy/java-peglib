@@ -2813,7 +2813,7 @@ public final class ParserGenerator {
      * character cannot possibly begin trivia. Delegates to the shared analysis
      * helper so the generator and the interpreter compute the same set.
      */
-    private java.util.Optional<java.util.Set<Character>> whitespaceFirstChars(Expression expr) {
+    private org.pragmatica.lang.Option<java.util.Set<Character>> whitespaceFirstChars(Expression expr) {
         return FirstCharAnalysis.whitespaceFirstChars(grammar, expr);
     }
 
@@ -4315,7 +4315,7 @@ public final class ParserGenerator {
                                                         .unwrap());
             var charsOpt = whitespaceFirstChars(wsInner);
             if (charsOpt.isPresent()) {
-                var chars = charsOpt.get();
+                var chars = charsOpt.unwrap();
                 sb.append("        if (skippingWhitespace || tokenBoundaryDepth > 0 || pos >= input.length()) return List.of();\n");
                 sb.append("        char c = input.charAt(pos);\n");
                 sb.append("        if (")
