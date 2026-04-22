@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.4] - 2026-04-22
 
+### Added
+
+- **Intra-sequence trivia attribution foundation.** Trivia matched between sibling elements of a sequence now attaches to the following sibling's `leadingTrivia` rather than being dropped. Implemented via a `pendingLeadingTrivia` field on `ParsingContext` and equivalent emitted state in the generated parser; threaded through Sequence / ZeroOrMore / OneOrMore / Repetition combinators with save/restore across backtracking combinators (Choice / Optional / And / Not). Documented in `docs/TRIVIA-ATTRIBUTION.md`.
+- Grammar DSL — four new directives:
+  - `%expected "label"` (rule-level) — semantic expected-label for failure diagnostics; replaces the raw-token `" or "` join when the rule fails and contributes to the furthest-failure report.
+  - `%recover <terminator>` (rule-level) — overrides the global `RecoveryStrategy.ADVANCED` recovery point set for this rule's scope.
+  - `%suggest <RuleName>` (grammar-level) — designates a rule's literal alternatives as a suggestion vocabulary. On failure near an identifier-like position, peglib runs Levenshtein distance against the cached vocabulary and emits `help: did you mean 'X'?` when the closest match is within distance 2.
+  - `%tag "tag"` (rule-level) — rule-level machine-readable tag for emitted diagnostics.
+- `Diagnostic#tag()` — machine-readable tag field on every diagnostic. Built-in tags: `error.unexpected-input`, `error.expected`, `error.unclosed`. Custom tags via `%tag` rule directive.
+- Suggestion-vocabulary caching at `ParsingContext` construction — designed so `peglib-incremental` (0.3.1) carries the vocabulary forward across edits without recomputation.
+- Documentation:
+  - `docs/TRIVIA-ATTRIBUTION.md` — attribution rule, implementation notes, deferred rule-exit rewind limitation.
+  - `docs/GRAMMAR-DSL.md` — cut-operator edge cases + `%expected` / `%recover` / `%suggest` / `%tag` reference.
+  - `docs/PERF-FLAGS.md` — tabular reference for all 10 `ParserConfig` perf flags from 0.2.2.
+  - `docs/BENCHMARKING.md` — JMH harness usage and extension guide.
+  - `docs/ERROR_RECOVERY.md` expanded with diagnostic tags and `%recover` override.
+  - README cross-links to all new reference docs.
+- New tests: `SemanticExpectedTest` (3), `RuleRecoveryTest` (3), `SuggestionTest` (3), `DiagnosticTagTest` (5).
+
+### Changed
+
+- `PegEngine` consumes `Rule#expected()` when tracking failures; the semantic label replaces the raw expected-token when present.
+- `PegEngine` consumes `Rule#recover()` via a stacked recovery-char override during ADVANCED error recovery.
+- `ParserGenerator` emits the same `%expected` / `%recover` / `%suggest` / `%tag` consumption logic into generated parser source, byte-identically for grammars that don't use the new directives. Grammars without any of the new directives produce generator output identical to 0.2.3 — `GeneratorFlagInertnessTest` remains 3/3 green.
+
+### Deferred
+
+- **Full source round-trip (RoundTripTest → 22/22).** The attribution threading landed in this release, but byte-for-byte reconstruction still fails on 17/22 fixtures because trailing intra-rule trivia (trivia consumed by a rule body when no following sibling exists to attach to) requires rule-exit pos rewind. The rewind changes NonTerminal span ends and therefore regenerates the `CstHash` baselines — too invasive to bundle with this release's scope. `RoundTripTest` remains `@Disabled`; completion is scheduled for a subsequent patch release. See `docs/TRIVIA-ATTRIBUTION.md` "Known limitation" section.
+
+### Tests
+
+- Test count: 587 → 601 passing, 1 skipped (`RoundTripTest`, per above), 0 failures, 0 errors.
+- All ten corpus-parity suites stay 22/22 against the unchanged baselines (trivia attribution doesn't shift non-trivia CST shape; `CstHash` excludes trivia by design).
+
 ## [0.2.3] - 2026-04-22
 
 ### Added
