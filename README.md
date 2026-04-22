@@ -15,6 +15,22 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 - **Source code generation** - Generate standalone parser Java files
 - **Java 25** - Uses latest Java features (records, sealed interfaces, pattern matching)
 
+## Module Layout (0.3.0)
+
+Peglib is a multi-module Maven reactor. Pick the module you need; transitive deps stay minimal.
+
+```
+peglib-parent (pom)
+├── peglib-core            # engine, generator, analyzer — the core parser
+├── peglib-incremental     # cursor-anchored incremental reparsing (shell; spec-driven)
+├── peglib-formatter       # grammar-driven source formatter (shell)
+├── peglib-maven-plugin    # codegen + analyzer goals for Maven builds
+└── peglib-playground      # interactive REPL / web playground
+```
+
+The artifact id `peglib` is reserved for the parent pom; production consumers depend on
+`peglib-core`. The other modules are optional add-ons.
+
 ## Quick Start
 
 ### Dependency
@@ -22,7 +38,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 ```xml
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
-    <artifactId>peglib</artifactId>
+    <artifactId>peglib-core</artifactId>
     <version>0.3.0</version>
 </dependency>
 ```
@@ -61,6 +77,24 @@ var calculator = PegParser.fromGrammar("""
 // Actions transform parsed content into semantic values
 Integer result = (Integer) calculator.parse("3 + 5 * 2").unwrap();
 // result = 13
+```
+
+### Partial parse (0.3.0)
+
+`parseRuleAt` invokes a single rule against a substring of the buffer starting at a
+given offset. Intended for cursor-anchored incremental reparsing and grammar-debugging
+tooling. See [docs/PARTIAL-PARSE.md](docs/PARTIAL-PARSE.md) for the full API.
+
+```java
+record Number() implements org.pragmatica.peg.action.RuleId {}
+
+var parser = PegParser.fromGrammar("""
+    Number <- < [0-9]+ >
+    %whitespace <- [ \\t]*
+    """).unwrap();
+
+var partial = parser.parseRuleAt(Number.class, "  42  ", 2).unwrap();
+// partial.endOffset() == 4, partial.node() is the CST for "42"
 ```
 
 ## Grammar Syntax

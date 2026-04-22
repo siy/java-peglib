@@ -548,5 +548,7 @@ tooling integrations.
   formatting, `ParseResultWithDiagnostics` API
 - [Trivia Attribution](TRIVIA-ATTRIBUTION.md) — how whitespace/comments
   are attached to CST nodes
+- [Partial Parse](PARTIAL-PARSE.md) — the 0.3.0 `parseRuleAt` API for
+  cursor-anchored partial parsing and incremental reparse
 - [`CHANGELOG.md`](../CHANGELOG.md) — per-release history of grammar-DSL
   additions
