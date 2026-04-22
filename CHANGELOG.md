@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`peglib-formatter` module — pretty-printer framework v1.** Wadler-Lindig doc algebra + rule DSL + renderer. Lets grammar authors write declarative formatters in Java with minimal boilerplate. Final release in the roadmap from `docs/bench-results/` era — closes `peglib` as a complete language-tool substrate (parser → incremental reparse → formatter).
 - Public API in `org.pragmatica.peg.formatter`:
-  - `Doc` sealed interface with records: `Text`, `Line`, `Softline`, `Group`, `Indent`, `Concat`, `Empty`.
+  - `Doc` sealed interface with records: `Text`, `Line`, `HardLine`, `Softline`, `Group`, `Indent`, `Concat`, `Empty`.
   - `Docs` static builders: `text(String)`, `line()`, `softline()`, `group(Doc...)`, `indent(int, Doc)`, `concat(Doc...)`, `empty()`.
   - `FormatterRule` — functional interface `(FormatContext, List<Doc> childDocs) -> Doc`.
   - `Formatter` — fluent builder with `.rule(name, lambda)`, `.defaultIndent(n)`, `.maxLineWidth(n)`, `.format(CstNode) → Result<String>`.
@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Trivia-aware reparse splice** in `peglib-incremental`. New internal `TriviaRedistribution` helper redistributes `leadingTrivia` / `trailingTrivia` between a spliced subtree and its neighbors after `TreeSplicer` runs.
-- **Trivia-only edit fast-path** in `SessionImpl` — detects edits that land entirely within trivia regions and patches the CST without reinvoking the parser. Flag-gated via `IncrementalParser.builder(...).triviaFastPathEnabled(true)` — **default off** because grammars like Java allow whitespace to affect tokenisation (e.g., deleting whitespace between `>>` changes parse).
+- **Trivia-only edit fast-path** in `SessionImpl` — detects edits that land entirely within trivia regions and patches the CST without reinvoking the parser. Flag-gated via `IncrementalParser.create(grammar, config, /*triviaFastPathEnabled=*/true)` — **default off** because grammars like Java allow whitespace to affect tokenisation (e.g., deleting whitespace between `>>` changes parse).
 - **`IncrementalBenchmark` (JMH)** in `peglib-incremental/src/jmh/java/`, behind the `bench` Maven profile. Parametrized over `{initialize, singleCharEdit, wordEdit, lineEdit, fullReparse, undoRestore}` variants against the 1,900-LOC fixture. Smoke result committed at `docs/bench-results/incremental-v1-smoke.json`.
 
 ### Performance
@@ -220,8 +220,8 @@ Infrastructure-only minor-bump release. No new user-facing features beyond the `
 ### Added
 
 - New `peglib-playground/` sibling module shipping a grammar REPL and web UI:
-  - **CLI REPL:** `java -jar peglib-playground-0.2.7-uber.jar repl <grammar.peg>` — watches the grammar file, re-parses on save, exposes a prompt for input strings. Meta-commands: `:trace`, `:quit`, config toggles.
-  - **Web UI:** `java -jar peglib-playground-0.2.7-uber.jar server [--port 8080]` — embedded `com.sun.net.httpserver.HttpServer` serving a three-pane SPA (grammar / input / output) plus controls strip (start-rule selector, packrat toggle, CST/AST toggle, trivia show/hide, recovery strategy picker, auto-refresh). `POST /parse` returns `{ok, tree, diagnostics, stats}` JSON. Neutral styling (system font stack, muted palette).
+  - **CLI REPL** via `PlaygroundRepl.main(...)` — watches the grammar file, re-parses on save, exposes a prompt for input strings. Meta-commands: `:trace`, `:quit`, config toggles. Invoke via `java -cp peglib-playground-0.2.7-uber.jar org.pragmatica.peg.playground.PlaygroundRepl <grammar.peg>`.
+  - **Web UI** via `PlaygroundServer.main(...)` — embedded `com.sun.net.httpserver.HttpServer` serving a three-pane SPA (grammar / input / output) plus controls strip (start-rule selector, packrat toggle, CST/AST toggle, trivia show/hide, recovery strategy picker, auto-refresh). `POST /parse` returns `{ok, tree, diagnostics, stats}` JSON. Uber-jar's main class is `PlaygroundServer`, so `java -jar peglib-playground-0.2.7-uber.jar [port]` starts the server directly. Neutral styling (system font stack, muted palette).
   - **ParseTracer:** strictly additive, post-parse walker that synthesizes rule-entry/exit events, cache-hit statistics, node/trivia counts. No engine hooks; no impact on parse performance when not attached.
 - New documentation `docs/PLAYGROUND.md` covering CLI usage, web UI, HTTP API, programmatic access, tracer limitations, and scope boundaries. README cross-linked.
 
