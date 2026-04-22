@@ -30,10 +30,10 @@ public final class GrammarParser {
         // Check for lexer errors
         for (var token : tokens) {
             if (token instanceof GrammarToken.Error error) {
-                return Result.failure(new ParseError.SemanticError(
+                return new ParseError.SemanticError(
                 error.span()
                      .start(),
-                error.message()));
+                error.message()).result();
             }
         }
         return new GrammarParser(tokens).parseGrammar();
@@ -57,7 +57,7 @@ public final class GrammarParser {
                     advance();
                     var result = parseSuggestDirective();
                     if (result instanceof Result.Failure< ? > f) {
-                        return Result.failure(f.cause());
+                        return f.cause().result();
                     }
                     suggestRules.add(result.unwrap());
                     continue;
@@ -72,7 +72,7 @@ public final class GrammarParser {
                     advance();
                     var result = parseImportDirective(start);
                     if (result instanceof Result.Failure< ? > f) {
-                        return Result.failure(f.cause());
+                        return f.cause().result();
                     }
                     imports.add(result.unwrap());
                     continue;
@@ -80,7 +80,7 @@ public final class GrammarParser {
                 advance();
                 var result = parseDirective(directive);
                 if (result instanceof Result.Failure< ? > f) {
-                    return Result.failure(f.cause());
+                    return f.cause().result();
                 }
                 var expr = result.unwrap();
                 switch (directive.name()) {
@@ -90,17 +90,17 @@ public final class GrammarParser {
             }else if (token instanceof GrammarToken.Identifier) {
                 var result = parseRule();
                 if (result instanceof Result.Failure< ? > f) {
-                    return Result.failure(f.cause());
+                    return f.cause().result();
                 }
                 rules.add(result.unwrap());
             }else if (token instanceof GrammarToken.Eof) {
                 break;
             }else {
-                return Result.failure(new ParseError.UnexpectedInput(
+                return new ParseError.UnexpectedInput(
                 token.span()
                      .start(),
                 tokenDescription(token),
-                "rule definition or directive"));
+                "rule definition or directive").result();
             }
         }
         return Result.success(new Grammar(rules,
@@ -113,42 +113,42 @@ public final class GrammarParser {
 
     private Result<Import> parseImportDirective(SourceLocation start) {
         if (! (peek() instanceof GrammarToken.Identifier grammarId)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "grammar name for '%import'"));
+            "grammar name for '%import'").result();
         }
         advance();
         if (! (peek() instanceof GrammarToken.Dot)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "'.' between grammar name and rule name"));
+            "'.' between grammar name and rule name").result();
         }
         advance();
         if (! (peek() instanceof GrammarToken.Identifier ruleId)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "rule name after '.'"));
+            "rule name after '.'").result();
         }
         advance();
         Option<String> alias = Option.none();
         if (peek() instanceof GrammarToken.Identifier asId && "as".equals(asId.name())) {
             advance();
             if (! (peek() instanceof GrammarToken.Identifier aliasId)) {
-                return Result.failure(new ParseError.UnexpectedInput(
+                return new ParseError.UnexpectedInput(
                 peek()
                 .span()
                 .start(),
                 tokenDescription(peek()),
-                "local name after 'as'"));
+                "local name after 'as'").result();
             }
             advance();
             alias = Option.some(aliasId.name());
@@ -159,12 +159,12 @@ public final class GrammarParser {
 
     private Result<String> parseSuggestDirective() {
         if (! (peek() instanceof GrammarToken.Identifier id)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "rule name"));
+            "rule name").result();
         }
         advance();
         return Result.success(id.name());
@@ -172,12 +172,12 @@ public final class GrammarParser {
 
     private Result<Expression> parseDirective(GrammarToken.Directive directive) {
         if (!expect(GrammarToken.LeftArrow.class)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "'<-'"));
+            "'<-'").result();
         }
         return parseExpression();
     }
@@ -187,25 +187,25 @@ public final class GrammarParser {
                     .span()
                     .start();
         if (! (peek() instanceof GrammarToken.Identifier id)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "rule name"));
+            "rule name").result();
         }
         advance();
         if (!expect(GrammarToken.LeftArrow.class)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "'<-'"));
+            "'<-'").result();
         }
         var exprResult = parseExpression();
         if (exprResult instanceof Result.Failure< ? > f) {
-            return Result.failure(f.cause());
+            return f.cause().result();
         }
         var expression = exprResult.unwrap();
         // Check for action and/or error_message
@@ -239,7 +239,7 @@ public final class GrammarParser {
             advance();
             var argResult = parseStringLiteralArg(d.name());
             if (argResult instanceof Result.Failure< ? > f) {
-                return Result.failure(f.cause());
+                return f.cause().result();
             }
             var value = argResult.unwrap();
             switch (d.name()) {
@@ -254,12 +254,12 @@ public final class GrammarParser {
 
     private Result<String> parseStringLiteralArg(String directiveName) {
         if (! (peek() instanceof GrammarToken.StringLiteral lit)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "string literal argument for '%" + directiveName + "'"));
+            "string literal argument for '%" + directiveName + "'").result();
         }
         advance();
         return Result.success(lit.value());
@@ -307,12 +307,12 @@ public final class GrammarParser {
             elements.add(result.unwrap());
         }
         if (elements.isEmpty()) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "expression"));
+            "expression").result();
         }
         if (elements.size() == 1) {
             return Result.success(elements.getFirst());
@@ -388,12 +388,12 @@ public final class GrammarParser {
                     return nextPrimary;
                 }
                 if (! (nextPrimary.unwrap() instanceof Expression.Literal nextLit)) {
-                    return Result.failure(new ParseError.UnexpectedInput(
+                    return new ParseError.UnexpectedInput(
                     peek()
                     .span()
                     .start(),
                     "non-literal",
-                    "string literal for dictionary"));
+                    "string literal for dictionary").result();
                 }
                 words.add(nextLit.text());
                 // If any literal is case-insensitive, the whole dictionary is
@@ -432,12 +432,12 @@ public final class GrammarParser {
         advance();
         // skip {
         if (! (peek() instanceof GrammarToken.Number min)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "number"));
+            "number").result();
         }
         advance();
         Option<Integer> max;
@@ -453,12 +453,12 @@ public final class GrammarParser {
             max = Option.some(min.value());
         }
         if (! (peek() instanceof GrammarToken.RBrace)) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             peek()
             .span()
             .start(),
             tokenDescription(peek()),
-            "'}'"));
+            "'}'").result();
         }
         advance();
         var span = SourceSpan.of(start, currentLocation());
@@ -503,12 +503,12 @@ public final class GrammarParser {
             var inner = parseExpression();
             if (inner.isFailure()) return inner;
             if (! (peek() instanceof GrammarToken.RParen)) {
-                return Result.failure(new ParseError.UnexpectedInput(
+                return new ParseError.UnexpectedInput(
                 peek()
                 .span()
                 .start(),
                 tokenDescription(peek()),
-                "')'"));
+                "')'").result();
             }
             advance();
             var span = SourceSpan.of(start, currentLocation());
@@ -520,12 +520,12 @@ public final class GrammarParser {
             var inner = parseExpression();
             if (inner.isFailure()) return inner;
             if (! (peek() instanceof GrammarToken.RAngle)) {
-                return Result.failure(new ParseError.UnexpectedInput(
+                return new ParseError.UnexpectedInput(
                 peek()
                 .span()
                 .start(),
                 tokenDescription(peek()),
-                "'>'"));
+                "'>'").result();
             }
             advance();
             var span = SourceSpan.of(start, currentLocation());
@@ -540,12 +540,12 @@ public final class GrammarParser {
                 var inner = parseExpression();
                 if (inner.isFailure()) return inner;
                 if (! (peek() instanceof GrammarToken.RParen)) {
-                    return Result.failure(new ParseError.UnexpectedInput(
+                    return new ParseError.UnexpectedInput(
                     peek()
                     .span()
                     .start(),
                     tokenDescription(peek()),
-                    "')'"));
+                    "')'").result();
                 }
                 advance();
                 var span = SourceSpan.of(start, currentLocation());
@@ -553,12 +553,12 @@ public final class GrammarParser {
             }
             // Named capture or back-reference requires identifier
             if (! (peek() instanceof GrammarToken.Identifier nameId)) {
-                return Result.failure(new ParseError.UnexpectedInput(
+                return new ParseError.UnexpectedInput(
                 peek()
                 .span()
                 .start(),
                 tokenDescription(peek()),
-                "capture name or '('"));
+                "capture name or '('").result();
             }
             advance();
             if (peek() instanceof GrammarToken.LAngle) {
@@ -566,12 +566,12 @@ public final class GrammarParser {
                 var inner = parseExpression();
                 if (inner.isFailure()) return inner;
                 if (! (peek() instanceof GrammarToken.RAngle)) {
-                    return Result.failure(new ParseError.UnexpectedInput(
+                    return new ParseError.UnexpectedInput(
                     peek()
                     .span()
                     .start(),
                     tokenDescription(peek()),
-                    "'>'"));
+                    "'>'").result();
                 }
                 advance();
                 var span = SourceSpan.of(start, currentLocation());
@@ -582,11 +582,11 @@ public final class GrammarParser {
                 return Result.success(new Expression.BackReference(span, nameId.name()));
             }
         }
-        return Result.failure(new ParseError.UnexpectedInput(
+        return new ParseError.UnexpectedInput(
         token.span()
              .start(),
         tokenDescription(token),
-        "expression"));
+        "expression").result();
     }
 
     private boolean isAtEnd() {

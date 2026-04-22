@@ -189,8 +189,8 @@ public final class PegEngine implements Parser {
         }
         for (var skip : config.packratSkipRules()) {
             if (lrRules.contains(skip)) {
-                return Result.failure(new ParseError.SemanticError(
-                SourceLocation.START, "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules"));
+                return new ParseError.SemanticError(
+                SourceLocation.START, "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules").result();
             }
         }
         return Result.success(grammar);
@@ -222,8 +222,8 @@ public final class PegEngine implements Parser {
     public Result<CstNode> parseCst(String input) {
         var startRule = grammar.effectiveStartRule();
         if (startRule.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "No start rule defined in grammar"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "No start rule defined in grammar").result();
         }
         return parseCst(input,
                         startRule.unwrap()
@@ -234,23 +234,23 @@ public final class PegEngine implements Parser {
     public Result<CstNode> parseCst(String input, String startRule) {
         var ruleOpt = grammar.rule(startRule);
         if (ruleOpt.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Unknown rule: " + startRule));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Unknown rule: " + startRule).result();
         }
         var ctx = ParsingContext.create(input, grammar, config);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRule(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return Result.failure(buildParseError(result, ctx, input));
+            return buildParseError(result, ctx, input).result();
         }
         // Capture trailing trivia
         var trailingTrivia = skipWhitespace(ctx);
         // Check if we consumed all input
         if (!ctx.isAtEnd()) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             ctx.location(),
             String.valueOf(ctx.peek()),
-            "end of input"));
+            "end of input").result();
         }
         var success = (ParseResult.Success) result;
         // Attach trailing trivia to root node
@@ -274,8 +274,8 @@ public final class PegEngine implements Parser {
     public Result<Object> parse(String input) {
         var startRule = grammar.effectiveStartRule();
         if (startRule.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "No start rule defined in grammar"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "No start rule defined in grammar").result();
         }
         return parse(input,
                      startRule.unwrap()
@@ -286,22 +286,22 @@ public final class PegEngine implements Parser {
     public Result<Object> parse(String input, String startRule) {
         var ruleOpt = grammar.rule(startRule);
         if (ruleOpt.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Unknown rule: " + startRule));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Unknown rule: " + startRule).result();
         }
         var ctx = ParsingContext.create(input, grammar, config);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRuleWithActions(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return Result.failure(buildParseError(result, ctx, input));
+            return buildParseError(result, ctx, input).result();
         }
         // Skip trailing whitespace before checking end
         skipWhitespace(ctx);
         if (!ctx.isAtEnd()) {
-            return Result.failure(new ParseError.UnexpectedInput(
+            return new ParseError.UnexpectedInput(
             ctx.location(),
             String.valueOf(ctx.peek()),
-            "end of input"));
+            "end of input").result();
         }
         var success = (ParseResult.Success) result;
         return Result.success(success.semanticValueOpt()
@@ -364,29 +364,29 @@ public final class PegEngine implements Parser {
     @Override
     public Result<PartialParse> parseRuleAt(Class< ? extends RuleId> ruleId, String input, int offset) {
         if (ruleId == null) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Rule id class is null"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Rule id class is null").result();
         }
         if (input == null) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Input is null"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Input is null").result();
         }
         if (offset < 0 || offset > input.length()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Offset " + offset + " out of range [0, " + input.length() + "]"));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Offset " + offset + " out of range [0, " + input.length() + "]").result();
         }
         var ruleName = resolveRuleName(ruleId);
         var ruleOpt = grammar.rule(ruleName);
         if (ruleOpt.isEmpty()) {
-            return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Unknown rule for class " + ruleId.getSimpleName() + ": " + ruleName));
+            return new ParseError.SemanticError(
+            SourceLocation.START, "Unknown rule for class " + ruleId.getSimpleName() + ": " + ruleName).result();
         }
         var ctx = ParsingContext.create(input, grammar, config);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         ctx.restoreLocation(computeLocation(input, offset));
         var result = parseRule(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
-            return Result.failure(buildParseError(result, ctx, input));
+            return buildParseError(result, ctx, input).result();
         }
         var success = (ParseResult.Success) result;
         return Result.success(new PartialParse(success.node(), ctx.pos()));
