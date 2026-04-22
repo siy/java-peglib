@@ -16,13 +16,21 @@ import java.util.stream.Collectors;
  * suggestion vocabulary used by error reporting to emit "did you mean 'X'?"
  * hints on near-miss identifier failures. When empty, no suggestion logic is
  * activated and hot paths remain unaffected.
+ *
+ * <p>{@code imports} (0.2.8) is the list of {@code %import} directives declared
+ * at grammar level. When empty the grammar is standalone; when non-empty it must
+ * be passed through {@link GrammarResolver} before being handed to the engine
+ * or generator. After resolution the composed {@code Grammar} carries an empty
+ * {@code imports} list and all imported rules appear as regular entries in
+ * {@link #rules()}.
  */
 public record Grammar(
  List<Rule> rules,
  Option<String> startRule,
  Option<Expression> whitespace,
  Option<Expression> word,
- List<String> suggestRules) {
+ List<String> suggestRules,
+ List<Import> imports) {
     /**
      * Backwards-compatible constructor matching the pre-0.2.4 signature.
      */
@@ -30,7 +38,18 @@ public record Grammar(
                    Option<String> startRule,
                    Option<Expression> whitespace,
                    Option<Expression> word) {
-        this(rules, startRule, whitespace, word, List.of());
+        this(rules, startRule, whitespace, word, List.of(), List.of());
+    }
+
+    /**
+     * Backwards-compatible constructor matching the 0.2.4-0.2.7 signature.
+     */
+    public Grammar(List<Rule> rules,
+                   Option<String> startRule,
+                   Option<Expression> whitespace,
+                   Option<Expression> word,
+                   List<String> suggestRules) {
+        this(rules, startRule, whitespace, word, suggestRules, List.of());
     }
 
     /**
