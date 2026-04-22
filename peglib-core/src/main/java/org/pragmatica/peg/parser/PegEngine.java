@@ -361,7 +361,7 @@ public final class PegEngine implements Parser {
      * attached by the rule itself).
      */
     @Override
-    public Result<PartialParse> parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset) {
+    public Result<PartialParse> parseRuleAt(Class< ? extends RuleId> ruleId, String input, int offset) {
         if (ruleId == null) {
             return Result.failure(new ParseError.SemanticError(
             SourceLocation.START, "Rule id class is null"));
@@ -372,15 +372,13 @@ public final class PegEngine implements Parser {
         }
         if (offset < 0 || offset > input.length()) {
             return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START,
-            "Offset " + offset + " out of range [0, " + input.length() + "]"));
+            SourceLocation.START, "Offset " + offset + " out of range [0, " + input.length() + "]"));
         }
         var ruleName = resolveRuleName(ruleId);
         var ruleOpt = grammar.rule(ruleName);
         if (ruleOpt.isEmpty()) {
             return Result.failure(new ParseError.SemanticError(
-            SourceLocation.START, "Unknown rule for class "
-                                  + ruleId.getSimpleName() + ": " + ruleName));
+            SourceLocation.START, "Unknown rule for class " + ruleId.getSimpleName() + ": " + ruleName));
         }
         var ctx = ParsingContext.create(input, grammar, config);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
@@ -400,8 +398,8 @@ public final class PegEngine implements Parser {
      * lookup. Falls back to the simple class name when no zero-arg constructor
      * is available.
      */
-    private static String resolveRuleName(Class<? extends RuleId> ruleId) {
-        try {
+    private static String resolveRuleName(Class< ? extends RuleId> ruleId) {
+        try{
             var ctor = ruleId.getDeclaredConstructor();
             ctor.setAccessible(true);
             return ctor.newInstance()

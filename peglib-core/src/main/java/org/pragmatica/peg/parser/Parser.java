@@ -77,5 +77,5 @@ public interface Parser {
      *         the rule fails to match at {@code offset}.
      * @since 0.3.0
      */
-    Result<PartialParse> parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset);
+    Result<PartialParse> parseRuleAt(Class< ? extends RuleId> ruleId, String input, int offset);
 }
