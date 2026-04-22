@@ -1,5 +1,4 @@
 package org.pragmatica.peg.analyzer;
-
 /**
  * A single analyzer finding about a grammar.
  *
@@ -13,7 +12,9 @@ public record Finding(Severity severity, String tag, String ruleName, String mes
      * Finding severity levels.
      */
     public enum Severity {
-        ERROR, WARNING, INFO
+        ERROR,
+        WARNING,
+        INFO
     }
 
     public static Finding error(String tag, String ruleName, String message) {

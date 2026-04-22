@@ -23,8 +23,9 @@ import java.util.Set;
  *       from the start rule. Severity: WARNING.</li>
  *   <li>{@code grammar.ambiguous-choice} — {@link Expression.Choice}
  *       alternatives whose first-character sets are identical AND whose
- *       prefixes are literal. Conservative: only flags the high-confidence
- *       ambiguities caught by {@link ChoiceDispatchAnalyzer}. Severity: WARNING.</li>
+ *       prefixes are literal (conservative: only flags high-confidence
+ *       cases where every alternative begins with a fixed literal char).
+ *       Severity: WARNING.</li>
  *   <li>{@code grammar.nullable-rule} — rules whose expression can match the
  *       empty string, computed by fix-point analysis. Severity: INFO, promoted
  *       to WARNING if the rule is on a (direct) left-recursive path.</li>
@@ -60,15 +61,14 @@ public final class Analyzer {
         findings.addAll(checkWhitespaceCycle());
         findings.addAll(checkBackReferences());
         // Stable sort: by rule name, then tag, then severity. Ensures deterministic output.
-        findings.sort(Comparator.<Finding, String>comparing(Finding::ruleName)
-                                .thenComparing(Finding::tag)
-                                .thenComparing(f -> f.severity()
-                                                     .name()));
+        findings.sort(Comparator.<Finding, String> comparing(Finding::ruleName)
+                      .thenComparing(Finding::tag)
+                      .thenComparing(f -> f.severity()
+                                           .name()));
         return new AnalyzerReport(List.copyOf(findings));
     }
 
     // === Check 1: Unreachable rules ===
-
     private List<Finding> checkUnreachableRules() {
         var start = grammar.effectiveStartRule();
         if (start.isEmpty()) {
@@ -129,14 +129,11 @@ public final class Analyzer {
             case Expression.CaptureScope cs -> gatherReferences(cs.expression(), out);
             case Expression.Group grp -> gatherReferences(grp.expression(), out);
             case Expression.Literal _, Expression.CharClass _, Expression.Any _,
-                 Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {
-                // terminals — no nested refs
-            }
+            Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {}
         }
     }
 
     // === Check 2: Ambiguous choices (first-char overlap with literal prefixes) ===
-
     private List<Finding> checkAmbiguousChoices() {
         var findings = new ArrayList<Finding>();
         for (var rule : grammar.rules()) {
@@ -166,9 +163,7 @@ public final class Analyzer {
             case Expression.Capture cap -> gatherAmbiguousChoices(rule, cap.expression(), findings);
             case Expression.CaptureScope cs -> gatherAmbiguousChoices(rule, cs.expression(), findings);
             case Expression.Group grp -> gatherAmbiguousChoices(rule, grp.expression(), findings);
-            default -> {
-                // terminals
-            }
+            default -> {}
         }
     }
 
@@ -185,7 +180,7 @@ public final class Analyzer {
         for (var alt : alternatives) {
             var ch = literalFirstChar(alt);
             if (ch == null) {
-                return; // not fully literal-prefixed; skip
+                return;
             }
             firstChars.add(ch);
         }
@@ -201,8 +196,8 @@ public final class Analyzer {
                 findings.add(Finding.warning(
                 "grammar.ambiguous-choice",
                 rule.name(),
-                "choice alternatives at positions " + bucket.getValue()
-                + " share first char '" + bucket.getKey() + "' (potential ambiguity)"));
+                "choice alternatives at positions " + bucket.getValue() + " share first char '" + bucket.getKey()
+                + "' (potential ambiguity)"));
             }
         }
     }
@@ -238,7 +233,6 @@ public final class Analyzer {
     }
 
     // === Check 3: Nullable rules ===
-
     private List<Finding> checkNullableRules() {
         var nullable = computeNullableFixedPoint();
         var leftRecursive = computeDirectLeftRecursiveRules();
@@ -381,7 +375,6 @@ public final class Analyzer {
     }
 
     // === Check 4: Duplicate literals across alternatives ===
-
     private List<Finding> checkDuplicateLiterals() {
         var findings = new ArrayList<Finding>();
         for (var rule : grammar.rules()) {
@@ -404,7 +397,7 @@ public final class Analyzer {
                               : lit.text();
                     if (seen.containsKey(key)) {
                         duplicates.add(lit.text());
-                    } else {
+                    }else {
                         seen.put(key, i);
                     }
                 }
@@ -433,14 +426,11 @@ public final class Analyzer {
             case Expression.Capture cap -> gatherDuplicateLiterals(rule, cap.expression(), findings);
             case Expression.CaptureScope cs -> gatherDuplicateLiterals(rule, cs.expression(), findings);
             case Expression.Group grp -> gatherDuplicateLiterals(rule, grp.expression(), findings);
-            default -> {
-                // terminals
-            }
+            default -> {}
         }
     }
 
     // === Check 5: Whitespace cycle ===
-
     private List<Finding> checkWhitespaceCycle() {
         var ws = grammar.whitespace();
         if (ws.isEmpty()) {
@@ -484,7 +474,6 @@ public final class Analyzer {
     }
 
     // === Check 6: BackReferences (forward-compat note) ===
-
     private List<Finding> checkBackReferences() {
         var findings = new ArrayList<Finding>();
         for (var rule : grammar.rules()) {
@@ -521,5 +510,4 @@ public final class Analyzer {
             default -> false;
         };
     }
-
 }

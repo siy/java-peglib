@@ -28,7 +28,7 @@ public final class AnalyzerMain {
         }
         var path = Path.of(args[0]);
         String grammarText;
-        try {
+        try{
             grammarText = Files.readString(path);
         } catch (Exception e) {
             System.err.println("error: failed to read grammar file: " + e.getMessage());
@@ -37,9 +37,9 @@ public final class AnalyzerMain {
         }
         var parsed = GrammarParser.parse(grammarText)
                                   .flatMap(Grammar::validate);
-        if (parsed instanceof org.pragmatica.lang.Result.Failure<?> failure) {
+        if (parsed instanceof org.pragmatica.lang.Result.Failure< ? > failure) {
             System.err.println("error: " + failure.cause()
-                                                  .message());
+                                                 .message());
             System.exit(2);
             return;
         }
