@@ -22,7 +22,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.2.6</version>
+    <version>0.2.7</version>
 </dependency>
 ```
 
@@ -352,7 +352,7 @@ The `peglib-maven-plugin` module (separate artifact, sibling to `peglib`) wraps 
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.2.6</version>
+    <version>0.2.7</version>
     <executions>
         <execution>
             <goals>
@@ -369,6 +369,20 @@ The `peglib-maven-plugin` module (separate artifact, sibling to `peglib`) wraps 
     </executions>
 </plugin>
 ```
+
+## Playground
+
+The `peglib-playground` module (separate artifact, sibling to `peglib`) bundles a
+REPL and an embedded web UI for experimenting with grammars interactively.
+
+- **CLI REPL:** `java -cp peglib-playground.jar org.pragmatica.peg.playground.PlaygroundRepl grammar.peg`
+- **Web UI:** `java -jar peglib-playground-0.2.7-uber.jar --port 8080` then open
+  `http://localhost:8080` — three panes (grammar / input / output) plus controls
+  for start rule, CST/AST, trivia, recovery, packrat, and auto-refresh.
+- **HTTP API:** `POST /parse` with `{"grammar":"…","input":"…","recovery":"BASIC","packrat":true,"trivia":true}`
+  returns `{tree, diagnostics, stats}` JSON.
+
+See [docs/PLAYGROUND.md](docs/PLAYGROUND.md) for the full usage guide.
 
 ## Examples
 

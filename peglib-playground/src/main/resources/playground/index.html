@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>peglib playground</title>
+    <link rel="stylesheet" href="/playground.css">
+</head>
+<body>
+<header class="top-bar">
+    <h1>peglib playground</h1>
+    <nav class="controls">
+        <label class="control">
+            <span>start rule</span>
+            <input type="text" id="start-rule" placeholder="(grammar default)" autocomplete="off">
+        </label>
+        <label class="control">
+            <span>mode</span>
+            <select id="mode">
+                <option value="cst" selected>CST</option>
+                <option value="ast">AST</option>
+            </select>
+        </label>
+        <label class="control">
+            <span>recovery</span>
+            <select id="recovery">
+                <option value="NONE">none</option>
+                <option value="BASIC" selected>basic</option>
+                <option value="ADVANCED">advanced</option>
+            </select>
+        </label>
+        <label class="control check">
+            <input type="checkbox" id="packrat" checked>
+            <span>packrat</span>
+        </label>
+        <label class="control check">
+            <input type="checkbox" id="trivia" checked>
+            <span>show trivia</span>
+        </label>
+        <label class="control check">
+            <input type="checkbox" id="auto-refresh" checked>
+            <span>auto refresh</span>
+        </label>
+        <button type="button" id="parse-btn">Parse</button>
+    </nav>
+</header>
+
+<main class="panes">
+    <section class="pane">
+        <header class="pane-header">grammar</header>
+        <textarea id="grammar" spellcheck="false">Number &lt;- &lt; [0-9]+ &gt;
+%whitespace &lt;- [ \t\r\n]*
+</textarea>
+    </section>
+    <section class="pane">
+        <header class="pane-header">input</header>
+        <textarea id="input" spellcheck="false">42</textarea>
+    </section>
+    <section class="pane output-pane">
+        <header class="pane-header">
+            <span>output</span>
+            <span class="stats" id="stats-line">&mdash;</span>
+        </header>
+        <div id="output" class="output"></div>
+        <div id="diagnostics" class="diagnostics"></div>
+    </section>
+</main>
+
+<footer class="status-bar">
+    <span id="status">ready</span>
+</footer>
+
+<script src="/playground.js"></script>
+</body>
+</html>
