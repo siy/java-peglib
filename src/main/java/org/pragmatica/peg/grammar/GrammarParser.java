@@ -41,12 +41,26 @@ public final class GrammarParser {
 
     private Result<Grammar> parseGrammar() {
         var rules = new ArrayList<Rule>();
+        var suggestRules = new ArrayList<String>();
         Option<String> startRule = Option.none();
         Option<Expression> whitespace = Option.none();
         Option<Expression> word = Option.none();
         while (!isAtEnd()) {
             var token = peek();
             if (token instanceof GrammarToken.Directive directive) {
+                // Grammar-level %suggest RuleName — designates a rule whose
+                // literal alternatives form a suggestion vocabulary for
+                // "did you mean 'X'?" hints. Parsed specially because its
+                // argument is a rule name (identifier), not an expression.
+                if ("suggest".equals(directive.name())) {
+                    advance();
+                    var result = parseSuggestDirective();
+                    if (result instanceof Result.Failure< ? > f) {
+                        return Result.failure(f.cause());
+                    }
+                    suggestRules.add(result.unwrap());
+                    continue;
+                }
                 advance();
                 var result = parseDirective(directive);
                 if (result instanceof Result.Failure< ? > f) {
@@ -73,7 +87,20 @@ public final class GrammarParser {
                 "rule definition or directive"));
             }
         }
-        return Result.success(new Grammar(rules, startRule, whitespace, word));
+        return Result.success(new Grammar(rules, startRule, whitespace, word, List.copyOf(suggestRules)));
+    }
+
+    private Result<String> parseSuggestDirective() {
+        if (! (peek() instanceof GrammarToken.Identifier id)) {
+            return Result.failure(new ParseError.UnexpectedInput(
+            peek()
+            .span()
+            .start(),
+            tokenDescription(peek()),
+            "rule name"));
+        }
+        advance();
+        return Result.success(id.name());
     }
 
     private Result<Expression> parseDirective(GrammarToken.Directive directive) {
@@ -132,8 +159,44 @@ public final class GrammarParser {
                 action = Option.some(actionCode.code());
             }
         }
+        // Trailing rule-level directives: %expected / %recover / %tag (0.2.4).
+        // Each takes a single string-literal argument and is optional; order
+        // among them is flexible so the author can pick whichever reads best.
+        Option<String> expected = Option.none();
+        Option<String> recover = Option.none();
+        Option<String> tag = Option.none();
+        while (peek() instanceof GrammarToken.Directive d
+               && (d.name()
+                    .equals("expected") || d.name()
+                                            .equals("recover") || d.name()
+                                                                   .equals("tag"))) {
+            advance();
+            var argResult = parseStringLiteralArg(d.name());
+            if (argResult instanceof Result.Failure< ? > f) {
+                return Result.failure(f.cause());
+            }
+            var value = argResult.unwrap();
+            switch (d.name()) {
+                case"expected" -> expected = Option.some(value);
+                case"recover" -> recover = Option.some(value);
+                case"tag" -> tag = Option.some(value);
+            }
+        }
         var span = SourceSpan.of(start, currentLocation());
-        return Result.success(new Rule(span, id.name(), expression, action, errorMessage));
+        return Result.success(new Rule(span, id.name(), expression, action, errorMessage, expected, recover, tag));
+    }
+
+    private Result<String> parseStringLiteralArg(String directiveName) {
+        if (! (peek() instanceof GrammarToken.StringLiteral lit)) {
+            return Result.failure(new ParseError.UnexpectedInput(
+            peek()
+            .span()
+            .start(),
+            tokenDescription(peek()),
+            "string literal argument for '%" + directiveName + "'"));
+        }
+        advance();
+        return Result.success(lit.value());
     }
 
     private Result<Expression> parseExpression() {
