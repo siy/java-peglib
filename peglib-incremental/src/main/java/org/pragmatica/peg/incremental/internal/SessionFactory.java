@@ -34,13 +34,19 @@ public final class SessionFactory implements IncrementalParser {
     private final Parser parser;
     private final Set<String> fallbackRules;
     private final RuleIdRegistry registry;
+    private final boolean triviaFastPathEnabled;
 
-    private SessionFactory(Grammar grammar, ParserConfig config, Parser parser, Set<String> fallbackRules) {
+    private SessionFactory(Grammar grammar,
+                           ParserConfig config,
+                           Parser parser,
+                           Set<String> fallbackRules,
+                           boolean triviaFastPathEnabled) {
         this.grammar = grammar;
         this.config = config;
         this.parser = parser;
         this.fallbackRules = fallbackRules;
         this.registry = new RuleIdRegistry();
+        this.triviaFastPathEnabled = triviaFastPathEnabled;
     }
 
     /**
@@ -51,6 +57,23 @@ public final class SessionFactory implements IncrementalParser {
      * is a programmer error (the caller owns the grammar text).
      */
     public static IncrementalParser create(Grammar grammar, ParserConfig config) {
+        return create(grammar, config, false);
+    }
+
+    /**
+     * Create a {@link SessionFactory} with explicit control over the SPEC §5.4
+     * v2 trivia-only fast-path. When {@code triviaFastPathEnabled} is true,
+     * edits whose range fits inside a single trivia run skip the parser and
+     * rewrite the trivia in-place (see {@link TriviaRedistribution}).
+     *
+     * <p>The fast-path is correct only for grammars where in-trivia edits
+     * cannot change the tokenisation of adjacent tokens. Simple grammars
+     * (whitespace-skipping with no token-boundary sensitivity) qualify; the
+     * Java grammar does NOT (e.g., {@code >>} vs {@code > >}). Default is
+     * {@code false}; opt-in via {@link IncrementalParser#create(Grammar,
+     * ParserConfig, boolean)}.
+     */
+    public static IncrementalParser create(Grammar grammar, ParserConfig config, boolean triviaFastPathEnabled) {
         var validated = grammar.validate().fold(
             cause -> { throw new IllegalArgumentException("invalid grammar: " + cause.message()); },
             g -> g);
@@ -58,7 +81,7 @@ public final class SessionFactory implements IncrementalParser {
             cause -> { throw new IllegalStateException("failed to build parser: " + cause.message()); },
             p -> p);
         var fallback = BackReferenceScan.unsafeRules(validated);
-        return new SessionFactory(validated, config, parser, fallback);
+        return new SessionFactory(validated, config, parser, fallback, triviaFastPathEnabled);
     }
 
     @Override
@@ -76,6 +99,7 @@ public final class SessionFactory implements IncrementalParser {
     Parser parser() { return parser; }
     Set<String> fallbackRules() { return fallbackRules; }
     RuleIdRegistry registry() { return registry; }
+    boolean triviaFastPathEnabled() { return triviaFastPathEnabled; }
 
     /**
      * Full-parse the buffer via the backing {@link Parser}. Surfaces errors

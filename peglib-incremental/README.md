@@ -14,6 +14,24 @@ v1 (0.3.1) — **correctness-first ship**. CST-only incremental reparsing, with
 wholesale packrat-cache invalidation on every edit and a full-reparse
 fallback for back-reference-bearing rules.
 
+v2 (0.3.2) — **trivia-aware reparse splice** (SPEC §5.4 v2). Structural
+splice preserves the spliced subtree's leading-trivia attribution (carried
+from `parseRuleAt` per 0.2.4 attribution semantics). Opt-in
+**trivia-only fast-path** rewrites edits whose range is entirely contained
+in a single trivia run without re-invoking the parser; off by default
+because it's only safe for grammars where in-trivia edits cannot change
+adjacent-token tokenisation (Java 25 does NOT qualify — `>>` vs `> >`
+parse differently). Enable via
+`IncrementalParser.create(grammar, config, /*triviaFastPathEnabled*/ true)`.
+New in 0.3.2: JMH harness under the `bench` profile (see `src/jmh/`) for
+measuring per-edit latency against SPEC §8 targets.
+
+**Carried limitation:** 0.2.4 shipped trivia attribution threading but NOT
+the rule-exit position rewind needed for byte-for-byte round-trip on all
+inputs — `RoundTripTest` stays `@Disabled` at the `peglib-core` level.
+Incremental v2 does not fix that; it ensures the splice does the right
+thing with 0.2.4's attribution semantics.
+
 ## Quick start
 
 ```java
@@ -48,7 +66,7 @@ sessions remain valid references for undo stacks or snapshots.
 | CST reparse | shipped | parity-fuzzed against full reparse on the 22-file perf corpus |
 | Back-ref grammars | fallback | rules containing `$name` trigger full reparse on every edit (SPEC §6.3 / §10) |
 | Action replay | **not supported** | actions run only on full-reparse fallback (SPEC §6.4) |
-| Trivia redistribution | **deferred to v2** | the CST hash excludes trivia; SPEC v2 will tighten this with idea #1 |
+| Trivia redistribution | **shipped in 0.3.2** (opt-in fast-path) | `TriviaRedistribution` helper + opt-in flag; safe for grammars that don't re-tokenise on whitespace |
 | Packrat cache carry-over | **dropped on edit** (v1 simple) | v2.5 may add span-rewriting remap |
 | Multi-threaded edits | not supported | sessions are immutable but concurrent `edit()` on the same session is the caller's concern |
 
@@ -88,6 +106,14 @@ See SPEC §4.4 and the v2 trivia-redistribution roadmap item.
   default N=100 (2,200 checks), configurable via
   `-Dincremental.parity.editsPerFile=N` (SPEC §7.1 target is N=1000 / 22,000
   checks; raise at CI).
+- `IncrementalTriviaParityTest` (0.3.2) — same 22-file corpus, random edits
+  biased toward whitespace regions (insert/delete/replace inside existing
+  trivia runs; run deletes). Default 50 edits/file (1,100 checks),
+  configurable via `-Dincremental.parity.trivia.editsPerFile=N`.
+- `TriviaRedistributionTest` (0.3.2) — hand-crafted edits exercising the
+  trivia-only fast-path: insert/delete/replace inside whitespace, edits
+  spanning trivia + token (expected fallthrough to structural), repeated
+  trivia mutations.
 - `ReparseBoundaryTest` — SPEC §6.3 edge-case matrix.
 - `IdempotencyTest` — SPEC §7.3 inverse-edit parity.
 - `SessionApiTest` — SPEC §4.4 API invariants.
@@ -111,5 +137,20 @@ root and fall back to a full reparse. Measure via
 algorithm will be tightened in v2.5 (span-rewriting cache remap) if
 profiling indicates it pays back.
 
-JMH benchmark (SPEC §7.4) is deferred to 0.3.2 to keep the 0.3.1 scope on
-correctness — see CHANGELOG for rationale.
+JMH benchmark (SPEC §7.4) lands in 0.3.2. Run with:
+
+```
+cd peglib-incremental
+mvn -Pbench -DskipTests package
+java -jar target/benchmarks.jar org.pragmatica.peg.incremental.bench.IncrementalBenchmark
+```
+
+Variants: `initialize`, `singleCharEdit`, `wordEdit`, `lineEdit`,
+`fullReparse`, `undoRestore`. Smoke-run results are at
+`docs/bench-results/incremental-v1-smoke.json`; a full matrix is deferred
+to a later release cycle when CI time allows. Early single-iteration
+numbers on JDK 25 / Apple Silicon for `singleCharEdit` land well above the
+SPEC §8 target (~325 ms/op on first measurement, vs. sub-1 ms target),
+driven by v1's wholesale cache invalidation and the Java grammar's
+back-reference-rule full-reparse fallback policy. SPEC §5.4 v2.5
+(span-rewriting cache remap) is the next lever.
