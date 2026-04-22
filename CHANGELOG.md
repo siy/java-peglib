@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.5] - 2026-04-22
 
+### Added
+
+- Grammar analyzer at `org.pragmatica.peg.analyzer`. Walks the `Grammar` IR and reports six categories of findings:
+  - `grammar.unreachable-rule` (warning) — rules not transitively reachable from the start rule.
+  - `grammar.ambiguous-choice` (warning) — Choice alternatives with identical literal first-chars (conservative; doesn't flag char-class overlaps).
+  - `grammar.nullable-rule` (info; warning when inside a direct-left-recursive path) — rules whose expression can match empty.
+  - `grammar.duplicate-literal` (error) — duplicate literals across alternatives in a Choice.
+  - `grammar.whitespace-cycle` (error) — `%whitespace` references cycle into themselves at analyzer time (previously caught at runtime via the reentrant guard).
+  - `grammar.has-backreference` (info) — rules containing `BackReference` expressions; flagged for forward compatibility with 0.3.1 incremental parsing (such rules fall back to full reparse).
+- `AnalyzerMain` CLI: `java -cp peglib.jar org.pragmatica.peg.analyzer.AnalyzerMain <grammar.peg>`. Rust-`cargo-check`-style output; exit code 0 (clean), 1 (errors), 2 (usage).
+- New `peglib-maven-plugin` module at `peglib-maven-plugin/` (sibling directory with its own pom; not a sub-module of the root). Depends on `peglib:0.2.5`. Three goals:
+  - `generate` — reads a grammar resource, invokes `PegParser.generateCstParser`, writes output. mtime-based skip when grammar is unchanged.
+  - `lint` — runs the analyzer; fails build on any `ERROR` finding. Optional `failOnWarning` flag.
+  - `check` — `lint` + build the generated parser + optional smoke-parse of a tiny input to verify end-to-end.
+- New documentation sections in `README.md` and `docs/GRAMMAR-DSL.md` covering analyzer findings, CLI usage, exit codes, and Maven plugin integration.
+
+### Notes
+
+- The `peglib-maven-plugin` module is built independently (`cd peglib-maven-plugin && mvn install`). Conversion of the root pom to a multi-module parent is deferred to 0.3.0.
+- The Maven plugin pins ASM 9.9 via a direct dependency on `maven-plugin-plugin` because the bundled 9.7.1 cannot read Java 25 class files. Revert to the default when `maven-plugin-plugin:3.15.2+` is available in Central.
+
+### Analyzer on `java25.peg`
+
+0 errors, 25 warnings (all `grammar.ambiguous-choice` on keyword/modifier/operator literal-prefixed choices — expected; PEG ordered choice disambiguates them correctly), 2 info (`grammar.nullable-rule` on `CompilationUnit` and `OrdinaryUnit` — intentionally accept empty input).
+
+### Tests
+
+- Test count: 601 → 618 passing, 1 skipped (`RoundTripTest`, per 0.2.4), 0 failures, 0 errors. +17 from `AnalyzerTest`.
+- Plugin module: 5 integration tests passing via `cd peglib-maven-plugin && mvn test`.
+
 ## [0.2.4] - 2026-04-22
 
 ### Added
