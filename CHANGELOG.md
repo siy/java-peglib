@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.9] - 2026-04-22
 
+### Added
+
+- **Direct left-recursion support** via Warth-style seeding. Rules of the form `Expr <- Expr '+' Term / Term` now parse naturally with left-associative semantics — no more right-recursive workarounds like `Expr <- Term ('+' Term)*` when left-associativity matters.
+- New `LeftRecursionAnalysis` under `org.pragmatica.peg.grammar.analysis`:
+  - Detects direct left-recursion by walking the left-position reference graph through transparent wrappers.
+  - Detects indirect left-recursion (`A → B → A`) and rejects it at `Grammar#validate()` time as a hard error. Error message: `indirect left-recursion detected in rule chain A -> B -> A; not supported in 0.2.9`.
+- Packrat cache entries now carry `CacheEntry(ParseResult result, boolean growing, int seedGeneration)`. The new schema is the cache shape `peglib-incremental` (0.3.1) will build against.
+- `Grammar#leftRecursiveRules()` accessor surfaces the detected set for downstream tooling.
+- Generator emits a growing-loop wrapper (`emitCstLeftRecursiveWrapper`) around left-recursive rules only; non-LR rules emit unchanged.
+
+### Changed
+
+- `PegEngine#parseRule` dispatches to a new `parseRuleWithLeftRecursion` seed-and-grow loop when the rule is flagged left-recursive. Non-LR rules take the existing fast path.
+- `ParserConfig.validate()` now rejects `packratSkipRules` entries that reference a left-recursive rule — such rules structurally depend on caching and cannot opt out. Error surfaces at engine construction.
+
+### Semantics
+
+- `^` cut inside a left-recursive rule **forces the current seed final** — no further growth iterations. This is a necessary compromise: cut commits, seed-and-grow depends on retry; the two reconcile by letting cut end growth.
+- Actions on left-recursive rules route through the CST seed-and-grow path (non-recursive to avoid action-driven infinite loops). Explicitly unsupported for 0.2.9; documented in `docs/GRAMMAR-DSL.md`.
+- **Indirect left-recursion is out of scope.** Detected and rejected rather than silently mis-parsed.
+
+### Tests
+
+- Test count: 651 → 663 passing, 1 skipped, 0 failures, 0 errors. +12 tests across `LeftRecursionTest` covering detection, arithmetic precedence, postfix chains, cut interaction, indirect-LR rejection, and `selectivePackrat`×LR configuration validation.
+- All 22-file corpus parity suites stay 22/22 (`java25.peg` uses no LR).
+- `GeneratorFlagInertnessTest` 3/3 green (non-LR grammars produce byte-identical emission).
+
 ## [0.2.8] - 2026-04-22
 
 ### Added
