@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-22
+
+Infrastructure-only minor-bump release. No new user-facing features beyond the `parseRuleAt` API. Sets up the project structure and API additions that `peglib-incremental` (0.3.1) and `peglib-formatter` (0.3.3) will build against.
+
+### Changed
+
+- **Root pom converted to a multi-module parent.** Previous structure was a single-module `org.pragmatica-lite:peglib` with sibling directories holding their own poms. New structure:
+  ```
+  peglib-parent            (root pom, packaging=pom)
+  ├── peglib-core          (the primary artifact: org.pragmatica-lite:peglib:0.3.0)
+  ├── peglib-incremental   (shell module, reserved for 0.3.1)
+  ├── peglib-formatter     (shell module, reserved for 0.3.3)
+  ├── peglib-maven-plugin  (was sibling; now reactor module)
+  └── peglib-playground    (was sibling; now reactor module)
+  ```
+- **Maven coordinate preserved.** `org.pragmatica-lite:peglib:0.3.0` still resolves to the same jar content consumers got in 0.2.x — the artifact simply lives in a sub-directory. Downstream consumers pinning the `peglib` coordinate need no changes.
+- `peglib-maven-plugin` and `peglib-playground` modules now inherit from `peglib-parent` — their poms gain `<parent>` references; artifactIds unchanged.
+
+### Added
+
+- `Parser#parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset)` — partial-parse entry point. Parses a specific rule against input starting at the given offset; returns `Result<PartialParse>` wrapping the resulting CST subtree and its end offset. Implemented by `PegEngine` (interpreter) and by generated parsers via an identity map keyed on the `RuleId` marker classes the generator has been emitting since 0.2.6. This is the API `peglib-incremental` (0.3.1) depends on per `docs/incremental/SPEC.md` §5.6.
+- `org.pragmatica.peg.parser.PartialParse` record `(CstNode node, int endOffset)`.
+- `peglib-incremental` and `peglib-formatter` shell modules — empty placeholders with just a `package-info.java` each. Reservations for 0.3.1 and 0.3.3.
+- `docs/PARTIAL-PARSE.md` — `parseRuleAt` API reference.
+- README updated with a Module Layout section and `parseRuleAt` usage snippet.
+
+### Tests
+
+- Root reactor: 663 → **674 passing** in `peglib-core`, +11 new in `ParseRuleAtTest` (interpreter + generator parity + `PartialParse` record). Plus 5 in `peglib-maven-plugin`, 22 in `peglib-playground` — aggregate **701 tests, 0 failures, 1 skipped** (pre-existing `RoundTripTest`).
+- All 22-file corpus parity suites stay 22/22 under the new structure.
+- `GeneratorFlagInertnessTest` stays 3/3 green — `parseRuleAt` emission lands in both config-vs-no-config sides.
+
+### Notes
+
+- Non-CST (Object-returning) generator path uses a different `ParseResult` type; `parseRuleAt` is scoped to the CST generator path (used by `peglib-incremental`). Per-path rationale in `docs/PARTIAL-PARSE.md`.
+
 ## [0.2.9] - 2026-04-22
 
 ### Added
