@@ -40,7 +40,7 @@ are optional add-ons.
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.3.2</version>
+    <version>0.3.3</version>
 </dependency>
 ```
 
@@ -389,7 +389,7 @@ The `peglib-maven-plugin` module (separate artifact, sibling to `peglib`) wraps 
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.3.2</version>
+    <version>0.3.3</version>
     <executions>
         <execution>
             <goals>
