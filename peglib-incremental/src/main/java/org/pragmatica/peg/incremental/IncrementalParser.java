@@ -55,6 +55,24 @@ public interface IncrementalParser {
     }
 
     /**
+     * Create an incremental parser with explicit control over the SPEC §5.4
+     * v2 trivia-only fast-path. When {@code triviaFastPathEnabled} is true,
+     * edits whose range fits inside a single trivia run skip the parser and
+     * rewrite the trivia in-place. The fast-path is correct only for
+     * grammars where in-trivia edits cannot change the tokenisation of
+     * adjacent tokens (simple grammars qualify; the Java 25 grammar does
+     * NOT — e.g. {@code >>} vs {@code > >}).
+     *
+     * <p>Default is {@code false} for safety; the structural reparse path
+     * always preserves correctness regardless of grammar shape.
+     *
+     * @since 0.3.2
+     */
+    static IncrementalParser create(Grammar grammar, ParserConfig config, boolean triviaFastPathEnabled) {
+        return SessionFactory.create(grammar, config, triviaFastPathEnabled);
+    }
+
+    /**
      * Produce the initial {@link Session} over {@code buffer} with the
      * cursor at offset 0.
      */

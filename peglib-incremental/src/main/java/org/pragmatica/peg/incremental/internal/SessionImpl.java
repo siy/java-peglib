@@ -85,19 +85,50 @@ final class SessionImpl implements Session {
         var newText = applyEdit(edit);
         int newCursor = shiftCursor(cursor, edit);
 
-        // Try incremental reparse first.
+        // 0.3.2 v2: trivia-only fast-path. Edits whose range is entirely
+        // contained in a single trivia run (whitespace or comment body) and
+        // whose replacement remains legal trivia content are handled without
+        // invoking the parser at all. The fast-path is gated by a per-factory
+        // {@code triviaFastPathEnabled} flag because the path is only safe
+        // for grammars where in-trivia edits cannot change tokenisation
+        // decisions of adjacent tokens (e.g. simple PEG grammars; not the
+        // Java grammar where {@code >>} vs {@code > >} parse differently).
+        // See TriviaRedistribution for the SPEC §5.4 v2 design notes and the
+        // v2.5 follow-up that aims to make this safe for all grammars.
+        if (factory.triviaFastPathEnabled()) {
+            var triviaRoot = TriviaRedistribution.tryTriviaOnlyEdit(root, newText, edit);
+            if (triviaRoot != null) {
+                var nextStats = new Stats(
+                    stats.reparseCount() + 1,
+                    stats.fullReparseCount(),
+                    "<trivia>",
+                    0,
+                    System.nanoTime() - t0);
+                var nextIndex = NodeIndex.build(triviaRoot);
+                var nextEnclosing = nextIndex.smallestContaining(newCursor);
+                return new SessionImpl(factory, newText, triviaRoot, newCursor,
+                    nextEnclosing != null ? nextEnclosing : triviaRoot, nextIndex, nextStats);
+            }
+        }
+
+        // Try incremental reparse next.
         var incremental = tryIncrementalReparse(newText, edit);
         if (incremental != null) {
+            // v2: trivia-aware splice normalization (currently a no-op for the
+            // leading-trivia direction since parseRuleAt already attaches
+            // trivia per 0.2.4 attribution; the seam exists for v2.5+).
+            var normalized = TriviaRedistribution.normalizeSplicedTrivia(
+                incremental.newRoot, incremental.spliced);
             var nextStats = new Stats(
                 stats.reparseCount() + 1,
                 stats.fullReparseCount(),
                 incremental.ruleName,
                 NodeIndex.flatten(incremental.spliced).size(),
                 System.nanoTime() - t0);
-            var nextIndex = NodeIndex.build(incremental.newRoot);
+            var nextIndex = NodeIndex.build(normalized);
             var nextEnclosing = nextIndex.smallestContaining(newCursor);
-            return new SessionImpl(factory, newText, incremental.newRoot, newCursor,
-                nextEnclosing != null ? nextEnclosing : incremental.newRoot, nextIndex, nextStats);
+            return new SessionImpl(factory, newText, normalized, newCursor,
+                nextEnclosing != null ? nextEnclosing : normalized, nextIndex, nextStats);
         }
         // Fall back to a full reparse.
         return fallback(newText, newCursor, t0);
