@@ -148,18 +148,42 @@ var diagnostic = Diagnostic.error("undefined variable", span)
 var diagnostic = Diagnostic.error("type mismatch", span)
     .withLabel("expected 'int'")
     .withSecondaryLabel(otherSpan, "found 'string'");
+
+// Machine-readable tag (0.2.4)
+var tagged = Diagnostic.error("unexpected input", span)
+    .withTag("error.unexpected-input");
 ```
+
+### Diagnostic Tags (0.2.4)
+
+Every `Diagnostic` carries an optional `Option<String> tag()` — a stable
+machine-readable identifier for tooling integration. Tags do not affect
+`format()` / `formatSimple()` output; they are read programmatically via
+`diagnostic.tag()`.
+
+Built-in tag values emitted by the engine and generator:
+
+| Tag | Emitted when |
+|---|---|
+| `error.unexpected-input` | Generic recovery: input did not match any alternative at the recovery anchor |
+| `error.expected` | A rule with `%expected "label"` failed; label forms the message |
+| `error.unclosed` | A rule with `%recover '<term>'` failed to reach its terminator |
+
+Rules can set a custom tag via the grammar DSL `%tag "name"` directive
+(see [Grammar DSL Reference](GRAMMAR-DSL.md#tag)). User code composes
+tags with `diagnostic.withTag("my.tag")`.
 
 ### Diagnostic Record
 
 ```java
 public record Diagnostic(
-    Severity severity,     // ERROR, WARNING, INFO, HINT
-    String code,           // Optional error code (e.g., "E0001")
-    String message,        // Primary error message
-    SourceSpan span,       // Location in source
-    List<Label> labels,    // Additional labeled spans
-    List<String> notes     // Help text, suggestions
+    Severity severity,        // ERROR, WARNING, INFO, HINT
+    Option<String> code,      // Optional error code (e.g., "E0001")
+    String message,           // Primary error message
+    SourceSpan span,          // Location in source
+    List<Label> labels,       // Additional labeled spans
+    List<String> notes,       // Help text, suggestions
+    Option<String> tag        // Machine-readable tag (0.2.4)
 ) {
     // Factory methods
     static Diagnostic error(String message, SourceSpan span);
@@ -171,12 +195,16 @@ public record Diagnostic(
     Diagnostic withSecondaryLabel(SourceSpan span, String message);
     Diagnostic withNote(String note);
     Diagnostic withHelp(String help);
+    Diagnostic withTag(String tag);  // 0.2.4
 
     // Formatting
     String format(String source, String filename);
     String formatSimple();  // One-line format
 }
 ```
+
+A pre-0.2.4 six-arg constructor is retained for source compatibility; it
+defaults `tag` to `Option.none()`.
 
 ### Severity Levels
 
@@ -304,7 +332,7 @@ error: unclosed string literal
 
 ## Recovery Points
 
-The parser recovers at these synchronization points:
+The parser recovers at these default synchronization points:
 
 | Character | Common Use |
 |-----------|------------|
@@ -320,6 +348,16 @@ When an error is encountered:
 2. Skips input until a recovery point
 3. Creates an `Error` node for skipped content
 4. Resumes parsing after the recovery point
+
+### Per-rule recovery override (0.2.4)
+
+A rule can override the default set with a single literal terminator using
+the `%recover '<term>'` grammar directive. See
+[Grammar DSL Reference — `%recover`](GRAMMAR-DSL.md#recover). On failure,
+the parser scans forward to the first occurrence of the declared terminator,
+splices an `Error` node with tag `error.unclosed`, and resumes after the
+terminator. Useful for block-structured rules where `,` / `;` inside the
+block are noise rather than sync points.
 
 ## IDE Integration
 
