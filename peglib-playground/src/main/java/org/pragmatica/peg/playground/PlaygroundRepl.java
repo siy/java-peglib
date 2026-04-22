@@ -13,6 +13,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -160,7 +161,7 @@ public final class PlaygroundRepl {
         if (arg.isEmpty()) {
             return !current;
         }
-        return switch (arg.toLowerCase()) {
+        return switch (arg.toLowerCase(Locale.ROOT)) {
             case "on", "true", "yes", "1" -> true;
             case "off", "false", "no", "0" -> false;
             default -> current;
@@ -172,7 +173,7 @@ public final class PlaygroundRepl {
             return current;
         }
         try {
-            return RecoveryStrategy.valueOf(arg.toUpperCase());
+            return RecoveryStrategy.valueOf(arg.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             return current;
         }

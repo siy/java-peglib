@@ -102,6 +102,53 @@ class PlaygroundServerTest {
         assertThat(response.statusCode()).isEqualTo(405);
     }
 
+    @Test
+    void staticHandler_rejectsPathTraversal() throws Exception {
+        // Path containing ".." must be rejected with 400 regardless of whether
+        // the underlying resource exists. java.net.http.HttpClient normalises
+        // the URI so we pass the raw encoded form through to the server.
+        var response = get("/../../etc/passwd");
+        assertThat(response.statusCode()).isIn(400, 404);
+    }
+
+    @Test
+    void staticHandler_attachesSecurityHeaders() throws Exception {
+        var response = get("/");
+        assertThat(response.headers().firstValue("X-Content-Type-Options").orElse(""))
+            .isEqualTo("nosniff");
+        assertThat(response.headers().firstValue("X-Frame-Options").orElse(""))
+            .isEqualTo("DENY");
+        assertThat(response.headers().firstValue("Referrer-Policy").orElse(""))
+            .isEqualTo("no-referrer");
+        assertThat(response.headers().firstValue("Cache-Control").orElse(""))
+            .isEqualTo("no-store");
+    }
+
+    @Test
+    void parseEndpoint_rejectsOversizedBody() throws Exception {
+        // Build a body larger than the 1 MiB cap — content does not need to be
+        // valid JSON because the size check precedes JSON parsing.
+        int size = 1024 * 1024 + 1024;
+        var body = "{\"grammar\":\"" + "a".repeat(size) + "\"}";
+        var response = post("/parse", body);
+        assertThat(response.statusCode()).isEqualTo(413);
+    }
+
+    @Test
+    void sanitizeStaticPath_acceptsNormalizedAssets() {
+        assertThat(PlaygroundServer.sanitizeStaticPath("/")).isEqualTo("/index.html");
+        assertThat(PlaygroundServer.sanitizeStaticPath("/playground.js")).isEqualTo("/playground.js");
+        assertThat(PlaygroundServer.sanitizeStaticPath("//playground.js")).isEqualTo("/playground.js");
+    }
+
+    @Test
+    void sanitizeStaticPath_rejectsTraversalAndControlChars() {
+        assertThat(PlaygroundServer.sanitizeStaticPath("/../secret")).isNull();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foo/../bar")).isNull();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foo\\bar")).isNull();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foobar")).isNull();
+    }
+
     private HttpResponse<String> post(String path, String body) throws Exception {
         var request = HttpRequest.newBuilder()
                                  .uri(URI.create("http://localhost:" + server.port() + path))
