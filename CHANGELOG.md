@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.7] - 2026-04-22
 
+### Added
+
+- New `peglib-playground/` sibling module shipping a grammar REPL and web UI:
+  - **CLI REPL:** `java -jar peglib-playground-0.2.7-uber.jar repl <grammar.peg>` — watches the grammar file, re-parses on save, exposes a prompt for input strings. Meta-commands: `:trace`, `:quit`, config toggles.
+  - **Web UI:** `java -jar peglib-playground-0.2.7-uber.jar server [--port 8080]` — embedded `com.sun.net.httpserver.HttpServer` serving a three-pane SPA (grammar / input / output) plus controls strip (start-rule selector, packrat toggle, CST/AST toggle, trivia show/hide, recovery strategy picker, auto-refresh). `POST /parse` returns `{ok, tree, diagnostics, stats}` JSON. Neutral styling (system font stack, muted palette).
+  - **ParseTracer:** strictly additive, post-parse walker that synthesizes rule-entry/exit events, cache-hit statistics, node/trivia counts. No engine hooks; no impact on parse performance when not attached.
+- New documentation `docs/PLAYGROUND.md` covering CLI usage, web UI, HTTP API, programmatic access, tracer limitations, and scope boundaries. README cross-linked.
+
+### Notes
+
+- Playground module depends on `peglib:0.2.7` and is built independently (`cd peglib-playground && mvn install`).
+- No framework dependencies for the web UI — vanilla JS + CSS, optional CodeMirror via CDN (not bundled). No build step.
+- Tracer is post-parse rather than in-parse to preserve the engine's performance guarantees. A future release (likely alongside `peglib-incremental` in 0.3.1) may add in-parse hooks if demand warrants.
+
+### Tests
+
+- Root module: 635 passing, 1 skipped (unchanged — playground module is additive and sibling-built).
+- Playground module: 22 new tests (`ParseTracerTest` 7, `PlaygroundServerTest` 6, `PlaygroundReplTest` 4, `JsonEncoderTest` 5). All pass via `cd peglib-playground && mvn test`.
+
 ## [0.2.6] - 2026-04-22
 
 ### Added
