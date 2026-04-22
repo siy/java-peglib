@@ -361,7 +361,8 @@ public final class ParsingContext {
      */
     public void restorePendingLeadingTrivia(int snapshot) {
         if (pendingLeadingTrivia.size() > snapshot) {
-            pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size())
+            pendingLeadingTrivia.subList(snapshot,
+                                         pendingLeadingTrivia.size())
                                 .clear();
         }
     }
