@@ -210,10 +210,7 @@ public final class PegEngine implements Parser {
         }
         var merged = new HashMap<>(inlineActions);
         for (var rule : grammar.rules()) {
-            var lambda = lambdaActions.get(rule.name());
-            if (lambda != null) {
-                merged.put(rule.name(), lambda::apply);
-            }
+            lambdaActions.get(rule.name()).onPresent(lambda -> merged.put(rule.name(), lambda::apply));
         }
         return merged;
     }

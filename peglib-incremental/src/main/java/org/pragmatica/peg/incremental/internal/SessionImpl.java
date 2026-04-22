@@ -1,5 +1,6 @@
 package org.pragmatica.peg.incremental.internal;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.peg.incremental.Edit;
 import org.pragmatica.peg.incremental.Session;
 import org.pragmatica.peg.incremental.Stats;
@@ -54,8 +55,8 @@ final class SessionImpl implements Session {
     /** Build the initial session after a fresh full parse. */
     static SessionImpl initial(SessionFactory factory, String text, int cursor, CstNode root) {
         var index = NodeIndex.build(root);
-        var enclosing = index.smallestContaining(cursor);
-        return new SessionImpl(factory, text, root, cursor, enclosing != null ? enclosing : root,
+        var enclosing = index.smallestContaining(cursor).or(root);
+        return new SessionImpl(factory, text, root, cursor, enclosing,
             index, Stats.INITIAL);
     }
 
@@ -105,9 +106,9 @@ final class SessionImpl implements Session {
                     0,
                     System.nanoTime() - t0);
                 var nextIndex = NodeIndex.build(triviaRoot);
-                var nextEnclosing = nextIndex.smallestContaining(newCursor);
+                var nextEnclosing = nextIndex.smallestContaining(newCursor).or(triviaRoot);
                 return new SessionImpl(factory, newText, triviaRoot, newCursor,
-                    nextEnclosing != null ? nextEnclosing : triviaRoot, nextIndex, nextStats);
+                    nextEnclosing, nextIndex, nextStats);
             }
         }
 
@@ -126,9 +127,9 @@ final class SessionImpl implements Session {
                 NodeIndex.flatten(incremental.spliced).size(),
                 System.nanoTime() - t0);
             var nextIndex = NodeIndex.build(normalized);
-            var nextEnclosing = nextIndex.smallestContaining(newCursor);
+            var nextEnclosing = nextIndex.smallestContaining(newCursor).or(normalized);
             return new SessionImpl(factory, newText, normalized, newCursor,
-                nextEnclosing != null ? nextEnclosing : normalized, nextIndex, nextStats);
+                nextEnclosing, nextIndex, nextStats);
         }
         // Fall back to a full reparse.
         return fallback(newText, newCursor, t0);
@@ -140,9 +141,9 @@ final class SessionImpl implements Session {
         if (clamped == cursor) {
             return this;
         }
-        var newEnclosing = index.smallestContainingFrom(enclosingNode, clamped);
+        var newEnclosing = index.smallestContainingFrom(enclosingNode, clamped).or(root);
         return new SessionImpl(factory, text, root, clamped,
-            newEnclosing != null ? newEnclosing : root, index, stats);
+            newEnclosing, index, stats);
     }
 
     @Override
@@ -150,7 +151,7 @@ final class SessionImpl implements Session {
         long t0 = System.nanoTime();
         var fresh = factory.parseFull(text);
         var freshIndex = NodeIndex.build(fresh);
-        var enclosing = freshIndex.smallestContaining(cursor);
+        var enclosing = freshIndex.smallestContaining(cursor).or(fresh);
         var nextStats = new Stats(
             stats.reparseCount() + 1,
             stats.fullReparseCount() + 1,
@@ -158,13 +159,13 @@ final class SessionImpl implements Session {
             NodeIndex.flatten(fresh).size(),
             System.nanoTime() - t0);
         return new SessionImpl(factory, text, fresh, cursor,
-            enclosing != null ? enclosing : fresh, freshIndex, nextStats);
+            enclosing, freshIndex, nextStats);
     }
 
     private Session fallback(String newText, int newCursor, long t0) {
         var fresh = factory.parseFull(newText);
         var freshIndex = NodeIndex.build(fresh);
-        var enclosing = freshIndex.smallestContaining(newCursor);
+        var enclosing = freshIndex.smallestContaining(newCursor).or(fresh);
         var nextStats = new Stats(
             stats.reparseCount() + 1,
             stats.fullReparseCount() + 1,
@@ -172,7 +173,7 @@ final class SessionImpl implements Session {
             NodeIndex.flatten(fresh).size(),
             System.nanoTime() - t0);
         return new SessionImpl(factory, newText, fresh, newCursor,
-            enclosing != null ? enclosing : fresh, freshIndex, nextStats);
+            enclosing, freshIndex, nextStats);
     }
 
     /**
@@ -206,14 +207,15 @@ final class SessionImpl implements Session {
                 return null;
             }
             var reparsed = reparseAt(nt, newText, delta);
-            if (reparsed != null) {
+            if (reparsed.isPresent()) {
+                var reparsedNode = reparsed.unwrap();
                 var path = index.pathTo(nt);
                 if (path.isEmpty()) {
                     // pivot == root — reparsed subtree replaces root wholesale.
-                    return new IncrementalResult(reparsed, reparsed, nt.rule());
+                    return new IncrementalResult(reparsedNode, reparsedNode, nt.rule());
                 }
-                var newRoot = TreeSplicer.spliceAndShift(path, nt, reparsed, editEnd, delta);
-                return new IncrementalResult(newRoot, reparsed, nt.rule());
+                var newRoot = TreeSplicer.spliceAndShift(path, nt, reparsedNode, editEnd, delta);
+                return new IncrementalResult(newRoot, reparsedNode, nt.rule());
             }
             pivot = index.parentOf(nt);
         }
@@ -244,14 +246,14 @@ final class SessionImpl implements Session {
         return root;
     }
 
-    private CstNode reparseAt(CstNode.NonTerminal nt, String newText, int delta) {
+    private Option<CstNode> reparseAt(CstNode.NonTerminal nt, String newText, int delta) {
         int startOffset = nt.span().start().offset();
         int expectedEnd = nt.span().end().offset() + delta;
         var ruleId = factory.registry().classFor(nt.rule());
         var partial = factory.parser().parseRuleAt(ruleId, newText, startOffset);
-        return partial.fold(
-            cause -> null,
-            p -> p.node().span().end().offset() == expectedEnd ? p.node() : null);
+        return partial.option()
+                      .filter(p -> p.node().span().end().offset() == expectedEnd)
+                      .map(p -> p.node());
     }
 
     /**

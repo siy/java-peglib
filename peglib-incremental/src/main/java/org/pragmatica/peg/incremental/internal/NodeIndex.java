@@ -1,5 +1,6 @@
 package org.pragmatica.peg.incremental.internal;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.peg.tree.CstNode;
 
 import java.util.ArrayDeque;
@@ -72,14 +73,14 @@ public final class NodeIndex {
 
     /**
      * Smallest node whose span contains {@code offset}. Returns the root for
-     * any offset within its span; never returns {@code null} unless the root
-     * itself does not contain the offset.
+     * any offset within its span; empty {@link Option} when the root itself
+     * does not contain the offset.
      */
-    public CstNode smallestContaining(int offset) {
+    public Option<CstNode> smallestContaining(int offset) {
         if (!contains(root, offset)) {
-            return null;
+            return Option.none();
         }
-        return descendTo(root, offset);
+        return Option.some(descendTo(root, offset));
     }
 
     /**
@@ -90,7 +91,7 @@ public final class NodeIndex {
      * <p>When {@code start} is not in this index (e.g., session fork), falls
      * back to {@link #smallestContaining(int)} from the root.
      */
-    public CstNode smallestContainingFrom(CstNode start, int offset) {
+    public Option<CstNode> smallestContainingFrom(CstNode start, int offset) {
         if (start == null || !parents.containsKey(start) && start != root) {
             return smallestContaining(offset);
         }
@@ -99,9 +100,9 @@ public final class NodeIndex {
             cursor = parents.get(cursor);
         }
         if (cursor == null) {
-            return null;
+            return Option.none();
         }
-        return descendTo(cursor, offset);
+        return Option.some(descendTo(cursor, offset));
     }
 
     /**

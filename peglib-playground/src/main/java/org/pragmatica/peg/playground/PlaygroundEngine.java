@@ -42,11 +42,10 @@ public final class PlaygroundEngine {
 
     private static ParseResultWithDiagnostics parseWithRecovery(Parser parser, ParseRequest request) {
         String input = request.input();
-        String startRule = request.startRule().or((String) null);
-        if (startRule == null || startRule.isBlank()) {
-            return parser.parseCstWithDiagnostics(input);
-        }
-        return parser.parseCstWithDiagnostics(input, startRule);
+        return request.startRule()
+                      .filter(rule -> !rule.isBlank())
+                      .fold(() -> parser.parseCstWithDiagnostics(input),
+                            rule -> parser.parseCstWithDiagnostics(input, rule));
     }
 
     private static ParserConfig buildConfig(ParseRequest request) {
