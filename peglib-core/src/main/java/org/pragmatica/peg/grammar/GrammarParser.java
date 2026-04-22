@@ -57,7 +57,8 @@ public final class GrammarParser {
                     advance();
                     var result = parseSuggestDirective();
                     if (result instanceof Result.Failure< ? > f) {
-                        return f.cause().result();
+                        return f.cause()
+                                .result();
                     }
                     suggestRules.add(result.unwrap());
                     continue;
@@ -72,7 +73,8 @@ public final class GrammarParser {
                     advance();
                     var result = parseImportDirective(start);
                     if (result instanceof Result.Failure< ? > f) {
-                        return f.cause().result();
+                        return f.cause()
+                                .result();
                     }
                     imports.add(result.unwrap());
                     continue;
@@ -80,7 +82,8 @@ public final class GrammarParser {
                 advance();
                 var result = parseDirective(directive);
                 if (result instanceof Result.Failure< ? > f) {
-                    return f.cause().result();
+                    return f.cause()
+                            .result();
                 }
                 var expr = result.unwrap();
                 switch (directive.name()) {
@@ -90,7 +93,8 @@ public final class GrammarParser {
             }else if (token instanceof GrammarToken.Identifier) {
                 var result = parseRule();
                 if (result instanceof Result.Failure< ? > f) {
-                    return f.cause().result();
+                    return f.cause()
+                            .result();
                 }
                 rules.add(result.unwrap());
             }else if (token instanceof GrammarToken.Eof) {
@@ -205,7 +209,8 @@ public final class GrammarParser {
         }
         var exprResult = parseExpression();
         if (exprResult instanceof Result.Failure< ? > f) {
-            return f.cause().result();
+            return f.cause()
+                    .result();
         }
         var expression = exprResult.unwrap();
         // Check for action and/or error_message
@@ -239,7 +244,8 @@ public final class GrammarParser {
             advance();
             var argResult = parseStringLiteralArg(d.name());
             if (argResult instanceof Result.Failure< ? > f) {
-                return f.cause().result();
+                return f.cause()
+                        .result();
             }
             var value = argResult.unwrap();
             switch (d.name()) {

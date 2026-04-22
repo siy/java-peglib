@@ -514,7 +514,9 @@ public final class ParsingContext {
             return Option.none();
         }
         long key = packratKey(ruleName, position);
-        return Option.option(packratCache.unwrap().get(key)).map(CacheEntry::result);
+        return Option.option(packratCache.unwrap()
+                                         .get(key))
+                     .map(CacheEntry::result);
     }
 
     /**

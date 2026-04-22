@@ -100,7 +100,8 @@ public final class GrammarResolver {
                                                        .start(),
                                                     List.of(imp.grammarName()));
             if (importedGrammar instanceof Result.Failure<Grammar> f) {
-                return f.cause().result();
+                return f.cause()
+                        .result();
             }
             var g = importedGrammar.unwrap();
             // Detect cycle in the imports of the imported grammar, starting from
@@ -110,7 +111,8 @@ public final class GrammarResolver {
             var cycleCheck = detectCycle(g,
                                          new ArrayList<>(List.of(imp.grammarName())));
             if (cycleCheck instanceof Result.Failure<Boolean> f) {
-                return f.cause().result();
+                return f.cause()
+                        .result();
             }
             // Build transitive closure of rule names needed from this imported grammar.
             var ruleMap = g.ruleMap();
@@ -184,7 +186,8 @@ public final class GrammarResolver {
         }
         var parsed = GrammarParser.parse(loaded.unwrap());
         if (parsed instanceof Result.Failure<Grammar> f) {
-            return f.cause().result();
+            return f.cause()
+                    .result();
         }
         var g = parsed.unwrap();
         loadedGrammars.put(grammarName, g);
@@ -208,12 +211,14 @@ public final class GrammarResolver {
                                               .start(),
                                            appendChain(chain, imp.grammarName()));
             if (loaded instanceof Result.Failure<Grammar> f) {
-                return f.cause().result();
+                return f.cause()
+                        .result();
             }
             var newChain = appendChain(chain, imp.grammarName());
             var sub = detectCycle(loaded.unwrap(), newChain);
             if (sub instanceof Result.Failure<Boolean> f) {
-                return f.cause().result();
+                return f.cause()
+                        .result();
             }
         }
         return Result.success(true);

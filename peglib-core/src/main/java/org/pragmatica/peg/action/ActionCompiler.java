@@ -60,7 +60,8 @@ public final class ActionCompiler {
             if (rule.hasAction()) {
                 var result = compileAction(rule);
                 if (result instanceof Result.Failure< ? > f) {
-                    return f.cause().result();
+                    return f.cause()
+                            .result();
                 }
                 actions.put(rule.name(), result.unwrap());
             }
