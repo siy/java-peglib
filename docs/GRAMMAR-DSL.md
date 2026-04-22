@@ -16,9 +16,11 @@ repeated here.
    - [`%tag "name"`](#tag)
 3. [Grammar-level directives](#grammar-level-directives)
    - [`%suggest RuleName`](#suggest)
+   - [`%import Grammar.Rule`](#import)
 4. [Directive interaction matrix](#directive-interaction-matrix)
 5. [Analyzer](#analyzer)
 6. [Programmatic action attachment (lambda actions)](#programmatic-action-attachment)
+7. [Grammar composition (`%import`)](#grammar-composition)
 
 ## Cut operator
 
@@ -362,6 +364,120 @@ records whose identity is the class itself — so that the upcoming
 point can dispatch on the same types without a migration. Callers who
 adopt lambda actions on 0.2.6 will not need to rewrite `RuleId` usages
 when `parseRuleAt` lands.
+
+<a id="grammar-composition"></a>
+## Grammar composition (`%import`)
+
+Added in 0.2.8.
+
+Peglib supports surface-level grammar composition through the
+`%import` directive. Use it to reuse rules defined in another `.peg`
+grammar without copy-pasting.
+
+### Syntax
+
+```peg
+%import Java25.Type
+%import Java25.Expression as JavaExpr
+
+MyAnnotation <- '@' Identifier '(' (JavaExpr (',' JavaExpr)*)? ')'
+%whitespace <- [ \t\r\n]*
+```
+
+- `%import GrammarName.RuleName` — imports the rule, exposed in the
+  composed grammar under the name `GrammarName_RuleName`
+  (underscore-joined).
+- `%import GrammarName.RuleName as LocalName` — imports the rule,
+  exposed under `LocalName` (no grammar-name prefix).
+
+### Transitive closure
+
+When `%import G.R` is resolved, the imported rule **plus every rule
+reachable from it** is pulled into the composed grammar. Transitive
+rules are renamed to `G_OriginalName`; only the explicitly-imported
+top-level rule is affected by an `as` alias.
+
+Example: given `Java25.peg` defining `Type → Identifier` and
+`Identifier → [a-zA-Z_][a-zA-Z0-9_]*`, a root that does
+`%import Java25.Type` will end up with both `Java25_Type` and
+`Java25_Identifier` as visible rules in the composed grammar, with
+`Java25_Type`'s body internally referencing `Java25_Identifier`.
+
+### Whitespace sharing
+
+V1 is surface-level composition: the **composed grammar has exactly one
+`%whitespace` binding — the root's**. Imported grammars' own
+`%whitespace` directives are ignored for imported rules when those
+rules are embedded in the composed grammar. Users must ensure imported
+grammars share a whitespace convention with the root, or explicitly
+rewrite imported rules if whitespace semantics differ. Per-rule
+whitespace context is deferred to a future release.
+
+### Collision policy
+
+- **Explicit imports** — `%import G.R` whose local name (default
+  `G_R`, or the `as` alias) collides with a rule name already defined
+  in the root grammar is a **hard error**. Users must provide an
+  explicit `as` rename.
+- **Transitive imports** — when a transitively-pulled rule's name
+  (after prefixing to `G_X`) already exists in the root, **the root
+  wins silently**. The imported version is dropped. Users needing both
+  can import the inner rule explicitly with a distinct alias:
+  `%import G.Identifier as GIdentifier`.
+
+### Cycle detection
+
+Grammar import cycles (`A.peg → B.peg → A.peg`) are a hard error
+detected at resolve time. The error message shows the offending import
+chain.
+
+### RuleId emission
+
+Imported rules participate in the composed grammar's `RuleId` sealed
+interface emission (see the lambda-actions section above):
+
+- Root rule `MyAnnotation` → `RuleId.MyAnnotation`
+- `%import Java25.Type` → `RuleId.Java25Type` (underscore-stripped
+  after sanitization)
+- `%import Java25.Expression as JavaExpr` → `RuleId.JavaExpr`
+
+The grammar-qualified prefix preserves source-grammar provenance for
+unaliased imports; `as` renames let callers pick an arbitrary local
+name.
+
+### Public API
+
+Parsers that declare `%import` directives must be built through the
+three-arg `PegParser.fromGrammar` overload that accepts a
+`GrammarSource`:
+
+```java
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.grammar.GrammarSource;
+import org.pragmatica.peg.parser.ParserConfig;
+
+var source = GrammarSource.inMemory(java.util.Map.of(
+    "Java25", java.nio.file.Files.readString(java.nio.file.Path.of("grammars/Java25.peg"))
+));
+var parser = PegParser.fromGrammar(rootGrammarText, ParserConfig.DEFAULT, source).unwrap();
+```
+
+Built-in `GrammarSource` strategies:
+
+- `GrammarSource.inMemory(Map<String,String>)` — name → text map (tests).
+- `GrammarSource.classpath(ClassLoader)` — reads `<name>.peg` from a
+  classloader resource root.
+- `GrammarSource.classpath()` — uses the current thread's context
+  classloader.
+- `GrammarSource.filesystem(Path)` — reads `<name>.peg` from a
+  configured directory.
+- `GrammarSource.chained(a, b, c)` — tries each source in order; first
+  hit wins.
+- `GrammarSource.empty()` — the default; causes any `%import` to fail
+  with a "grammar not found" error.
+
+If your root grammar declares no `%import` directives, you can keep
+using the two-arg `fromGrammar` overload — no behaviour change.
 
 ## Related
 

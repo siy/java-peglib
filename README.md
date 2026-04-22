@@ -130,8 +130,9 @@ $name       # Back-reference to captured 'name'
 %whitespace <- [ \t\r\n]*
 ```
 
-Advanced rule-level directives (`%expected`, `%recover`, `%tag`) and the
-grammar-level `%suggest` directive are documented in
+Advanced rule-level directives (`%expected`, `%recover`, `%tag`), the
+grammar-level `%suggest` directive, and `%import GrammarName.RuleName`
+for cross-grammar rule composition (0.2.8) are documented in
 [`docs/GRAMMAR-DSL.md`](docs/GRAMMAR-DSL.md) along with the cut-operator
 edge cases.
 
