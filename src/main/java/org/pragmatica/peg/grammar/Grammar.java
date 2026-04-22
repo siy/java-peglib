@@ -10,12 +10,29 @@ import java.util.stream.Collectors;
 
 /**
  * A complete PEG grammar - collection of rules with directives.
+ *
+ * <p>{@code suggestRules} is the list of rule names declared at grammar level via
+ * {@code %suggest RuleName}. The literal alternatives of those rules form a
+ * suggestion vocabulary used by error reporting to emit "did you mean 'X'?"
+ * hints on near-miss identifier failures. When empty, no suggestion logic is
+ * activated and hot paths remain unaffected.
  */
 public record Grammar(
  List<Rule> rules,
  Option<String> startRule,
  Option<Expression> whitespace,
- Option<Expression> word) {
+ Option<Expression> word,
+ List<String> suggestRules) {
+    /**
+     * Backwards-compatible constructor matching the pre-0.2.4 signature.
+     */
+    public Grammar(List<Rule> rules,
+                   Option<String> startRule,
+                   Option<Expression> whitespace,
+                   Option<Expression> word) {
+        this(rules, startRule, whitespace, word, List.of());
+    }
+
     /**
      * Get rule by name.
      */

@@ -22,7 +22,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.2.3</version>
+    <version>0.2.4</version>
 </dependency>
 ```
 
@@ -130,6 +130,11 @@ $name       # Back-reference to captured 'name'
 %whitespace <- [ \t\r\n]*
 ```
 
+Advanced rule-level directives (`%expected`, `%recover`, `%tag`) and the
+grammar-level `%suggest` directive are documented in
+[`docs/GRAMMAR-DSL.md`](docs/GRAMMAR-DSL.md) along with the cut-operator
+edge cases.
+
 ### Inline Actions
 
 Actions are Java code blocks that transform parsed content:
@@ -223,10 +228,17 @@ List<Trivia> leading = cst.leadingTrivia();   // "  " before 42
 List<Trivia> trailing = cst.trailingTrivia(); // "  " after 7
 ```
 
-Trivia types:
+Trivia types (classified by content: starts with `//` → `LineComment`,
+`/*` → `BlockComment`, else `Whitespace`):
+
 - `Trivia.Whitespace` - spaces, tabs, newlines
 - `Trivia.LineComment` - `// ...` style
 - `Trivia.BlockComment` - `/* ... */` style
+
+Attribution: trivia between sibling elements attaches to the **following
+sibling's** `leadingTrivia`. See
+[`docs/TRIVIA-ATTRIBUTION.md`](docs/TRIVIA-ATTRIBUTION.md) for the full
+rule and 0.2.4 status (round-trip reconstruction deferred).
 
 ## Source Code Generation
 
@@ -342,7 +354,7 @@ Flags (all consumed at generation time — no runtime branching in the emitted p
 | `inlineLocations` | 2 | off | Inline int locals at rule entry instead of SourceLocation |
 | `selectivePackrat` | 2 | off | Skip packrat cache for rules in `packratSkipRules` |
 
-The three default-off flags can be flipped on per-project via a custom `ParserConfig`. See [`docs/PERF-REWORK-SPEC.md`](docs/PERF-REWORK-SPEC.md) for the underlying design and [`docs/bench-results/java25-parse.json`](docs/bench-results/java25-parse.json) for raw JMH data.
+The three default-off flags can be flipped on per-project via a custom `ParserConfig`. See [`docs/PERF-FLAGS.md`](docs/PERF-FLAGS.md) for the per-flag reference and guidance on when to flip, [`docs/PERF-REWORK-SPEC.md`](docs/PERF-REWORK-SPEC.md) for the underlying design, and [`docs/bench-results/java25-parse.json`](docs/bench-results/java25-parse.json) for raw JMH data.
 
 To reproduce benchmarks:
 
@@ -351,15 +363,18 @@ mvn -Pbench -DskipTests package
 java -jar target/benchmarks.jar org.pragmatica.peg.bench.Java25ParseBenchmark
 ```
 
+See [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) for the full JMH harness
+reference (variants, `@Param` extension, result interpretation).
+
 ## Building
 
 ```bash
 mvn compile    # Compile
-mvn test       # Run tests (565 tests, 1 skipped)
+mvn test       # Run tests
 mvn verify     # Full verification
 ```
 
-Requires Java 25+.
+Requires Java 25+. For JMH benchmarks see [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md).
 
 ## References
 

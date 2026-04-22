@@ -44,6 +44,25 @@ public final class ParsingContext {
     // Whitespace skipping guard (prevents recursive whitespace parsing)
     private boolean skippingWhitespace;
 
+    // Pending leading trivia — trivia matched between sibling sequence elements
+    // that should attach to the following sibling's leadingTrivia. See
+    // docs/TRIVIA-ATTRIBUTION.md for the attribution rule. Backtracking
+    // combinators (Choice/Optional/And/Not) must save/restore snapshots of
+    // this buffer around each attempt so failed alternatives do not leak
+    // trivia forward.
+    private final List<Trivia> pendingLeadingTrivia = new ArrayList<>();
+
+    // 0.2.4: suggestion vocabulary derived once from rules marked with
+    // %suggest. Shared list, never recomputed. When empty, no hint logic
+    // runs. Stored on the context so incremental-parse sessions can carry it
+    // forward without recomputation.
+    private List<String> suggestionVocabulary = List.of();
+
+    // 0.2.4: stack of per-rule recovery terminators in scope. The top of
+    // the stack wins; an empty stack falls back to the global recovery
+    // point set. Rules pushing a %recover terminator must pop on exit.
+    private final java.util.ArrayDeque<String> recoveryOverrideStack = new java.util.ArrayDeque<>();
+
     private ParsingContext(String input, Grammar grammar, ParserConfig config) {
         this.input = input;
         this.grammar = grammar;
@@ -195,7 +214,8 @@ public final class ParsingContext {
                              .withLabel("found '" + (found.isEmpty()
                                                      ? "EOF"
                                                      : found) + "'")
-                             .withHelp("expected " + expected);
+                             .withHelp("expected " + expected)
+                             .withTag("error.unexpected-input");
         diagnostics.add(diag);
     }
 
@@ -268,9 +288,20 @@ public final class ParsingContext {
     /**
      * Skip characters until a recovery point is found.
      * Recovery points are typically: newlines, semicolons, closing braces.
+     *
+     * <p>0.2.4: when a rule has a {@code %recover '<term>'} directive active
+     * (via {@link #pushRecoveryOverride}), only the specified terminator
+     * string stops recovery; the global char-set fallback is suppressed.
      */
     public SourceSpan skipToRecoveryPoint() {
         var start = location();
+        var override = recoveryOverrideStack.peek();
+        if (override != null && !override.isEmpty()) {
+            while (!isAtEnd() && !matchesOverrideAt(override)) {
+                advance();
+            }
+            return spanFrom(start);
+        }
         while (!isAtEnd()) {
             char c = peek();
             // Stop at common synchronization points
@@ -280,6 +311,66 @@ public final class ParsingContext {
             advance();
         }
         return spanFrom(start);
+    }
+
+    private boolean matchesOverrideAt(String term) {
+        if (remaining() < term.length()) {
+            return false;
+        }
+        for (int i = 0; i < term.length(); i++ ) {
+            if (peek(i) != term.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // === 0.2.4: %recover rule-scope terminator stack ===
+    /**
+     * Push a per-rule recovery terminator onto the active stack. The rule
+     * body that follows will recover by skipping until this literal is
+     * seen, instead of the global char-set. Must be paired with
+     * {@link #popRecoveryOverride()}.
+     */
+    public void pushRecoveryOverride(String terminator) {
+        recoveryOverrideStack.push(terminator);
+    }
+
+    /**
+     * Pop the top rule-scope recovery terminator. No-op if the stack is
+     * empty (defensive — shouldn't happen with balanced push/pop).
+     */
+    public void popRecoveryOverride() {
+        if (!recoveryOverrideStack.isEmpty()) {
+            recoveryOverrideStack.pop();
+        }
+    }
+
+    /**
+     * Check whether any rule-scope recovery override is currently active.
+     */
+    public boolean hasRecoveryOverride() {
+        return !recoveryOverrideStack.isEmpty();
+    }
+
+    // === 0.2.4: Suggestion Vocabulary ===
+    /**
+     * Install the suggestion vocabulary computed once from
+     * {@code %suggest}-designated rules. Called by the engine at context
+     * creation or by a Session when carrying state forward. The list is
+     * shared; callers must not mutate it.
+     */
+    public void setSuggestionVocabulary(List<String> vocabulary) {
+        this.suggestionVocabulary = vocabulary;
+    }
+
+    /**
+     * Access the installed suggestion vocabulary. Returns an empty list
+     * when no {@code %suggest} directive designated any rule; callers use
+     * that as the zero-cost signal that no hint logic should run.
+     */
+    public List<String> suggestionVocabulary() {
+        return suggestionVocabulary;
     }
 
     // === Token Boundary Tracking ===
@@ -306,6 +397,57 @@ public final class ParsingContext {
 
     public void exitWhitespaceSkip() {
         skippingWhitespace = false;
+    }
+
+    // === Pending Leading Trivia ===
+    /**
+     * Append captured trivia to the pending-leading buffer. Called at sites
+     * between sibling sequence elements (sequence, zero-or-more, one-or-more,
+     * repetition) so the following sibling's leaf or rule can claim it.
+     */
+    public void appendPendingLeadingTrivia(List<Trivia> captured) {
+        if (!captured.isEmpty()) {
+            pendingLeadingTrivia.addAll(captured);
+        }
+    }
+
+    /**
+     * Take and clear the pending-leading buffer. Called when constructing a
+     * CstNode that owns {@code leadingTrivia} — leaf terminals, token
+     * boundaries, or rule wrappers. Returns the previously-pending list; the
+     * buffer is reset to empty.
+     */
+    public List<Trivia> takePendingLeadingTrivia() {
+        if (pendingLeadingTrivia.isEmpty()) {
+            return List.of();
+        }
+        var snapshot = List.copyOf(pendingLeadingTrivia);
+        pendingLeadingTrivia.clear();
+        return snapshot;
+    }
+
+    /**
+     * Snapshot the current pending-leading buffer size for later restoration.
+     * Backtracking combinators (Choice/Optional/And/Not) must call this
+     * before attempting each alternative and call
+     * {@link #restorePendingLeadingTrivia(int)} on failure so that trivia
+     * collected inside the failed attempt does not leak forward to the next
+     * attempt.
+     */
+    public int savePendingLeadingTrivia() {
+        return pendingLeadingTrivia.size();
+    }
+
+    /**
+     * Truncate the pending-leading buffer back to a previously-saved size.
+     * No-op when the buffer is already at or below {@code snapshot}.
+     */
+    public void restorePendingLeadingTrivia(int snapshot) {
+        if (pendingLeadingTrivia.size() > snapshot) {
+            pendingLeadingTrivia.subList(snapshot,
+                                         pendingLeadingTrivia.size())
+                                .clear();
+        }
     }
 
     // === Captures (for back-references) ===
