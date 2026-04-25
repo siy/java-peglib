@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-04-26
+
+Trivia round-trip + `%recover` directive.
+
+### Fixed
+
+- **Trivia round-trip is byte-equal.** `RoundTripTest` un-`@Disabled`; all 22 corpus files round-trip exactly. Rule-exit position rewind in `PegEngine` and `ParserGenerator` now attaches trailing intra-rule trivia to the preceding sibling's `trailingTrivia`, completing the attribution work started in 0.2.4. `docs/TRIVIA-ATTRIBUTION.md` updated; "Known limitation" section retired.
+- **`%recover` directive now wired end-to-end.** Override actually shifts recovery point at runtime; demonstrated by new regression test that fails without the directive and passes with it.
+
+### Changed
+
+- **CST hash baselines regenerated.** `NonTerminal` span end offsets shift on rules that had unattached trailing trivia (most non-trivial rules). Both `peglib-core/src/test/resources/perf-corpus-baseline/` and `peglib-core/src/test/resources/perf-corpus-interpreter-baseline/` are committed in a separate baseline-shift commit. Anyone diffing 0.3.4 baselines against 0.3.5 will see span-end shifts; this is expected.
+
 ## [0.3.4] - 2026-04-22
 
 Post-roadmap cleanup release. Two rounds of parallel JBCT review (10 focus-area reviewers + docs-backreference + test-coverage audit, run twice) identified priorities. This release lands the P0 (correctness + security) and P1 (highest-leverage mechanical) fixes; architectural refactors remain tracked as P3 items in `docs/AUDIT-REPORTS/CONSOLIDATED-BACKLOG.md`.
