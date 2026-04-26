@@ -2485,7 +2485,11 @@ public final class ParserGenerator {
         }
         sb.append("        \n");
         if (!skipCache) {
-            sb.append("        // Check cache at pre-whitespace position\n");
+            sb.append("        // Check cache at pre-whitespace position. Bug B fix:\n");
+            sb.append("        // on a settled-success cache hit we must reproduce the first-parse\n");
+            sb.append("        // trivia attribution — drain pending-leading, run skipWhitespace at\n");
+            sb.append("        // the same pre-WS position, then jump pos to the cached body-end and\n");
+            sb.append("        // attach the rebuilt leading trivia. Failure hits return as-is.\n");
             sb.append("        long key = cacheKey(")
               .append(ruleId)
               .append(", ")
@@ -2496,7 +2500,15 @@ public final class ParserGenerator {
             sb.append("        if (cache != null) {\n");
             sb.append("            var cached = cache.get(key);\n");
             sb.append("            if (cached != null) {\n");
-            sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation.unwrap());\n");
+            sb.append("                if (cached.isSuccess()) {\n");
+            sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+            sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+            sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
+            sb.append("                    var hitEndLoc = cached.endLocation.unwrap();\n");
+            sb.append("                    restoreLocation(hitEndLoc);\n");
+            sb.append("                    var hitNode = attachLeadingTrivia(cached.node.unwrap(), hitLeading);\n");
+            sb.append("                    return CstParseResult.success(hitNode, cached.text.or(\"\"), hitEndLoc);\n");
+            sb.append("                }\n");
             sb.append("                return cached;\n");
             sb.append("            }\n");
             sb.append("        }\n");
@@ -2604,15 +2616,28 @@ public final class ParserGenerator {
                   ? "startOffset"
                   : "startLoc.offset()")
           .append(");\n");
-        // Settled cache hit — return immediately.
+        // Settled cache hit — Bug B fix: rebuild leading trivia at the hit site
+        // (drain pending + skipWhitespace + reattach) so the returned node is
+        // byte-for-byte equivalent to a fresh parse. Failure hits return as-is.
         sb.append("        if (cache != null) {\n");
         sb.append("            var cached = cache.get(key);\n");
         sb.append("            if (cached != null) {\n");
-        sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation.unwrap());\n");
+        sb.append("                if (cached.isSuccess()) {\n");
+        sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+        sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+        sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
+        sb.append("                    var hitEndLoc = cached.endLocation.unwrap();\n");
+        sb.append("                    restoreLocation(hitEndLoc);\n");
+        sb.append("                    var hitNode = attachLeadingTrivia(cached.node.unwrap(), hitLeading);\n");
+        sb.append("                    return CstParseResult.success(hitNode, cached.text.or(\"\"), hitEndLoc);\n");
+        sb.append("                }\n");
         sb.append("                return cached;\n");
         sb.append("            }\n");
         sb.append("        }\n");
         // Growing-seed hit — self-recursive call observes the current seed.
+        // Trivia is applied once at the outer settle path; do NOT rebuild here
+        // for the in-progress seed, otherwise the self-reference would allocate
+        // duplicate leading-trivia per growth iteration.
         sb.append("        var activeSeed = growingSeeds.get(key);\n");
         sb.append("        if (activeSeed != null) {\n");
         sb.append("            if (activeSeed.isSuccess()) restoreLocation(activeSeed.endLocation.unwrap());\n");

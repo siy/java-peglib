@@ -622,14 +622,27 @@ public final class PegEngine implements Parser {
         }
         var startPos = ctx.pos();
         var startLoc = ctx.location();
-        // Check packrat cache at START position
+        // Check packrat cache at START position. On a hit the cached BODY result
+        // carries an empty leading-trivia list (set when the body was first
+        // wrapped at line 667). Bug B fix: rebuild leading trivia on the hit
+        // path so that the returned node is byte-for-byte equivalent to a fresh
+        // parse — drain pending, run skipWhitespace at the same pre-WS position,
+        // then jump pos to the cached body-end and re-attach leading trivia.
         var cachedEntry = ctx.getCachedEntryAt(rule.name(), startPos);
         if (cachedEntry.isPresent()) {
             var entry = cachedEntry.unwrap();
             var result = entry.result();
-            if (result.isSuccess()) {
-                var success = (ParseResult.Success) result;
+            if (result instanceof ParseResult.Success success) {
+                var hitCarriedLeading = ctx.takePendingLeadingTrivia();
+                var hitLocalTrivia = skipWhitespace(ctx);
+                List<Trivia> hitRuleLeading = hitCarriedLeading.isEmpty()
+                                              ? hitLocalTrivia
+                                              : (hitLocalTrivia.isEmpty()
+                                                 ? hitCarriedLeading
+                                                 : concatTrivia(hitCarriedLeading, hitLocalTrivia));
                 ctx.restoreLocation(success.endLocation());
+                var hitNode = attachLeadingTrivia(success.node(), hitRuleLeading);
+                return ParseResult.Success.of(hitNode, ctx.location());
             }
             return result;
         }
@@ -721,15 +734,33 @@ public final class PegEngine implements Parser {
         var startLoc = ctx.location();
         // Cache hit: either a settled entry (from a previous top-level call)
         // or a growing entry from an in-progress outer invocation (the self-
-        // reference case). Both paths return the cached result directly —
-        // the outer loop is responsible for driving further iterations.
+        // reference case). Bug B fix: settled-success hits rebuild leading
+        // trivia (drain pending + skipWhitespace + reattach) so the returned
+        // node is equivalent to a fresh parse. Growing-seed hits are the
+        // self-reference path and return the seed unchanged — leading-trivia
+        // is applied once at the outer-level settle path (line ~830).
         var cachedEntry = ctx.getCachedEntryAt(rule.name(), startPos);
         if (cachedEntry.isPresent()) {
             var entry = cachedEntry.unwrap();
             var result = entry.result();
-            if (result.isSuccess()) {
-                var success = (ParseResult.Success) result;
+            if (entry.growing()) {
+                if (result.isSuccess()) {
+                    var success = (ParseResult.Success) result;
+                    ctx.restoreLocation(success.endLocation());
+                }
+                return result;
+            }
+            if (result instanceof ParseResult.Success success) {
+                var hitCarriedLeading = ctx.takePendingLeadingTrivia();
+                var hitLocalTrivia = skipWhitespace(ctx);
+                List<Trivia> hitRuleLeading = hitCarriedLeading.isEmpty()
+                                              ? hitLocalTrivia
+                                              : (hitLocalTrivia.isEmpty()
+                                                 ? hitCarriedLeading
+                                                 : concatTrivia(hitCarriedLeading, hitLocalTrivia));
                 ctx.restoreLocation(success.endLocation());
+                var hitNode = attachLeadingTrivia(success.node(), hitRuleLeading);
+                return ParseResult.Success.of(hitNode, ctx.location());
             }
             return result;
         }
