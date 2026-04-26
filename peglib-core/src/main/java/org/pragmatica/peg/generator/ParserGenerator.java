@@ -2992,7 +2992,7 @@ public final class ParserGenerator {
                 // Snapshot pending-leading so any between-element trivia appended
                 // inside this sequence can be rolled back on failure.
                 sb.append(pad)
-                  .append("int ")
+                  .append("List<Trivia> ")
                   .append(seqPending)
                   .append(" = savePendingLeading();\n");
                 sb.append(pad)
@@ -3101,7 +3101,7 @@ public final class ParserGenerator {
                 // back — captured trivia inside one alt must not leak forward
                 // into sibling alternatives.
                 sb.append(pad)
-                  .append("int choicePending")
+                  .append("List<Trivia> choicePending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 // Don't skip whitespace here - let alternatives capture trivia themselves
@@ -3190,7 +3190,7 @@ public final class ParserGenerator {
                   .append(beforeLoc)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("    int zomIterPending")
+                  .append("    List<Trivia> zomIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3329,7 +3329,7 @@ public final class ParserGenerator {
                       .append("children.clear();\n");
                 }
                 sb.append(pad)
-                  .append("int oomEntryPending")
+                  .append("List<Trivia> oomEntryPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 generateCstExpressionCode(sb,
@@ -3370,7 +3370,7 @@ public final class ParserGenerator {
                   .append(beforeLoc)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("        int oomIterPending")
+                  .append("        List<Trivia> oomIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3484,7 +3484,7 @@ public final class ParserGenerator {
                   .append(optStart)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("int optPending")
+                  .append("List<Trivia> optPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 // Save parent children before inner expression
@@ -3632,7 +3632,7 @@ public final class ParserGenerator {
                   .append(beforeLoc)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("    int repIterPending")
+                  .append("    List<Trivia> repIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3791,7 +3791,7 @@ public final class ParserGenerator {
                   .append(andStart)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("int andPending")
+                  .append("List<Trivia> andPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (addToChildren) {
@@ -3836,7 +3836,7 @@ public final class ParserGenerator {
                   .append(notStart)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("int notPending")
+                  .append("List<Trivia> notPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (addToChildren) {
@@ -4403,14 +4403,13 @@ public final class ParserGenerator {
                     return snapshot;
                 }
 
-                private int savePendingLeading() {
-                    return pendingLeadingTrivia.size();
+                private List<Trivia> savePendingLeading() {
+                    return List.copyOf(pendingLeadingTrivia);
                 }
 
-                private void restorePendingLeading(int snapshot) {
-                    if (pendingLeadingTrivia.size() > snapshot) {
-                        pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size()).clear();
-                    }
+                private void restorePendingLeading(List<Trivia> snapshot) {
+                    pendingLeadingTrivia.clear();
+                    pendingLeadingTrivia.addAll(snapshot);
                 }
 
                 private List<Trivia> concatTrivia(List<Trivia> first, List<Trivia> second) {

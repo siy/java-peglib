@@ -427,27 +427,32 @@ public final class ParsingContext {
     }
 
     /**
-     * Snapshot the current pending-leading buffer size for later restoration.
-     * Backtracking combinators (Choice/Optional/And/Not) must call this
-     * before attempting each alternative and call
-     * {@link #restorePendingLeadingTrivia(int)} on failure so that trivia
-     * collected inside the failed attempt does not leak forward to the next
-     * attempt.
+     * Capture the full contents of the pending-leading buffer for later
+     * restoration. Backtracking combinators (Choice/Optional/And/Not/Sequence)
+     * must call this before attempting each alternative and call
+     * {@link #restorePendingLeadingTrivia(List)} on failure so that the
+     * pending-leading state is fully reverted — including items that were
+     * consumed (drained) by inner operations inside the failed attempt.
+     *
+     * <p>A size-only snapshot is insufficient: if an inner operation drains
+     * pending trivia (via {@link #takePendingLeadingTrivia()}) and the outer
+     * branch later fails, restoring just the size cannot recover the consumed
+     * items. The full-list snapshot guarantees byte-identical buffer state
+     * regardless of intermediate drains.</p>
      */
-    public int savePendingLeadingTrivia() {
-        return pendingLeadingTrivia.size();
+    public List<Trivia> savePendingLeadingTrivia() {
+        return List.copyOf(pendingLeadingTrivia);
     }
 
     /**
-     * Truncate the pending-leading buffer back to a previously-saved size.
-     * No-op when the buffer is already at or below {@code snapshot}.
+     * Restore the pending-leading buffer to a previously-captured snapshot.
+     * Replaces all current contents with those from {@code snapshot},
+     * recovering items that may have been drained by inner operations
+     * inside a now-failed branch.
      */
-    public void restorePendingLeadingTrivia(int snapshot) {
-        if (pendingLeadingTrivia.size() > snapshot) {
-            pendingLeadingTrivia.subList(snapshot,
-                                         pendingLeadingTrivia.size())
-                                .clear();
-        }
+    public void restorePendingLeadingTrivia(List<Trivia> snapshot) {
+        pendingLeadingTrivia.clear();
+        pendingLeadingTrivia.addAll(snapshot);
     }
 
     // === Captures (for back-references) ===
