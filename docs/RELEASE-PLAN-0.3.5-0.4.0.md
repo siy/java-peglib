@@ -13,22 +13,39 @@ Subagent convention per repo: `jbct-coder` for all code; `build-runner` for `mvn
 
 ## Release 0.3.5 — "trivia round-trip"
 
-**Goal:** un-`@Disable` `RoundTripTest`, prove `%recover` works end-to-end. Estimated 4 working days.
+**Goal:** un-`@Disable` `RoundTripTest`, prove `%recover` works end-to-end. Revised estimate: ~5-7 working days (originally 4 — diagnostic on 2026-04-26 revealed three distinct bugs, not one).
 
-### Phase 1 — rule-exit pos-rewind in `PegEngine` (~1 day)
+### Diagnostic findings (2026-04-26)
 
-Implement the rewind at all 6 sites identified during the 0.2.4 attempt. Each rule that consumes trivia at body-end without a following sibling must rewind `pos` so the trailing trivia is observable to the parent's trivia-attribution pass.
+Empirical round-trip diagnostic on `DeepGenerics.java` (smallest failing corpus file) showed two failure shapes, not one. Plus the originally-planned third. All three need fixing for byte-equal round-trip:
 
-- File: `peglib-core/src/main/java/org/pragmatica/peg/parser/PegEngine.java`
-- Sites: previously catalogued in 0.2.4 work-in-progress (search for sequence-end / rule-exit trivia consumption points)
-- Watch: 3 ZoM iterations that surfaced infinite-loop edge cases in the 0.2.4 attempt — debug fully this round
+- **Bug A — pending-trivia snapshot is size-only.** `ParsingContext.savePendingLeadingTrivia()` returns just the list size; `restorePendingLeadingTrivia(int)` only truncates if the buffer grew. Items *consumed* inside a backtracked branch are permanently lost. Fix: change snapshot to a full `List<Trivia>` and restore by replacing buffer contents.
+- **Bug B — packrat cache bakes in dynamic leading trivia.** `cacheAt` stores the wrapped node *including* its `leadingTrivia`. Cache hits at the same `(ruleName, position)` return that stale leading regardless of current pending. Result: trivia gets attributed to both an outer wrapper rule AND the cached inner rule (the duplication seen as `rec > src` in the diag). Fix: cache nodes with empty leadingTrivia; reattach current pending on cache hit.
+- **Bug C — rule-exit pos-rewind missing.** The original plan item. After a rule body completes, any pending trivia not drained by a child gets dropped. Fix: at rule-exit, if pending is non-empty, rewind `pos` past it and attach to the last child's `trailingTrivia`. Manifests as `rec < src` in the diag (-16, -30, -301 byte cases).
 
-### Phase 2 — same in `ParserGenerator` (~1 day)
+### Phase 1A — Bug A: list-snapshot pending trivia (~0.5 day)
 
-Mirror the rewind in emitted rule code at all 4 generator sites.
+- `ParsingContext.savePendingLeadingTrivia()` → returns `List<Trivia>` snapshot
+- `ParsingContext.restorePendingLeadingTrivia(List<Trivia>)` → replaces buffer with snapshot contents
+- All call sites in `PegEngine` (Sequence ~1490, Choice ~1538, ZoM ~1587, OoM ~1652, Repetition, Optional, And, Not) updated to pass/receive `List<Trivia>`
+- Mirror in `ParserGenerator` emission templates (~4406-4414)
+- All 874 existing tests must stay green; baselines unchanged at this phase
 
-- File: `peglib-core/src/main/java/org/pragmatica/peg/generator/ParserGenerator.java`
-- Symmetry with Phase 1 is mandatory — interpreter and generated parsers must produce identical CST hashes
+### Phase 1B — Bug B: cache-safe leading trivia (~1 day)
+
+- `parseRule` wraps with empty leading before caching; reattaches `ruleLeading` only on the path that returns
+- Cache hit path: take cached node (no leading), reattach current `takePendingLeadingTrivia()` as leading
+- Same logic in `parseRuleWithLeftRecursion` and `parseRuleWithActions`
+- Mirror in generator's emitted rule wrappers (lines ~2454-2570 and LR variant ~2581-2700)
+- Existing parity baselines should hold (this phase doesn't change spans, just trivia attribution invariants)
+
+### Phase 1C — Bug C: rule-exit pos-rewind (~1.5 days)
+
+- At `parseRule` exit (line 668), `parseRuleWithLeftRecursion` exit (line 791-808), `parseRuleWithActions` exit (line 912/919): if `pendingLeadingTrivia` non-empty, rewind `pos` by total trivia text length, attach as `trailingTrivia` on the last child of the rule's result.
+- For Terminal/Token rule results (single-leaf bodies), attach to that leaf.
+- Watch: ZoM/OoM/Repetition iteration sites may need symmetric exit handling — the 0.2.4 attempt hit 3 infinite-loop edge cases here. Debug carefully.
+- Mirror in generator (lines ~2454-2570, ~2581-2700)
+- Symmetry with Phase 1A/B mandatory: interpreter and generated parsers must produce identical CST hashes
 
 ### Phase 3 — baseline regeneration (~0.5 day)
 
