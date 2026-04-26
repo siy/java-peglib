@@ -39,13 +39,40 @@ Empirical round-trip diagnostic on `DeepGenerics.java` (smallest failing corpus 
 - Mirror in generator's emitted rule wrappers (lines ~2454-2570 and LR variant ~2581-2700)
 - Existing parity baselines should hold (this phase doesn't change spans, just trivia attribution invariants)
 
-### Phase 1C — Bug C: rule-exit pos-rewind (~1.5 days)
+### Phase 1C — Bug C: cache-hit leading-trivia ambiguity (deferred to 0.3.6)
 
-- At `parseRule` exit (line 668), `parseRuleWithLeftRecursion` exit (line 791-808), `parseRuleWithActions` exit (line 912/919): if `pendingLeadingTrivia` non-empty, rewind `pos` by total trivia text length, attach as `trailingTrivia` on the last child of the rule's result.
-- For Terminal/Token rule results (single-leaf bodies), attach to that leaf.
-- Watch: ZoM/OoM/Repetition iteration sites may need symmetric exit handling — the 0.2.4 attempt hit 3 infinite-loop edge cases here. Debug carefully.
-- Mirror in generator (lines ~2454-2570, ~2581-2700)
-- Symmetry with Phase 1A/B mandatory: interpreter and generated parsers must produce identical CST hashes
+**Originally planned as rule-exit pos-rewind. Empirical diagnostic on 2026-04-26
+revealed a different root cause.**
+
+After Bug A and Bug B were committed, only 12 of 22 corpus fixtures round-trip
+byte-equal. The remaining 10 fail because the packrat cache stores rule BODY
+results whose `leadingTrivia` may be authoritative (from inner-rule wraps
+when body is a Reference) or stale (from a backtracked prior context). Bug B's
+`attachLeadingTrivia` helper short-circuits on empty current leading, which
+preserves the cached attribution — correct when authoritative, wrong when
+stale. Always-replacing regresses corpus passes from 12 → 5.
+
+The fix requires distinguishing the two cases. Approach (sketched, not
+implemented in 0.3.5):
+
+1. Strip `leadingTrivia` from the body result at cache-store time so the
+   cache never carries attribution.
+2. On cache hit, recompute the rule-internal whitespace by inspecting
+   `input[startPos .. bodyEndPos)` directly (deterministic — same input
+   produces same trivia) and use it as the body's leading.
+3. Apply the rebuilt outer-leading on top via `wrapWithRuleName`.
+
+This redesign is multi-day work and may require coordinated changes in
+both `PegEngine` and `ParserGenerator`. Scheduled for **release 0.3.6**
+ahead of the IDE-plugin perf release (0.4.1).
+
+Rule-exit pos-rewind (the originally-named Phase 1C) may still be needed
+for some of the 10 remaining failure fixtures (specifically the loss
+cases — `CompoundAssignments` -16, `SwitchExpressions` -13, etc). Whether
+it is actually needed will become clear once Bug C is resolved.
+
+See `docs/TRIVIA-ATTRIBUTION.md` § "Known limitation" for the diagnostic
+data and resolution direction.
 
 ### Phase 3 — baseline regeneration (~0.5 day)
 

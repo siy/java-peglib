@@ -7,16 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.5] - 2026-04-26
 
-Trivia round-trip + `%recover` directive.
+Trivia attribution correctness + `%recover` directive. Sets the foundation for full byte-equal round-trip (now empirically achieved for 12 of 22 corpus fixtures); the remaining 10 await Bug C in 0.3.6.
 
 ### Fixed
 
-- **Trivia round-trip is byte-equal.** `RoundTripTest` un-`@Disabled`; all 22 corpus files round-trip exactly. Rule-exit position rewind in `PegEngine` and `ParserGenerator` now attaches trailing intra-rule trivia to the preceding sibling's `trailingTrivia`, completing the attribution work started in 0.2.4. `docs/TRIVIA-ATTRIBUTION.md` updated; "Known limitation" section retired.
-- **`%recover` directive now wired end-to-end.** Override actually shifts recovery point at runtime; demonstrated by new regression test that fails without the directive and passes with it.
+- **Bug A — pending-trivia restore on backtrack.** `ParsingContext.savePendingLeadingTrivia()` returned a size-only snapshot and `restorePendingLeadingTrivia(int)` only truncated. Items consumed inside a backtracked branch were permanently lost. Now snapshots/restores the full `List<Trivia>` contents. `PegEngine` call sites and `ParserGenerator` emission templates updated symmetrically.
+- **Bug B — cache-hit leading trivia rebuild.** Packrat cache hits returned the cached body result directly without applying any leading-trivia attribution, while cache misses applied `ruleLeading` via `wrapWithRuleName`. The asymmetry produced wrong leading attribution on cache hits. Fixed by rebuilding leading trivia (drain pending + `skipWhitespace` + reattach) on every settled-success cache hit in `parseRule` and `parseRuleWithLeftRecursion`. Generator emits the same logic. Growing-seed hits (left-recursion self-reference) deliberately unchanged.
+
+### Known limitations (deferred to 0.3.6)
+
+- **Bug C — cache-hit leading-trivia ambiguity.** Cache stores rule body results that may already carry leading-trivia attribution from inner-rule wraps. On a cache hit when current `pendingLeadingTrivia` is empty, the rebuilt leading is also empty, and the existing helper short-circuits (preserving the cached body's stale leading). This produces duplication in 10 of 22 round-trip corpus fixtures (e.g. `DeepGenerics.java` +1 byte). Always-replacing the leading regresses other fixtures into loss territory because some cached attributions ARE authoritative. Resolving this requires distinguishing "authoritative cache leading" from "stale cache leading" — likely by stripping leading at cache-store time and capturing the rule-internal whitespace via input-text inspection on hit. `RoundTripTest` therefore remains `@Disabled`. See `docs/TRIVIA-ATTRIBUTION.md` § "Known limitation" for the full diagnostic.
 
 ### Changed
 
-- **CST hash baselines regenerated.** `NonTerminal` span end offsets shift on rules that had unattached trailing trivia (most non-trivial rules). Both `peglib-core/src/test/resources/perf-corpus-baseline/` and `peglib-core/src/test/resources/perf-corpus-interpreter-baseline/` are committed in a separate baseline-shift commit. Anyone diffing 0.3.4 baselines against 0.3.5 will see span-end shifts; this is expected.
+- `docs/TRIVIA-ATTRIBUTION.md` — updated to document Bug A/B fixes and the remaining Bug C ambiguity.
+- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — sequencing updated; Bug C scheduled for 0.3.6.
 
 ## [0.3.4] - 2026-04-22
 
