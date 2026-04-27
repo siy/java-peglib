@@ -666,17 +666,27 @@ public final class PegEngine implements Parser {
                                          .unwrap());
             pushedRecover = true;
         }
-        ParseResult result;
+        ParseResult result = null;
         try{
             result = parseExpressionWithMode(ctx, rule.expression(), rule.name(), ParseMode.standard());
         } finally{
+            // 0.3.5 (Phase 5) — capture failure override BEFORE pop. parseWithRecovery's
+            // skipToRecoveryPoint runs after this method returns, by which point the
+            // stack has been unwound; the pending field carries the override across.
             if (pushedRecover) {
+                if (result == null || result.isFailure()) {
+                    ctx.recordFailureRecoveryOverride(rule.recover()
+                                                          .unwrap());
+                }
                 ctx.popRecoveryOverride();
             }
         }
         // Cache the result at START position
         ctx.cacheAt(rule.name(), startPos, result);
         if (result instanceof ParseResult.Success success) {
+            // 0.3.5 (Phase 5) — clear pending override on success so a backtracked
+            // alternative's recorded override does not leak into a later recovery cycle.
+            ctx.clearPendingRecoveryOverride();
             var node = wrapWithRuleName(success.node(), rule.name(), ruleLeading);
             return ParseResult.Success.of(node, ctx.location());
         }
@@ -826,7 +836,14 @@ public final class PegEngine implements Parser {
                 ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.seed(lastSeed, generation));
             }
         } finally{
+            // 0.3.5 (Phase 5) — same pattern as parseRule: capture failure override
+            // before stack pop. lastSeed reflects the final LR settle state at this
+            // point; treat any non-Success as a failure for recovery purposes.
             if (pushedRecover) {
+                if (!lastSeed.isSuccess()) {
+                    ctx.recordFailureRecoveryOverride(rule.recover()
+                                                          .unwrap());
+                }
                 ctx.popRecoveryOverride();
             }
         }
@@ -834,6 +851,8 @@ public final class PegEngine implements Parser {
         ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.settled(lastSeed));
         if (lastSeed instanceof ParseResult.Success finalSuccess) {
             ctx.restoreLocation(finalSuccess.endLocation());
+            // 0.3.5 (Phase 5) — clear pending override on success path.
+            ctx.clearPendingRecoveryOverride();
             // Re-wrap at the outer level with leadingTrivia attached. The inner
             // wrap used an empty leading list for self-reference purposes.
             var outerNode = attachLeadingTrivia(finalSuccess.node(), ruleLeading);
@@ -896,14 +915,21 @@ public final class PegEngine implements Parser {
                                          .unwrap());
             pushedRecover = true;
         }
-        ParseResult result;
+        ParseResult result = null;
         try{
             result = parseExpressionWithMode(ctx,
                                              rule.expression(),
                                              rule.name(),
                                              ParseMode.withActions(childValues, tokenCapture));
         } finally{
+            // 0.3.5 (Phase 5) — capture failure override before stack pop. Same
+            // rationale as parseRule: skipToRecoveryPoint runs after parseRule
+            // returns, after the finally block has unwound the stack.
             if (pushedRecover) {
+                if (result == null || result.isFailure()) {
+                    ctx.recordFailureRecoveryOverride(rule.recover()
+                                                          .unwrap());
+                }
                 ctx.popRecoveryOverride();
             }
         }
@@ -927,6 +953,8 @@ public final class PegEngine implements Parser {
             }
             return result;
         }
+        // 0.3.5 (Phase 5) — clear pending override on success path.
+        ctx.clearPendingRecoveryOverride();
         var success = (ParseResult.Success) result;
         // Use token capture if available, otherwise full match
         var matchedText = Option.option(tokenCapture[0])

@@ -63,6 +63,16 @@ public final class ParsingContext {
     // point set. Rules pushing a %recover terminator must pop on exit.
     private final java.util.ArrayDeque<String> recoveryOverrideStack = new java.util.ArrayDeque<>();
 
+    // 0.3.5 (Phase 5): pending recovery override captured at the moment a
+    // rule with %recover fails. Required because parseRule pops the stack in
+    // its finally block before parseWithRecovery consults skipToRecoveryPoint;
+    // without this field the stack is always empty at recovery time and the
+    // directive is a silent no-op. Set by the deepest failing rule with
+    // %recover (parseRule variants record before popping); consumed and
+    // cleared by skipToRecoveryPoint. Cleared on rule success so that a
+    // backtracked alternative's override does not leak forward.
+    private Option<String> pendingFailureRecoveryOverride = Option.none();
+
     private ParsingContext(String input, Grammar grammar, ParserConfig config) {
         this.input = input;
         this.grammar = grammar;
@@ -295,7 +305,20 @@ public final class ParsingContext {
      */
     public SourceSpan skipToRecoveryPoint() {
         var start = location();
-        var override = recoveryOverrideStack.peek();
+        // 0.3.5 (Phase 5) — fix: consult the pending failure override first.
+        // parseRule's finally block pops the stack before this method is
+        // reached, so the live stack is empty during top-level recovery; the
+        // pending field carries the override of the deepest %recover-equipped
+        // rule whose body failure triggered recovery. Falls through to the
+        // live stack (still useful for nested-recovery scenarios where push
+        // outlives the failure) and finally to the global char-set.
+        String override = null;
+        if (pendingFailureRecoveryOverride.isPresent()) {
+            override = pendingFailureRecoveryOverride.unwrap();
+            pendingFailureRecoveryOverride = Option.none();
+        } else {
+            override = recoveryOverrideStack.peek();
+        }
         if (override != null && !override.isEmpty()) {
             while (!isAtEnd() && !matchesOverrideAt(override)) {
                 advance();
@@ -351,6 +374,36 @@ public final class ParsingContext {
      */
     public boolean hasRecoveryOverride() {
         return !recoveryOverrideStack.isEmpty();
+    }
+
+    /**
+     * 0.3.5 (Phase 5) — record the override of a rule whose body has just
+     * failed. Called from parseRule variants on the failure path BEFORE the
+     * stack-pop in {@code finally}, so the override survives stack unwinding
+     * and is available to {@link #skipToRecoveryPoint()} at the top-level
+     * recovery loop.
+     *
+     * <p>Idempotent w.r.t. the deepest-wins policy: only sets the field when
+     * empty. As failures bubble up, the innermost (deepest) failing rule
+     * with {@code %recover} populates the field first; outer rules — even if
+     * they also have {@code %recover} — do not overwrite. The most-specific
+     * scope wins, which matches user intent: a per-statement recovery
+     * terminator should not be replaced by an enclosing block's terminator.
+     */
+    public void recordFailureRecoveryOverride(String terminator) {
+        if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride.isEmpty()) {
+            pendingFailureRecoveryOverride = Option.some(terminator);
+        }
+    }
+
+    /**
+     * 0.3.5 (Phase 5) — clear any pending failure override. Called on rule
+     * SUCCESS so that an override recorded by a failed inner alternative of
+     * a backtracking combinator (Choice/Optional/etc.) does not leak forward
+     * into a later, unrelated recovery cycle.
+     */
+    public void clearPendingRecoveryOverride() {
+        pendingFailureRecoveryOverride = Option.none();
     }
 
     // === 0.2.4: Suggestion Vocabulary ===
