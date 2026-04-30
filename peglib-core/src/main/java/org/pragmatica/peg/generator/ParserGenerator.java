@@ -2529,6 +2529,7 @@ public final class ParserGenerator {
         generateCstExpressionCode(sb, rule.expression(), "result", 2, true, counter, false);
         sb.append("        \n");
         sb.append("        CstParseResult finalResult;\n");
+        sb.append("        CstParseResult cacheableResult;\n");
         sb.append("        if (result.isSuccess()) {\n");
         sb.append("            var endLoc = location();\n");
         if (inlineLocations) {
@@ -2536,6 +2537,13 @@ public final class ParserGenerator {
         }else {
             sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
         }
+        // Bug C fix: cache the empty-leading wrapped node so cache hits don't
+        // preserve stale leading trivia and duplicate it on outer nodes. The
+        // returned node carries the actual leadingTrivia for this call site.
+        sb.append("            var cacheNode = wrapWithRuleName(result, children, span, ")
+          .append(ruleIdConst)
+          .append(", List.<Trivia>of());\n");
+        sb.append("            cacheableResult = CstParseResult.success(cacheNode, result.text.or(\"\"), endLoc);\n");
         // Match interpreter's wrapWithRuleName: replace the rule name on whatever node was produced
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
@@ -2572,10 +2580,11 @@ public final class ParserGenerator {
         }else {
             sb.append("            finalResult = result;\n");
         }
+        sb.append("            cacheableResult = finalResult;\n");
         sb.append("        }\n");
         sb.append("        \n");
         if (!skipCache) {
-            sb.append("        if (cache != null) cache.put(key, finalResult);\n");
+            sb.append("        if (cache != null) cache.put(key, cacheableResult);\n");
         }
         sb.append("        return finalResult;\n");
         sb.append("    }\n\n");
@@ -2671,10 +2680,14 @@ public final class ParserGenerator {
         sb.append("        }\n");
         sb.append("        growingSeeds.remove(key);\n");
         sb.append("        CstParseResult finalResult;\n");
+        sb.append("        CstParseResult cacheableResult;\n");
         sb.append("        if (lastSeed.isSuccess()) {\n");
         sb.append("            restoreLocation(lastSeed.endLocation.unwrap());\n");
         sb.append("            var node = attachLeadingTrivia(lastSeed.node.unwrap(), leadingTrivia);\n");
         sb.append("            finalResult = CstParseResult.success(node, lastSeed.text.or(\"\"), lastSeed.endLocation.unwrap());\n");
+        // Bug C fix: cache the empty-leading lastSeed (body emission attaches no
+        // leading trivia). The wrapped node above is for return only.
+        sb.append("            cacheableResult = lastSeed;\n");
         sb.append("        } else {\n");
         if (inlineLocations) {
             sb.append("            this.pos = startOffset;\n");
@@ -2707,8 +2720,9 @@ public final class ParserGenerator {
               .append(escape(ruleName))
               .append("'\") : lastSeed;\n");
         }
+        sb.append("            cacheableResult = finalResult;\n");
         sb.append("        }\n");
-        sb.append("        if (cache != null) cache.put(key, finalResult);\n");
+        sb.append("        if (cache != null) cache.put(key, cacheableResult);\n");
         sb.append("        return finalResult;\n");
         sb.append("    }\n\n");
     }
