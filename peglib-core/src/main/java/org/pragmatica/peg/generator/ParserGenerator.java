@@ -2537,17 +2537,27 @@ public final class ParserGenerator {
         }else {
             sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
         }
+        // 0.3.5 (Bug C') rule-exit trailing-trivia attribution: capture trivia
+        // accumulated in pending-leading by the body that wasn't claimed by any
+        // child (typically inter-element skipWhitespace before a zero-width tail
+        // element). Pos is NOT rewound — predicate combinators rely on pos being
+        // past consumed whitespace. Mirrors PegEngine.parseRule.
+        sb.append("            var pendingAtExit = takePendingLeading();\n");
         // Bug C fix: cache the empty-leading wrapped node so cache hits don't
         // preserve stale leading trivia and duplicate it on outer nodes. The
         // returned node carries the actual leadingTrivia for this call site.
         sb.append("            var cacheNode = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", List.<Trivia>of());\n");
-        sb.append("            cacheableResult = CstParseResult.success(cacheNode, result.text.or(\"\"), endLoc);\n");
         // Match interpreter's wrapWithRuleName: replace the rule name on whatever node was produced
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", leadingTrivia);\n");
+        sb.append("            if (!pendingAtExit.isEmpty()) {\n");
+        sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
+        sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
+        sb.append("            }\n");
+        sb.append("            cacheableResult = CstParseResult.success(cacheNode, result.text.or(\"\"), endLoc);\n");
         sb.append("            finalResult = CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
         sb.append("        } else {\n");
         if (inlineLocations) {
@@ -2686,7 +2696,11 @@ public final class ParserGenerator {
         sb.append("            var node = attachLeadingTrivia(lastSeed.node.unwrap(), leadingTrivia);\n");
         sb.append("            finalResult = CstParseResult.success(node, lastSeed.text.or(\"\"), lastSeed.endLocation.unwrap());\n");
         // Bug C fix: cache the empty-leading lastSeed (body emission attaches no
-        // leading trivia). The wrapped node above is for return only.
+        // leading trivia). The wrapped node above is for return only. Bug C' is
+        // intentionally NOT applied at the LR settle path: PegEngine's LR path
+        // does not apply rule-exit trailing-trivia attribution either, and the
+        // interpreter's parseRule (non-LR) fix alone is sufficient for full
+        // round-trip equivalence on the corpus.
         sb.append("            cacheableResult = lastSeed;\n");
         sb.append("        } else {\n");
         if (inlineLocations) {
@@ -4506,6 +4520,52 @@ public final class ParserGenerator {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
                                 err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia
+                            );
+                """);
+        }
+        sb.append("""
+                    };
+                }
+
+            """);
+        // 0.3.5 (Bug C') — rule-exit trailing-trivia attribution. When a rule
+        // body accumulates pending-leading trivia not claimed by any child
+        // (typically inter-element skipWhitespace before a zero-width tail
+        // element such as an empty ZoM/Optional), attach the trivia to the
+        // last child's trailingTrivia so reconstruction includes it. Pos is
+        // NOT rewound — predicate combinators rely on pos being past any
+        // whitespace already consumed. Mirrors PegEngine.attachTrailingToTail.
+        sb.append("""
+                private CstNode attachTrailingToTail(CstNode node, List<Trivia> trivia) {
+                    if (trivia.isEmpty()) return node;
+                    return switch (node) {
+                        case CstNode.NonTerminal nt -> {
+                            var ntChildren = nt.children();
+                            if (ntChildren.isEmpty()) {
+                                var combined = concatTrivia(nt.trailingTrivia(), trivia);
+                                yield new CstNode.NonTerminal(
+                                    nt.span(), nt.rule(), ntChildren, nt.leadingTrivia(), combined
+                                );
+                            }
+                            var newChildren = new ArrayList<CstNode>(ntChildren);
+                            var lastIdx = newChildren.size() - 1;
+                            var lastChild = newChildren.get(lastIdx);
+                            newChildren.set(lastIdx, attachTrailingToTail(lastChild, trivia));
+                            yield new CstNode.NonTerminal(
+                                nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia()
+                            );
+                        }
+                        case CstNode.Terminal t -> new CstNode.Terminal(
+                            t.span(), t.rule(), t.text(), t.leadingTrivia(), concatTrivia(t.trailingTrivia(), trivia)
+                        );
+                        case CstNode.Token tok -> new CstNode.Token(
+                            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), concatTrivia(tok.trailingTrivia(), trivia)
+                        );
+            """);
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("""
+                            case CstNode.Error err -> new CstNode.Error(
+                                err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), concatTrivia(err.trailingTrivia(), trivia)
                             );
                 """);
         }
