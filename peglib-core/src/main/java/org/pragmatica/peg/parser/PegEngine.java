@@ -681,13 +681,30 @@ public final class PegEngine implements Parser {
                 ctx.popRecoveryOverride();
             }
         }
+        // 0.3.5 (Bug C') rule-exit trailing-trivia attribution: trivia consumed by
+        // the body's inter-element skipWhitespace before a zero-width tail element
+        // (empty ZoM/Optional) ends up in pending and isn't claimed by any child.
+        // Attach it to the last child's trailingTrivia so reconstruction includes
+        // it. Pos is NOT rewound — predicate combinators rely on pos being past
+        // any whitespace already consumed.
+        ParseResult resultForCache = result;
+        CstNode bodyNode = null;
+        if (result instanceof ParseResult.Success success) {
+            bodyNode = success.node();
+            var pendingAtExit = ctx.savePendingLeadingTrivia();
+            if (!pendingAtExit.isEmpty()) {
+                ctx.restorePendingLeadingTrivia(List.of());
+                bodyNode = attachTrailingToTail(bodyNode, pendingAtExit);
+                resultForCache = ParseResult.Success.of(bodyNode, success.endLocation());
+            }
+        }
         // Cache the result at START position
-        ctx.cacheAt(rule.name(), startPos, result);
+        ctx.cacheAt(rule.name(), startPos, resultForCache);
         if (result instanceof ParseResult.Success success) {
             // 0.3.5 (Phase 5) — clear pending override on success so a backtracked
             // alternative's recorded override does not leak into a later recovery cycle.
             ctx.clearPendingRecoveryOverride();
-            var node = wrapWithRuleName(success.node(), rule.name(), ruleLeading);
+            var node = wrapWithRuleName(bodyNode, rule.name(), ruleLeading);
             return ParseResult.Success.of(node, ctx.location());
         }
         // Restore position and re-deposit the caller's pending so enclosing
@@ -1967,6 +1984,51 @@ public final class PegEngine implements Parser {
             case CstNode.Error err -> new CstNode.Error(
             err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia);
         };
+    }
+
+    /**
+     * 0.3.5 (Bug C') — rule-exit trailing-trivia attribution. When a rule body
+     * accumulates trivia in {@code pendingLeadingTrivia} that is not claimed by
+     * any child (typically: inter-element skipWhitespace before a zero-width
+     * tail element such as an empty ZoM/Optional), append that trivia to the
+     * last child's trailingTrivia (or the node's own trailing if it has no
+     * children). This keeps reconstruction byte-equal without rewinding the
+     * parser position — important because predicate combinators rely on
+     * pos already being past any consumed whitespace.
+     */
+    private CstNode attachTrailingToTail(CstNode node, List<Trivia> trivia) {
+        if (trivia.isEmpty()) return node;
+        return switch (node) {
+            case CstNode.NonTerminal nt -> {
+                var children = nt.children();
+                if (children.isEmpty()) {
+                    var combined = combineTrivia(nt.trailingTrivia(), trivia);
+                    yield new CstNode.NonTerminal(
+                    nt.span(), nt.rule(), children, nt.leadingTrivia(), combined);
+                }
+                var newChildren = new ArrayList<>(children);
+                var lastIdx = newChildren.size() - 1;
+                var lastChild = newChildren.get(lastIdx);
+                newChildren.set(lastIdx, attachTrailingToTail(lastChild, trivia));
+                yield new CstNode.NonTerminal(
+                nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia());
+            }
+            case CstNode.Terminal t -> new CstNode.Terminal(
+            t.span(), t.rule(), t.text(), t.leadingTrivia(), combineTrivia(t.trailingTrivia(), trivia));
+            case CstNode.Token tok -> new CstNode.Token(
+            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), combineTrivia(tok.trailingTrivia(), trivia));
+            case CstNode.Error err -> new CstNode.Error(
+            err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), combineTrivia(err.trailingTrivia(), trivia));
+        };
+    }
+
+    private static List<Trivia> combineTrivia(List<Trivia> first, List<Trivia> second) {
+        if (first.isEmpty()) return second;
+        if (second.isEmpty()) return first;
+        var combined = new ArrayList<Trivia>(first.size() + second.size());
+        combined.addAll(first);
+        combined.addAll(second);
+        return List.copyOf(combined);
     }
 
     private String describeExpression(Expression expr) {
