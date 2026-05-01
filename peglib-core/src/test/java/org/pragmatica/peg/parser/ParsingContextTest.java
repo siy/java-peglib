@@ -33,7 +33,7 @@ class ParsingContextTest {
 
         // Create a result and cache it
         var node = createTerminal("a");
-        var result = ParseResult.Success.of(node, SourceLocation.at(1, 2, 1));
+        var result = ParseResult.Success.of(node, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cache("Root", result);
 
         // Should retrieve cached result
@@ -50,7 +50,7 @@ class ParsingContextTest {
 
         // Should return none even after caching
         var node = createTerminal("a");
-        var result = ParseResult.Success.of(node, SourceLocation.at(1, 2, 1));
+        var result = ParseResult.Success.of(node, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cache("Root", result);
 
         assertTrue(ctx.getCached("Root").isEmpty());
@@ -64,13 +64,13 @@ class ParsingContextTest {
 
         // Cache at position 0
         var node1 = createTerminal("a");
-        var result1 = ParseResult.Success.of(node1, SourceLocation.at(1, 2, 1));
+        var result1 = ParseResult.Success.of(node1, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cacheAt("Root", 0, result1);
 
         // Cache at position 1
         ctx.setPos(1);
         var node2 = createTerminal("a");
-        var result2 = ParseResult.Success.of(node2, SourceLocation.at(1, 3, 2));
+        var result2 = ParseResult.Success.of(node2, SourceLocation.sourceLocation(1, 3, 2));
         ctx.cacheAt("Root", 1, result2);
 
         // Should retrieve different results for different positions
@@ -92,12 +92,12 @@ class ParsingContextTest {
 
         // Cache for rule A
         var nodeA = createTerminal("a");
-        var resultA = ParseResult.Success.of(nodeA, SourceLocation.at(1, 2, 1));
+        var resultA = ParseResult.Success.of(nodeA, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cache("A", resultA);
 
         // Cache for rule B at same position
         var nodeB = createTerminal("b");
-        var resultB = ParseResult.Success.of(nodeB, SourceLocation.at(1, 2, 1));
+        var resultB = ParseResult.Success.of(nodeB, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cache("B", resultB);
 
         // Should retrieve different results for different rules
@@ -223,7 +223,7 @@ class ParsingContextTest {
     }
 
     private static CstNode.Terminal createTerminal(String text) {
-        var span = SourceSpan.of(SourceLocation.at(1, 1, 0), SourceLocation.at(1, text.length() + 1, text.length()));
+        var span = SourceSpan.sourceSpan(SourceLocation.sourceLocation(1, 1, 0), SourceLocation.sourceLocation(1, text.length() + 1, text.length()));
         return new CstNode.Terminal(span, "Test", text, List.of(), List.of());
     }
 }

@@ -110,9 +110,9 @@ class ErrorRecoveryExample {
     @Test
     void diagnostics_formatInRustStyle() {
         var source = "let x = @invalid;";
-        var span = SourceSpan.of(
-            SourceLocation.at(1, 9, 8),
-            SourceLocation.at(1, 17, 16)
+        var span = SourceSpan.sourceSpan(
+            SourceLocation.sourceLocation(1, 9, 8),
+            SourceLocation.sourceLocation(1, 17, 16)
         );
 
         var diagnostic = Diagnostic.error("unexpected token", span)
@@ -158,9 +158,9 @@ class ErrorRecoveryExample {
     @Test
     void customDiagnostics_error() {
         var source = "return;";
-        var span = SourceSpan.of(
-            SourceLocation.at(1, 1, 0),
-            SourceLocation.at(1, 7, 6)
+        var span = SourceSpan.sourceSpan(
+            SourceLocation.sourceLocation(1, 1, 0),
+            SourceLocation.sourceLocation(1, 7, 6)
         );
 
         var error = Diagnostic.error("E0001", "missing return value", span)
@@ -180,9 +180,9 @@ class ErrorRecoveryExample {
     @Test
     void customDiagnostics_warning() {
         var source = "let unused = 42;";
-        var span = SourceSpan.of(
-            SourceLocation.at(1, 5, 4),
-            SourceLocation.at(1, 11, 10)
+        var span = SourceSpan.sourceSpan(
+            SourceLocation.sourceLocation(1, 5, 4),
+            SourceLocation.sourceLocation(1, 11, 10)
         );
 
         var warning = Diagnostic.warning("unused variable", span)

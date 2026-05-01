@@ -164,7 +164,7 @@ public final class GrammarParser {
             advance();
             alias = Option.some(aliasId.name());
         }
-        var span = SourceSpan.of(start, currentLocation());
+        var span = SourceSpan.sourceSpan(start, currentLocation());
         return Result.success(new Import(span, grammarId.name(), ruleId.name(), alias));
     }
 
@@ -261,7 +261,7 @@ public final class GrammarParser {
                 case"tag" -> tag = Option.some(value);
             }
         }
-        var span = SourceSpan.of(start, currentLocation());
+        var span = SourceSpan.sourceSpan(start, currentLocation());
         return Result.success(new Rule(span, id.name(), expression, action, errorMessage, expected, recover, tag));
     }
 
@@ -303,7 +303,7 @@ public final class GrammarParser {
         if (alternatives.size() == 1) {
             return Result.success(alternatives.getFirst());
         }
-        var span = SourceSpan.of(start, currentLocation());
+        var span = SourceSpan.sourceSpan(start, currentLocation());
         return Result.success(new Expression.Choice(span, alternatives));
     }
 
@@ -330,7 +330,7 @@ public final class GrammarParser {
         if (elements.size() == 1) {
             return Result.success(elements.getFirst());
         }
-        var span = SourceSpan.of(start, currentLocation());
+        var span = SourceSpan.sourceSpan(start, currentLocation());
         return Result.success(new Expression.Sequence(span, elements));
     }
 
@@ -359,21 +359,21 @@ public final class GrammarParser {
             advance();
             var inner = parseSuffix();
             if (inner.isFailure()) return inner;
-            var span = SourceSpan.of(start, currentLocation());
+            var span = SourceSpan.sourceSpan(start, currentLocation());
             return Result.success(new Expression.And(span, inner.unwrap()));
         }
         if (peek() instanceof GrammarToken.Exclamation) {
             advance();
             var inner = parseSuffix();
             if (inner.isFailure()) return inner;
-            var span = SourceSpan.of(start, currentLocation());
+            var span = SourceSpan.sourceSpan(start, currentLocation());
             return Result.success(new Expression.Not(span, inner.unwrap()));
         }
         if (peek() instanceof GrammarToken.Tilde) {
             advance();
             var inner = parseSuffix();
             if (inner.isFailure()) return inner;
-            var span = SourceSpan.of(start, currentLocation());
+            var span = SourceSpan.sourceSpan(start, currentLocation());
             return Result.success(new Expression.Ignore(span, inner.unwrap()));
         }
         return parseSuffix();
@@ -414,21 +414,21 @@ public final class GrammarParser {
                     caseInsensitive = true;
                 }
             }
-            var span = SourceSpan.of(start, currentLocation());
+            var span = SourceSpan.sourceSpan(start, currentLocation());
             expr = new Expression.Dictionary(span, words, caseInsensitive);
         }
         while (true) {
             if (peek() instanceof GrammarToken.Star) {
                 advance();
-                var span = SourceSpan.of(start, currentLocation());
+                var span = SourceSpan.sourceSpan(start, currentLocation());
                 expr = new Expression.ZeroOrMore(span, expr);
             }else if (peek() instanceof GrammarToken.Plus) {
                 advance();
-                var span = SourceSpan.of(start, currentLocation());
+                var span = SourceSpan.sourceSpan(start, currentLocation());
                 expr = new Expression.OneOrMore(span, expr);
             }else if (peek() instanceof GrammarToken.Question) {
                 advance();
-                var span = SourceSpan.of(start, currentLocation());
+                var span = SourceSpan.sourceSpan(start, currentLocation());
                 expr = new Expression.Optional(span, expr);
             }else if (peek() instanceof GrammarToken.LBrace) {
                 var repResult = parseRepetition(start, expr);
@@ -474,7 +474,7 @@ public final class GrammarParser {
             "'}'").result();
         }
         advance();
-        var span = SourceSpan.of(start, currentLocation());
+        var span = SourceSpan.sourceSpan(start, currentLocation());
         return Result.success(new Expression.Repetition(span, expr, min.value(), max));
     }
 
@@ -524,7 +524,7 @@ public final class GrammarParser {
                 "')'").result();
             }
             advance();
-            var span = SourceSpan.of(start, currentLocation());
+            var span = SourceSpan.sourceSpan(start, currentLocation());
             return Result.success(new Expression.Group(span, inner.unwrap()));
         }
         // Token boundary < >
@@ -541,7 +541,7 @@ public final class GrammarParser {
                 "'>'").result();
             }
             advance();
-            var span = SourceSpan.of(start, currentLocation());
+            var span = SourceSpan.sourceSpan(start, currentLocation());
             return Result.success(new Expression.TokenBoundary(span, inner.unwrap()));
         }
         // Capture scope $(...), Named capture $name< >, or Back-reference $name
@@ -561,7 +561,7 @@ public final class GrammarParser {
                     "')'").result();
                 }
                 advance();
-                var span = SourceSpan.of(start, currentLocation());
+                var span = SourceSpan.sourceSpan(start, currentLocation());
                 return Result.success(new Expression.CaptureScope(span, inner.unwrap()));
             }
             // Named capture or back-reference requires identifier
@@ -587,11 +587,11 @@ public final class GrammarParser {
                     "'>'").result();
                 }
                 advance();
-                var span = SourceSpan.of(start, currentLocation());
+                var span = SourceSpan.sourceSpan(start, currentLocation());
                 return Result.success(new Expression.Capture(span, nameId.name(), inner.unwrap()));
             }else {
                 // Back-reference
-                var span = SourceSpan.of(start, currentLocation());
+                var span = SourceSpan.sourceSpan(start, currentLocation());
                 return Result.success(new Expression.BackReference(span, nameId.name()));
             }
         }

@@ -397,7 +397,7 @@ public final class TriviaRedistribution {
         // compatibility), the owner's span stays put.
         SourceSpan ownerSpan;
         if (match.kind() == Owner.LEADING && delta != 0) {
-            ownerSpan = SourceSpan.of(shiftLoc(owner.span().start(), delta), shiftLoc(owner.span().end(), delta));
+            ownerSpan = SourceSpan.sourceSpan(shiftLoc(owner.span().start(), delta), shiftLoc(owner.span().end(), delta));
         } else {
             ownerSpan = owner.span();
         }
@@ -459,7 +459,7 @@ public final class TriviaRedistribution {
         int relEnd = relStart + edit.oldLen();
         var oldText = trivia.text();
         var rebuilt = oldText.substring(0, relStart) + newText + oldText.substring(relEnd);
-        var newSpan = SourceSpan.of(
+        var newSpan = SourceSpan.sourceSpan(
             trivia.span().start(),
             new SourceLocation(
                 trivia.span().end().line(),
@@ -480,7 +480,7 @@ public final class TriviaRedistribution {
         }
         var start = span.start().offset() >= editEnd ? shiftLoc(span.start(), delta) : span.start();
         var end = span.end().offset() >= editEnd ? shiftLoc(span.end(), delta) : span.end();
-        return SourceSpan.of(start, end);
+        return SourceSpan.sourceSpan(start, end);
     }
 
     private static List<Trivia> shiftTriviaListAfter(List<Trivia> trivia, int delta, int editEnd) {
@@ -504,7 +504,7 @@ public final class TriviaRedistribution {
         if (delta == 0) {
             return trivia;
         }
-        var newSpan = SourceSpan.of(shiftLoc(trivia.span().start(), delta), shiftLoc(trivia.span().end(), delta));
+        var newSpan = SourceSpan.sourceSpan(shiftLoc(trivia.span().start(), delta), shiftLoc(trivia.span().end(), delta));
         return switch (trivia) {
             case Trivia.Whitespace w -> new Trivia.Whitespace(newSpan, w.text());
             case Trivia.LineComment l -> new Trivia.LineComment(newSpan, l.text());

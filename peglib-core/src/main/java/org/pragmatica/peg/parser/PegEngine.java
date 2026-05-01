@@ -316,7 +316,7 @@ public final class PegEngine implements Parser {
         var startRule = grammar.effectiveStartRule();
         if (startRule.isEmpty()) {
             var diag = Diagnostic.error("no start rule defined in grammar",
-                                        SourceSpan.at(SourceLocation.START))
+                                        SourceSpan.sourceSpan(SourceLocation.START))
                                  .withTag("error.unexpected-input");
             return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
         }
@@ -330,7 +330,7 @@ public final class PegEngine implements Parser {
         var ruleOpt = grammar.rule(startRule);
         if (ruleOpt.isEmpty()) {
             var diag = Diagnostic.error("unknown rule: " + startRule,
-                                        SourceSpan.at(SourceLocation.START))
+                                        SourceSpan.sourceSpan(SourceLocation.START))
                                  .withTag("error.unexpected-input");
             return ParseResultWithDiagnostics.withErrors(Option.none(), List.of(diag), input);
         }
@@ -428,12 +428,12 @@ public final class PegEngine implements Parser {
                 column++ ;
             }
         }
-        return SourceLocation.at(line, column, offset);
+        return SourceLocation.sourceLocation(line, column, offset);
     }
 
     private ParseResultWithDiagnostics toDiagnosticsResult(ParseError parseError, String input) {
         var loc = parseError.location();
-        var span = SourceSpan.at(loc);
+        var span = SourceSpan.sourceSpan(loc);
         var diag = Diagnostic.error("parse error", span)
                              .withLabel(parseError.message())
                              .withTag("error.expected");
@@ -554,7 +554,7 @@ public final class PegEngine implements Parser {
                 var found = ctx.isAtEnd()
                             ? "EOF"
                             : String.valueOf(ctx.peek());
-                var errorSpan = SourceSpan.at(startLoc);
+                var errorSpan = SourceSpan.sourceSpan(startLoc);
                 // 0.2.4: tag every recovery diagnostic. CutFailure means a
                 // commit point was passed — use the "unclosed" tag family so
                 // tooling can distinguish it from plain unexpected input.
@@ -606,7 +606,7 @@ public final class PegEngine implements Parser {
                                      .span();
             var lastSpan = fragments.get(fragments.size() - 1)
                                     .span();
-            var fullSpan = SourceSpan.of(firstSpan.start(), lastSpan.end());
+            var fullSpan = SourceSpan.sourceSpan(firstSpan.start(), lastSpan.end());
             rootNode = Option.some(new CstNode.NonTerminal(
             fullSpan, startRule.name(), fragments, List.of(), trailingTrivia));
         }
@@ -1110,7 +1110,7 @@ public final class PegEngine implements Parser {
         }
         advanceLiteral(ctx, text, len);
         var endLoc = ctx.location();
-        var span = SourceSpan.of(startLoc, endLoc);
+        var span = SourceSpan.sourceSpan(startLoc, endLoc);
         var node = new CstNode.Terminal(span, "", text, ctx.takePendingLeadingTrivia(), List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1170,7 +1170,7 @@ public final class PegEngine implements Parser {
         var matched = longestMatch.unwrap();
         advanceLiteral(ctx, matched, longestLen);
         var endLoc = ctx.location();
-        var span = SourceSpan.of(startLoc, endLoc);
+        var span = SourceSpan.sourceSpan(startLoc, endLoc);
         var node = new CstNode.Terminal(span, "", matched, ctx.takePendingLeadingTrivia(), List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1220,7 +1220,7 @@ public final class PegEngine implements Parser {
         }
         ctx.advance();
         var endLoc = ctx.location();
-        var span = SourceSpan.of(startLoc, endLoc);
+        var span = SourceSpan.sourceSpan(startLoc, endLoc);
         var node = new CstNode.Terminal(span, "", String.valueOf(c), ctx.takePendingLeadingTrivia(), List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1333,7 +1333,7 @@ public final class PegEngine implements Parser {
         var startLoc = ctx.location();
         char c = ctx.advance();
         var endLoc = ctx.location();
-        var span = SourceSpan.of(startLoc, endLoc);
+        var span = SourceSpan.sourceSpan(startLoc, endLoc);
         var node = new CstNode.Terminal(span, "", String.valueOf(c), ctx.takePendingLeadingTrivia(), List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1790,7 +1790,7 @@ public final class PegEngine implements Parser {
         // Optional always succeeds - return empty node on no match
         ctx.restoreLocation(startLoc);
         ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
-        var span = SourceSpan.at(startLoc);
+        var span = SourceSpan.sourceSpan(startLoc);
         var node = new CstNode.NonTerminal(span, ruleName, List.of(), List.of(), List.of());
         return ParseResult.Success.of(node, ctx.location());
     }

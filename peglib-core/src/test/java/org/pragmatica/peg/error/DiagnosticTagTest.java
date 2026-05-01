@@ -19,7 +19,7 @@ class DiagnosticTagTest {
 
     @Test
     void diagnosticCarriesTagField() {
-        var span = SourceSpan.at(SourceLocation.START);
+        var span = SourceSpan.sourceSpan(SourceLocation.START);
         var diag = Diagnostic.error("test", span)
                              .withTag("error.custom");
         assertEquals(Option.some("error.custom"), diag.tag());
@@ -27,7 +27,7 @@ class DiagnosticTagTest {
 
     @Test
     void defaultDiagnosticHasNoTag() {
-        var span = SourceSpan.at(SourceLocation.START);
+        var span = SourceSpan.sourceSpan(SourceLocation.START);
         var diag = Diagnostic.error("test", span);
         assertEquals(Option.none(), diag.tag());
     }
@@ -58,7 +58,7 @@ class DiagnosticTagTest {
 
     @Test
     void taggedDiagnosticSurvivesChainedBuilders() {
-        var span = SourceSpan.at(SourceLocation.START);
+        var span = SourceSpan.sourceSpan(SourceLocation.START);
         var diag = Diagnostic.error("x", span)
                              .withTag("error.foo")
                              .withLabel("lbl")

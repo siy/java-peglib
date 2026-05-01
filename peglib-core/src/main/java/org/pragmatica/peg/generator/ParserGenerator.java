@@ -1638,14 +1638,14 @@ public final class ParserGenerator {
 
                 public record SourceLocation(int line, int column, int offset) {
                     public static final SourceLocation START = new SourceLocation(1, 1, 0);
-                    public static SourceLocation at(int line, int column, int offset) {
+                    public static SourceLocation sourceLocation(int line, int column, int offset) {
                         return new SourceLocation(line, column, offset);
                     }
                     @Override public String toString() { return line + ":" + column; }
                 }
 
                 public record SourceSpan(SourceLocation start, SourceLocation end) {
-                    public static SourceSpan of(SourceLocation start, SourceLocation end) {
+                    public static SourceSpan sourceSpan(SourceLocation start, SourceLocation end) {
                         return new SourceSpan(start, end);
                     }
                     public int length() { return end.offset() - start.offset(); }
@@ -2078,7 +2078,7 @@ public final class ParserGenerator {
                 }
 
                 private SourceLocation location() {
-                    return SourceLocation.at(line, column, pos);
+                    return SourceLocation.sourceLocation(line, column, pos);
                 }
 
                 private boolean isAtEnd() {
@@ -2178,7 +2178,7 @@ public final class ParserGenerator {
                             while (!isAtEnd() && !matchesOverrideAt(override)) {
                                 advance();
                             }
-                            return SourceSpan.of(start, location());
+                            return SourceSpan.sourceSpan(start, location());
                         }
                         while (!isAtEnd()) {
                             char c = peek();
@@ -2187,7 +2187,7 @@ public final class ParserGenerator {
                             }
                             advance();
                         }
-                        return SourceSpan.of(start, location());
+                        return SourceSpan.sourceSpan(start, location());
                     }
 
                 """);
@@ -2329,7 +2329,7 @@ public final class ParserGenerator {
                         if (result.isFailure()) {
                             // Record the failure and attempt recovery
                             var errorLoc = furthestFailure.or(location());
-                            var errorSpan = SourceSpan.of(errorLoc, errorLoc);
+                            var errorSpan = SourceSpan.sourceSpan(errorLoc, errorLoc);
                             var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
                             addDiagnostic("expected " + expected, errorSpan);
 
@@ -2348,7 +2348,7 @@ public final class ParserGenerator {
                             // Unexpected trailing input - use furthest failure position for error
                             var errorLoc = furthestFailure.or(location());
                             var skippedSpan = skipToRecoveryPoint();
-                            var errorSpan = SourceSpan.of(errorLoc, skippedSpan.end());
+                            var errorSpan = SourceSpan.sourceSpan(errorLoc, skippedSpan.end());
                             addDiagnostic("unexpected input", errorSpan, "expected end of input");
 
                             // Attach error node to result
@@ -2504,7 +2504,7 @@ public final class ParserGenerator {
         if (inlineLocations) {
             // §7.3 option A: inline int locals at rule entry — no SourceLocation
             // allocation on the failure path. On success we still materialize a
-            // SourceLocation for SourceSpan.of(...), same as before.
+            // SourceLocation for SourceSpan.sourceSpan(...), same as before.
             sb.append("        int startOffset = pos;\n");
             sb.append("        int startLine = line;\n");
             sb.append("        int startColumn = column;\n");
@@ -2588,9 +2588,9 @@ public final class ParserGenerator {
         }
         sb.append("            var endLoc = location();\n");
         if (inlineLocations) {
-            sb.append("            var span = SourceSpan.of(new SourceLocation(startLine, startColumn, startOffset), endLoc);\n");
+            sb.append("            var span = SourceSpan.sourceSpan(new SourceLocation(startLine, startColumn, startOffset), endLoc);\n");
         }else {
-            sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
+            sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
         }
         // 0.3.5 (Bug C') rule-exit trailing-trivia attribution: capture trivia
         // accumulated in pending-leading by the body that wasn't claimed by any
@@ -2848,7 +2848,7 @@ public final class ParserGenerator {
         sb.append("        \n");
         sb.append("        if (result.isSuccess()) {\n");
         sb.append("            var endLoc = location();\n");
-        sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
+        sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", List.<Trivia>of());\n");
@@ -3428,7 +3428,7 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var zomSpan")
                       .append(id)
-                      .append(" = SourceSpan.of(")
+                      .append(" = SourceSpan.sourceSpan(")
                       .append(zomStart)
                       .append(", location());\n");
                     sb.append(pad)
@@ -3610,7 +3610,7 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var oomSpan")
                       .append(id)
-                      .append(" = SourceSpan.of(")
+                      .append(" = SourceSpan.sourceSpan(")
                       .append(oomStart)
                       .append(", location());\n");
                     sb.append(pad)
@@ -3899,7 +3899,7 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var repSpan")
                       .append(id)
-                      .append(" = SourceSpan.of(")
+                      .append(" = SourceSpan.sourceSpan(")
                       .append(repStart)
                       .append(", location());\n");
                     sb.append(pad)
@@ -4071,7 +4071,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    var tbSpan")
                   .append(id)
-                  .append(" = SourceSpan.of(")
+                  .append(" = SourceSpan.sourceSpan(")
                   .append(tbStart)
                   .append(", location());\n");
                 var tokenRuleId = inWhitespaceRule
@@ -4499,7 +4499,7 @@ public final class ParserGenerator {
             generateCstExpressionCode(sb, innerExpr, "wsResult", 3, false, new int[]{0}, true);
             sb.append("            if (wsResult.isFailure() || pos == wsStartPos) break;\n");
             sb.append("            var wsText = substring(wsStartPos, pos);\n");
-            sb.append("            var wsSpan = SourceSpan.of(wsStartLoc, location());\n");
+            sb.append("            var wsSpan = SourceSpan.sourceSpan(wsStartLoc, location());\n");
             sb.append("            trivia.add(classifyTrivia(wsSpan, wsText));\n");
             sb.append("        }\n");
         }
@@ -4817,7 +4817,7 @@ public final class ParserGenerator {
             sb.append("        }\n");
         }
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.of(startLoc, ")
+        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
           .append(endLocVar)
           .append(");\n");
         sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, takePendingLeading(), List.of());\n");
@@ -4864,7 +4864,7 @@ public final class ParserGenerator {
         sb.append("            advance();\n");
         sb.append("        }\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.of(startLoc, ")
+        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
           .append(endLocVar)
           .append(");\n");
         sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, takePendingLeading(), List.of());\n");
@@ -4916,7 +4916,7 @@ public final class ParserGenerator {
         sb.append("        advance();\n");
         sb.append("        var text = String.valueOf(c);\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.of(startLoc, ")
+        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
           .append(endLocVar)
           .append(");\n");
         sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
@@ -4956,7 +4956,7 @@ public final class ParserGenerator {
         sb.append("        char c = advance();\n");
         sb.append("        var text = String.valueOf(c);\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.of(startLoc, ")
+        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
           .append(endLocVar)
           .append(");\n");
         sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");

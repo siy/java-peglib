@@ -3,11 +3,11 @@ package org.pragmatica.peg.tree;
  * A range in source text from start (inclusive) to end (exclusive).
  */
 public record SourceSpan(SourceLocation start, SourceLocation end) {
-    public static SourceSpan of(SourceLocation start, SourceLocation end) {
+    public static SourceSpan sourceSpan(SourceLocation start, SourceLocation end) {
         return new SourceSpan(start, end);
     }
 
-    public static SourceSpan at(SourceLocation location) {
+    public static SourceSpan sourceSpan(SourceLocation location) {
         return new SourceSpan(location, location);
     }
 

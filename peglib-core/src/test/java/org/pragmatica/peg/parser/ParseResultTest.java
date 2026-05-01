@@ -16,9 +16,9 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ParseResultTest {
 
-    private static final SourceLocation LOC = SourceLocation.at(1, 1, 0);
-    private static final SourceLocation END_LOC = SourceLocation.at(1, 5, 4);
-    private static final SourceSpan SPAN = SourceSpan.of(LOC, END_LOC);
+    private static final SourceLocation LOC = SourceLocation.sourceLocation(1, 1, 0);
+    private static final SourceLocation END_LOC = SourceLocation.sourceLocation(1, 5, 4);
+    private static final SourceSpan SPAN = SourceSpan.sourceSpan(LOC, END_LOC);
 
     // === Success Tests ===
 

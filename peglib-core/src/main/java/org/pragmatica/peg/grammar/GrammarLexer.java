@@ -333,16 +333,16 @@ public final class GrammarLexer {
     }
 
     private SourceLocation currentLocation() {
-        return SourceLocation.at(line, column, pos);
+        return SourceLocation.sourceLocation(line, column, pos);
     }
 
     private SourceSpan currentSpan() {
         var loc = currentLocation();
-        return SourceSpan.at(loc);
+        return SourceSpan.sourceSpan(loc);
     }
 
     private SourceSpan span(SourceLocation start) {
-        return SourceSpan.of(start, currentLocation());
+        return SourceSpan.sourceSpan(start, currentLocation());
     }
 
     private boolean isIdentifierStart(char c) {
