@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-05-01
+
+Incremental parser perf + generator-side `%recover`. Non-breaking.
+
+### Fixed
+
+- **Incremental: edit-anchored pivot selection.** `SessionImpl.findBoundaryCandidate` now seeds the upward walk from `index.smallestContaining(editStart)` instead of the warm cursor pointer. Eliminates the worst-case overshoot to `ClassBody` (or equivalent top-level rule) when the cursor is far from the edit site. Measured `singleCharEdit` median on the 1,900-LOC fixture drops from ~325 ms to the 5-15 ms band — IDE-plugin viability without API changes. See `docs/incremental/V2.5-SPIKE.md` for the spike that motivated this change (and explicitly NO-GO'd the SPEC §5.4 v2.5 cache-remap approach).
+- **Generator: `%recover` per-rule overrides now wired.** Mirrors the interpreter's `pendingFailureRecoveryOverride` mechanism (shipped in 0.3.5). Generator now emits override capture before the rule's `finally` pop so `parseWithRecovery` consults the deepest override after the stack unwinds.
+
 ## [0.3.5] - 2026-05-01
 
 Trivia attribution correctness — full byte-equal round-trip on all 22 corpus fixtures — plus `%recover` directive wiring. `RoundTripTest` re-enabled.
