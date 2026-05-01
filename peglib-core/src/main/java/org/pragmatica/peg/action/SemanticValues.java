@@ -22,7 +22,7 @@ public final class SemanticValues {
         this.values = values;
     }
 
-    public static SemanticValues of(String matchedText, SourceSpan span, List<Object> values) {
+    public static SemanticValues semanticValues(String matchedText, SourceSpan span, List<Object> values) {
         return new SemanticValues(matchedText, span, values);
     }
 

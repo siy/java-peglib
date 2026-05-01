@@ -137,7 +137,7 @@ public final class PegEngine implements Parser {
             return configCheck.map(unused -> (PegEngine) null);
         }
         // Compile all actions in the grammar
-        var compiler = ActionCompiler.create();
+        var compiler = ActionCompiler.actionCompiler();
         return compiler.compileGrammar(grammar)
                        .map(actions -> new PegEngine(grammar, config, actions));
     }
@@ -153,7 +153,7 @@ public final class PegEngine implements Parser {
         if (configCheck.isFailure()) {
             return configCheck.map(unused -> (PegEngine) null);
         }
-        var compiler = ActionCompiler.create();
+        var compiler = ActionCompiler.actionCompiler();
         return compiler.compileGrammar(grammar)
                        .map(inlineActions -> new PegEngine(grammar,
                                                            config,
@@ -981,7 +981,7 @@ public final class PegEngine implements Parser {
         // Execute action if present
         var actionOpt = Option.option(actions.get(rule.name()));
         if (actionOpt.isPresent()) {
-            var sv = SemanticValues.of(matchedText, span, childValues);
+            var sv = SemanticValues.semanticValues(matchedText, span, childValues);
             try{
                 var value = actionOpt.unwrap()
                                      .apply(sv);

@@ -41,11 +41,11 @@ public final class ActionCompiler {
         this.parentLoader = parentLoader;
     }
 
-    public static ActionCompiler create() {
+    public static ActionCompiler actionCompiler() {
         return new ActionCompiler(ActionCompiler.class.getClassLoader());
     }
 
-    public static ActionCompiler create(ClassLoader parentLoader) {
+    public static ActionCompiler actionCompiler(ClassLoader parentLoader) {
         return new ActionCompiler(parentLoader);
     }
 
