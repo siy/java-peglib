@@ -3033,6 +3033,7 @@ public final class ParserGenerator {
             case Expression.Sequence seq -> {
                 var seqStart = "seqStart" + id;
                 var seqPending = "seqPending" + id;
+                var seqChildren = "seqChildren" + id;
                 var cutVar = "cut" + id;
                 sb.append(pad)
                   .append("CstParseResult ")
@@ -3048,6 +3049,14 @@ public final class ParserGenerator {
                   .append("List<Trivia> ")
                   .append(seqPending)
                   .append(" = savePendingLeading();\n");
+                // 0.3.5 (Bug C''): snapshot children so any partial additions by a
+                // failing later element are rolled back along with location/pending.
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("var ")
+                      .append(seqChildren)
+                      .append(" = new ArrayList<>(children);\n");
+                }
                 sb.append(pad)
                   .append("boolean ")
                   .append(cutVar)
@@ -3080,6 +3089,14 @@ public final class ParserGenerator {
                       .append("        restorePendingLeading(")
                       .append(seqPending)
                       .append(");\n");
+                    if (addToChildren) {
+                        sb.append(pad)
+                          .append("        children.clear();\n");
+                        sb.append(pad)
+                          .append("        children.addAll(")
+                          .append(seqChildren)
+                          .append(");\n");
+                    }
                     sb.append(pad)
                       .append("        ")
                       .append(resultVar)
@@ -3098,6 +3115,14 @@ public final class ParserGenerator {
                       .append("        restorePendingLeading(")
                       .append(seqPending)
                       .append(");\n");
+                    if (addToChildren) {
+                        sb.append(pad)
+                          .append("        children.clear();\n");
+                        sb.append(pad)
+                          .append("        children.addAll(")
+                          .append(seqChildren)
+                          .append(");\n");
+                    }
                     sb.append(pad)
                       .append("        ")
                       .append(resultVar)
