@@ -2485,7 +2485,11 @@ public final class ParserGenerator {
         }
         sb.append("        \n");
         if (!skipCache) {
-            sb.append("        // Check cache at pre-whitespace position\n");
+            sb.append("        // Check cache at pre-whitespace position. Bug B fix:\n");
+            sb.append("        // on a settled-success cache hit we must reproduce the first-parse\n");
+            sb.append("        // trivia attribution — drain pending-leading, run skipWhitespace at\n");
+            sb.append("        // the same pre-WS position, then jump pos to the cached body-end and\n");
+            sb.append("        // attach the rebuilt leading trivia. Failure hits return as-is.\n");
             sb.append("        long key = cacheKey(")
               .append(ruleId)
               .append(", ")
@@ -2496,7 +2500,15 @@ public final class ParserGenerator {
             sb.append("        if (cache != null) {\n");
             sb.append("            var cached = cache.get(key);\n");
             sb.append("            if (cached != null) {\n");
-            sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation.unwrap());\n");
+            sb.append("                if (cached.isSuccess()) {\n");
+            sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+            sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+            sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
+            sb.append("                    var hitEndLoc = cached.endLocation.unwrap();\n");
+            sb.append("                    restoreLocation(hitEndLoc);\n");
+            sb.append("                    var hitNode = attachLeadingTrivia(cached.node.unwrap(), hitLeading);\n");
+            sb.append("                    return CstParseResult.success(hitNode, cached.text.or(\"\"), hitEndLoc);\n");
+            sb.append("                }\n");
             sb.append("                return cached;\n");
             sb.append("            }\n");
             sb.append("        }\n");
@@ -2517,6 +2529,7 @@ public final class ParserGenerator {
         generateCstExpressionCode(sb, rule.expression(), "result", 2, true, counter, false);
         sb.append("        \n");
         sb.append("        CstParseResult finalResult;\n");
+        sb.append("        CstParseResult cacheableResult;\n");
         sb.append("        if (result.isSuccess()) {\n");
         sb.append("            var endLoc = location();\n");
         if (inlineLocations) {
@@ -2524,10 +2537,27 @@ public final class ParserGenerator {
         }else {
             sb.append("            var span = SourceSpan.of(startLoc, endLoc);\n");
         }
+        // 0.3.5 (Bug C') rule-exit trailing-trivia attribution: capture trivia
+        // accumulated in pending-leading by the body that wasn't claimed by any
+        // child (typically inter-element skipWhitespace before a zero-width tail
+        // element). Pos is NOT rewound — predicate combinators rely on pos being
+        // past consumed whitespace. Mirrors PegEngine.parseRule.
+        sb.append("            var pendingAtExit = takePendingLeading();\n");
+        // Bug C fix: cache the empty-leading wrapped node so cache hits don't
+        // preserve stale leading trivia and duplicate it on outer nodes. The
+        // returned node carries the actual leadingTrivia for this call site.
+        sb.append("            var cacheNode = wrapWithRuleName(result, children, span, ")
+          .append(ruleIdConst)
+          .append(", List.<Trivia>of());\n");
         // Match interpreter's wrapWithRuleName: replace the rule name on whatever node was produced
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", leadingTrivia);\n");
+        sb.append("            if (!pendingAtExit.isEmpty()) {\n");
+        sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
+        sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
+        sb.append("            }\n");
+        sb.append("            cacheableResult = CstParseResult.success(cacheNode, result.text.or(\"\"), endLoc);\n");
         sb.append("            finalResult = CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
         sb.append("        } else {\n");
         if (inlineLocations) {
@@ -2560,10 +2590,11 @@ public final class ParserGenerator {
         }else {
             sb.append("            finalResult = result;\n");
         }
+        sb.append("            cacheableResult = finalResult;\n");
         sb.append("        }\n");
         sb.append("        \n");
         if (!skipCache) {
-            sb.append("        if (cache != null) cache.put(key, finalResult);\n");
+            sb.append("        if (cache != null) cache.put(key, cacheableResult);\n");
         }
         sb.append("        return finalResult;\n");
         sb.append("    }\n\n");
@@ -2604,15 +2635,28 @@ public final class ParserGenerator {
                   ? "startOffset"
                   : "startLoc.offset()")
           .append(");\n");
-        // Settled cache hit — return immediately.
+        // Settled cache hit — Bug B fix: rebuild leading trivia at the hit site
+        // (drain pending + skipWhitespace + reattach) so the returned node is
+        // byte-for-byte equivalent to a fresh parse. Failure hits return as-is.
         sb.append("        if (cache != null) {\n");
         sb.append("            var cached = cache.get(key);\n");
         sb.append("            if (cached != null) {\n");
-        sb.append("                if (cached.isSuccess()) restoreLocation(cached.endLocation.unwrap());\n");
+        sb.append("                if (cached.isSuccess()) {\n");
+        sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+        sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+        sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
+        sb.append("                    var hitEndLoc = cached.endLocation.unwrap();\n");
+        sb.append("                    restoreLocation(hitEndLoc);\n");
+        sb.append("                    var hitNode = attachLeadingTrivia(cached.node.unwrap(), hitLeading);\n");
+        sb.append("                    return CstParseResult.success(hitNode, cached.text.or(\"\"), hitEndLoc);\n");
+        sb.append("                }\n");
         sb.append("                return cached;\n");
         sb.append("            }\n");
         sb.append("        }\n");
         // Growing-seed hit — self-recursive call observes the current seed.
+        // Trivia is applied once at the outer settle path; do NOT rebuild here
+        // for the in-progress seed, otherwise the self-reference would allocate
+        // duplicate leading-trivia per growth iteration.
         sb.append("        var activeSeed = growingSeeds.get(key);\n");
         sb.append("        if (activeSeed != null) {\n");
         sb.append("            if (activeSeed.isSuccess()) restoreLocation(activeSeed.endLocation.unwrap());\n");
@@ -2646,10 +2690,18 @@ public final class ParserGenerator {
         sb.append("        }\n");
         sb.append("        growingSeeds.remove(key);\n");
         sb.append("        CstParseResult finalResult;\n");
+        sb.append("        CstParseResult cacheableResult;\n");
         sb.append("        if (lastSeed.isSuccess()) {\n");
         sb.append("            restoreLocation(lastSeed.endLocation.unwrap());\n");
         sb.append("            var node = attachLeadingTrivia(lastSeed.node.unwrap(), leadingTrivia);\n");
         sb.append("            finalResult = CstParseResult.success(node, lastSeed.text.or(\"\"), lastSeed.endLocation.unwrap());\n");
+        // Bug C fix: cache the empty-leading lastSeed (body emission attaches no
+        // leading trivia). The wrapped node above is for return only. Bug C' is
+        // intentionally NOT applied at the LR settle path: PegEngine's LR path
+        // does not apply rule-exit trailing-trivia attribution either, and the
+        // interpreter's parseRule (non-LR) fix alone is sufficient for full
+        // round-trip equivalence on the corpus.
+        sb.append("            cacheableResult = lastSeed;\n");
         sb.append("        } else {\n");
         if (inlineLocations) {
             sb.append("            this.pos = startOffset;\n");
@@ -2682,8 +2734,9 @@ public final class ParserGenerator {
               .append(escape(ruleName))
               .append("'\") : lastSeed;\n");
         }
+        sb.append("            cacheableResult = finalResult;\n");
         sb.append("        }\n");
-        sb.append("        if (cache != null) cache.put(key, finalResult);\n");
+        sb.append("        if (cache != null) cache.put(key, cacheableResult);\n");
         sb.append("        return finalResult;\n");
         sb.append("    }\n\n");
     }
@@ -2980,6 +3033,7 @@ public final class ParserGenerator {
             case Expression.Sequence seq -> {
                 var seqStart = "seqStart" + id;
                 var seqPending = "seqPending" + id;
+                var seqChildren = "seqChildren" + id;
                 var cutVar = "cut" + id;
                 sb.append(pad)
                   .append("CstParseResult ")
@@ -2992,9 +3046,17 @@ public final class ParserGenerator {
                 // Snapshot pending-leading so any between-element trivia appended
                 // inside this sequence can be rolled back on failure.
                 sb.append(pad)
-                  .append("int ")
+                  .append("List<Trivia> ")
                   .append(seqPending)
                   .append(" = savePendingLeading();\n");
+                // 0.3.5 (Bug C''): snapshot children so any partial additions by a
+                // failing later element are rolled back along with location/pending.
+                if (addToChildren) {
+                    sb.append(pad)
+                      .append("var ")
+                      .append(seqChildren)
+                      .append(" = new ArrayList<>(children);\n");
+                }
                 sb.append(pad)
                   .append("boolean ")
                   .append(cutVar)
@@ -3027,6 +3089,14 @@ public final class ParserGenerator {
                       .append("        restorePendingLeading(")
                       .append(seqPending)
                       .append(");\n");
+                    if (addToChildren) {
+                        sb.append(pad)
+                          .append("        children.clear();\n");
+                        sb.append(pad)
+                          .append("        children.addAll(")
+                          .append(seqChildren)
+                          .append(");\n");
+                    }
                     sb.append(pad)
                       .append("        ")
                       .append(resultVar)
@@ -3045,6 +3115,14 @@ public final class ParserGenerator {
                       .append("        restorePendingLeading(")
                       .append(seqPending)
                       .append(");\n");
+                    if (addToChildren) {
+                        sb.append(pad)
+                          .append("        children.clear();\n");
+                        sb.append(pad)
+                          .append("        children.addAll(")
+                          .append(seqChildren)
+                          .append(");\n");
+                    }
                     sb.append(pad)
                       .append("        ")
                       .append(resultVar)
@@ -3101,7 +3179,7 @@ public final class ParserGenerator {
                 // back — captured trivia inside one alt must not leak forward
                 // into sibling alternatives.
                 sb.append(pad)
-                  .append("int choicePending")
+                  .append("List<Trivia> choicePending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 // Don't skip whitespace here - let alternatives capture trivia themselves
@@ -3190,7 +3268,7 @@ public final class ParserGenerator {
                   .append(beforeLoc)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("    int zomIterPending")
+                  .append("    List<Trivia> zomIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3329,7 +3407,7 @@ public final class ParserGenerator {
                       .append("children.clear();\n");
                 }
                 sb.append(pad)
-                  .append("int oomEntryPending")
+                  .append("List<Trivia> oomEntryPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 generateCstExpressionCode(sb,
@@ -3370,7 +3448,7 @@ public final class ParserGenerator {
                   .append(beforeLoc)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("        int oomIterPending")
+                  .append("        List<Trivia> oomIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3484,7 +3562,7 @@ public final class ParserGenerator {
                   .append(optStart)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("int optPending")
+                  .append("List<Trivia> optPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 // Save parent children before inner expression
@@ -3632,7 +3710,7 @@ public final class ParserGenerator {
                   .append(beforeLoc)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("    int repIterPending")
+                  .append("    List<Trivia> repIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3791,7 +3869,7 @@ public final class ParserGenerator {
                   .append(andStart)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("int andPending")
+                  .append("List<Trivia> andPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (addToChildren) {
@@ -3836,7 +3914,7 @@ public final class ParserGenerator {
                   .append(notStart)
                   .append(" = location();\n");
                 sb.append(pad)
-                  .append("int notPending")
+                  .append("List<Trivia> notPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (addToChildren) {
@@ -4403,14 +4481,13 @@ public final class ParserGenerator {
                     return snapshot;
                 }
 
-                private int savePendingLeading() {
-                    return pendingLeadingTrivia.size();
+                private List<Trivia> savePendingLeading() {
+                    return List.copyOf(pendingLeadingTrivia);
                 }
 
-                private void restorePendingLeading(int snapshot) {
-                    if (pendingLeadingTrivia.size() > snapshot) {
-                        pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size()).clear();
-                    }
+                private void restorePendingLeading(List<Trivia> snapshot) {
+                    pendingLeadingTrivia.clear();
+                    pendingLeadingTrivia.addAll(snapshot);
                 }
 
                 private List<Trivia> concatTrivia(List<Trivia> first, List<Trivia> second) {
@@ -4468,6 +4545,52 @@ public final class ParserGenerator {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
                                 err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia
+                            );
+                """);
+        }
+        sb.append("""
+                    };
+                }
+
+            """);
+        // 0.3.5 (Bug C') — rule-exit trailing-trivia attribution. When a rule
+        // body accumulates pending-leading trivia not claimed by any child
+        // (typically inter-element skipWhitespace before a zero-width tail
+        // element such as an empty ZoM/Optional), attach the trivia to the
+        // last child's trailingTrivia so reconstruction includes it. Pos is
+        // NOT rewound — predicate combinators rely on pos being past any
+        // whitespace already consumed. Mirrors PegEngine.attachTrailingToTail.
+        sb.append("""
+                private CstNode attachTrailingToTail(CstNode node, List<Trivia> trivia) {
+                    if (trivia.isEmpty()) return node;
+                    return switch (node) {
+                        case CstNode.NonTerminal nt -> {
+                            var ntChildren = nt.children();
+                            if (ntChildren.isEmpty()) {
+                                var combined = concatTrivia(nt.trailingTrivia(), trivia);
+                                yield new CstNode.NonTerminal(
+                                    nt.span(), nt.rule(), ntChildren, nt.leadingTrivia(), combined
+                                );
+                            }
+                            var newChildren = new ArrayList<CstNode>(ntChildren);
+                            var lastIdx = newChildren.size() - 1;
+                            var lastChild = newChildren.get(lastIdx);
+                            newChildren.set(lastIdx, attachTrailingToTail(lastChild, trivia));
+                            yield new CstNode.NonTerminal(
+                                nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia()
+                            );
+                        }
+                        case CstNode.Terminal t -> new CstNode.Terminal(
+                            t.span(), t.rule(), t.text(), t.leadingTrivia(), concatTrivia(t.trailingTrivia(), trivia)
+                        );
+                        case CstNode.Token tok -> new CstNode.Token(
+                            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), concatTrivia(tok.trailingTrivia(), trivia)
+                        );
+            """);
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("""
+                            case CstNode.Error err -> new CstNode.Error(
+                                err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), concatTrivia(err.trailingTrivia(), trivia)
                             );
                 """);
         }

@@ -1,7 +1,6 @@
 package org.pragmatica.peg.perf;
 
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -18,16 +17,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Round-trip equality: {@code reconstruct(parse(source)) == source} byte-for-byte
  * for every corpus file. Catches dropped tokens, lost trivia, and span off-by-ones.
  *
- * <p>Re-enables in a future release. Attribution threading is now implemented —
- * trivia between sibling sequence elements attaches to the following sibling's
- * {@code leadingTrivia} instead of being dropped. However, <b>trailing
- * intra-rule trivia</b> (trivia matched by a rule body that has no following
- * sibling to attach to) still requires rule-exit pos-rewind logic that is not
- * yet in place. Full byte-for-byte source reconstruction therefore still fails;
- * see {@code docs/TRIVIA-ATTRIBUTION.md} for the current state and remaining
- * work.
+ * <p>Enabled in 0.3.5: Bug A (full-list pending-trivia restore on backtrack),
+ * Bug B (cache-safe leading trivia), Bug C (cache empty-leading wrapped node),
+ * Bug C' (rule-exit trailing-trivia attribution to last child), and Bug C''
+ * (Sequence children rollback on element failure) collectively achieve
+ * byte-equal round-trip for all 22 corpus fixtures.
  */
-@Disabled("Attribution threading landed in 0.2.4; full round-trip awaits rule-exit pos-rewind")
 class RoundTripTest {
 
     private static final Path CORPUS_ROOT = Path.of("src/test/resources/perf-corpus");

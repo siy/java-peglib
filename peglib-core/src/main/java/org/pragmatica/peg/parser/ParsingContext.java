@@ -63,6 +63,16 @@ public final class ParsingContext {
     // point set. Rules pushing a %recover terminator must pop on exit.
     private final java.util.ArrayDeque<String> recoveryOverrideStack = new java.util.ArrayDeque<>();
 
+    // 0.3.5 (Phase 5): pending recovery override captured at the moment a
+    // rule with %recover fails. Required because parseRule pops the stack in
+    // its finally block before parseWithRecovery consults skipToRecoveryPoint;
+    // without this field the stack is always empty at recovery time and the
+    // directive is a silent no-op. Set by the deepest failing rule with
+    // %recover (parseRule variants record before popping); consumed and
+    // cleared by skipToRecoveryPoint. Cleared on rule success so that a
+    // backtracked alternative's override does not leak forward.
+    private Option<String> pendingFailureRecoveryOverride = Option.none();
+
     private ParsingContext(String input, Grammar grammar, ParserConfig config) {
         this.input = input;
         this.grammar = grammar;
@@ -295,7 +305,20 @@ public final class ParsingContext {
      */
     public SourceSpan skipToRecoveryPoint() {
         var start = location();
-        var override = recoveryOverrideStack.peek();
+        // 0.3.5 (Phase 5) — fix: consult the pending failure override first.
+        // parseRule's finally block pops the stack before this method is
+        // reached, so the live stack is empty during top-level recovery; the
+        // pending field carries the override of the deepest %recover-equipped
+        // rule whose body failure triggered recovery. Falls through to the
+        // live stack (still useful for nested-recovery scenarios where push
+        // outlives the failure) and finally to the global char-set.
+        String override = null;
+        if (pendingFailureRecoveryOverride.isPresent()) {
+            override = pendingFailureRecoveryOverride.unwrap();
+            pendingFailureRecoveryOverride = Option.none();
+        }else {
+            override = recoveryOverrideStack.peek();
+        }
         if (override != null && !override.isEmpty()) {
             while (!isAtEnd() && !matchesOverrideAt(override)) {
                 advance();
@@ -351,6 +374,36 @@ public final class ParsingContext {
      */
     public boolean hasRecoveryOverride() {
         return !recoveryOverrideStack.isEmpty();
+    }
+
+    /**
+     * 0.3.5 (Phase 5) — record the override of a rule whose body has just
+     * failed. Called from parseRule variants on the failure path BEFORE the
+     * stack-pop in {@code finally}, so the override survives stack unwinding
+     * and is available to {@link #skipToRecoveryPoint()} at the top-level
+     * recovery loop.
+     *
+     * <p>Idempotent w.r.t. the deepest-wins policy: only sets the field when
+     * empty. As failures bubble up, the innermost (deepest) failing rule
+     * with {@code %recover} populates the field first; outer rules — even if
+     * they also have {@code %recover} — do not overwrite. The most-specific
+     * scope wins, which matches user intent: a per-statement recovery
+     * terminator should not be replaced by an enclosing block's terminator.
+     */
+    public void recordFailureRecoveryOverride(String terminator) {
+        if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride.isEmpty()) {
+            pendingFailureRecoveryOverride = Option.some(terminator);
+        }
+    }
+
+    /**
+     * 0.3.5 (Phase 5) — clear any pending failure override. Called on rule
+     * SUCCESS so that an override recorded by a failed inner alternative of
+     * a backtracking combinator (Choice/Optional/etc.) does not leak forward
+     * into a later, unrelated recovery cycle.
+     */
+    public void clearPendingRecoveryOverride() {
+        pendingFailureRecoveryOverride = Option.none();
     }
 
     // === 0.2.4: Suggestion Vocabulary ===
@@ -427,27 +480,32 @@ public final class ParsingContext {
     }
 
     /**
-     * Snapshot the current pending-leading buffer size for later restoration.
-     * Backtracking combinators (Choice/Optional/And/Not) must call this
-     * before attempting each alternative and call
-     * {@link #restorePendingLeadingTrivia(int)} on failure so that trivia
-     * collected inside the failed attempt does not leak forward to the next
-     * attempt.
+     * Capture the full contents of the pending-leading buffer for later
+     * restoration. Backtracking combinators (Choice/Optional/And/Not/Sequence)
+     * must call this before attempting each alternative and call
+     * {@link #restorePendingLeadingTrivia(List)} on failure so that the
+     * pending-leading state is fully reverted — including items that were
+     * consumed (drained) by inner operations inside the failed attempt.
+     *
+     * <p>A size-only snapshot is insufficient: if an inner operation drains
+     * pending trivia (via {@link #takePendingLeadingTrivia()}) and the outer
+     * branch later fails, restoring just the size cannot recover the consumed
+     * items. The full-list snapshot guarantees byte-identical buffer state
+     * regardless of intermediate drains.</p>
      */
-    public int savePendingLeadingTrivia() {
-        return pendingLeadingTrivia.size();
+    public List<Trivia> savePendingLeadingTrivia() {
+        return List.copyOf(pendingLeadingTrivia);
     }
 
     /**
-     * Truncate the pending-leading buffer back to a previously-saved size.
-     * No-op when the buffer is already at or below {@code snapshot}.
+     * Restore the pending-leading buffer to a previously-captured snapshot.
+     * Replaces all current contents with those from {@code snapshot},
+     * recovering items that may have been drained by inner operations
+     * inside a now-failed branch.
      */
-    public void restorePendingLeadingTrivia(int snapshot) {
-        if (pendingLeadingTrivia.size() > snapshot) {
-            pendingLeadingTrivia.subList(snapshot,
-                                         pendingLeadingTrivia.size())
-                                .clear();
-        }
+    public void restorePendingLeadingTrivia(List<Trivia> snapshot) {
+        pendingLeadingTrivia.clear();
+        pendingLeadingTrivia.addAll(snapshot);
     }
 
     // === Captures (for back-references) ===

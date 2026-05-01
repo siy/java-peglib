@@ -622,14 +622,27 @@ public final class PegEngine implements Parser {
         }
         var startPos = ctx.pos();
         var startLoc = ctx.location();
-        // Check packrat cache at START position
+        // Check packrat cache at START position. On a hit the cached BODY result
+        // carries an empty leading-trivia list (set when the body was first
+        // wrapped at line 667). Bug B fix: rebuild leading trivia on the hit
+        // path so that the returned node is byte-for-byte equivalent to a fresh
+        // parse — drain pending, run skipWhitespace at the same pre-WS position,
+        // then jump pos to the cached body-end and re-attach leading trivia.
         var cachedEntry = ctx.getCachedEntryAt(rule.name(), startPos);
         if (cachedEntry.isPresent()) {
             var entry = cachedEntry.unwrap();
             var result = entry.result();
-            if (result.isSuccess()) {
-                var success = (ParseResult.Success) result;
+            if (result instanceof ParseResult.Success success) {
+                var hitCarriedLeading = ctx.takePendingLeadingTrivia();
+                var hitLocalTrivia = skipWhitespace(ctx);
+                List<Trivia> hitRuleLeading = hitCarriedLeading.isEmpty()
+                                              ? hitLocalTrivia
+                                              : (hitLocalTrivia.isEmpty()
+                                                 ? hitCarriedLeading
+                                                 : concatTrivia(hitCarriedLeading, hitLocalTrivia));
                 ctx.restoreLocation(success.endLocation());
+                var hitNode = attachLeadingTrivia(success.node(), hitRuleLeading);
+                return ParseResult.Success.of(hitNode, ctx.location());
             }
             return result;
         }
@@ -653,18 +666,45 @@ public final class PegEngine implements Parser {
                                          .unwrap());
             pushedRecover = true;
         }
-        ParseResult result;
+        ParseResult result = null;
         try{
             result = parseExpressionWithMode(ctx, rule.expression(), rule.name(), ParseMode.standard());
         } finally{
+            // 0.3.5 (Phase 5) — capture failure override BEFORE pop. parseWithRecovery's
+            // skipToRecoveryPoint runs after this method returns, by which point the
+            // stack has been unwound; the pending field carries the override across.
             if (pushedRecover) {
+                if (result == null || result.isFailure()) {
+                    ctx.recordFailureRecoveryOverride(rule.recover()
+                                                          .unwrap());
+                }
                 ctx.popRecoveryOverride();
             }
         }
-        // Cache the result at START position
-        ctx.cacheAt(rule.name(), startPos, result);
+        // 0.3.5 (Bug C') rule-exit trailing-trivia attribution: trivia consumed by
+        // the body's inter-element skipWhitespace before a zero-width tail element
+        // (empty ZoM/Optional) ends up in pending and isn't claimed by any child.
+        // Attach it to the last child's trailingTrivia so reconstruction includes
+        // it. Pos is NOT rewound — predicate combinators rely on pos being past
+        // any whitespace already consumed.
+        ParseResult resultForCache = result;
+        CstNode bodyNode = null;
         if (result instanceof ParseResult.Success success) {
-            var node = wrapWithRuleName(success.node(), rule.name(), ruleLeading);
+            bodyNode = success.node();
+            var pendingAtExit = ctx.savePendingLeadingTrivia();
+            if (!pendingAtExit.isEmpty()) {
+                ctx.restorePendingLeadingTrivia(List.of());
+                bodyNode = attachTrailingToTail(bodyNode, pendingAtExit);
+                resultForCache = ParseResult.Success.of(bodyNode, success.endLocation());
+            }
+        }
+        // Cache the result at START position
+        ctx.cacheAt(rule.name(), startPos, resultForCache);
+        if (result instanceof ParseResult.Success success) {
+            // 0.3.5 (Phase 5) — clear pending override on success so a backtracked
+            // alternative's recorded override does not leak into a later recovery cycle.
+            ctx.clearPendingRecoveryOverride();
+            var node = wrapWithRuleName(bodyNode, rule.name(), ruleLeading);
             return ParseResult.Success.of(node, ctx.location());
         }
         // Restore position and re-deposit the caller's pending so enclosing
@@ -721,15 +761,33 @@ public final class PegEngine implements Parser {
         var startLoc = ctx.location();
         // Cache hit: either a settled entry (from a previous top-level call)
         // or a growing entry from an in-progress outer invocation (the self-
-        // reference case). Both paths return the cached result directly —
-        // the outer loop is responsible for driving further iterations.
+        // reference case). Bug B fix: settled-success hits rebuild leading
+        // trivia (drain pending + skipWhitespace + reattach) so the returned
+        // node is equivalent to a fresh parse. Growing-seed hits are the
+        // self-reference path and return the seed unchanged — leading-trivia
+        // is applied once at the outer-level settle path (line ~830).
         var cachedEntry = ctx.getCachedEntryAt(rule.name(), startPos);
         if (cachedEntry.isPresent()) {
             var entry = cachedEntry.unwrap();
             var result = entry.result();
-            if (result.isSuccess()) {
-                var success = (ParseResult.Success) result;
+            if (entry.growing()) {
+                if (result.isSuccess()) {
+                    var success = (ParseResult.Success) result;
+                    ctx.restoreLocation(success.endLocation());
+                }
+                return result;
+            }
+            if (result instanceof ParseResult.Success success) {
+                var hitCarriedLeading = ctx.takePendingLeadingTrivia();
+                var hitLocalTrivia = skipWhitespace(ctx);
+                List<Trivia> hitRuleLeading = hitCarriedLeading.isEmpty()
+                                              ? hitLocalTrivia
+                                              : (hitLocalTrivia.isEmpty()
+                                                 ? hitCarriedLeading
+                                                 : concatTrivia(hitCarriedLeading, hitLocalTrivia));
                 ctx.restoreLocation(success.endLocation());
+                var hitNode = attachLeadingTrivia(success.node(), hitRuleLeading);
+                return ParseResult.Success.of(hitNode, ctx.location());
             }
             return result;
         }
@@ -795,7 +853,14 @@ public final class PegEngine implements Parser {
                 ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.seed(lastSeed, generation));
             }
         } finally{
+            // 0.3.5 (Phase 5) — same pattern as parseRule: capture failure override
+            // before stack pop. lastSeed reflects the final LR settle state at this
+            // point; treat any non-Success as a failure for recovery purposes.
             if (pushedRecover) {
+                if (!lastSeed.isSuccess()) {
+                    ctx.recordFailureRecoveryOverride(rule.recover()
+                                                          .unwrap());
+                }
                 ctx.popRecoveryOverride();
             }
         }
@@ -803,6 +868,8 @@ public final class PegEngine implements Parser {
         ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.settled(lastSeed));
         if (lastSeed instanceof ParseResult.Success finalSuccess) {
             ctx.restoreLocation(finalSuccess.endLocation());
+            // 0.3.5 (Phase 5) — clear pending override on success path.
+            ctx.clearPendingRecoveryOverride();
             // Re-wrap at the outer level with leadingTrivia attached. The inner
             // wrap used an empty leading list for self-reference purposes.
             var outerNode = attachLeadingTrivia(finalSuccess.node(), ruleLeading);
@@ -865,14 +932,21 @@ public final class PegEngine implements Parser {
                                          .unwrap());
             pushedRecover = true;
         }
-        ParseResult result;
+        ParseResult result = null;
         try{
             result = parseExpressionWithMode(ctx,
                                              rule.expression(),
                                              rule.name(),
                                              ParseMode.withActions(childValues, tokenCapture));
         } finally{
+            // 0.3.5 (Phase 5) — capture failure override before stack pop. Same
+            // rationale as parseRule: skipToRecoveryPoint runs after parseRule
+            // returns, after the finally block has unwound the stack.
             if (pushedRecover) {
+                if (result == null || result.isFailure()) {
+                    ctx.recordFailureRecoveryOverride(rule.recover()
+                                                          .unwrap());
+                }
                 ctx.popRecoveryOverride();
             }
         }
@@ -896,6 +970,8 @@ public final class PegEngine implements Parser {
             }
             return result;
         }
+        // 0.3.5 (Phase 5) — clear pending override on success path.
+        ctx.clearPendingRecoveryOverride();
         var success = (ParseResult.Success) result;
         // Use token capture if available, otherwise full match
         var matchedText = Option.option(tokenCapture[0])
@@ -1908,6 +1984,55 @@ public final class PegEngine implements Parser {
             case CstNode.Error err -> new CstNode.Error(
             err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia);
         };
+    }
+
+    /**
+     * 0.3.5 (Bug C') — rule-exit trailing-trivia attribution. When a rule body
+     * accumulates trivia in {@code pendingLeadingTrivia} that is not claimed by
+     * any child (typically: inter-element skipWhitespace before a zero-width
+     * tail element such as an empty ZoM/Optional), append that trivia to the
+     * last child's trailingTrivia (or the node's own trailing if it has no
+     * children). This keeps reconstruction byte-equal without rewinding the
+     * parser position — important because predicate combinators rely on
+     * pos already being past any consumed whitespace.
+     */
+    private CstNode attachTrailingToTail(CstNode node, List<Trivia> trivia) {
+        if (trivia.isEmpty()) return node;
+        return switch (node) {
+            case CstNode.NonTerminal nt -> {
+                var children = nt.children();
+                if (children.isEmpty()) {
+                    var combined = combineTrivia(nt.trailingTrivia(), trivia);
+                    yield new CstNode.NonTerminal(
+                    nt.span(), nt.rule(), children, nt.leadingTrivia(), combined);
+                }
+                var newChildren = new ArrayList<>(children);
+                var lastIdx = newChildren.size() - 1;
+                var lastChild = newChildren.get(lastIdx);
+                newChildren.set(lastIdx, attachTrailingToTail(lastChild, trivia));
+                yield new CstNode.NonTerminal(
+                nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia());
+            }
+            case CstNode.Terminal t -> new CstNode.Terminal(
+            t.span(), t.rule(), t.text(), t.leadingTrivia(), combineTrivia(t.trailingTrivia(), trivia));
+            case CstNode.Token tok -> new CstNode.Token(
+            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), combineTrivia(tok.trailingTrivia(), trivia));
+            case CstNode.Error err -> new CstNode.Error(
+            err.span(),
+            err.skippedText(),
+            err.expected(),
+            err.leadingTrivia(),
+            combineTrivia(err.trailingTrivia(), trivia));
+        };
+    }
+
+    private static List<Trivia> combineTrivia(List<Trivia> first, List<Trivia> second) {
+        if (first.isEmpty()) return second;
+        if (second.isEmpty()) return first;
+        var combined = new ArrayList<Trivia>(first.size() + second.size());
+        combined.addAll(first);
+        combined.addAll(second);
+        return List.copyOf(combined);
     }
 
     private String describeExpression(Expression expr) {

@@ -1,7 +1,33 @@
 # Trivia Attribution
 
-Status as of release 0.2.4: **attribution threading is in place**, full
-round-trip source reconstruction is **deferred**.
+Status as of release 0.3.5: **full byte-equal round-trip on all 22 corpus
+fixtures**. The 0.2.4 attribution threading plus five 0.3.5 fixes (Bug A
+through C'') compose to make `reconstruct(parse(source)) == source` byte-for-byte
+across the entire perf corpus. `RoundTripTest` is re-enabled.
+
+The five fixes:
+- **Bug A** — `ParsingContext` snapshot/restore changed from size-only to
+  full `List<Trivia>` so backtracked branches don't permanently lose drained
+  pending trivia.
+- **Bug B** — Cache-hit path rebuilds leading trivia (drain pending +
+  `skipWhitespace` + reattach) so cache hits behave identically to fresh
+  parses for trivia attribution.
+- **Bug C** — Generator's cache stored the wrapped-with-leading body. The
+  short-circuit in `attachLeadingTrivia` then preserved stale leading on
+  empty-pending hits, duplicating trivia across nested wrappers. Fix: cache
+  an empty-leading version, return the leading-applied version. Interpreter
+  was already correct (caches the body, not the wrap).
+- **Bug C'** — Trivia consumed by the body's last inter-element
+  `skipWhitespace` (e.g. before an empty ZoM/Optional) ends up in pending
+  with no claimant. At rule exit, attach it to the last child's
+  `trailingTrivia`. Pos is *not* rewound — predicate combinators rely on
+  position being past consumed whitespace.
+- **Bug C''** — Generator's emitted Sequence used the rule-method's outer
+  `children` list. On element failure, location and pending were restored
+  but children were not. Partial additions leaked into the parent's tree.
+  Fix: snapshot `children` at Sequence start; restore on element failure.
+  Interpreter uses a local `children` list per Sequence so was already
+  correct.
 
 ## Attribution rule
 
@@ -58,35 +84,20 @@ they were going to restore to.
   attribution rule above.
 - Trivia preceding a referenced sub-rule attaches to that sub-rule's
   wrapper node, concatenated onto the sub-rule's own leading whitespace.
-- All 565 pre-existing trivia, parity, and correctness tests stay green;
-  587 tests total, 1 skipped (`RoundTripTest`).
+- Trailing trivia consumed inside a rule body (e.g. by inter-element
+  `skipWhitespace` before an empty ZoM/Optional) is attached to the last
+  child's `trailingTrivia` at rule exit (Bug C').
+- Failed Sequence elements roll back the local children list as well as
+  location and pending (Bug C'' — generator was missing this).
+- `RoundTripTest` is enabled; all 22 perf-corpus fixtures round-trip
+  byte-equal via the generated parser.
 - Interpreter and generator remain byte-for-byte parity on the corpus
   fixtures.
 
-## Known limitation (deferred)
-
-Trivia matched by a rule body that has no following sibling to attach to
-— for example, trailing whitespace between the last element of a rule's
-last repetition and the rule's end — is not yet rewound to the preceding
-sibling's `trailingTrivia`. No `trailingTrivia` assignment happens on any
-non-root node. As a result, the 22-file `RoundTripTest` remains
-`@Disabled`: attribution alone does not yet yield byte-for-byte source
-reconstruction.
-
-Full round-trip support requires a rule-exit position rewind pass: when a
-rule finishes, any pending trivia that the rule captured but did not
-attach to a child (i.e. post-last-sibling whitespace) must be rewound out
-of the rule's span and attached to the preceding sibling's
-`trailingTrivia`. That pass is out of scope for 0.2.4; it will land in a
-later release together with re-enabling `RoundTripTest`.
-
 ## Baseline stability
 
-Attribution threading does not change any node's `span` start or end
-offsets. All trivia that was captured as part of a rule's consumed range
-in 0.2.3 is still captured as part of the same range — it is simply now
-exposed on a child node's `leadingTrivia` instead of being dropped. The
-CST hash baselines under `src/test/resources/perf-corpus-baseline/` and
-`src/test/resources/perf-corpus-interpreter-baseline/` therefore remain
-valid, and every corpus-parity test suite continues to pass 22/22 without
-baseline regeneration.
+The Bug C'' fix removes a duplicate trailing comma child in enum-constant
+lists; that legitimately changes the CST shape for
+`large/FactoryClassGenerator.java.txt`. Its CST hash baseline was
+regenerated as a separate commit. All other corpus baselines are unchanged
+because their fixtures didn't exercise the Bug C'' path.
