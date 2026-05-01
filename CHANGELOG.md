@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.6] - 2026-05-01
 
-Incremental parser perf + generator-side `%recover`. Non-breaking.
+Generator-side `%recover` per-rule overrides. Non-breaking.
 
 ### Fixed
 
-- **Incremental: edit-anchored pivot selection.** `SessionImpl.findBoundaryCandidate` now seeds the upward walk from `index.smallestContaining(editStart)` instead of the warm cursor pointer. Eliminates the worst-case overshoot to `ClassBody` (or equivalent top-level rule) when the cursor is far from the edit site. Measured `singleCharEdit` median on the 1,900-LOC fixture drops from ~325 ms to the 5-15 ms band — IDE-plugin viability without API changes. See `docs/incremental/V2.5-SPIKE.md` for the spike that motivated this change (and explicitly NO-GO'd the SPEC §5.4 v2.5 cache-remap approach).
 - **Generator: `%recover` per-rule overrides now wired.** Mirrors the interpreter's `pendingFailureRecoveryOverride` mechanism (shipped in 0.3.5). Generator now emits override capture before the rule's `finally` pop so `parseWithRecovery` consults the deepest override after the stack unwinds.
+
+### Known limitations
+
+- **Incremental parser `singleCharEdit` perf** is still ~325 ms/op on the 1,900-LOC fixture. `docs/incremental/V2.5-SPIKE.md` documents the diagnosis (the dominant cost is pivot overshoot in `findBoundaryCandidate`, not cache invalidation as v2.5 assumed) and a proposed "lever 1" fix (edit-anchored pivot selection). A naive lever-1 swap was attempted in 0.3.6 development but produced correctness regressions on `IncrementalParityTest` due to subtle interaction with `NodeIndex.contains`'s inclusive-boundary semantics — the smallestContaining lookup can return a node ending exactly at `editStart`, yielding a different pivot than the warm-pointer walk would. A correct fix needs careful boundary semantics work; deferred.
 
 ## [0.3.5] - 2026-05-01
 
