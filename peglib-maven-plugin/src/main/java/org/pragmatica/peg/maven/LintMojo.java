@@ -8,7 +8,6 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.pragmatica.peg.analyzer.Analyzer;
 import org.pragmatica.peg.analyzer.AnalyzerReport;
-import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 
 import java.io.File;
@@ -59,8 +58,11 @@ public class LintMojo extends AbstractMojo {
         } catch (Exception e) {
             throw new MojoExecutionException("Failed to read grammar: " + grammarFile, e);
         }
-        var parsed = GrammarParser.parse(grammarText)
-                                  .flatMap(Grammar::validate);
+        // 0.4.0 — Grammar.grammar(...) factory validates at construction; the
+        // parse step (when there are no %imports) returns a validated Grammar
+        // directly. Lint targets standalone grammar files, so we don't run the
+        // resolver here.
+        var parsed = GrammarParser.parse(grammarText);
         if (parsed instanceof org.pragmatica.lang.Result.Failure< ? > failure) {
             throw new MojoFailureException("Grammar parse failed: " + failure.cause()
                                                                              .message());

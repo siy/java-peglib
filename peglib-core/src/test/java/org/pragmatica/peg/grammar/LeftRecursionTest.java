@@ -181,13 +181,15 @@ class LeftRecursionTest {
     class IndirectLrRejection {
         @Test
         void indirectCycleIsRejectedAtValidation() {
-            var grammar = GrammarParser.parse("""
+            // 0.4.0 — validation is done by the Grammar.grammar(...) factory at
+            // construction; GrammarParser.parse(...) surfaces validation failure
+            // directly.
+            var validated = GrammarParser.parse("""
                 A <- B '+' X / X
                 B <- A '-' Y / Y
                 X <- [a-z]
                 Y <- [a-z]
-                """).unwrap();
-            var validated = grammar.validate();
+                """);
 
             assertThat(validated.isFailure()).as("indirect LR rejected").isTrue();
             validated.onFailure(cause ->
@@ -196,11 +198,10 @@ class LeftRecursionTest {
 
         @Test
         void directLrPassesValidation() {
-            var grammar = GrammarParser.parse("""
+            var validated = GrammarParser.parse("""
                 Expr <- Expr '+' Term / Term
                 Term <- [0-9]+
-                """).unwrap();
-            var validated = grammar.validate();
+                """);
 
             assertThat(validated.isSuccess()).as("direct LR passes").isTrue();
         }

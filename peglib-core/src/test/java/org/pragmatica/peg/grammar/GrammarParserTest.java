@@ -184,14 +184,12 @@ class GrammarParserTest {
 
     @Test
     void validate_undefinedReference_returnsFailure() {
+        // 0.4.0 — Grammar.grammar(...) factory now validates at construction;
+        // GrammarParser.parse(...) returns the same Result the factory would.
         var result = GrammarParser.parse("Start <- 'a' UndefinedRule 'b'");
 
-        assertTrue(result.isSuccess());
-        var grammar = result.unwrap();
-
-        var validation = grammar.validate();
-        assertTrue(validation.isFailure());
-        var message = validation.fold(cause -> cause.message(), g -> "");
+        assertTrue(result.isFailure());
+        var message = result.fold(cause -> cause.message(), g -> "");
         assertTrue(message.contains("Undefined rule reference: 'UndefinedRule'"), message);
     }
 
@@ -203,10 +201,6 @@ class GrammarParserTest {
             """);
 
         assertTrue(result.isSuccess());
-        var grammar = result.unwrap();
-
-        var validation = grammar.validate();
-        assertTrue(validation.isSuccess());
     }
 
     @Test
@@ -216,12 +210,8 @@ class GrammarParserTest {
             Foo <- 'foo'
             """);
 
-        assertTrue(result.isSuccess());
-        var grammar = result.unwrap();
-
-        var validation = grammar.validate();
-        assertTrue(validation.isFailure());
-        var message = validation.fold(cause -> cause.message(), g -> "");
+        assertTrue(result.isFailure());
+        var message = result.fold(cause -> cause.message(), g -> "");
         assertTrue(message.contains("Undefined rule reference: 'Bar'"), message);
     }
 }

@@ -1,6 +1,5 @@
 package org.pragmatica.peg.analyzer;
 
-import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 
 import java.nio.file.Files;
@@ -35,8 +34,9 @@ public final class AnalyzerMain {
             System.exit(2);
             return;
         }
-        var parsed = GrammarParser.parse(grammarText)
-                                  .flatMap(Grammar::validate);
+        // 0.4.0 — GrammarParser.parse(...) routes through Grammar.grammar(...)
+        // so validation is performed at construction time.
+        var parsed = GrammarParser.parse(grammarText);
         if (parsed instanceof org.pragmatica.lang.Result.Failure< ? > failure) {
             System.err.println("error: " + failure.cause()
                                                  .message());

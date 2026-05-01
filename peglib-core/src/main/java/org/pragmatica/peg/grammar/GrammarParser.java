@@ -107,12 +107,19 @@ public final class GrammarParser {
                 "rule definition or directive").result();
             }
         }
-        return Result.success(new Grammar(rules,
-                                          startRule,
-                                          whitespace,
-                                          word,
-                                          List.copyOf(suggestRules),
-                                          List.copyOf(imports)));
+        var copiedSuggest = List.copyOf(suggestRules);
+        var copiedImports = List.copyOf(imports);
+        // 0.4.0 — when a grammar declares no imports, validate eagerly via the
+        // parse-don't-validate factory. With imports, the root grammar may
+        // legitimately reference rule names that only appear after %import
+        // resolution (e.g. {@code A_RuleA}); deferring validation until after
+        // composition is required for those cases. The {@link GrammarResolver}
+        // routes its final composed grammar through {@link Grammar#grammar}
+        // so the validation still runs — just at the right point in the pipe.
+        if (copiedImports.isEmpty()) {
+            return Grammar.grammar(rules, startRule, whitespace, word, copiedSuggest, copiedImports);
+        }
+        return Result.success(new Grammar(rules, startRule, whitespace, word, copiedSuggest, copiedImports));
     }
 
     private Result<Import> parseImportDirective(SourceLocation start) {

@@ -11,7 +11,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 
 ### Changed (BREAKING)
 
-- _<TBD: add as phases land>_
+- **`Grammar` is parse-don't-validate.** The instance method `Grammar#validate()` and the legacy backwards-compat record constructors (4-arg pre-0.2.4 / 5-arg 0.2.4-0.2.7) are gone. Construct a validated `Grammar` via the new static factory `Grammar.grammar(rules, startRule, whitespace, word, suggestRules, imports)` (and the 4-arg overload `Grammar.grammar(rules, startRule, whitespace, word)`), which returns `Result<Grammar>` and runs the same checks the old `validate()` did (undefined rule references, unsupported indirect left-recursion). `GrammarParser.parse(text)` and `GrammarResolver.resolve(...)` route through the factory, so callers using the public `PegParser` API observe the validation failure earlier in the pipeline. `PegParser.fromGrammar(Grammar, ...)` no longer revalidates — the input is assumed already-validated.
 
 ### Fixed
 
@@ -19,7 +19,9 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 
 ### Migration guide
 
-- _<TBD>_
+- **`Grammar.validate()` callers** — drop the `.flatMap(Grammar::validate)` (or `.validate()`) step. `GrammarParser.parse(text)` already returns a validated `Result<Grammar>` for grammars without `%import` directives; for grammars with imports, `GrammarResolver.resolve(...)` runs validation as part of composition.
+- **Direct `new Grammar(...)` callers** — switch to `Grammar.grammar(...).fold(failure -> handleError(failure), grammar -> useIt(grammar))`. The canonical record constructor is still public (Java records require canonical-ctor visibility ≥ class visibility) but should be treated as internal.
+- **`SessionFactory.create(Grammar, ParserConfig, boolean)` (incremental)** — now expects an already-validated `Grammar`. Validation failures from `PegEngine.create(...)` are still surfaced as `IllegalArgumentException`, preserving the construction-time contract.
 
 ## [0.3.6] - 2026-05-01
 

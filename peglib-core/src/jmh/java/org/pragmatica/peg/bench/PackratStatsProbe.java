@@ -41,7 +41,6 @@ public final class PackratStatsProbe {
         var fixtureSource = Java25ParseBenchmark.loadResource(FIXTURE_RESOURCE);
 
         var grammar = GrammarParser.parse(grammarText)
-                                   .flatMap(g -> g.validate())
                                    .unwrap();
         var ruleNames = grammar.rules().stream().map(r -> r.name()).toList();
 

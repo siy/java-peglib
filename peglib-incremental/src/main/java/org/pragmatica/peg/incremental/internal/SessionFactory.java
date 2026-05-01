@@ -74,14 +74,17 @@ public final class SessionFactory implements IncrementalParser {
      * ParserConfig, boolean)}.
      */
     public static IncrementalParser create(Grammar grammar, ParserConfig config, boolean triviaFastPathEnabled) {
-        var validated = grammar.validate().fold(
+        // 0.4.0 — caller is expected to supply a validated Grammar (constructed
+        // through {@link Grammar#grammar(java.util.List, org.pragmatica.lang.Option,
+        // org.pragmatica.lang.Option, org.pragmatica.lang.Option, java.util.List,
+        // java.util.List)} or via {@link GrammarParser#parse(String)}). Surface
+        // PegEngine construction errors as IllegalArgumentException to preserve
+        // the pre-0.4.0 contract — IncrementalParser is a construction-time API.
+        var parser = PegParser.fromGrammar(grammar, config).fold(
             cause -> { throw new IllegalArgumentException("invalid grammar: " + cause.message()); },
-            g -> g);
-        var parser = PegParser.fromGrammar(validated, config).fold(
-            cause -> { throw new IllegalStateException("failed to build parser: " + cause.message()); },
             p -> p);
-        var fallback = BackReferenceScan.unsafeRules(validated);
-        return new SessionFactory(validated, config, parser, fallback, triviaFastPathEnabled);
+        var fallback = BackReferenceScan.unsafeRules(grammar);
+        return new SessionFactory(grammar, config, parser, fallback, triviaFastPathEnabled);
     }
 
     @Override
