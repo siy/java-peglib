@@ -1,10 +1,33 @@
 # Trivia Attribution
 
-Status as of release 0.3.5: **attribution threading is in place** (0.2.4),
-**pending-trivia backtrack restore is correct** (0.3.5 Bug A), and **cache-hit
-leading rebuild is correct for non-empty pending** (0.3.5 Bug B). Full
-byte-for-byte round-trip is empirically achieved for 12 of 22 corpus fixtures;
-the remaining 10 hit Bug C (see "Known limitation" below) and await 0.3.6.
+Status as of release 0.3.5: **full byte-equal round-trip on all 22 corpus
+fixtures**. The 0.2.4 attribution threading plus five 0.3.5 fixes (Bug A
+through C'') compose to make `reconstruct(parse(source)) == source` byte-for-byte
+across the entire perf corpus. `RoundTripTest` is re-enabled.
+
+The five fixes:
+- **Bug A** — `ParsingContext` snapshot/restore changed from size-only to
+  full `List<Trivia>` so backtracked branches don't permanently lose drained
+  pending trivia.
+- **Bug B** — Cache-hit path rebuilds leading trivia (drain pending +
+  `skipWhitespace` + reattach) so cache hits behave identically to fresh
+  parses for trivia attribution.
+- **Bug C** — Generator's cache stored the wrapped-with-leading body. The
+  short-circuit in `attachLeadingTrivia` then preserved stale leading on
+  empty-pending hits, duplicating trivia across nested wrappers. Fix: cache
+  an empty-leading version, return the leading-applied version. Interpreter
+  was already correct (caches the body, not the wrap).
+- **Bug C'** — Trivia consumed by the body's last inter-element
+  `skipWhitespace` (e.g. before an empty ZoM/Optional) ends up in pending
+  with no claimant. At rule exit, attach it to the last child's
+  `trailingTrivia`. Pos is *not* rewound — predicate combinators rely on
+  position being past consumed whitespace.
+- **Bug C''** — Generator's emitted Sequence used the rule-method's outer
+  `children` list. On element failure, location and pending were restored
+  but children were not. Partial additions leaked into the parent's tree.
+  Fix: snapshot `children` at Sequence start; restore on element failure.
+  Interpreter uses a local `children` list per Sequence so was already
+  correct.
 
 ## Attribution rule
 
@@ -61,86 +84,20 @@ they were going to restore to.
   attribution rule above.
 - Trivia preceding a referenced sub-rule attaches to that sub-rule's
   wrapper node, concatenated onto the sub-rule's own leading whitespace.
-- All 565 pre-existing trivia, parity, and correctness tests stay green;
-  587 tests total, 1 skipped (`RoundTripTest`).
+- Trailing trivia consumed inside a rule body (e.g. by inter-element
+  `skipWhitespace` before an empty ZoM/Optional) is attached to the last
+  child's `trailingTrivia` at rule exit (Bug C').
+- Failed Sequence elements roll back the local children list as well as
+  location and pending (Bug C'' — generator was missing this).
+- `RoundTripTest` is enabled; all 22 perf-corpus fixtures round-trip
+  byte-equal via the generated parser.
 - Interpreter and generator remain byte-for-byte parity on the corpus
   fixtures.
 
-## Known limitation (deferred to 0.3.6)
-
-### Bug C — cache-hit leading-trivia ambiguity
-
-After 0.3.5's Bug A and Bug B fixes, the round-trip diagnostic on the 22
-corpus fixtures shows:
-- 12 fixtures pass byte-equal.
-- 10 fixtures fail (deltas range from +9 to -13 bytes), split between
-  duplication (rec > src) and loss (rec < src).
-
-Empirical investigation (2026-04-26) traced the failures to packrat cache
-hit semantics:
-
-The cache stores rule BODY results (not the wrapped result). A body result's
-`leadingTrivia` may be:
-- Empty — when the rule body is a `Sequence` (Sequence wraps with
-  `leading=List.of()`), or a leaf with empty pending at construction.
-- Non-empty — when the rule body is a `Reference` to an inner rule that
-  was wrapped with non-empty `ruleLeading` from its own first parse.
-
-Bug B's cache-hit fix rebuilds `ruleLeading` from the current parse context
-(drain `pending` + `skipWhitespace`) and applies it via `attachLeadingTrivia`.
-That helper short-circuits when the rebuilt list is empty:
-
-```java
-private CstNode attachLeadingTrivia(CstNode node, List<Trivia> leadingTrivia) {
-    if (leadingTrivia.isEmpty()) {
-        return node;  // <-- preserves whatever cached.leading was
-    }
-    ...
-}
-```
-
-When the rebuilt leading is empty (current `pending` empty AND `skipWhitespace`
-returns empty) but the cached body's leading is non-empty (Reference body
-case), the cached attribution is preserved. This is sometimes correct
-(when the cached attribution is "authoritative" for that position) and
-sometimes wrong (when it is "stale" from a different prior context).
-
-Trying to always-replace (instead of short-circuiting) drops the corpus pass
-count from 12 → 5 because the authoritative cases lose their attribution.
-
-### Resolution direction
-
-The proper fix likely requires stripping leading at cache-store time AND
-capturing the rule-internal whitespace from the input text on hit (since
-`startPos` and `bodyEndPos` are known, the trivia between them can be
-recomputed deterministically). This is a multi-day redesign of the
-cache-hit path and is scheduled for **release 0.3.6**.
-
-Until then, `RoundTripTest` stays `@Disabled`. Consumers requiring
-byte-equal round-trip should hold off on the formatter and incremental v2
-features until 0.3.6 ships.
-
-### Original 0.2.4 limitation (resolved by 0.3.5 Bug A+B)
-
-The original limitation documented at 0.2.4 release time was "trailing
-intra-rule trivia is dropped because no rule-exit pos-rewind exists." That
-analysis was incomplete — empirical diagnostic in 0.3.5 showed the
-dominant failure mode is the cache-hit ambiguity above (Bug C), not
-rule-exit rewind. Bugs A and B substantially improved attribution: 12 of
-22 fixtures now round-trip exactly without any rule-exit rewind work.
-
-A genuine rule-exit pos-rewind may still be needed for some of the
-remaining 10 fixtures (specifically the loss cases), but solving Bug C
-first will reveal which fixtures truly need rewind versus which were
-purely cache-attribution artifacts.
-
 ## Baseline stability
 
-Attribution threading does not change any node's `span` start or end
-offsets. All trivia that was captured as part of a rule's consumed range
-in 0.2.3 is still captured as part of the same range — it is simply now
-exposed on a child node's `leadingTrivia` instead of being dropped. The
-CST hash baselines under `src/test/resources/perf-corpus-baseline/` and
-`src/test/resources/perf-corpus-interpreter-baseline/` therefore remain
-valid, and every corpus-parity test suite continues to pass 22/22 without
-baseline regeneration.
+The Bug C'' fix removes a duplicate trailing comma child in enum-constant
+lists; that legitimately changes the CST shape for
+`large/FactoryClassGenerator.java.txt`. Its CST hash baseline was
+regenerated as a separate commit. All other corpus baselines are unchanged
+because their fixtures didn't exercise the Bug C'' path.

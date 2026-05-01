@@ -5,26 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.5] - 2026-04-26
+## [0.3.5] - 2026-05-01
 
-Trivia attribution correctness + `%recover` directive. Sets the foundation for full byte-equal round-trip (now empirically achieved for 12 of 22 corpus fixtures); the remaining 10 await Bug C in 0.3.6.
+Trivia attribution correctness — full byte-equal round-trip on all 22 corpus fixtures — plus `%recover` directive wiring. `RoundTripTest` re-enabled.
 
 ### Fixed
 
 - **Bug A — pending-trivia restore on backtrack.** `ParsingContext.savePendingLeadingTrivia()` returned a size-only snapshot and `restorePendingLeadingTrivia(int)` only truncated. Items consumed inside a backtracked branch were permanently lost. Now snapshots/restores the full `List<Trivia>` contents. `PegEngine` call sites and `ParserGenerator` emission templates updated symmetrically.
 - **Bug B — cache-hit leading trivia rebuild.** Packrat cache hits returned the cached body result directly without applying any leading-trivia attribution, while cache misses applied `ruleLeading` via `wrapWithRuleName`. The asymmetry produced wrong leading attribution on cache hits. Fixed by rebuilding leading trivia (drain pending + `skipWhitespace` + reattach) on every settled-success cache hit in `parseRule` and `parseRuleWithLeftRecursion`. Generator emits the same logic. Growing-seed hits (left-recursion self-reference) deliberately unchanged.
+- **Bug C — generator caches wrapped-with-leading body.** Generator's cache stored the rule's wrapped node *with* leading trivia applied. On subsequent cache hits, `attachLeadingTrivia` short-circuits when current pending is empty, preserving the stale cached leading. Same trivia ended up on multiple wrapper nodes (duplication). Fix: cache an empty-leading wrap, return the actual-leading wrap. Cache hits now apply current pending without inheriting stale state. Interpreter was already correct (caches the body, not the wrap).
+- **Bug C' — rule-exit trailing-trivia attribution.** When a rule body's final element is zero-width (empty ZoM/Optional), the inter-element `appendPending(skipWhitespace())` deposit is left in `pendingLeadingTrivia` with no child to claim it. Pending trivia at rule exit is now attached to the last child's `trailingTrivia` (or to the rule node's trailing if it has no children). Pos is *not* rewound — predicate combinators rely on it being past consumed whitespace. Applied symmetrically in `PegEngine` and `ParserGenerator`.
+- **Bug C'' — generator Sequence children rollback on element failure.** Generator emitted Sequences using the rule-method's outer `children` list directly. On element failure, the Sequence restored location and pending but NOT children — so partial child additions from earlier elements of the failed Sequence stayed in the parent's children list. Symptom: a successful trailing comma appeared as a child of both the inner ZoM-NT and the outer Sequence (e.g. enum-constant lists). Fix: snapshot `children` at Sequence start; restore on element failure. Interpreter uses a local `children` list per Sequence call so was already correct.
 - **`%recover` directive now wired end-to-end (interpreter).** Root cause: the rule-level recovery override was pushed at body entry and popped in the `finally` block — including on failure paths. By the time `parseWithRecovery` (the top-level recovery loop) consulted the override, the stack had been unwound and `skipToRecoveryPoint` fell through to the global default char-set. Fix: capture the failed rule's override into a per-context `pendingFailureRecoveryOverride` field BEFORE the pop, with deepest-wins semantics; consume-and-clear inside `skipToRecoveryPoint`; clear on rule success to prevent backtracked-alternative leakage. New regression test `RecoverDirectiveProofTest` proves override and default produce DISTINCT recovery landing points (uses `:` as override terminator — outside the default char-set — so the discriminator is unambiguous).
-- **Note: generated parser `%recover` per-rule overrides remain unthreaded.** `ParserGenerator` only emits the start rule's recovery statically. Per-rule overrides in generated parsers are still not honored. Documented as a known limitation; targeted for 0.3.6 alongside Bug C.
-
-### Known limitations (deferred to 0.3.6)
-
-- **Bug C — cache-hit leading-trivia ambiguity.** Cache stores rule body results that may already carry leading-trivia attribution from inner-rule wraps. On a cache hit when current `pendingLeadingTrivia` is empty, the rebuilt leading is also empty, and the existing helper short-circuits (preserving the cached body's stale leading). This produces duplication in 10 of 22 round-trip corpus fixtures (e.g. `DeepGenerics.java` +1 byte). Always-replacing the leading regresses other fixtures into loss territory because some cached attributions ARE authoritative. Resolving this requires distinguishing "authoritative cache leading" from "stale cache leading" — likely by stripping leading at cache-store time and capturing the rule-internal whitespace via input-text inspection on hit. `RoundTripTest` therefore remains `@Disabled`. See `docs/TRIVIA-ATTRIBUTION.md` § "Known limitation" for the full diagnostic.
-- **Generated-parser `%recover` per-rule overrides.** Interpreter `%recover` is now correct (this release). Generator only emits start-rule recovery statically; non-start rules' overrides are not threaded into emitted parsers. Targeted for 0.3.6.
+- **Note: generated parser `%recover` per-rule overrides remain unthreaded.** `ParserGenerator` only emits the start rule's recovery statically. Per-rule overrides in generated parsers are still not honored. Documented as a known limitation; targeted for 0.3.6.
 
 ### Changed
 
-- `docs/TRIVIA-ATTRIBUTION.md` — updated to document Bug A/B fixes and the remaining Bug C ambiguity.
-- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — sequencing updated; Bug C scheduled for 0.3.6.
+- **CST hash baseline regenerated for `large/FactoryClassGenerator.java.txt`.** The Bug C'' children-rollback fix removes a duplicate trailing comma child in enum-constant lists; that fixture's CST shape legitimately changes. Other 21 fixtures' baselines are unchanged. Committed as a separate baseline-shift commit alongside the Bug C'' fix. Anyone diffing 0.3.4 baselines against 0.3.5 will see the single-fixture shift; this is expected.
+- **`RoundTripTest` re-enabled.** All 22 corpus fixtures round-trip byte-equal via the generated parser. The `@Disabled` annotation and pointer comment in the test are removed.
+- `docs/TRIVIA-ATTRIBUTION.md` — updated to document the full Bug A/B/C/C'/C'' resolution.
+- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — Phase 1 marked complete; Bug C originally deferred to 0.3.6 was solved in 0.3.5 along with Bug C'/C''.
+
+### Known limitations
+
+- **Generated-parser `%recover` per-rule overrides.** Interpreter `%recover` is now correct (this release). Generator only emits start-rule recovery statically; non-start rules' overrides are not threaded into emitted parsers. Targeted for 0.3.6.
 
 ## [0.3.4] - 2026-04-22
 

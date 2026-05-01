@@ -11,9 +11,15 @@ Subagent convention per repo: `jbct-coder` for all code; `build-runner` for `mvn
 
 ---
 
-## Release 0.3.5 — "trivia round-trip"
+## Release 0.3.5 — "trivia round-trip" — ✅ SHIPPED 2026-05-01
 
-**Goal:** un-`@Disable` `RoundTripTest`, prove `%recover` works end-to-end. Revised estimate: ~5-7 working days (originally 4 — diagnostic on 2026-04-26 revealed three distinct bugs, not one).
+**Final status:** all 22 perf-corpus fixtures round-trip byte-equal via the
+generated parser. `RoundTripTest` re-enabled. Five distinct bugs (Bug A
+through Bug C'') were required, three discovered after the initial plan was
+written. `%recover` directive wired end-to-end on the interpreter side
+(generator-side per-rule overrides remain deferred to 0.3.6).
+
+**Goal:** un-`@Disable` `RoundTripTest`, prove `%recover` works end-to-end. Revised estimate: ~5-7 working days (originally 4 — diagnostic on 2026-04-26 revealed three distinct bugs, not one — and a follow-up diagnostic on 2026-04-30 revealed two more, all fixed in 0.3.5).
 
 ### Diagnostic findings (2026-04-26)
 
@@ -39,68 +45,73 @@ Empirical round-trip diagnostic on `DeepGenerics.java` (smallest failing corpus 
 - Mirror in generator's emitted rule wrappers (lines ~2454-2570 and LR variant ~2581-2700)
 - Existing parity baselines should hold (this phase doesn't change spans, just trivia attribution invariants)
 
-### Phase 1C — Bug C: cache-hit leading-trivia ambiguity (deferred to 0.3.6)
+### Phase 1C — Bug C: cache-hit leading-trivia ambiguity (✅ shipped)
 
-**Originally planned as rule-exit pos-rewind. Empirical diagnostic on 2026-04-26
-revealed a different root cause.**
+Empirical diagnostic isolated the duplication to the **generator** (interpreter
+was already correct). The generator's cache stored the wrapped-with-leading
+body, so subsequent cache hits with empty pending preserved stale leading
+through `attachLeadingTrivia`'s short-circuit, attaching trivia at multiple
+nesting levels.
 
-After Bug A and Bug B were committed, only 12 of 22 corpus fixtures round-trip
-byte-equal. The remaining 10 fail because the packrat cache stores rule BODY
-results whose `leadingTrivia` may be authoritative (from inner-rule wraps
-when body is a Reference) or stale (from a backtracked prior context). Bug B's
-`attachLeadingTrivia` helper short-circuits on empty current leading, which
-preserves the cached attribution — correct when authoritative, wrong when
-stale. Always-replacing regresses corpus passes from 12 → 5.
+Fix: cache an empty-leading wrap, return the actual-leading wrap. Cache
+hits now apply current pending without inheriting stale state. Interpreter
+unchanged — already cached the body, not the wrap.
 
-The fix requires distinguishing the two cases. Approach (sketched, not
-implemented in 0.3.5):
+After this fix, generator dropped from 12/22 → 5/22 round-trip pass
+because pre-existing trivia gaps (previously masked by Bug C duplication
+accidentally compensating for them) became visible.
 
-1. Strip `leadingTrivia` from the body result at cache-store time so the
-   cache never carries attribution.
-2. On cache hit, recompute the rule-internal whitespace by inspecting
-   `input[startPos .. bodyEndPos)` directly (deterministic — same input
-   produces same trivia) and use it as the body's leading.
-3. Apply the rebuilt outer-leading on top via `wrapWithRuleName`.
+### Phase 1C' — Bug C': rule-exit trailing-trivia attribution (✅ shipped)
 
-This redesign is multi-day work and may require coordinated changes in
-both `PegEngine` and `ParserGenerator`. Scheduled for **release 0.3.6**
-ahead of the IDE-plugin perf release (0.4.1).
+The visible loss cases revealed by Bug C: trivia consumed by the body's
+last inter-element `skipWhitespace` (e.g. before a zero-width tail like
+empty ZoM/Optional) ends up in `pendingLeadingTrivia` with no child to
+claim it. Originally planned as rule-exit pos-rewind, but rewinding pos
+broke predicate combinators (`!isPredicate(element)` skip-no-whitespace
+semantics).
 
-Rule-exit pos-rewind (the originally-named Phase 1C) may still be needed
-for some of the 10 remaining failure fixtures (specifically the loss
-cases — `CompoundAssignments` -16, `SwitchExpressions` -13, etc). Whether
-it is actually needed will become clear once Bug C is resolved.
+Fix: at rule-exit success path, attach pending trivia to the last child's
+`trailingTrivia` (or to the rule node's trailing if children empty).
+**Pos is not rewound.** Applied symmetrically in `PegEngine` and
+`ParserGenerator`.
 
-See `docs/TRIVIA-ATTRIBUTION.md` § "Known limitation" for the diagnostic
-data and resolution direction.
+After this fix, **interpreter reached 22/22**. Generator reached 21/22 —
+the remaining `FactoryClassGenerator.java.txt` fixture had a duplicate
+trailing comma exposed by Bug C''.
 
-### Phase 3 — baseline regeneration (~0.5 day)
+### Phase 1C'' — Bug C'': generator Sequence children rollback (✅ shipped)
 
-`NonTerminal` span end offsets shift across the corpus. Regenerate both baselines via the gated utilities:
+Generator emitted Sequences using the rule-method's outer `children` list
+directly. On element failure, location and pending were restored — but
+children were not, so partial child additions from earlier elements of
+the failed Sequence stayed in the parent's tree. Symptom: the trailing
+comma in enum-constant lists appeared as a child of both the inner
+ZoM-NT and the outer Sequence.
 
-- `BaselineGenerator` with `-Dperf.regen=1` → `peglib-core/src/test/resources/perf-corpus-baseline/`
-- `InterpreterBaselineGenerator` with `-Dperf.regen=1` → `peglib-core/src/test/resources/perf-corpus-interpreter-baseline/`
+Fix: snapshot `children` at Sequence start; restore on element failure
+(both cut-failure and regular-failure branches). Interpreter uses a
+local `children` list per `parseSequenceWithMode` call so was already
+correct.
 
-Commit the regen as a **separate commit** with explicit "baseline-shift" CHANGELOG entry. Anyone diffing 0.3.4 baselines against 0.3.5 must see this called out.
+After this fix, **generator reached 22/22**.
 
-### Phase 4 — `RoundTripTest` un-disable + verify 22/22 (~0.5 day)
+See `docs/TRIVIA-ATTRIBUTION.md` for the full attribution model.
 
-- Remove `@Disabled` annotation and pointer comment
-- Verify all 22 corpus files round-trip byte-equal
-- Update `docs/TRIVIA-ATTRIBUTION.md` § "Known limitation" — promote it to "resolved in 0.3.5"
+### Phase 3 — baseline regeneration (✅ shipped)
 
-### Phase 5 — `%recover` wiring debug (~0.5 day)
+Only `large/FactoryClassGenerator.java.txt` shifted (the Bug C'' children-rollback fix removes a duplicate trailing comma in enum lists). Other 21 corpus baselines unchanged. Regenerated via `BaselineGeneratorRunner` (`-Dperf.regen=1`); committed as `9ac3307` with explicit "baseline-shift" CHANGELOG callout.
 
-The 0.3.4 audit found `{x@@@}` produces identical diagnostics with and without `%recover Block <- '}'`. Two hypotheses (handover §8.2):
+### Phase 4 — `RoundTripTest` un-disable + verify 22/22 (✅ shipped)
 
-1. Override isn't consulted at runtime → wiring bug; fix in `PegEngine` recovery path
-2. Test scenario doesn't reach `Block` body recovery → recovery fires at outer `ZeroOrMore`
+`@Disabled` removed; 22/22 corpus files round-trip byte-equal. `docs/TRIVIA-ATTRIBUTION.md` updated.
 
-Diagnose by tracing recovery point selection. Fix whichever fault applies.
+### Phase 5 — `%recover` wiring debug (✅ shipped)
 
-### Phase 6 — `%recover` proof test (~0.5 day)
+Root cause identified: rule-level recovery override was popped in `parseRule`'s `finally` block before `parseWithRecovery` consulted it. Fix: capture the failed rule's override into a per-context `pendingFailureRecoveryOverride` field BEFORE the pop, with deepest-wins semantics. Committed as `ca2ac9f`.
 
-Add a regression test in `peglib-core` that demonstrates measurably different recovery behavior between default and overridden `%recover`. Must fail before Phase 5 fix and pass after.
+### Phase 6 — `%recover` proof test (✅ shipped)
+
+`RecoverDirectiveProofTest` (interpreter-side) committed alongside Phase 5 fix. Uses `:` as override terminator (outside default char-set) so override-vs-default discriminator is unambiguous. Pre-fix the test fails; post-fix passes.
 
 ### Phase 0.3.5 release
 
