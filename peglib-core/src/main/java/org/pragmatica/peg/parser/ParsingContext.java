@@ -316,7 +316,7 @@ public final class ParsingContext {
         if (pendingFailureRecoveryOverride.isPresent()) {
             override = pendingFailureRecoveryOverride.unwrap();
             pendingFailureRecoveryOverride = Option.none();
-        } else {
+        }else {
             override = recoveryOverrideStack.peek();
         }
         if (override != null && !override.isEmpty()) {

@@ -2018,7 +2018,11 @@ public final class PegEngine implements Parser {
             case CstNode.Token tok -> new CstNode.Token(
             tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), combineTrivia(tok.trailingTrivia(), trivia));
             case CstNode.Error err -> new CstNode.Error(
-            err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), combineTrivia(err.trailingTrivia(), trivia));
+            err.span(),
+            err.skippedText(),
+            err.expected(),
+            err.leadingTrivia(),
+            combineTrivia(err.trailingTrivia(), trivia));
         };
     }
 
