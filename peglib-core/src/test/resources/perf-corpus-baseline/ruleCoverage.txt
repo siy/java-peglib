@@ -99,4 +99,4 @@ VarInit	356	15
 WhenKW	3	1
 WhileKW	2	1
 YieldKW	4	2
-literal	12115	22
+literal	12114	22
