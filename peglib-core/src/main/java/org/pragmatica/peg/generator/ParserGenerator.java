@@ -1996,6 +1996,48 @@ public final class ParserGenerator {
                 }
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
+            // 0.3.6: per-rule %recover override stack and pending-failure field.
+            // Mirrors ParsingContext's stack/pending pair. Rules carrying a
+            // %recover directive push their terminator onto the stack at body
+            // entry and capture it into the pending field on body failure
+            // before popping. skipToRecoveryPoint consults the pending field
+            // first (the stack is unwound by the time recovery runs), then
+            // the live stack, then the global default char-set.
+            sb.append("""
+                    private final java.util.ArrayDeque<String> recoveryOverrideStack = new java.util.ArrayDeque<>();
+                    private Option<String> pendingFailureRecoveryOverride = Option.none();
+
+                    private void pushRecoveryOverride(String terminator) {
+                        recoveryOverrideStack.push(terminator);
+                    }
+
+                    private void popRecoveryOverride() {
+                        if (!recoveryOverrideStack.isEmpty()) {
+                            recoveryOverrideStack.pop();
+                        }
+                    }
+
+                    private void recordFailureRecoveryOverride(String terminator) {
+                        if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride.isEmpty()) {
+                            pendingFailureRecoveryOverride = Option.some(terminator);
+                        }
+                    }
+
+                    private void clearPendingRecoveryOverride() {
+                        pendingFailureRecoveryOverride = Option.none();
+                    }
+
+                    private boolean matchesOverrideAt(String term) {
+                        if (remaining() < term.length()) return false;
+                        for (int i = 0; i < term.length(); i++) {
+                            if (peek(i) != term.charAt(i)) return false;
+                        }
+                        return true;
+                    }
+
+                """);
+        }
+        if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     private List<Diagnostic> diagnostics;
                 """);
@@ -2028,6 +2070,8 @@ public final class ParserGenerator {
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                         this.diagnostics = new ArrayList<>();
+                        this.recoveryOverrideStack.clear();
+                        this.pendingFailureRecoveryOverride = Option.none();
                 """);
         }
         sb.append("""
@@ -2113,56 +2157,40 @@ public final class ParserGenerator {
                 """);
         }
         if (errorReporting == ErrorReporting.ADVANCED) {
-            // 0.2.4: emit %recover override around the top-level recovery skip
-            // when the start rule carries a %recover directive. Per-rule stacks
-            // are not threaded into generated code (scope kept minimal);
-            // interpreter-side rule-scoped recovery is available via PegEngine.
-            var startRuleOpt = grammar.effectiveStartRule();
-            String topRecover = startRuleOpt.isPresent() && startRuleOpt.unwrap()
-                                                                        .hasRecover()
-                                ? startRuleOpt.unwrap()
-                                              .recover()
-                                              .unwrap()
-                                : "";
-            if (!topRecover.isEmpty()) {
-                sb.append("        private static final String RECOVERY_OVERRIDE = \"")
-                  .append(escape(topRecover))
-                  .append("\";\n\n");
-                sb.append("""
-                        private SourceSpan skipToRecoveryPoint() {
-                            var start = location();
-                            while (!isAtEnd()) {
-                                if (matchesRecoveryOverride()) break;
+            // 0.3.6: stack-aware recovery — per-rule %recover overrides are
+            // pushed onto recoveryOverrideStack at rule body entry and
+            // captured into pendingFailureRecoveryOverride before popping on
+            // failure. skipToRecoveryPoint consults the pending field first
+            // (the stack is unwound by the time recovery runs), then the
+            // live stack, then the global default char-set. Mirrors
+            // ParsingContext.skipToRecoveryPoint.
+            sb.append("""
+                    private SourceSpan skipToRecoveryPoint() {
+                        var start = location();
+                        String override = null;
+                        if (pendingFailureRecoveryOverride.isPresent()) {
+                            override = pendingFailureRecoveryOverride.unwrap();
+                            pendingFailureRecoveryOverride = Option.none();
+                        } else if (!recoveryOverrideStack.isEmpty()) {
+                            override = recoveryOverrideStack.peek();
+                        }
+                        if (override != null && !override.isEmpty()) {
+                            while (!isAtEnd() && !matchesOverrideAt(override)) {
                                 advance();
                             }
                             return SourceSpan.of(start, location());
                         }
-
-                        private boolean matchesRecoveryOverride() {
-                            if (remaining() < RECOVERY_OVERRIDE.length()) return false;
-                            for (int i = 0; i < RECOVERY_OVERRIDE.length(); i++) {
-                                if (peek(i) != RECOVERY_OVERRIDE.charAt(i)) return false;
+                        while (!isAtEnd()) {
+                            char c = peek();
+                            if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
+                                break;
                             }
-                            return true;
+                            advance();
                         }
+                        return SourceSpan.of(start, location());
+                    }
 
-                    """);
-            }else {
-                sb.append("""
-                        private SourceSpan skipToRecoveryPoint() {
-                            var start = location();
-                            while (!isAtEnd()) {
-                                char c = peek();
-                                if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
-                                    break;
-                                }
-                                advance();
-                            }
-                            return SourceSpan.of(start, location());
-                        }
-
-                    """);
-            }
+                """);
             sb.append("""
                     private void addDiagnostic(String message, SourceSpan span) {
                         diagnostics.add(Diagnostic.error(message, span).withTag("error.unexpected-input"));
@@ -2524,13 +2552,40 @@ public final class ParserGenerator {
           .append(ruleIdConst)
           .append(";\n");
         sb.append("        \n");
+        // 0.3.6: emit %recover override push before body parse (ADVANCED only).
+        // Mirrors PegEngine.parseRule. Popped on the failure-recording line below.
+        boolean emitRecoverHooks = errorReporting == ErrorReporting.ADVANCED && rule.hasRecover();
+        if (emitRecoverHooks) {
+            sb.append("        pushRecoveryOverride(\"")
+              .append(escape(rule.recover()
+                                 .unwrap()))
+              .append("\");\n");
+        }
         var counter = new int[]{0};
         // Mutable counter for unique variable names
         generateCstExpressionCode(sb, rule.expression(), "result", 2, true, counter, false);
         sb.append("        \n");
+        if (emitRecoverHooks) {
+            // 0.3.6: capture failure override BEFORE pop — skipToRecoveryPoint
+            // runs after this method returns, by which point the live stack
+            // has been unwound. Mirrors PegEngine.parseRule finally block.
+            sb.append("        if (!result.isSuccess()) {\n");
+            sb.append("            recordFailureRecoveryOverride(\"")
+              .append(escape(rule.recover()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("        }\n");
+            sb.append("        popRecoveryOverride();\n");
+        }
         sb.append("        CstParseResult finalResult;\n");
         sb.append("        CstParseResult cacheableResult;\n");
         sb.append("        if (result.isSuccess()) {\n");
+        if (emitRecoverHooks) {
+            // 0.3.6: clear pending override on success so a backtracked
+            // alternative's recorded override does not leak into a later
+            // recovery cycle. Mirrors PegEngine.parseRule.
+            sb.append("            clearPendingRecoveryOverride();\n");
+        }
         sb.append("            var endLoc = location();\n");
         if (inlineLocations) {
             sb.append("            var span = SourceSpan.of(new SourceLocation(startLine, startColumn, startOffset), endLoc);\n");
@@ -2673,6 +2728,16 @@ public final class ParserGenerator {
         sb.append("        CstParseResult lastSeed = CstParseResult.failure(\"left-recursion seed\");\n");
         sb.append("        growingSeeds.put(key, lastSeed);\n");
         sb.append("        boolean cutFired = false;\n");
+        // 0.3.6: emit %recover override push for LR rule (ADVANCED only).
+        // Mirrors PegEngine.parseRuleWithLeftRecursion. Pushed before the
+        // grow loop, captured + popped after.
+        boolean emitLrRecoverHooks = errorReporting == ErrorReporting.ADVANCED && rule.hasRecover();
+        if (emitLrRecoverHooks) {
+            sb.append("        pushRecoveryOverride(\"")
+              .append(escape(rule.recover()
+                                 .unwrap()))
+              .append("\");\n");
+        }
         sb.append("        while (true) {\n");
         sb.append("            pos = bodyStartPos;\n");
         sb.append("            line = bodyStartLine;\n");
@@ -2688,10 +2753,25 @@ public final class ParserGenerator {
         sb.append("            lastSeed = iter;\n");
         sb.append("            growingSeeds.put(key, lastSeed);\n");
         sb.append("        }\n");
+        if (emitLrRecoverHooks) {
+            // 0.3.6: capture failure override BEFORE pop. Treat any non-Success
+            // as a failure for recovery purposes (matches PegEngine.parseRuleWithLeftRecursion).
+            sb.append("        if (!lastSeed.isSuccess()) {\n");
+            sb.append("            recordFailureRecoveryOverride(\"")
+              .append(escape(rule.recover()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("        }\n");
+            sb.append("        popRecoveryOverride();\n");
+        }
         sb.append("        growingSeeds.remove(key);\n");
         sb.append("        CstParseResult finalResult;\n");
         sb.append("        CstParseResult cacheableResult;\n");
         sb.append("        if (lastSeed.isSuccess()) {\n");
+        if (emitLrRecoverHooks) {
+            // 0.3.6: clear pending override on success path.
+            sb.append("            clearPendingRecoveryOverride();\n");
+        }
         sb.append("            restoreLocation(lastSeed.endLocation.unwrap());\n");
         sb.append("            var node = attachLeadingTrivia(lastSeed.node.unwrap(), leadingTrivia);\n");
         sb.append("            finalResult = CstParseResult.success(node, lastSeed.text.or(\"\"), lastSeed.endLocation.unwrap());\n");

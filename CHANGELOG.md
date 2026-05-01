@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-05-01
+
+Generator-side `%recover` per-rule overrides. Non-breaking.
+
+### Fixed
+
+- **Generator: `%recover` per-rule overrides now wired.** Mirrors the interpreter's `pendingFailureRecoveryOverride` mechanism (shipped in 0.3.5). Generator now emits override capture before the rule's `finally` pop so `parseWithRecovery` consults the deepest override after the stack unwinds.
+
+### Known limitations
+
+- **Incremental parser `singleCharEdit` perf** is still ~325 ms/op on the 1,900-LOC fixture. `docs/incremental/V2.5-SPIKE.md` documents the diagnosis (the dominant cost is pivot overshoot in `findBoundaryCandidate`, not cache invalidation as v2.5 assumed) and a proposed "lever 1" fix (edit-anchored pivot selection). A naive lever-1 swap was attempted in 0.3.6 development but produced correctness regressions on `IncrementalParityTest` due to subtle interaction with `NodeIndex.contains`'s inclusive-boundary semantics — the smallestContaining lookup can return a node ending exactly at `editStart`, yielding a different pivot than the warm-pointer walk would. A correct fix needs careful boundary semantics work; deferred.
+
 ## [0.3.5] - 2026-05-01
 
 Trivia attribution correctness — full byte-equal round-trip on all 22 corpus fixtures — plus `%recover` directive wiring. `RoundTripTest` re-enabled.
