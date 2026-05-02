@@ -49,39 +49,39 @@ public final class ParseTracer {
 
     public void recordRuleEnter(String rule, int offset) {
         ruleEntries++;
-        records.add(TraceRecord.of(TraceRecord.EventKind.RULE_ENTER, rule, offset, elapsedNanos(), ""));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_ENTER, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordRuleSuccess(String rule, int offset) {
-        records.add(TraceRecord.of(TraceRecord.EventKind.RULE_SUCCESS, rule, offset, elapsedNanos(), ""));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_SUCCESS, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordRuleFailure(String rule, int offset) {
-        records.add(TraceRecord.of(TraceRecord.EventKind.RULE_FAILURE, rule, offset, elapsedNanos(), ""));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_FAILURE, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCacheHit(String rule, int offset) {
         cacheHits++;
-        records.add(TraceRecord.of(TraceRecord.EventKind.CACHE_HIT, rule, offset, elapsedNanos(), ""));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_HIT, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCacheMiss(String rule, int offset) {
         cacheMisses++;
-        records.add(TraceRecord.of(TraceRecord.EventKind.CACHE_MISS, rule, offset, elapsedNanos(), ""));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_MISS, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCachePut(String rule, int offset) {
         cachePuts++;
-        records.add(TraceRecord.of(TraceRecord.EventKind.CACHE_PUT, rule, offset, elapsedNanos(), ""));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_PUT, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCutFired(String rule, int offset) {
         cutsFired++;
-        records.add(TraceRecord.of(TraceRecord.EventKind.CUT_FIRED, rule, offset, elapsedNanos(), "cut"));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CUT_FIRED, rule, offset, elapsedNanos(), "cut"));
     }
 
     public void note(String detail) {
-        records.add(TraceRecord.of(TraceRecord.EventKind.NOTE, "", -1, elapsedNanos(), detail));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.NOTE, "", -1, elapsedNanos(), detail));
     }
 
     public List<TraceRecord> records() {

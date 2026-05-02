@@ -18,6 +18,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`grammar` package — test assertion idiom.** `GrammarParserTest` rewritten to use `.onFailure(cause -> fail(cause.message())).onSuccess(grammar -> ...)` in place of `assertTrue(result.isSuccess()); var grammar = result.unwrap();` for happy-path assertions. Failure-path tests (`isFailure()` checks) unchanged.
 - **`generator` package factory rename.** `ParserGenerator.create(...)` (4 overloads) → `ParserGenerator.parserGenerator(...)`. Test assertion idiom: `ParserGeneratorTest` rewritten to use `result.onFailure(cause -> fail(cause.message())).unwrap()` in place of `assertTrue(...isSuccess()); var x = result.unwrap();`.
 - **`peglib-incremental` package factory rename.** `CstHash.of(...)` → `CstHash.cstHash(...)` (both the incremental `internal/CstHash` and the perf-test reflective `CstHash`); `SessionFactory.create(...)` (2 overloads) → `SessionFactory.sessionFactory(...)`. Public `IncrementalParser.create(...)` retained — it's the user-facing facade and not on the rename list.
+- **`peglib-playground` package factory rename.** `TraceRecord.of(...)` → `TraceRecord.traceRecord(...)`.
 
 ### Fixed
 
@@ -33,6 +34,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`parser` factories** — replace `ParserConfig.of(...)` with `ParserConfig.parserConfig(...)`; `ParseResult.Success.of(...)` with `ParseResult.Success.success(...)`; `ParseResult.Failure.at(...)` with `ParseResult.Failure.failure(...)`; `ParseResult.CutFailure.at(...)` with `ParseResult.CutFailure.cutFailure(...)`. Mechanical rename.
 - **`generator` factories** — replace `ParserGenerator.create(...)` with `ParserGenerator.parserGenerator(...)` (all four overloads). Mechanical rename.
 - **`incremental` factories** — replace `CstHash.of(...)` with `CstHash.cstHash(...)` and `SessionFactory.create(...)` with `SessionFactory.sessionFactory(...)`. `IncrementalParser.create(...)` remains.
+- **`playground` factories** — replace `TraceRecord.of(...)` with `TraceRecord.traceRecord(...)`.
 
 ## [0.3.6] - 2026-05-01
 
