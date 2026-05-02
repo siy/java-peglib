@@ -21,6 +21,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`peglib-incremental` `SessionImpl` → `IncrementalSession` record.** The package-private `SessionImpl` class implementing `Session` is replaced by a `record IncrementalSession(SessionFactory, String, CstNode, int, CstNode, NodeIndex, Stats) implements Session`. Removes the `Impl` anti-pattern; `Session` remains a public interface (the record's seven components are internal state and don't belong in a public type signature). The dead helper `SessionImpl#debugPathTo(...)` (no callers) was deleted in the same change. Internal-only — no consumer-visible source change.
 - **`peglib-playground` package factory rename.** `TraceRecord.of(...)` → `TraceRecord.traceRecord(...)`.
 - **`peglib-maven-plugin` Mojo `execute()` methods refactored to `Result` pipelines.** `GenerateMojo`, `LintMojo`, `CheckMojo` now compose failure-prone steps (read grammar, parse `errorReporting`, parse grammar, build parser, smoke-parse) as a `Result` chain and translate the terminal `Result.failure(cause)` into `MojoFailureException(cause.message())` at the Maven boundary. Behavior preserved (same successes, same surfaced messages); a few read-failure paths that previously threw `MojoExecutionException` now consistently throw `MojoFailureException` to keep the boundary single-typed. `@Contract` annotation from JBCT convention is documented in Javadoc on each `execute()` method (no annotation type exists in the project).
+- **`peglib-formatter` `Formatter` mutable builder replaced by immutable `FormatterConfig` record + immutable builder.** The previous API used `new Formatter().defaultIndent(...).maxLineWidth(...).triviaPolicy(...).rule(name, fn)` returning the same instance with mutated state. Replaced by `FormatterConfig.builder()` (also exposed as `Formatter.builder()`), where each `defaultIndent` / `maxLineWidth` / `triviaPolicy` / `rule` call returns a *new* `FormatterConfig.Builder`; terminal `.build()` materialises an immutable `FormatterConfig` record. A `Formatter` is then derived from the config via `Formatter.formatter(config)`, and is itself immutable and thread-safe to use concurrently. The public `new Formatter()` constructor is removed. `FormatterConfig` exposes `defaultConfig()`, `builder()`, and `toBuilder()` factory entry points.
 
 ### Fixed
 
@@ -38,6 +39,25 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`incremental` factories** — replace `CstHash.of(...)` with `CstHash.cstHash(...)` and `SessionFactory.create(...)` with `SessionFactory.sessionFactory(...)`. `IncrementalParser.create(...)` remains.
 - **`incremental` `SessionImpl` rename** — no migration needed. `SessionImpl` was package-private; the new `IncrementalSession` record is also package-private and implements the same public `Session` interface. Consumers continue to use `Session`; there is no source-visible change.
 - **`playground` factories** — replace `TraceRecord.of(...)` with `TraceRecord.traceRecord(...)`.
+- **`Formatter` builder** — replace
+  ```java
+  var formatter = new Formatter()
+      .defaultIndent(2)
+      .maxLineWidth(80)
+      .triviaPolicy(TriviaPolicy.DROP_ALL)
+      .rule("Block", (ctx, kids) -> ...);
+  ```
+  with
+  ```java
+  var config = Formatter.builder()
+      .defaultIndent(2)
+      .maxLineWidth(80)
+      .triviaPolicy(TriviaPolicy.DROP_ALL)
+      .rule("Block", (ctx, kids) -> ...)
+      .build();
+  var formatter = Formatter.formatter(config);
+  ```
+  Each `with*`-style mutator on the builder returns a new builder (no shared mutable state); the resulting `FormatterConfig` is an immutable record; the `Formatter` is constructed once from the config and is thread-safe to share. The `Formatter#format(CstNode)` / `format(CstNode, String)` API is unchanged.
 
 ## [0.3.6] - 2026-05-01
 

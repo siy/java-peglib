@@ -58,15 +58,16 @@ public final class JsonFormatter {
 
     public static JsonFormatter create() {
         var parser = PegParser.fromGrammar(GRAMMAR).unwrap();
-        var fmt = new Formatter()
+        var config = Formatter.builder()
             .defaultIndent(2)
             .maxLineWidth(60)
             .triviaPolicy(TriviaPolicy.DROP_ALL)
             .rule("Value", JsonFormatter::formatValue)
             .rule("ValueList", JsonFormatter::formatValueList)
             .rule("MemberList", JsonFormatter::formatMemberList)
-            .rule("Member", JsonFormatter::formatMember);
-        return new JsonFormatter(parser, fmt);
+            .rule("Member", JsonFormatter::formatMember)
+            .build();
+        return new JsonFormatter(parser, Formatter.formatter(config));
     }
 
     public Result<String> format(String input) {

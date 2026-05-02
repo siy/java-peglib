@@ -58,7 +58,7 @@ public final class SqlFormatter {
 
     public static SqlFormatter create() {
         var parser = PegParser.fromGrammar(GRAMMAR).unwrap();
-        var fmt = new Formatter()
+        var config = Formatter.builder()
             .defaultIndent(2)
             .maxLineWidth(40)
             .triviaPolicy(TriviaPolicy.DROP_ALL)
@@ -68,8 +68,9 @@ public final class SqlFormatter {
             .rule("Where", (ctx, children) -> formatClause(ctx, "WHERE"))
             .rule("ColList", (ctx, children) -> formatListFlat(ctx, "ColList"))
             .rule("IdentList", (ctx, children) -> formatListFlat(ctx, "IdentList"))
-            .rule("Condition", SqlFormatter::formatCondition);
-        return new SqlFormatter(parser, fmt);
+            .rule("Condition", SqlFormatter::formatCondition)
+            .build();
+        return new SqlFormatter(parser, Formatter.formatter(config));
     }
 
     public Result<String> format(String input) {

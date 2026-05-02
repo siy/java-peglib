@@ -3,9 +3,14 @@
  *
  * <p>Entry points:
  * <ul>
- *   <li>{@link org.pragmatica.peg.formatter.Formatter} — fluent builder + CST
- *       walker; register per-rule {@link org.pragmatica.peg.formatter.FormatterRule}
- *       functions, then call {@code format(CstNode)} to obtain a string.</li>
+ *   <li>{@link org.pragmatica.peg.formatter.Formatter} — immutable CST walker
+ *       configured by {@link org.pragmatica.peg.formatter.FormatterConfig};
+ *       register per-rule {@link org.pragmatica.peg.formatter.FormatterRule}
+ *       functions on the config builder, then call {@code format(CstNode)}
+ *       to obtain a string.</li>
+ *   <li>{@link org.pragmatica.peg.formatter.FormatterConfig} — immutable
+ *       configuration record (indent / max line width / trivia policy /
+ *       per-rule formatters) with an immutable nested builder.</li>
  *   <li>{@link org.pragmatica.peg.formatter.Doc} / {@link org.pragmatica.peg.formatter.Docs}
  *       — the pretty-print algebra (text / line / softline / group / indent /
  *       concat) and its static builder functions.</li>

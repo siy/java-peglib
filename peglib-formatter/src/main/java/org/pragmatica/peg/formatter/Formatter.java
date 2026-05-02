@@ -7,107 +7,88 @@ import org.pragmatica.peg.tree.CstNode;
 import org.pragmatica.peg.tree.Trivia;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Fluent builder + CST walker for a {@link Doc}-based pretty-printer.
+ * Immutable CST walker for a {@link Doc}-based pretty-printer.
+ *
+ * <p>Configuration (indent / max line width / trivia policy / per-rule
+ * formatters) is captured in a {@link FormatterConfig} record built via
+ * {@link FormatterConfig#builder()} (or the convenience {@link #builder()}).
+ * A {@link Formatter} is then derived from the config via {@link #formatter}.
  *
  * <p>Usage pattern:
  *
  * <pre>{@code
  * import static org.pragmatica.peg.formatter.Docs.*;
  *
- * var formatter = new Formatter()
+ * var config = FormatterConfig.builder()
  *     .defaultIndent(2)
  *     .maxLineWidth(80)
  *     .rule("Block", (ctx, children) ->
  *         group(text("{"),
  *               indent(ctx.defaultIndent(), line(), concat(children)),
- *               line(), text("}")));
+ *               line(), text("}")))
+ *     .build();
  *
+ * var formatter = Formatter.formatter(config);
  * Result<String> out = formatter.format(cst);
  * }</pre>
  *
  * <p>Lookup happens by {@link CstNode#rule() rule name}. If no rule is
- * registered for a node, the formatter falls back to
- * {@link #defaultFallback(CstNode, List)} which emits the node's text verbatim
- * for {@link CstNode.Terminal}/{@link CstNode.Token} leaves, and the
- * concatenation of children for {@link CstNode.NonTerminal} interior nodes.
+ * registered for a node, the formatter falls back to a default that emits the
+ * node's text verbatim for {@link CstNode.Terminal}/{@link CstNode.Token}
+ * leaves, and the concatenation of children for
+ * {@link CstNode.NonTerminal} interior nodes.
  *
  * <p>Trivia handling is driven by {@link TriviaPolicy}. By default trivia is
  * preserved verbatim — each leaf's leading trivia is emitted before the
  * leaf's doc and trailing trivia after. Custom policies can strip whitespace,
  * normalise blank lines, etc.
  *
- * <p>Instances are mutable during configuration and immutable after
- * {@link #format(CstNode)} is invoked (the map is read-only thereafter).
- * Not thread-safe during configuration; thread-safe to call
- * {@link #format(CstNode)} concurrently once configured.
+ * <p>Instances are immutable and thread-safe to use concurrently.
  *
  * @since 0.3.3
  */
 public final class Formatter {
-    private final Map<String, FormatterRule> rules = new HashMap<>();
-    private int defaultIndent = 2;
-    private int maxLineWidth = 80;
-    private TriviaPolicy triviaPolicy = TriviaPolicy.PRESERVE;
+    private final FormatterConfig config;
 
-    public Formatter() {}
-
-    /** Register a rule for the given CST rule name. Last registration wins. */
-    public Formatter rule(String ruleName, FormatterRule rule) {
-        if (ruleName == null || ruleName.isEmpty()) {
-            throw new IllegalArgumentException("ruleName must be non-empty");
-        }
-        if (rule == null) {
-            throw new IllegalArgumentException("rule must not be null");
-        }
-        rules.put(ruleName, rule);
-        return this;
+    private Formatter(FormatterConfig config) {
+        this.config = config;
     }
 
-    /** Default indent width in columns (default: 2). */
-    public Formatter defaultIndent(int amount) {
-        if (amount < 0) {
-            throw new IllegalArgumentException("defaultIndent must be >= 0");
+    /** Create a formatter from the given config. */
+    public static Formatter formatter(FormatterConfig config) {
+        if (config == null) {
+            throw new IllegalArgumentException("config must not be null");
         }
-        this.defaultIndent = amount;
-        return this;
+        return new Formatter(config);
     }
 
-    /** Target maximum line width in columns (default: 80). */
-    public Formatter maxLineWidth(int width) {
-        if (width <= 0) {
-            throw new IllegalArgumentException("maxLineWidth must be > 0");
-        }
-        this.maxLineWidth = width;
-        return this;
+    /** Convenience entry point for {@link FormatterConfig#builder()}. */
+    public static FormatterConfig.Builder builder() {
+        return FormatterConfig.builder();
     }
 
-    /** Set the trivia emission policy (default: {@link TriviaPolicy#PRESERVE}). */
-    public Formatter triviaPolicy(TriviaPolicy policy) {
-        if (policy == null) {
-            throw new IllegalArgumentException("triviaPolicy must not be null");
-        }
-        this.triviaPolicy = policy;
-        return this;
+    /** The configuration backing this formatter. */
+    public FormatterConfig config() {
+        return config;
     }
 
-    /** Read the currently configured default indent. */
+    /** Read the configured default indent. */
     public int defaultIndent() {
-        return defaultIndent;
+        return config.defaultIndent();
     }
 
-    /** Read the currently configured maximum line width. */
+    /** Read the configured maximum line width. */
     public int maxLineWidth() {
-        return maxLineWidth;
+        return config.maxLineWidth();
     }
 
-    /** Read the currently configured trivia policy. */
+    /** Read the configured trivia policy. */
     public TriviaPolicy triviaPolicy() {
-        return triviaPolicy;
+        return config.triviaPolicy();
     }
 
     /**
@@ -136,7 +117,7 @@ public final class Formatter {
         }
         try {
             var doc = walk(cst, source);
-            var out = Renderer.render(doc, maxLineWidth);
+            var out = Renderer.render(doc, config.maxLineWidth());
             return Result.success(out);
         } catch (RuntimeException e) {
             return new FormatterError.RuleFailed(cst.rule(), e).result();
@@ -161,15 +142,17 @@ public final class Formatter {
     }
 
     private Doc applyRule(CstNode node, String source, List<Doc> childDocs) {
+        Map<String, FormatterRule> rules = config.rules();
         var rule = rules.get(node.rule());
         if (rule != null) {
-            var ctx = new FormatContext(node, source, defaultIndent, maxLineWidth, triviaPolicy);
+            var ctx = new FormatContext(node, source, config.defaultIndent(), config.maxLineWidth(), config.triviaPolicy());
             return rule.format(ctx, childDocs);
         }
         return defaultFallback(node, source, childDocs);
     }
 
     private Doc wrapWithTrivia(CstNode node, Doc nodeDoc) {
+        var triviaPolicy = config.triviaPolicy();
         var leading = triviaPolicy.transform(node.leadingTrivia());
         var trailing = triviaPolicy.transform(node.trailingTrivia());
         if (leading.isEmpty() && trailing.isEmpty()) {
