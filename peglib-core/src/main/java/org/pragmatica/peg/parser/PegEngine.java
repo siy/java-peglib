@@ -168,7 +168,9 @@ public final class PegEngine implements Parser {
      */
     public static Result<PegEngine> createWithoutActions(Grammar grammar, ParserConfig config) {
         return validateConfig(grammar, config)
-                .map(g -> new PegEngine(g, config, Map.of()));
+               .map(g -> new PegEngine(g,
+                                       config,
+                                       Map.of()));
     }
 
     /**
@@ -1016,7 +1018,8 @@ public final class PegEngine implements Parser {
                                        ParsingContext ctx) {
         return Result.lift(t -> (ParseError) new ParseError.ActionError(startLoc, ruleName, t),
                            () -> action.apply(sv))
-                     .fold(cause -> actionFailure(startLoc, ((ParseError.ActionError) cause).cause()),
+                     .fold(cause -> actionFailure(startLoc,
+                                                  ((ParseError.ActionError) cause).cause()),
                            value -> actionSuccess(successNode, ruleName, ruleLeading, ctx, value));
     }
 
