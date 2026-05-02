@@ -15,6 +15,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`tree` package factory rename.** `SourceLocation.at(line, column, offset)` → `SourceLocation.sourceLocation(...)`; `SourceSpan.of(start, end)` → `SourceSpan.sourceSpan(...)`; `SourceSpan.at(location)` → `SourceSpan.sourceSpan(location)` (overload). Generator emits the new typeName-style factories, so generated parsers from 0.3.x will fail to compile against 0.4.0 runtime — regenerate.
 - **`action` package factory rename.** `ActionCompiler.create()` / `ActionCompiler.create(ClassLoader)` → `ActionCompiler.actionCompiler(...)`; `SemanticValues.of(...)` → `SemanticValues.semanticValues(...)`.
 - **`parser` package factory rename.** `ParserConfig.of(...)` → `ParserConfig.parserConfig(...)`; `ParseResult.Success.of(...)` → `ParseResult.Success.success(...)`; `ParseResult.Failure.at(...)` → `ParseResult.Failure.failure(...)`; `ParseResult.CutFailure.at(...)` → `ParseResult.CutFailure.cutFailure(...)`. `PegEngine.create(...)` left as-is (domain-named per spec).
+- **`grammar` package — test assertion idiom.** `GrammarParserTest` rewritten to use `.onFailure(cause -> fail(cause.message())).onSuccess(grammar -> ...)` in place of `assertTrue(result.isSuccess()); var grammar = result.unwrap();` for happy-path assertions. Failure-path tests (`isFailure()` checks) unchanged.
 
 ### Fixed
 
