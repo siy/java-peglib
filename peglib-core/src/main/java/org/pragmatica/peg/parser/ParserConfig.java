@@ -73,7 +73,9 @@ public record ParserConfig(
      * {@code true}; remaining phase-2 flags default to {@code false}. Equivalent
      * to {@link #DEFAULT} with the caller's three runtime fields substituted.
      */
-    public static ParserConfig of(boolean packratEnabled, RecoveryStrategy recoveryStrategy, boolean captureTrivia) {
+    public static ParserConfig parserConfig(boolean packratEnabled,
+                                            RecoveryStrategy recoveryStrategy,
+                                            boolean captureTrivia) {
         return new ParserConfig(
         packratEnabled,
         recoveryStrategy,

@@ -642,7 +642,7 @@ public final class PegEngine implements Parser {
                                                  : concatTrivia(hitCarriedLeading, hitLocalTrivia));
                 ctx.restoreLocation(success.endLocation());
                 var hitNode = attachLeadingTrivia(success.node(), hitRuleLeading);
-                return ParseResult.Success.of(hitNode, ctx.location());
+                return ParseResult.Success.success(hitNode, ctx.location());
             }
             return result;
         }
@@ -695,7 +695,7 @@ public final class PegEngine implements Parser {
             if (!pendingAtExit.isEmpty()) {
                 ctx.restorePendingLeadingTrivia(List.of());
                 bodyNode = attachTrailingToTail(bodyNode, pendingAtExit);
-                resultForCache = ParseResult.Success.of(bodyNode, success.endLocation());
+                resultForCache = ParseResult.Success.success(bodyNode, success.endLocation());
             }
         }
         // Cache the result at START position
@@ -705,7 +705,7 @@ public final class PegEngine implements Parser {
             // alternative's recorded override does not leak into a later recovery cycle.
             ctx.clearPendingRecoveryOverride();
             var node = wrapWithRuleName(bodyNode, rule.name(), ruleLeading);
-            return ParseResult.Success.of(node, ctx.location());
+            return ParseResult.Success.success(node, ctx.location());
         }
         // Restore position and re-deposit the caller's pending so enclosing
         // backtracking combinators can roll it back to their own snapshots.
@@ -715,9 +715,9 @@ public final class PegEngine implements Parser {
         }
         // Use custom error message if available
         if (rule.hasErrorMessage()) {
-            return ParseResult.Failure.at(startLoc,
-                                          rule.errorMessage()
-                                              .unwrap());
+            return ParseResult.Failure.failure(startLoc,
+                                               rule.errorMessage()
+                                                   .unwrap());
         }
         // 0.2.4: %expected semantic label — emit as the rule's failure message
         // and push into the furthest-failure tracker so diagnostics use the
@@ -726,7 +726,7 @@ public final class PegEngine implements Parser {
             var label = rule.expected()
                             .unwrap();
             ctx.updateFurthest(label);
-            return ParseResult.Failure.at(startLoc, label);
+            return ParseResult.Failure.failure(startLoc, label);
         }
         return result;
     }
@@ -787,7 +787,7 @@ public final class PegEngine implements Parser {
                                                  : concatTrivia(hitCarriedLeading, hitLocalTrivia));
                 ctx.restoreLocation(success.endLocation());
                 var hitNode = attachLeadingTrivia(success.node(), hitRuleLeading);
-                return ParseResult.Success.of(hitNode, ctx.location());
+                return ParseResult.Success.success(hitNode, ctx.location());
             }
             return result;
         }
@@ -806,7 +806,7 @@ public final class PegEngine implements Parser {
         // Seed with Failure so the first recursive self-invocation sees a
         // failing base and falls through to the non-recursive alternative.
         int generation = 0;
-        var seedFailure = ParseResult.Failure.at(startLoc, "left-recursion seed");
+        var seedFailure = ParseResult.Failure.failure(startLoc, "left-recursion seed");
         ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.seed(seedFailure, generation));
         boolean pushedRecover = false;
         if (rule.hasRecover()) {
@@ -847,7 +847,7 @@ public final class PegEngine implements Parser {
                 // behaviour at parseRule exit). Leading-trivia is consumed at
                 // the outer level only; intermediate seeds carry an empty list.
                 var wrapped = wrapWithRuleName(success.node(), rule.name(), List.of());
-                var wrappedSeed = ParseResult.Success.of(wrapped, success.endLocation());
+                var wrappedSeed = ParseResult.Success.success(wrapped, success.endLocation());
                 lastSeed = wrappedSeed;
                 generation++ ;
                 ctx.cacheEntryAt(rule.name(), startPos, ParsingContext.CacheEntry.seed(lastSeed, generation));
@@ -873,7 +873,7 @@ public final class PegEngine implements Parser {
             // Re-wrap at the outer level with leadingTrivia attached. The inner
             // wrap used an empty leading list for self-reference purposes.
             var outerNode = attachLeadingTrivia(finalSuccess.node(), ruleLeading);
-            return ParseResult.Success.of(outerNode, ctx.location());
+            return ParseResult.Success.success(outerNode, ctx.location());
         }
         // Failure path — restore the original caller state and re-deposit
         // pending-leading so enclosing backtracking combinators can roll back.
@@ -882,18 +882,18 @@ public final class PegEngine implements Parser {
             ctx.appendPendingLeadingTrivia(carriedLeading);
         }
         if (rule.hasErrorMessage()) {
-            return ParseResult.Failure.at(startLoc,
-                                          rule.errorMessage()
-                                              .unwrap());
+            return ParseResult.Failure.failure(startLoc,
+                                               rule.errorMessage()
+                                                   .unwrap());
         }
         if (rule.hasExpected()) {
             var label = rule.expected()
                             .unwrap();
             ctx.updateFurthest(label);
-            return ParseResult.Failure.at(startLoc, label);
+            return ParseResult.Failure.failure(startLoc, label);
         }
         if (cutFired) {
-            return ParseResult.CutFailure.at(startLoc, "cut inside left-recursive rule '" + rule.name() + "'");
+            return ParseResult.CutFailure.cutFailure(startLoc, "cut inside left-recursive rule '" + rule.name() + "'");
         }
         return lastSeed;
     }
@@ -957,16 +957,16 @@ public final class PegEngine implements Parser {
             }
             // Use custom error message if available
             if (rule.hasErrorMessage()) {
-                return ParseResult.Failure.at(startLoc,
-                                              rule.errorMessage()
-                                                  .unwrap());
+                return ParseResult.Failure.failure(startLoc,
+                                                   rule.errorMessage()
+                                                       .unwrap());
             }
             // 0.2.4: %expected semantic label — see parseRule for rationale.
             if (rule.hasExpected()) {
                 var label = rule.expected()
                                 .unwrap();
                 ctx.updateFurthest(label);
-                return ParseResult.Failure.at(startLoc, label);
+                return ParseResult.Failure.failure(startLoc, label);
             }
             return result;
         }
@@ -988,7 +988,7 @@ public final class PegEngine implements Parser {
                 var node = wrapWithRuleName(success.node(), rule.name(), ruleLeading);
                 return ParseResult.Success.withValue(node, ctx.location(), value);
             } catch (Exception e) {
-                return ParseResult.Failure.at(startLoc, "action error: " + e.getMessage());
+                return ParseResult.Failure.failure(startLoc, "action error: " + e.getMessage());
             }
         }
         // No action - return node with child values as semantic value if any
@@ -1000,13 +1000,13 @@ public final class PegEngine implements Parser {
                                                  ? childValues.getFirst()
                                                  : childValues);
         }
-        return ParseResult.Success.of(node, ctx.location());
+        return ParseResult.Success.success(node, ctx.location());
     }
 
     private ParseResult parseReferenceWithActions(ParsingContext ctx, Expression.Reference ref, List<Object> values) {
         var ruleOpt = grammar.rule(ref.ruleName());
         if (ruleOpt.isEmpty()) {
-            return ParseResult.Failure.at(ctx.location(), "rule '" + ref.ruleName() + "'");
+            return ParseResult.Failure.failure(ctx.location(), "rule '" + ref.ruleName() + "'");
         }
         var result = parseRuleWithActions(ctx, ruleOpt.unwrap());
         if (result instanceof ParseResult.Success success && success.semanticValueOpt()
@@ -1042,7 +1042,7 @@ public final class PegEngine implements Parser {
             tokenCapture[0] = text;
             var span = ctx.spanFrom(startLoc);
             var node = new CstNode.Token(span, ruleName, text, ctx.takePendingLeadingTrivia(), List.of());
-            return ParseResult.Success.of(node, ctx.location());
+            return ParseResult.Success.success(node, ctx.location());
         } finally{
             ctx.exitTokenBoundary();
         }
@@ -1123,7 +1123,7 @@ public final class PegEngine implements Parser {
     private ParseResult literalFailureAt(ParsingContext ctx, String text) {
         var msg = literalFailureMessageCache.computeIfAbsent(text, t -> "'" + t + "'");
         ctx.updateFurthest(msg);
-        return ParseResult.Failure.at(ctx.location(), msg);
+        return ParseResult.Failure.failure(ctx.location(), msg);
     }
 
     /**
@@ -1165,7 +1165,7 @@ public final class PegEngine implements Parser {
                                             .map(w -> "'" + w + "'")
                                             .toList());
             ctx.updateFurthest(expected);
-            return ParseResult.Failure.at(ctx.location(), expected);
+            return ParseResult.Failure.failure(ctx.location(), expected);
         }
         var matched = longestMatch.unwrap();
         advanceLiteral(ctx, matched, longestLen);
@@ -1240,7 +1240,7 @@ public final class PegEngine implements Parser {
                                                                            ? "^"
                                                                            : "") + cc.pattern() + "]");
         ctx.updateFurthest(msg);
-        return ParseResult.Failure.at(ctx.location(), msg);
+        return ParseResult.Failure.failure(ctx.location(), msg);
     }
 
     private boolean matchesCharClass(char c, String pattern, boolean caseInsensitive) {
@@ -1328,7 +1328,7 @@ public final class PegEngine implements Parser {
     private ParseResult parseAny(ParsingContext ctx, Expression.Any any) {
         if (ctx.isAtEnd()) {
             ctx.updateFurthest("any character");
-            return ParseResult.Failure.at(ctx.location(), "any character");
+            return ParseResult.Failure.failure(ctx.location(), "any character");
         }
         var startLoc = ctx.location();
         char c = ctx.advance();
@@ -1342,7 +1342,7 @@ public final class PegEngine implements Parser {
     private ParseResult parseReference(ParsingContext ctx, Expression.Reference ref) {
         var ruleOpt = grammar.rule(ref.ruleName());
         if (ruleOpt.isEmpty()) {
-            return ParseResult.Failure.at(ctx.location(), "rule '" + ref.ruleName() + "'");
+            return ParseResult.Failure.failure(ctx.location(), "rule '" + ref.ruleName() + "'");
         }
         return parseRule(ctx, ruleOpt.unwrap());
     }
@@ -1378,7 +1378,7 @@ public final class PegEngine implements Parser {
         // Always restore - predicates don't consume input nor trivia state.
         ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
         if (result.isSuccess()) {
-            return ParseResult.Failure.at(startLoc, "not " + describeExpression(not.expression()));
+            return ParseResult.Failure.failure(startLoc, "not " + describeExpression(not.expression()));
         }
         return new ParseResult.PredicateSuccess(startLoc);
     }
@@ -1398,7 +1398,7 @@ public final class PegEngine implements Parser {
             var text = ctx.substring(startPos, endPos);
             var span = ctx.spanFrom(startLoc);
             var node = new CstNode.Token(span, ruleName, text, ctx.takePendingLeadingTrivia(), List.of());
-            return ParseResult.Success.of(node, ctx.location());
+            return ParseResult.Success.success(node, ctx.location());
         } finally{
             ctx.exitTokenBoundary();
         }
@@ -1438,16 +1438,16 @@ public final class PegEngine implements Parser {
     private ParseResult parseBackReference(ParsingContext ctx, Expression.BackReference br) {
         var captured = ctx.getCapture(br.name());
         if (captured.isEmpty()) {
-            return ParseResult.Failure.at(ctx.location(), "capture '" + br.name() + "'");
+            return ParseResult.Failure.failure(ctx.location(), "capture '" + br.name() + "'");
         }
         var text = captured.unwrap();
         if (ctx.remaining() < text.length()) {
-            return ParseResult.Failure.at(ctx.location(), "'" + text + "'");
+            return ParseResult.Failure.failure(ctx.location(), "'" + text + "'");
         }
         var startLoc = ctx.location();
         for (int i = 0; i < text.length(); i++ ) {
             if (ctx.peek(i) != text.charAt(i)) {
-                return ParseResult.Failure.at(ctx.location(), "'" + text + "'");
+                return ParseResult.Failure.failure(ctx.location(), "'" + text + "'");
             }
         }
         for (int i = 0; i < text.length(); i++ ) {
@@ -1455,7 +1455,7 @@ public final class PegEngine implements Parser {
         }
         var span = ctx.spanFrom(startLoc);
         var node = new CstNode.Terminal(span, "", text, ctx.takePendingLeadingTrivia(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return ParseResult.Success.success(node, ctx.location());
     }
 
     private ParseResult parseCut(ParsingContext ctx, Expression.Cut cut) {
@@ -1586,7 +1586,7 @@ public final class PegEngine implements Parser {
                 ctx.restorePendingLeadingTrivia(pendingSnapshot);
                 // If cut was encountered, return CutFailure to prevent backtracking
                 if (cutEncountered) {
-                    return ParseResult.CutFailure.at(failure.location(), failure.expected());
+                    return ParseResult.CutFailure.cutFailure(failure.location(), failure.expected());
                 }
                 return result;
             }
@@ -1600,7 +1600,7 @@ public final class PegEngine implements Parser {
         }
         var span = ctx.spanFrom(startLoc);
         var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return ParseResult.Success.success(node, ctx.location());
     }
 
     /**
@@ -1646,7 +1646,7 @@ public final class PegEngine implements Parser {
         }
         return lastFailure != null
                ? lastFailure
-               : ParseResult.Failure.at(ctx.location(), "one of alternatives");
+               : ParseResult.Failure.failure(ctx.location(), "one of alternatives");
     }
 
     /**
@@ -1699,10 +1699,10 @@ public final class PegEngine implements Parser {
         }
         var span = ctx.spanFrom(startLoc);
         if (children.size() == 1) {
-            return ParseResult.Success.of(children.getFirst(), ctx.location());
+            return ParseResult.Success.success(children.getFirst(), ctx.location());
         }
         var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return ParseResult.Success.success(node, ctx.location());
     }
 
     /**
@@ -1764,10 +1764,10 @@ public final class PegEngine implements Parser {
         }
         var span = ctx.spanFrom(startLoc);
         if (children.size() == 1) {
-            return ParseResult.Success.of(children.getFirst(), ctx.location());
+            return ParseResult.Success.success(children.getFirst(), ctx.location());
         }
         var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return ParseResult.Success.success(node, ctx.location());
     }
 
     /**
@@ -1792,7 +1792,7 @@ public final class PegEngine implements Parser {
         ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
         var span = SourceSpan.sourceSpan(startLoc);
         var node = new CstNode.NonTerminal(span, ruleName, List.of(), List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return ParseResult.Success.success(node, ctx.location());
     }
 
     /**
@@ -1852,14 +1852,14 @@ public final class PegEngine implements Parser {
         }
         if (count < rep.min()) {
             ctx.restoreLocation(startLoc);
-            return ParseResult.Failure.at(ctx.location(), "at least " + rep.min() + " repetitions");
+            return ParseResult.Failure.failure(ctx.location(), "at least " + rep.min() + " repetitions");
         }
         var span = ctx.spanFrom(startLoc);
         if (children.size() == 1) {
-            return ParseResult.Success.of(children.getFirst(), ctx.location());
+            return ParseResult.Success.success(children.getFirst(), ctx.location());
         }
         var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
-        return ParseResult.Success.of(node, ctx.location());
+        return ParseResult.Success.success(node, ctx.location());
     }
 
     /**

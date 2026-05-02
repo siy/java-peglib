@@ -263,7 +263,7 @@ public final class PegParser {
         }
 
         public Result<Parser> build() {
-            var config = ParserConfig.of(packratEnabled, recoveryStrategy, captureTrivia);
+            var config = ParserConfig.parserConfig(packratEnabled, recoveryStrategy, captureTrivia);
             return fromGrammar(grammarText, config);
         }
     }

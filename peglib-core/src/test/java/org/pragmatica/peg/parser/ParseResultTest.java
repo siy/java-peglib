@@ -25,7 +25,7 @@ class ParseResultTest {
     @Test
     void success_isSuccess_returnsTrue() {
         var node = createTerminal("test");
-        var result = ParseResult.Success.of(node, END_LOC);
+        var result = ParseResult.Success.success(node, END_LOC);
 
         assertTrue(result.isSuccess());
         assertFalse(result.isFailure());
@@ -34,7 +34,7 @@ class ParseResultTest {
     @Test
     void success_withoutSemanticValue_hasNoValue() {
         var node = createTerminal("test");
-        var result = ParseResult.Success.of(node, END_LOC);
+        var result = ParseResult.Success.success(node, END_LOC);
 
         assertFalse(result.hasSemanticValue());
         assertTrue(result.semanticValueOpt().isEmpty());
@@ -71,7 +71,7 @@ class ParseResultTest {
     @Test
     void success_withSemanticValue_addsToExisting() {
         var node = createTerminal("test");
-        var result = ParseResult.Success.of(node, END_LOC);
+        var result = ParseResult.Success.success(node, END_LOC);
 
         var withValue = result.withSemanticValue(100);
 
@@ -83,7 +83,7 @@ class ParseResultTest {
     @Test
     void success_withTrivia_preservesTrivia() {
         var node = createTerminal("test");
-        var result = ParseResult.Success.of(node, END_LOC, List.of());
+        var result = ParseResult.Success.success(node, END_LOC, List.of());
 
         assertEquals(List.of(), result.trailingTrivia());
     }
@@ -92,7 +92,7 @@ class ParseResultTest {
 
     @Test
     void failure_isFailure_returnsTrue() {
-        var result = ParseResult.Failure.at(LOC, "expected");
+        var result = ParseResult.Failure.failure(LOC, "expected");
 
         assertFalse(result.isSuccess());
         assertTrue(result.isFailure());
@@ -100,7 +100,7 @@ class ParseResultTest {
 
     @Test
     void failure_preservesExpected() {
-        var result = ParseResult.Failure.at(LOC, "digit");
+        var result = ParseResult.Failure.failure(LOC, "digit");
 
         assertEquals("digit", result.expected());
         assertEquals(LOC, result.location());
@@ -110,7 +110,7 @@ class ParseResultTest {
 
     @Test
     void cutFailure_isFailure_returnsTrue() {
-        var result = ParseResult.CutFailure.at(LOC, "expected after cut");
+        var result = ParseResult.CutFailure.cutFailure(LOC, "expected after cut");
 
         assertFalse(result.isSuccess());
         assertTrue(result.isFailure());
@@ -118,7 +118,7 @@ class ParseResultTest {
 
     @Test
     void cutFailure_preservesExpected() {
-        var result = ParseResult.CutFailure.at(LOC, "expression");
+        var result = ParseResult.CutFailure.cutFailure(LOC, "expression");
 
         assertEquals("expression", result.expected());
         assertEquals(LOC, result.location());
@@ -126,8 +126,8 @@ class ParseResultTest {
 
     @Test
     void cutFailure_distinctFromRegularFailure() {
-        var failure = ParseResult.Failure.at(LOC, "test");
-        var cutFailure = ParseResult.CutFailure.at(LOC, "test");
+        var failure = ParseResult.Failure.failure(LOC, "test");
+        var cutFailure = ParseResult.CutFailure.cutFailure(LOC, "test");
 
         // Both are failures
         assertTrue(failure.isFailure());
@@ -180,7 +180,7 @@ class ParseResultTest {
         var node = createTerminal("test");
 
         // No semantic value
-        var noValue = ParseResult.Success.of(node, END_LOC);
+        var noValue = ParseResult.Success.success(node, END_LOC);
         // Null passed to withValue is treated as none (JBCT compliant)
         var nullValue = ParseResult.Success.withValue(node, END_LOC, null);
         // Non-null value

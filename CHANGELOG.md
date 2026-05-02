@@ -14,6 +14,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`Grammar` is parse-don't-validate.** The instance method `Grammar#validate()` and the legacy backwards-compat record constructors (4-arg pre-0.2.4 / 5-arg 0.2.4-0.2.7) are gone. Construct a validated `Grammar` via the new static factory `Grammar.grammar(rules, startRule, whitespace, word, suggestRules, imports)` (and the 4-arg overload `Grammar.grammar(rules, startRule, whitespace, word)`), which returns `Result<Grammar>` and runs the same checks the old `validate()` did (undefined rule references, unsupported indirect left-recursion). `GrammarParser.parse(text)` and `GrammarResolver.resolve(...)` route through the factory, so callers using the public `PegParser` API observe the validation failure earlier in the pipeline. `PegParser.fromGrammar(Grammar, ...)` no longer revalidates — the input is assumed already-validated.
 - **`tree` package factory rename.** `SourceLocation.at(line, column, offset)` → `SourceLocation.sourceLocation(...)`; `SourceSpan.of(start, end)` → `SourceSpan.sourceSpan(...)`; `SourceSpan.at(location)` → `SourceSpan.sourceSpan(location)` (overload). Generator emits the new typeName-style factories, so generated parsers from 0.3.x will fail to compile against 0.4.0 runtime — regenerate.
 - **`action` package factory rename.** `ActionCompiler.create()` / `ActionCompiler.create(ClassLoader)` → `ActionCompiler.actionCompiler(...)`; `SemanticValues.of(...)` → `SemanticValues.semanticValues(...)`.
+- **`parser` package factory rename.** `ParserConfig.of(...)` → `ParserConfig.parserConfig(...)`; `ParseResult.Success.of(...)` → `ParseResult.Success.success(...)`; `ParseResult.Failure.at(...)` → `ParseResult.Failure.failure(...)`; `ParseResult.CutFailure.at(...)` → `ParseResult.CutFailure.cutFailure(...)`. `PegEngine.create(...)` left as-is (domain-named per spec).
 
 ### Fixed
 
@@ -26,6 +27,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`SessionFactory.create(Grammar, ParserConfig, boolean)` (incremental)** — now expects an already-validated `Grammar`. Validation failures from `PegEngine.create(...)` are still surfaced as `IllegalArgumentException`, preserving the construction-time contract.
 - **`tree` factories** — replace `SourceLocation.at(...)` with `SourceLocation.sourceLocation(...)`, `SourceSpan.of(...)` and `SourceSpan.at(...)` with `SourceSpan.sourceSpan(...)`. Mechanical rename. Generated parsers must be regenerated.
 - **`action` factories** — replace `ActionCompiler.create(...)` with `ActionCompiler.actionCompiler(...)` and `SemanticValues.of(...)` with `SemanticValues.semanticValues(...)`. Mechanical rename.
+- **`parser` factories** — replace `ParserConfig.of(...)` with `ParserConfig.parserConfig(...)`; `ParseResult.Success.of(...)` with `ParseResult.Success.success(...)`; `ParseResult.Failure.at(...)` with `ParseResult.Failure.failure(...)`; `ParseResult.CutFailure.at(...)` with `ParseResult.CutFailure.cutFailure(...)`. Mechanical rename.
 
 ## [0.3.6] - 2026-05-01
 

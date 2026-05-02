@@ -25,7 +25,7 @@ class ParsingContextTest {
     @Test
     void packratCache_whenEnabled_cachesMemoizedResults() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);  // packrat enabled
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);  // packrat enabled
         var ctx = ParsingContext.create("a", grammar, config);
 
         // Cache should be empty initially
@@ -33,7 +33,7 @@ class ParsingContextTest {
 
         // Create a result and cache it
         var node = createTerminal("a");
-        var result = ParseResult.Success.of(node, SourceLocation.sourceLocation(1, 2, 1));
+        var result = ParseResult.Success.success(node, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cache("Root", result);
 
         // Should retrieve cached result
@@ -45,12 +45,12 @@ class ParsingContextTest {
     @Test
     void packratCache_whenDisabled_returnsNone() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(false, RecoveryStrategy.NONE, true);  // packrat disabled
+        var config = ParserConfig.parserConfig(false, RecoveryStrategy.NONE, true);  // packrat disabled
         var ctx = ParsingContext.create("a", grammar, config);
 
         // Should return none even after caching
         var node = createTerminal("a");
-        var result = ParseResult.Success.of(node, SourceLocation.sourceLocation(1, 2, 1));
+        var result = ParseResult.Success.success(node, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cache("Root", result);
 
         assertTrue(ctx.getCached("Root").isEmpty());
@@ -59,18 +59,18 @@ class ParsingContextTest {
     @Test
     void packratCache_usesPositionInKey() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("aa", grammar, config);
 
         // Cache at position 0
         var node1 = createTerminal("a");
-        var result1 = ParseResult.Success.of(node1, SourceLocation.sourceLocation(1, 2, 1));
+        var result1 = ParseResult.Success.success(node1, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cacheAt("Root", 0, result1);
 
         // Cache at position 1
         ctx.setPos(1);
         var node2 = createTerminal("a");
-        var result2 = ParseResult.Success.of(node2, SourceLocation.sourceLocation(1, 3, 2));
+        var result2 = ParseResult.Success.success(node2, SourceLocation.sourceLocation(1, 3, 2));
         ctx.cacheAt("Root", 1, result2);
 
         // Should retrieve different results for different positions
@@ -87,17 +87,17 @@ class ParsingContextTest {
     @Test
     void packratCache_usesRuleNameInKey() {
         var grammar = parseGrammar("A <- 'a'\nB <- 'b'");
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("ab", grammar, config);
 
         // Cache for rule A
         var nodeA = createTerminal("a");
-        var resultA = ParseResult.Success.of(nodeA, SourceLocation.sourceLocation(1, 2, 1));
+        var resultA = ParseResult.Success.success(nodeA, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cache("A", resultA);
 
         // Cache for rule B at same position
         var nodeB = createTerminal("b");
-        var resultB = ParseResult.Success.of(nodeB, SourceLocation.sourceLocation(1, 2, 1));
+        var resultB = ParseResult.Success.success(nodeB, SourceLocation.sourceLocation(1, 2, 1));
         ctx.cache("B", resultB);
 
         // Should retrieve different results for different rules
@@ -116,7 +116,7 @@ class ParsingContextTest {
     @Test
     void position_startsAtZero() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("test", grammar, config);
 
         assertEquals(0, ctx.pos());
@@ -129,7 +129,7 @@ class ParsingContextTest {
     @Test
     void advance_updatesPositionAndColumn() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("abc", grammar, config);
 
         ctx.advance();
@@ -145,7 +145,7 @@ class ParsingContextTest {
     @Test
     void advance_updatesLineOnNewline() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("a\nb", grammar, config);
 
         ctx.advance();  // 'a'
@@ -159,7 +159,7 @@ class ParsingContextTest {
     @Test
     void restoreLocation_resetsPositionAndLineColumn() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("abc", grammar, config);
 
         var saved = ctx.location();
@@ -178,7 +178,7 @@ class ParsingContextTest {
     @Test
     void capture_setAndGet() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("test", grammar, config);
 
         ctx.setCapture("name", "value");
@@ -191,7 +191,7 @@ class ParsingContextTest {
     @Test
     void capture_getMissing_returnsNone() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("test", grammar, config);
 
         var captured = ctx.getCapture("nonexistent");
@@ -201,7 +201,7 @@ class ParsingContextTest {
     @Test
     void capture_saveAndRestore() {
         var grammar = parseGrammar(SIMPLE_GRAMMAR);
-        var config = ParserConfig.of(true, RecoveryStrategy.NONE, true);
+        var config = ParserConfig.parserConfig(true, RecoveryStrategy.NONE, true);
         var ctx = ParsingContext.create("test", grammar, config);
 
         ctx.setCapture("a", "1");
