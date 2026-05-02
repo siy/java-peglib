@@ -160,13 +160,15 @@ public final class PegEngine implements Parser {
                                                            mergeActions(grammar, inlineActions, lambdaActions)));
     }
 
-    public static PegEngine createWithoutActions(Grammar grammar, ParserConfig config) {
-        var configCheck = validateConfig(grammar, config);
-        if (configCheck.isFailure()) {
-            throw new IllegalArgumentException(
-            ((ParseError.SemanticError) configCheck.fold(c -> c, r -> null)).reason());
-        }
-        return new PegEngine(grammar, config, Map.of());
+    /**
+     * 0.4.0 — symmetric with {@link #create(Grammar, ParserConfig)}: returns
+     * {@code Result<PegEngine>} so configuration errors flow through the same
+     * monadic channel instead of throwing. Used by CST-only callers that
+     * deliberately skip action compilation.
+     */
+    public static Result<PegEngine> createWithoutActions(Grammar grammar, ParserConfig config) {
+        return validateConfig(grammar, config)
+                .map(g -> new PegEngine(g, config, Map.of()));
     }
 
     /**
@@ -978,18 +980,13 @@ public final class PegEngine implements Parser {
                                 .or(ctx.substring(startPos,
                                                   ctx.pos()));
         var span = ctx.spanFrom(startLoc);
-        // Execute action if present
+        // Execute action if present.
+        // 0.4.0 — wrap action invocation in Result.lift to convert any thrown
+        // exception into a ParseResult.Failure at the JBCT adapter boundary.
         var actionOpt = Option.option(actions.get(rule.name()));
         if (actionOpt.isPresent()) {
             var sv = SemanticValues.semanticValues(matchedText, span, childValues);
-            try{
-                var value = actionOpt.unwrap()
-                                     .apply(sv);
-                var node = wrapWithRuleName(success.node(), rule.name(), ruleLeading);
-                return ParseResult.Success.withValue(node, ctx.location(), value);
-            } catch (Exception e) {
-                return ParseResult.Failure.failure(startLoc, "action error: " + e.getMessage());
-            }
+            return dispatchAction(actionOpt.unwrap(), sv, success.node(), rule.name(), ruleLeading, startLoc, ctx);
         }
         // No action - return node with child values as semantic value if any
         var node = wrapWithRuleName(success.node(), rule.name(), ruleLeading);
@@ -1001,6 +998,39 @@ public final class PegEngine implements Parser {
                                                  : childValues);
         }
         return ParseResult.Success.success(node, ctx.location());
+    }
+
+    /**
+     * 0.4.0 — JBCT adapter-boundary wrapper for grammar action dispatch. Any
+     * exception thrown by the action body is captured by {@link Result#lift}
+     * into a {@link ParseError.ActionError}, then projected into a
+     * {@link ParseResult.Failure}. Success builds the wrapped node and
+     * threads the action's return value as the semantic value.
+     */
+    private ParseResult dispatchAction(Action action,
+                                       SemanticValues sv,
+                                       CstNode successNode,
+                                       String ruleName,
+                                       List<Trivia> ruleLeading,
+                                       SourceLocation startLoc,
+                                       ParsingContext ctx) {
+        return Result.lift(t -> (ParseError) new ParseError.ActionError(startLoc, ruleName, t),
+                           () -> action.apply(sv))
+                     .fold(cause -> actionFailure(startLoc, ((ParseError.ActionError) cause).cause()),
+                           value -> actionSuccess(successNode, ruleName, ruleLeading, ctx, value));
+    }
+
+    private static ParseResult actionFailure(SourceLocation startLoc, Throwable cause) {
+        return ParseResult.Failure.failure(startLoc, "action error: " + cause.getMessage());
+    }
+
+    private ParseResult actionSuccess(CstNode successNode,
+                                      String ruleName,
+                                      List<Trivia> ruleLeading,
+                                      ParsingContext ctx,
+                                      Object value) {
+        var node = wrapWithRuleName(successNode, ruleName, ruleLeading);
+        return ParseResult.Success.withValue(node, ctx.location(), value);
     }
 
     private ParseResult parseReferenceWithActions(ParsingContext ctx, Expression.Reference ref, List<Object> values) {

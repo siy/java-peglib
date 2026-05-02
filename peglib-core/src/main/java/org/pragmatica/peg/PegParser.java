@@ -122,7 +122,8 @@ public final class PegParser {
      * Useful for CST-only parsing where actions are not needed.
      */
     public static Result<Parser> fromGrammarWithoutActions(Grammar grammar, ParserConfig config) {
-        return Result.success(PegEngine.createWithoutActions(grammar, config));
+        return PegEngine.createWithoutActions(grammar, config)
+                        .map(engine -> (Parser) engine);
     }
 
     /**
