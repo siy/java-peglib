@@ -39,7 +39,7 @@ import java.util.List;
  * spaces inside an existing whitespace run, deleting a blank line) — both are
  * handled by {@link #tryTriviaOnlyEdit}. Edits that span trivia plus a token
  * fall through to the structural reparse path in
- * {@link SessionImpl#tryIncrementalReparse}.
+ * {@link IncrementalSession#tryIncrementalReparse}.
  *
  * <p>Trivia attribution rule (0.2.4, see {@code docs/TRIVIA-ATTRIBUTION.md}):
  * trivia matched between siblings attaches to the <em>following</em>
@@ -87,7 +87,7 @@ public final class TriviaRedistribution {
      * root unchanged in v2 (the spliced subtree's leading trivia is already
      * correct because {@code parseRuleAt} ran the parser, which honours
      * 0.2.4's attribution rule). The hook exists so v2.5+ can plug in
-     * trailing-trivia rewinds without changing {@link SessionImpl}'s control
+     * trailing-trivia rewinds without changing {@link IncrementalSession}'s control
      * flow.
      */
     public static CstNode normalizeSplicedTrivia(CstNode newRoot, CstNode splicedSubtree) {

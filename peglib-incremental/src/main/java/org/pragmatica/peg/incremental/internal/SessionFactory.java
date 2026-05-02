@@ -94,7 +94,7 @@ public final class SessionFactory implements IncrementalParser {
         }
         int clampedCursor = Math.max(0, Math.min(cursorOffset, buffer.length()));
         CstNode root = parseFull(buffer);
-        return SessionImpl.initial(this, buffer, clampedCursor, root);
+        return IncrementalSession.initial(this, buffer, clampedCursor, root);
     }
 
     Grammar grammar() { return grammar; }
