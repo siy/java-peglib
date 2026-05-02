@@ -49,6 +49,14 @@ public final class PlaygroundServer {
         this.port = port;
     }
 
+    /**
+     * JBCT boundary: CLI entry point invoked by the JVM. The HTTP handler
+     * methods ({@link #handleParse}, {@link #handleStatic}) own the adapter
+     * lift — {@link #parseRequestBody} returns {@code Result<ParseRequest>}
+     * and request-body decode failures surface through that channel rather
+     * than through {@code main}'s untyped boundary. This method merely
+     * starts the server and registers a shutdown hook.
+     */
     public static void main(String[] args) throws IOException {
         int port = parsePort(args);
         var server = start(port);

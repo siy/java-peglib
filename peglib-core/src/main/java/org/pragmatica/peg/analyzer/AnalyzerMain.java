@@ -19,6 +19,15 @@ import java.nio.file.Path;
 public final class AnalyzerMain {
     private AnalyzerMain() {}
 
+    /**
+     * JBCT boundary: the JVM launches CLI tools through {@code main}, an
+     * untyped {@code void} entry point. This method maps each failure-prone
+     * step (file read, grammar parse) onto a process exit code and prints
+     * any reported diagnostics to stderr/stdout. Keep the body free of
+     * business logic — delegate to {@link Analyzer} and let
+     * {@link GrammarParser#parse} surface validation errors as
+     * {@code Result.failure}.
+     */
     public static void main(String[] args) {
         if (args.length != 1) {
             System.err.println("Usage: peglib-analyze <grammar.peg>");
