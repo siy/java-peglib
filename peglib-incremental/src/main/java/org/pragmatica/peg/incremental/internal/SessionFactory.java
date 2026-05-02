@@ -56,8 +56,8 @@ public final class SessionFactory implements IncrementalParser {
      * construction-time API, not a parse-result API, so validation failure
      * is a programmer error (the caller owns the grammar text).
      */
-    public static IncrementalParser create(Grammar grammar, ParserConfig config) {
-        return create(grammar, config, false);
+    public static IncrementalParser sessionFactory(Grammar grammar, ParserConfig config) {
+        return sessionFactory(grammar, config, false);
     }
 
     /**
@@ -73,7 +73,7 @@ public final class SessionFactory implements IncrementalParser {
      * {@code false}; opt-in via {@link IncrementalParser#create(Grammar,
      * ParserConfig, boolean)}.
      */
-    public static IncrementalParser create(Grammar grammar, ParserConfig config, boolean triviaFastPathEnabled) {
+    public static IncrementalParser sessionFactory(Grammar grammar, ParserConfig config, boolean triviaFastPathEnabled) {
         // 0.4.0 — caller is expected to supply a validated Grammar (constructed
         // through {@link Grammar#grammar(java.util.List, org.pragmatica.lang.Option,
         // org.pragmatica.lang.Option, org.pragmatica.lang.Option, java.util.List,

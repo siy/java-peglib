@@ -38,7 +38,7 @@ public final class CstHash {
      * @param root node with the generator/interpreter shape (Terminal/NonTerminal/Token/Error)
      * @return lowercase 16-character hex digest
      */
-    public static String of(Object root) {
+    public static String cstHash(Object root) {
         var h = new long[]{MIX};
         mix(h, root);
         return String.format("%016x", h[0]);

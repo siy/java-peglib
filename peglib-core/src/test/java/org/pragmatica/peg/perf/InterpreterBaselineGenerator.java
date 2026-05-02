@@ -46,7 +46,7 @@ public final class InterpreterBaselineGenerator {
                 System.err.println("SKIP (parse failed): " + file + " -> " + cstResult);
                 continue;
             }
-            var hash = CstHash.of(cstResult.unwrap());
+            var hash = CstHash.cstHash(cstResult.unwrap());
             var relative = CORPUS_ROOT.relativize(file);
             var out = BASELINE_ROOT.resolve(relative + ".hash");
             Files.createDirectories(out.getParent());

@@ -54,9 +54,9 @@ final class TriviaRedistributionTest {
             .fold(cause -> { throw new IllegalStateException(cause.message()); }, p -> p);
         var oracleResult = oracle.parseCst(session.text());
         assertThat(oracleResult.isSuccess()).as("oracle must parse %s", session.text()).isTrue();
-        assertThat(CstHash.of(session.root()))
+        assertThat(CstHash.cstHash(session.root()))
             .as("incremental parity for buffer %s", session.text())
-            .isEqualTo(CstHash.of(oracleResult.unwrap()));
+            .isEqualTo(CstHash.cstHash(oracleResult.unwrap()));
     }
 
     @Nested

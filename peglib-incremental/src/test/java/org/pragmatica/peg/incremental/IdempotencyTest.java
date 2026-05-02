@@ -38,10 +38,10 @@ final class IdempotencyTest {
     @DisplayName("Insert then delete restores the CST hash")
     void insert_then_delete() {
         var s0 = parser().initialize("let x = 1;");
-        long hash0 = CstHash.of(s0.root());
+        long hash0 = CstHash.cstHash(s0.root());
         var s1 = s0.edit(9, 0, "42");
         var s2 = s1.edit(9, 2, "");
-        assertThat(CstHash.of(s2.root())).isEqualTo(hash0);
+        assertThat(CstHash.cstHash(s2.root())).isEqualTo(hash0);
         assertThat(s2.text()).isEqualTo(s0.text());
     }
 
@@ -49,10 +49,10 @@ final class IdempotencyTest {
     @DisplayName("Delete then insert restores the CST hash")
     void delete_then_insert() {
         var s0 = parser().initialize("let x = 123;");
-        long hash0 = CstHash.of(s0.root());
+        long hash0 = CstHash.cstHash(s0.root());
         var s1 = s0.edit(8, 3, "");
         var s2 = s1.edit(8, 0, "123");
-        assertThat(CstHash.of(s2.root())).isEqualTo(hash0);
+        assertThat(CstHash.cstHash(s2.root())).isEqualTo(hash0);
         assertThat(s2.text()).isEqualTo(s0.text());
     }
 
@@ -60,10 +60,10 @@ final class IdempotencyTest {
     @DisplayName("Replace then restore via inverse replacement")
     void replace_then_restore() {
         var s0 = parser().initialize("let x = 1; let y = 2;");
-        long hash0 = CstHash.of(s0.root());
+        long hash0 = CstHash.cstHash(s0.root());
         var s1 = s0.edit(4, 1, "foo");
         var s2 = s1.edit(4, 3, "x");
-        assertThat(CstHash.of(s2.root())).isEqualTo(hash0);
+        assertThat(CstHash.cstHash(s2.root())).isEqualTo(hash0);
     }
 
     @Test
@@ -88,10 +88,10 @@ final class IdempotencyTest {
         var s0 = parser().initialize("let x = 1;");
         var branchA = s0.edit(9, 0, "42");
         var branchB = s0.edit(0, 0, "let z = 0; ");
-        assertThat(CstHash.of(branchA.root()))
-            .isEqualTo(CstHash.of(oracle.parseCst(branchA.text()).unwrap()));
-        assertThat(CstHash.of(branchB.root()))
-            .isEqualTo(CstHash.of(oracle.parseCst(branchB.text()).unwrap()));
+        assertThat(CstHash.cstHash(branchA.root()))
+            .isEqualTo(CstHash.cstHash(oracle.parseCst(branchA.text()).unwrap()));
+        assertThat(CstHash.cstHash(branchB.root()))
+            .isEqualTo(CstHash.cstHash(oracle.parseCst(branchB.text()).unwrap()));
         // s0 unchanged.
         assertThat(s0.text()).isEqualTo("let x = 1;");
     }

@@ -28,7 +28,7 @@ import java.util.List;
 public final class CstHash {
     private CstHash() {}
 
-    public static long of(CstNode node) {
+    public static long cstHash(CstNode node) {
         if (node == null) {
             return 0L;
         }
@@ -52,7 +52,7 @@ public final class CstHash {
     private static long hashChildren(List<CstNode> children) {
         long h = 17;
         for (var child : children) {
-            h = 31 * h + of(child);
+            h = 31 * h + cstHash(child);
         }
         return h;
     }

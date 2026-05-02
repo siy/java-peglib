@@ -62,7 +62,7 @@ class Phase2ChoiceDispatchParityTest {
     void phase2ChoiceDispatchCstHashMatchesBaseline(Path file) throws Exception {
         String source = Files.readString(file, StandardCharsets.UTF_8);
         var cst = GeneratedJava25Parser.parseToCst(source, PHASE2_DISPATCH_ON);
-        String actual = CstHash.of(cst);
+        String actual = CstHash.cstHash(cst);
 
         Path relative = CORPUS_ROOT.relativize(file);
         Path hashFile = BASELINE_ROOT.resolve(relative + ".hash");

@@ -58,7 +58,7 @@ public final class BaselineGenerator {
                 continue;
             }
 
-            String hash = CstHash.of(cst);
+            String hash = CstHash.cstHash(cst);
             var ruleHits = new TreeMap<String, Long>();
             countRuleHits(cst, ruleHits);
 

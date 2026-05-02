@@ -49,7 +49,7 @@ final class BackReferenceFallbackTest {
         var oracle = PegParser.fromGrammar(grammar()).fold(
             cause -> { throw new IllegalStateException(cause.message()); }, p -> p);
         var oracleTree = oracle.parseCst(s1.text()).unwrap();
-        assertThat(CstHash.of(s1.root())).isEqualTo(CstHash.of(oracleTree));
+        assertThat(CstHash.cstHash(s1.root())).isEqualTo(CstHash.cstHash(oracleTree));
     }
 
     @Test
