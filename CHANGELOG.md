@@ -16,6 +16,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`action` package factory rename.** `ActionCompiler.create()` / `ActionCompiler.create(ClassLoader)` → `ActionCompiler.actionCompiler(...)`; `SemanticValues.of(...)` → `SemanticValues.semanticValues(...)`.
 - **`parser` package factory rename.** `ParserConfig.of(...)` → `ParserConfig.parserConfig(...)`; `ParseResult.Success.of(...)` → `ParseResult.Success.success(...)`; `ParseResult.Failure.at(...)` → `ParseResult.Failure.failure(...)`; `ParseResult.CutFailure.at(...)` → `ParseResult.CutFailure.cutFailure(...)`. `PegEngine.create(...)` left as-is (domain-named per spec).
 - **`grammar` package — test assertion idiom.** `GrammarParserTest` rewritten to use `.onFailure(cause -> fail(cause.message())).onSuccess(grammar -> ...)` in place of `assertTrue(result.isSuccess()); var grammar = result.unwrap();` for happy-path assertions. Failure-path tests (`isFailure()` checks) unchanged.
+- **`generator` package factory rename.** `ParserGenerator.create(...)` (4 overloads) → `ParserGenerator.parserGenerator(...)`. Test assertion idiom: `ParserGeneratorTest` rewritten to use `result.onFailure(cause -> fail(cause.message())).unwrap()` in place of `assertTrue(...isSuccess()); var x = result.unwrap();`.
 
 ### Fixed
 
@@ -29,6 +30,7 @@ API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap 
 - **`tree` factories** — replace `SourceLocation.at(...)` with `SourceLocation.sourceLocation(...)`, `SourceSpan.of(...)` and `SourceSpan.at(...)` with `SourceSpan.sourceSpan(...)`. Mechanical rename. Generated parsers must be regenerated.
 - **`action` factories** — replace `ActionCompiler.create(...)` with `ActionCompiler.actionCompiler(...)` and `SemanticValues.of(...)` with `SemanticValues.semanticValues(...)`. Mechanical rename.
 - **`parser` factories** — replace `ParserConfig.of(...)` with `ParserConfig.parserConfig(...)`; `ParseResult.Success.of(...)` with `ParseResult.Success.success(...)`; `ParseResult.Failure.at(...)` with `ParseResult.Failure.failure(...)`; `ParseResult.CutFailure.at(...)` with `ParseResult.CutFailure.cutFailure(...)`. Mechanical rename.
+- **`generator` factories** — replace `ParserGenerator.create(...)` with `ParserGenerator.parserGenerator(...)` (all four overloads). Mechanical rename.
 
 ## [0.3.6] - 2026-05-01
 

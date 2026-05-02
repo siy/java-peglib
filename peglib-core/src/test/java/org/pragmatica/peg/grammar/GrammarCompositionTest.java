@@ -317,7 +317,7 @@ class GrammarCompositionTest {
 
             // Same shape when we drive the generator via the composed grammar.
             var composedSource = org.pragmatica.peg.generator.ParserGenerator
-            .create(composed, "gen.cst2", "CstParser2",
+            .parserGenerator(composed, "gen.cst2", "CstParser2",
                     org.pragmatica.peg.generator.ErrorReporting.BASIC, ParserConfig.DEFAULT)
             .generateCst();
             assertThat(composedSource).contains("record Num() implements RuleId");
@@ -335,7 +335,7 @@ class GrammarCompositionTest {
                 """;
             var composed = GrammarResolver.resolveText(rootText, source).unwrap();
             var generated = org.pragmatica.peg.generator.ParserGenerator
-            .create(composed, "gen.cst3", "CstParser3",
+            .parserGenerator(composed, "gen.cst3", "CstParser3",
                     org.pragmatica.peg.generator.ErrorReporting.BASIC, ParserConfig.DEFAULT)
             .generateCst();
             // Grammar-qualified RuleId record name.

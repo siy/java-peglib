@@ -154,7 +154,7 @@ public final class PegParser {
                                                 ParserConfig config) {
         return GrammarResolver.resolveText(grammarText,
                                            GrammarSource.empty())
-                              .map(grammar -> ParserGenerator.create(grammar, packageName, className, config)
+                              .map(grammar -> ParserGenerator.parserGenerator(grammar, packageName, className, config)
                                                              .generate());
     }
 
@@ -222,11 +222,11 @@ public final class PegParser {
                                                    ParserConfig config) {
         return GrammarResolver.resolveText(grammarText,
                                            GrammarSource.empty())
-                              .map(grammar -> ParserGenerator.create(grammar,
-                                                                     packageName,
-                                                                     className,
-                                                                     errorReporting,
-                                                                     config)
+                              .map(grammar -> ParserGenerator.parserGenerator(grammar,
+                                                                              packageName,
+                                                                              className,
+                                                                              errorReporting,
+                                                                              config)
                                                              .generateCst());
     }
 

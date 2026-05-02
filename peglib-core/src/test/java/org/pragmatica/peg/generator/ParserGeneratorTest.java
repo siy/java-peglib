@@ -21,8 +21,7 @@ class ParserGeneratorTest {
             "HelloParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         assertTrue(source.contains("package com.example.parser;"));
         assertTrue(source.contains("public final class HelloParser"));
@@ -40,8 +39,7 @@ class ParserGeneratorTest {
             "NumberParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         assertTrue(source.contains("skipWhitespace()"));
         assertTrue(source.contains("matchCharClass"));
@@ -56,8 +54,7 @@ class ParserGeneratorTest {
             "IntParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         assertTrue(source.contains("Integer.parseInt"));
     }
@@ -75,8 +72,7 @@ class ParserGeneratorTest {
             "Calculator"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         assertTrue(source.contains("parse_Expr"));
         assertTrue(source.contains("parse_Term"));
@@ -94,8 +90,7 @@ class ParserGeneratorTest {
             "RefParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         assertTrue(source.contains("parse_B()"));
     }
@@ -108,8 +103,7 @@ class ParserGeneratorTest {
             "ChoiceParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         assertTrue(source.contains("choiceStart"));
         assertTrue(source.contains("alt0_0"));
@@ -129,8 +123,7 @@ class ParserGeneratorTest {
             "QuantParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         assertTrue(source.contains("parse_ZeroOrMore"));
         assertTrue(source.contains("parse_OneOrMore"));
@@ -147,8 +140,7 @@ class ParserGeneratorTest {
             "TestParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Should import pragmatica-lite types
         assertTrue(source.contains("import org.pragmatica.lang.Option;"));
@@ -169,8 +161,7 @@ class ParserGeneratorTest {
             ErrorReporting.BASIC
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Should NOT include advanced diagnostic types
         assertFalse(source.contains("enum Severity"));
@@ -189,8 +180,7 @@ class ParserGeneratorTest {
             ErrorReporting.ADVANCED
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Should include advanced diagnostic types
         assertThat(source).contains("enum Severity");
@@ -210,8 +200,7 @@ class ParserGeneratorTest {
             ErrorReporting.ADVANCED
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Should include parseWithDiagnostics method
         assertThat(source).contains("public ParseResultWithDiagnostics parseWithDiagnostics(String input)");
@@ -228,8 +217,7 @@ class ParserGeneratorTest {
             ErrorReporting.ADVANCED
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Should include Rust-style formatting method
         assertThat(source).contains("public String format(String source, String filename)");
@@ -247,8 +235,7 @@ class ParserGeneratorTest {
             ErrorReporting.ADVANCED
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Should include error recovery helpers
         assertThat(source).contains("skipToRecoveryPoint");
@@ -266,8 +253,7 @@ class ParserGeneratorTest {
             ErrorReporting.ADVANCED
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Should include Error node type for CST
         assertThat(source).contains("record Error(SourceSpan span, String skippedText");
@@ -282,8 +268,7 @@ class ParserGeneratorTest {
             ErrorReporting.ADVANCED
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Should include Diagnostic helper methods
         assertThat(source).contains("Diagnostic withLabel(String labelMessage)");
@@ -300,8 +285,7 @@ class ParserGeneratorTest {
             "DefaultParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Default should be BASIC - no advanced features
         assertFalse(source.contains("parseWithDiagnostics"));
@@ -317,8 +301,7 @@ class ParserGeneratorTest {
             ErrorReporting.ADVANCED
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // CstNode.Error should be defined
         assertThat(source).contains("record Error(SourceSpan span, String skippedText, String expected,");
@@ -337,8 +320,7 @@ class ParserGeneratorTest {
             ErrorReporting.BASIC
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // CstNode.Error should NOT be defined in BASIC mode
         assertFalse(source.contains("record Error(SourceSpan span, String skippedText"));
@@ -358,8 +340,7 @@ class ParserGeneratorTest {
             "FurthestAstParser"
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Compile and run
         var parser = compileAndInstantiate(source, "test.furthest.FurthestAstParser");
@@ -390,8 +371,7 @@ class ParserGeneratorTest {
             ErrorReporting.BASIC
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Compile and run
         var parser = compileAndInstantiate(source, "test.furthest.cst.FurthestCstParser");
@@ -417,8 +397,7 @@ class ParserGeneratorTest {
             ErrorReporting.ADVANCED
         );
 
-        assertTrue(result.isSuccess());
-        var source = result.unwrap();
+        var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // Compile and run
         var parser = compileAndInstantiate(source, "test.furthest.adv.FurthestAdvParser");

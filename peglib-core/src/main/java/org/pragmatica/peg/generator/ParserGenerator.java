@@ -138,29 +138,29 @@ public final class ParserGenerator {
         }
     }
 
-    public static ParserGenerator create(Grammar grammar, String packageName, String className) {
+    public static ParserGenerator parserGenerator(Grammar grammar, String packageName, String className) {
         return new ParserGenerator(grammar, packageName, className, ErrorReporting.BASIC, ParserConfig.DEFAULT);
     }
 
-    public static ParserGenerator create(Grammar grammar,
-                                         String packageName,
-                                         String className,
-                                         ErrorReporting errorReporting) {
+    public static ParserGenerator parserGenerator(Grammar grammar,
+                                                  String packageName,
+                                                  String className,
+                                                  ErrorReporting errorReporting) {
         return new ParserGenerator(grammar, packageName, className, errorReporting, ParserConfig.DEFAULT);
     }
 
-    public static ParserGenerator create(Grammar grammar,
-                                         String packageName,
-                                         String className,
-                                         ParserConfig config) {
+    public static ParserGenerator parserGenerator(Grammar grammar,
+                                                  String packageName,
+                                                  String className,
+                                                  ParserConfig config) {
         return new ParserGenerator(grammar, packageName, className, ErrorReporting.BASIC, config);
     }
 
-    public static ParserGenerator create(Grammar grammar,
-                                         String packageName,
-                                         String className,
-                                         ErrorReporting errorReporting,
-                                         ParserConfig config) {
+    public static ParserGenerator parserGenerator(Grammar grammar,
+                                                  String packageName,
+                                                  String className,
+                                                  ErrorReporting errorReporting,
+                                                  ParserConfig config) {
         return new ParserGenerator(grammar, packageName, className, errorReporting, config);
     }
 

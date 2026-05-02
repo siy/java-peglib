@@ -25,9 +25,9 @@ class GeneratorFlagInertnessTest {
     void generateCst_withDefaultConfig_isByteIdenticalToLegacyFactory() {
         var grammar = loadJava25Grammar();
 
-        var legacySource = ParserGenerator.create(grammar, "gen", "Java25Parser")
+        var legacySource = ParserGenerator.parserGenerator(grammar, "gen", "Java25Parser")
                                           .generateCst();
-        var configuredSource = ParserGenerator.create(grammar, "gen", "Java25Parser", ParserConfig.DEFAULT)
+        var configuredSource = ParserGenerator.parserGenerator(grammar, "gen", "Java25Parser", ParserConfig.DEFAULT)
                                               .generateCst();
 
         assertEquals(legacySource, configuredSource,
@@ -38,9 +38,9 @@ class GeneratorFlagInertnessTest {
     void generateCst_withDefaultConfigAndAdvancedReporting_isByteIdenticalToLegacyFactory() {
         var grammar = loadJava25Grammar();
 
-        var legacySource = ParserGenerator.create(grammar, "gen", "Java25Parser", ErrorReporting.ADVANCED)
+        var legacySource = ParserGenerator.parserGenerator(grammar, "gen", "Java25Parser", ErrorReporting.ADVANCED)
                                           .generateCst();
-        var configuredSource = ParserGenerator.create(grammar, "gen", "Java25Parser",
+        var configuredSource = ParserGenerator.parserGenerator(grammar, "gen", "Java25Parser",
                                                       ErrorReporting.ADVANCED, ParserConfig.DEFAULT)
                                               .generateCst();
 
@@ -52,9 +52,9 @@ class GeneratorFlagInertnessTest {
     void generate_withDefaultConfig_isByteIdenticalToLegacyFactory() {
         var grammar = loadJava25Grammar();
 
-        var legacySource = ParserGenerator.create(grammar, "gen", "Java25Parser")
+        var legacySource = ParserGenerator.parserGenerator(grammar, "gen", "Java25Parser")
                                           .generate();
-        var configuredSource = ParserGenerator.create(grammar, "gen", "Java25Parser", ParserConfig.DEFAULT)
+        var configuredSource = ParserGenerator.parserGenerator(grammar, "gen", "Java25Parser", ParserConfig.DEFAULT)
                                               .generate();
 
         assertEquals(legacySource, configuredSource,
