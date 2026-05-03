@@ -47,6 +47,8 @@ public final class PegEngine implements Parser {
     // the regular single-pass path.
     private final Set<String> leftRecursiveRules;
 
+    private final Map<String, Rule> rulesByName;
+
     // Phase-1 optimization: per-engine caches for the quoted "'text'" and "[...]" / "[^...]"
     // expected-message strings (§6.5). The String concatenation "'" + text + "'" allocates a
     // StringBuilder + final String on every literal/char-class failure — in the hot backtracking
@@ -68,6 +70,19 @@ public final class PegEngine implements Parser {
         this.whitespaceFirstChars = computeWhitespaceFirstChars(grammar);
         this.suggestionVocabulary = computeSuggestionVocabulary(grammar);
         this.leftRecursiveRules = grammar.leftRecursiveRules();
+        this.rulesByName = buildRulesByName(grammar);
+    }
+
+    private static Map<String, Rule> buildRulesByName(Grammar grammar) {
+        var map = new HashMap<String, Rule>();
+        for (var rule : grammar.rules()) {
+            map.putIfAbsent(rule.name(), rule);
+        }
+        return Map.copyOf(map);
+    }
+
+    private Option<Rule> lookupRule(String name) {
+        return Option.option(rulesByName.get(name));
     }
 
     private static List<String> computeSuggestionVocabulary(Grammar grammar) {
@@ -234,7 +249,7 @@ public final class PegEngine implements Parser {
 
     @Override
     public Result<CstNode> parseCst(String input, String startRule) {
-        var ruleOpt = grammar.rule(startRule);
+        var ruleOpt = lookupRule(startRule);
         if (ruleOpt.isEmpty()) {
             return new ParseError.SemanticError(
             SourceLocation.START, "Unknown rule: " + startRule).result();
@@ -287,7 +302,7 @@ public final class PegEngine implements Parser {
 
     @Override
     public Result<Object> parse(String input, String startRule) {
-        var ruleOpt = grammar.rule(startRule);
+        var ruleOpt = lookupRule(startRule);
         if (ruleOpt.isEmpty()) {
             return new ParseError.SemanticError(
             SourceLocation.START, "Unknown rule: " + startRule).result();
@@ -331,7 +346,7 @@ public final class PegEngine implements Parser {
 
     @Override
     public ParseResultWithDiagnostics parseCstWithDiagnostics(String input, String startRule) {
-        var ruleOpt = grammar.rule(startRule);
+        var ruleOpt = lookupRule(startRule);
         if (ruleOpt.isEmpty()) {
             var diag = Diagnostic.error("unknown rule: " + startRule,
                                         SourceSpan.sourceSpan(SourceLocation.START))
@@ -380,7 +395,7 @@ public final class PegEngine implements Parser {
             SourceLocation.START, "Offset " + offset + " out of range [0, " + input.length() + "]").result();
         }
         var ruleName = resolveRuleName(ruleId);
-        var ruleOpt = grammar.rule(ruleName);
+        var ruleOpt = lookupRule(ruleName);
         if (ruleOpt.isEmpty()) {
             return new ParseError.SemanticError(
             SourceLocation.START, "Unknown rule for class " + ruleId.getSimpleName() + ": " + ruleName).result();
@@ -1037,7 +1052,7 @@ public final class PegEngine implements Parser {
     }
 
     private ParseResult parseReferenceWithActions(ParsingContext ctx, Expression.Reference ref, List<Object> values) {
-        var ruleOpt = grammar.rule(ref.ruleName());
+        var ruleOpt = lookupRule(ref.ruleName());
         if (ruleOpt.isEmpty()) {
             return ParseResult.Failure.failure(ctx.location(), "rule '" + ref.ruleName() + "'");
         }
@@ -1373,7 +1388,7 @@ public final class PegEngine implements Parser {
 
     // === Combinator Parsers ===
     private ParseResult parseReference(ParsingContext ctx, Expression.Reference ref) {
-        var ruleOpt = grammar.rule(ref.ruleName());
+        var ruleOpt = lookupRule(ref.ruleName());
         if (ruleOpt.isEmpty()) {
             return ParseResult.Failure.failure(ctx.location(), "rule '" + ref.ruleName() + "'");
         }
