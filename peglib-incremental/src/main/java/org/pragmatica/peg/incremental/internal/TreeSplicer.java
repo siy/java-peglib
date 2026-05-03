@@ -95,7 +95,7 @@ public final class TreeSplicer {
         var newEnd = oldEnd.offset() >= editEnd
                      ? new SourceLocation(oldEnd.line(), oldEnd.column(), oldEnd.offset() + delta)
                      : oldEnd;
-        var newSpan = SourceSpan.of(oldSpan.start(), newEnd);
+        var newSpan = SourceSpan.sourceSpan(oldSpan.start(), newEnd);
         return new CstNode.NonTerminal(
             newSpan,
             ancestor.rule(),
@@ -142,7 +142,7 @@ public final class TreeSplicer {
     }
 
     private static SourceSpan shiftSpan(SourceSpan span, int delta) {
-        return SourceSpan.of(shiftLoc(span.start(), delta), shiftLoc(span.end(), delta));
+        return SourceSpan.sourceSpan(shiftLoc(span.start(), delta), shiftLoc(span.end(), delta));
     }
 
     private static SourceLocation shiftLoc(SourceLocation loc, int delta) {

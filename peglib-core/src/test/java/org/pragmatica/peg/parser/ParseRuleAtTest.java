@@ -150,9 +150,9 @@ class ParseRuleAtTest {
         @Test
         void partialParse_equalityAndHashCode() {
             CstNode node = new CstNode.Terminal(
-            org.pragmatica.peg.tree.SourceSpan.of(
-            org.pragmatica.peg.tree.SourceLocation.at(1, 1, 0),
-            org.pragmatica.peg.tree.SourceLocation.at(1, 3, 2)),
+            org.pragmatica.peg.tree.SourceSpan.sourceSpan(
+            org.pragmatica.peg.tree.SourceLocation.sourceLocation(1, 1, 0),
+            org.pragmatica.peg.tree.SourceLocation.sourceLocation(1, 3, 2)),
             "Number", "42", java.util.List.of(), java.util.List.of());
 
             var a = new PartialParse(node, 2);

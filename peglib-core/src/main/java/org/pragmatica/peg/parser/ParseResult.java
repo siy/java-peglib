@@ -30,11 +30,11 @@ public sealed interface ParseResult {
             return true;
         }
 
-        public static Success of(CstNode node, SourceLocation endLocation) {
+        public static Success success(CstNode node, SourceLocation endLocation) {
             return new Success(node, endLocation, List.of(), Option.none());
         }
 
-        public static Success of(CstNode node, SourceLocation endLocation, List<Trivia> trivia) {
+        public static Success success(CstNode node, SourceLocation endLocation, List<Trivia> trivia) {
             return new Success(node, endLocation, trivia, Option.none());
         }
 
@@ -73,7 +73,7 @@ public sealed interface ParseResult {
             return false;
         }
 
-        public static Failure at(SourceLocation location, String expected) {
+        public static Failure failure(SourceLocation location, String expected) {
             return new Failure(location, expected);
         }
     }
@@ -113,7 +113,7 @@ public sealed interface ParseResult {
             return false;
         }
 
-        public static CutFailure at(SourceLocation location, String expected) {
+        public static CutFailure cutFailure(SourceLocation location, String expected) {
             return new CutFailure(location, expected);
         }
     }

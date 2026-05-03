@@ -177,10 +177,17 @@ Or whichever pattern the first reviewer green-lights as canonical. Bundle per-fi
 - Rewrite `execute()` bodies as Result pipelines
 - Add `@Contract` annotations on Mojo boundary methods (Maven calls into untyped land)
 
-### Phase 5 — `Formatter` immutable builder (~0.5 day)
+### Phase 5 — `Formatter` immutable builder (✅ shipped)
 
-- Replace mutable builder with immutable `FormatterConfig` record + small builder
-- File: `peglib-formatter/src/main/java/org/pragmatica/peg/formatter/Formatter.java`
+- Replaced mutable builder with immutable `FormatterConfig` record + immutable nested `Builder` record
+- New entry points: `FormatterConfig.builder()` / `Formatter.builder()` → `FormatterConfig.Builder`; terminal `.build()` → `FormatterConfig`; `Formatter.formatter(config)` → `Formatter`
+- `Formatter` is now stateless / thread-safe post-construction; the public `new Formatter()` constructor is removed
+- Files touched:
+  - `peglib-formatter/src/main/java/org/pragmatica/peg/formatter/FormatterConfig.java` (new)
+  - `peglib-formatter/src/main/java/org/pragmatica/peg/formatter/Formatter.java`
+  - `peglib-formatter/src/main/java/org/pragmatica/peg/formatter/package-info.java`
+  - `peglib-formatter/README.md`
+  - `peglib-formatter/src/test/java/.../examples/{Json,Sql,Arithmetic}Formatter.java`
 
 ### Phase 6 — `Result.lift` boundaries (~1 day)
 

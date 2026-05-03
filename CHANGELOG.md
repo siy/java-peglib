@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-01
+
+API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap (the original 0.4.0 plan item; superseded by `docs/incremental/V2.5-SPIKE.md`'s NO-GO recommendation — the actual lever is pivot-selection, not cache invalidation).
+
+### Changed (BREAKING)
+
+- **`Grammar` is parse-don't-validate.** The instance method `Grammar#validate()` and the legacy backwards-compat record constructors (4-arg pre-0.2.4 / 5-arg 0.2.4-0.2.7) are gone. Construct a validated `Grammar` via the new static factory `Grammar.grammar(rules, startRule, whitespace, word, suggestRules, imports)` (and the 4-arg overload `Grammar.grammar(rules, startRule, whitespace, word)`), which returns `Result<Grammar>` and runs the same checks the old `validate()` did (undefined rule references, unsupported indirect left-recursion). `GrammarParser.parse(text)` and `GrammarResolver.resolve(...)` route through the factory, so callers using the public `PegParser` API observe the validation failure earlier in the pipeline. `PegParser.fromGrammar(Grammar, ...)` no longer revalidates — the input is assumed already-validated.
+- **`tree` package factory rename.** `SourceLocation.at(line, column, offset)` → `SourceLocation.sourceLocation(...)`; `SourceSpan.of(start, end)` → `SourceSpan.sourceSpan(...)`; `SourceSpan.at(location)` → `SourceSpan.sourceSpan(location)` (overload). Generator emits the new typeName-style factories, so generated parsers from 0.3.x will fail to compile against 0.4.0 runtime — regenerate.
+- **`action` package factory rename.** `ActionCompiler.create()` / `ActionCompiler.create(ClassLoader)` → `ActionCompiler.actionCompiler(...)`; `SemanticValues.of(...)` → `SemanticValues.semanticValues(...)`.
+- **`parser` package factory rename.** `ParserConfig.of(...)` → `ParserConfig.parserConfig(...)`; `ParseResult.Success.of(...)` → `ParseResult.Success.success(...)`; `ParseResult.Failure.at(...)` → `ParseResult.Failure.failure(...)`; `ParseResult.CutFailure.at(...)` → `ParseResult.CutFailure.cutFailure(...)`. `PegEngine.create(...)` left as-is (domain-named per spec).
+- **`grammar` package — test assertion idiom.** `GrammarParserTest` rewritten to use `.onFailure(cause -> fail(cause.message())).onSuccess(grammar -> ...)` in place of `assertTrue(result.isSuccess()); var grammar = result.unwrap();` for happy-path assertions. Failure-path tests (`isFailure()` checks) unchanged.
+- **`generator` package factory rename.** `ParserGenerator.create(...)` (4 overloads) → `ParserGenerator.parserGenerator(...)`. Test assertion idiom: `ParserGeneratorTest` rewritten to use `result.onFailure(cause -> fail(cause.message())).unwrap()` in place of `assertTrue(...isSuccess()); var x = result.unwrap();`.
+- **`peglib-incremental` package factory rename.** `CstHash.of(...)` → `CstHash.cstHash(...)` (both the incremental `internal/CstHash` and the perf-test reflective `CstHash`); `SessionFactory.create(...)` (2 overloads) → `SessionFactory.sessionFactory(...)`. Public `IncrementalParser.create(...)` retained — it's the user-facing facade and not on the rename list.
+- **`peglib-incremental` `SessionImpl` → `IncrementalSession` record.** The package-private `SessionImpl` class implementing `Session` is replaced by a `record IncrementalSession(SessionFactory, String, CstNode, int, CstNode, NodeIndex, Stats) implements Session`. Removes the `Impl` anti-pattern; `Session` remains a public interface (the record's seven components are internal state and don't belong in a public type signature). The dead helper `SessionImpl#debugPathTo(...)` (no callers) was deleted in the same change. Internal-only — no consumer-visible source change.
+- **`peglib-playground` package factory rename.** `TraceRecord.of(...)` → `TraceRecord.traceRecord(...)`.
+- **`peglib-maven-plugin` Mojo `execute()` methods refactored to `Result` pipelines.** `GenerateMojo`, `LintMojo`, `CheckMojo` now compose failure-prone steps (read grammar, parse `errorReporting`, parse grammar, build parser, smoke-parse) as a `Result` chain and translate the terminal `Result.failure(cause)` into `MojoFailureException(cause.message())` at the Maven boundary. Behavior preserved (same successes, same surfaced messages); a few read-failure paths that previously threw `MojoExecutionException` now consistently throw `MojoFailureException` to keep the boundary single-typed. `@Contract` annotation from JBCT convention is documented in Javadoc on each `execute()` method (no annotation type exists in the project).
+- **`peglib-formatter` `Formatter` mutable builder replaced by immutable `FormatterConfig` record + immutable builder.** The previous API used `new Formatter().defaultIndent(...).maxLineWidth(...).triviaPolicy(...).rule(name, fn)` returning the same instance with mutated state. Replaced by `FormatterConfig.builder()` (also exposed as `Formatter.builder()`), where each `defaultIndent` / `maxLineWidth` / `triviaPolicy` / `rule` call returns a *new* `FormatterConfig.Builder`; terminal `.build()` materialises an immutable `FormatterConfig` record. A `Formatter` is then derived from the config via `Formatter.formatter(config)`, and is itself immutable and thread-safe to use concurrently. The public `new Formatter()` constructor is removed. `FormatterConfig` exposes `defaultConfig()`, `builder()`, and `toBuilder()` factory entry points.
+- **`PegEngine.createWithoutActions(...)` returns `Result<PegEngine>`.** Previously asymmetric with `PegEngine.create(...)` (threw `IllegalArgumentException` on config validation failure). Now routes through `validateConfig` and surfaces failures as `Result<PegEngine>` so callers compose uniformly. `PegParser.fromGrammarWithoutActions(...)` updated to thread the result. JBCT Phase 6.
+- **Action dispatch wrapped in `Result.lift` (`PegEngine#dispatchAction`).** Replaces the previous `try/catch (Exception)` around `action.apply(sv)` in `parseRuleWithActions` with a `Result.lift(t -> new ParseError.ActionError(...), () -> action.apply(sv))` adapter boundary. Action exceptions are still projected into `ParseResult.Failure` with the same `"action error: " + getMessage()` wording; only the JBCT pattern changed. JBCT Phase 6.
+- **Playground `parseRequestBody` returns `Result<ParseRequest>`.** The HTTP `/parse` adapter now uses `Result.lift(BadRequest::new, () -> JsonDecoder.decodeObject(body))` to capture the JSON-decoder's `IllegalArgumentException`, with the missing-grammar validation step propagating through `Result.flatMap`. The handler still emits HTTP 400 with the same `{"error":"bad request","detail":...}` payload on any decode/validation failure; only the internal control-flow shape changed. New package-private `BadRequest(String message) implements Cause` carries the message. JBCT Phase 6.
+- **`IncrementalSession#tryIncrementalReparse` returns `Option<IncrementalResult>`.** Replaces the previous nullable-`IncrementalResult` return with `Option`. The outward-walk loop now threads `Option<CstNode>` from `index.parentOf(...)` directly instead of `.or((CstNode) null)`, eliminating the three sites of the `(CstNode) null` cast workaround and the related TODO(P3) breadcrumbs. The success branch is extracted to `applyIncremental(...)` and the splice-build into `buildIncrementalResult(...)`. `findBoundaryCandidate(...)` rewritten to thread the same `Option`-walk pattern; root-fallback semantics unchanged. JBCT Phase 7.
+
+### Documentation
+
+- **JBCT-boundary Javadoc on CLI `main(String[])` entry points.** Added boundary documentation comments to `AnalyzerMain.main`, `PlaygroundRepl.main`, `PlaygroundServer.main`, and the dev-only `PackratStatsProbe.main`. Same pattern as Mojo `execute()` (Phase 4): `@Contract` is not a project annotation, so the boundary description lives in Javadoc. JBCT Phase 8.
+
+### Fixed
+
+- _<TBD>_
+
+### Migration guide
+
+- **`Grammar.validate()` callers** — drop the `.flatMap(Grammar::validate)` (or `.validate()`) step. `GrammarParser.parse(text)` already returns a validated `Result<Grammar>` for grammars without `%import` directives; for grammars with imports, `GrammarResolver.resolve(...)` runs validation as part of composition.
+- **Direct `new Grammar(...)` callers** — switch to `Grammar.grammar(...).fold(failure -> handleError(failure), grammar -> useIt(grammar))`. The canonical record constructor is still public (Java records require canonical-ctor visibility ≥ class visibility) but should be treated as internal.
+- **`SessionFactory.create(Grammar, ParserConfig, boolean)` (incremental)** — now expects an already-validated `Grammar`. Validation failures from `PegEngine.create(...)` are still surfaced as `IllegalArgumentException`, preserving the construction-time contract.
+- **`tree` factories** — replace `SourceLocation.at(...)` with `SourceLocation.sourceLocation(...)`, `SourceSpan.of(...)` and `SourceSpan.at(...)` with `SourceSpan.sourceSpan(...)`. Mechanical rename. Generated parsers must be regenerated.
+- **`action` factories** — replace `ActionCompiler.create(...)` with `ActionCompiler.actionCompiler(...)` and `SemanticValues.of(...)` with `SemanticValues.semanticValues(...)`. Mechanical rename.
+- **`parser` factories** — replace `ParserConfig.of(...)` with `ParserConfig.parserConfig(...)`; `ParseResult.Success.of(...)` with `ParseResult.Success.success(...)`; `ParseResult.Failure.at(...)` with `ParseResult.Failure.failure(...)`; `ParseResult.CutFailure.at(...)` with `ParseResult.CutFailure.cutFailure(...)`. Mechanical rename.
+- **`generator` factories** — replace `ParserGenerator.create(...)` with `ParserGenerator.parserGenerator(...)` (all four overloads). Mechanical rename.
+- **`incremental` factories** — replace `CstHash.of(...)` with `CstHash.cstHash(...)` and `SessionFactory.create(...)` with `SessionFactory.sessionFactory(...)`. `IncrementalParser.create(...)` remains.
+- **`incremental` `SessionImpl` rename** — no migration needed. `SessionImpl` was package-private; the new `IncrementalSession` record is also package-private and implements the same public `Session` interface. Consumers continue to use `Session`; there is no source-visible change.
+- **`playground` factories** — replace `TraceRecord.of(...)` with `TraceRecord.traceRecord(...)`.
+- **`Formatter` builder** — replace
+  ```java
+  var formatter = new Formatter()
+      .defaultIndent(2)
+      .maxLineWidth(80)
+      .triviaPolicy(TriviaPolicy.DROP_ALL)
+      .rule("Block", (ctx, kids) -> ...);
+  ```
+  with
+  ```java
+  var config = Formatter.builder()
+      .defaultIndent(2)
+      .maxLineWidth(80)
+      .triviaPolicy(TriviaPolicy.DROP_ALL)
+      .rule("Block", (ctx, kids) -> ...)
+      .build();
+  var formatter = Formatter.formatter(config);
+  ```
+  Each `with*`-style mutator on the builder returns a new builder (no shared mutable state); the resulting `FormatterConfig` is an immutable record; the `Formatter` is constructed once from the config and is thread-safe to share. The `Formatter#format(CstNode)` / `format(CstNode, String)` API is unchanged.
+
 ## [0.3.6] - 2026-05-01
 
 Generator-side `%recover` per-rule overrides. Non-breaking.

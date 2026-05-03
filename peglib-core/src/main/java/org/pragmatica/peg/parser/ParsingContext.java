@@ -110,7 +110,7 @@ public final class ParsingContext {
     }
 
     public SourceLocation location() {
-        return SourceLocation.at(line, column, pos);
+        return SourceLocation.sourceLocation(line, column, pos);
     }
 
     public void restoreLocation(SourceLocation loc) {
@@ -188,7 +188,7 @@ public final class ParsingContext {
     }
 
     public SourceLocation furthestLocation() {
-        return SourceLocation.at(furthestLine, furthestColumn, furthestPos);
+        return SourceLocation.sourceLocation(furthestLine, furthestColumn, furthestPos);
     }
 
     public String furthestExpected() {
@@ -216,7 +216,7 @@ public final class ParsingContext {
      * Create and add an error diagnostic with expected token info.
      */
     public void addUnexpectedError(String found, String expected) {
-        var span = SourceSpan.at(location());
+        var span = SourceSpan.sourceSpan(location());
         var message = found.isEmpty()
                       ? "unexpected end of input"
                       : "unexpected input";
@@ -646,12 +646,12 @@ public final class ParsingContext {
 
     // === Span Creation ===
     public SourceSpan spanFrom(SourceLocation start) {
-        return SourceSpan.of(start, location());
+        return SourceSpan.sourceSpan(start, location());
     }
 
     public SourceSpan spanFrom(int startOffset) {
         // Reconstruct start location (simplified - doesn't track line/column for offset)
-        var start = SourceLocation.at(1, 1, startOffset);
-        return SourceSpan.of(start, location());
+        var start = SourceLocation.sourceLocation(1, 1, startOffset);
+        return SourceSpan.sourceSpan(start, location());
     }
 }

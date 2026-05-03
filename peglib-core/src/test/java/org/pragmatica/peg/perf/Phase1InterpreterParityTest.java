@@ -68,7 +68,7 @@ class Phase1InterpreterParityTest {
         assertThat(cstResult.isSuccess())
             .as("interpreter parse succeeded for %s; failure=%s", file, cstResult)
             .isTrue();
-        String actual = CstHash.of(cstResult.unwrap());
+        String actual = CstHash.cstHash(cstResult.unwrap());
 
         Path relative = CORPUS_ROOT.relativize(file);
         Path hashFile = BASELINE_ROOT.resolve(relative + ".hash");

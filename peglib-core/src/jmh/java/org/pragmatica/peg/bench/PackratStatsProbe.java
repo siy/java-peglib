@@ -36,12 +36,20 @@ public final class PackratStatsProbe {
 
     private PackratStatsProbe() {}
 
+    /**
+     * JBCT boundary: dev-tool CLI entry point. The probe is invoked by hand
+     * (or from JMH benchmark scripts) so the {@code throws Exception}
+     * signature is intentional — failures should fast-fail the JVM with a
+     * stack trace rather than be reflected in a {@code Result} channel.
+     * Production code paths in {@link PegParser} and {@link GrammarParser}
+     * still surface failures as {@code Result.failure}; this main only
+     * adapts those typed results to a probe-tool exit.
+     */
     public static void main(String[] args) throws Exception {
         var grammarText = Java25ParseBenchmark.loadResource(GRAMMAR_RESOURCE);
         var fixtureSource = Java25ParseBenchmark.loadResource(FIXTURE_RESOURCE);
 
         var grammar = GrammarParser.parse(grammarText)
-                                   .flatMap(g -> g.validate())
                                    .unwrap();
         var ruleNames = grammar.rules().stream().map(r -> r.name()).toList();
 

@@ -78,11 +78,15 @@ public final class PegParser {
 
     /**
      * Create a parser from a pre-parsed grammar with custom configuration.
+     *
+     * <p>0.4.0 — {@code grammar} is assumed to be validated; produce one via
+     * {@link Grammar#grammar(java.util.List, org.pragmatica.lang.Option,
+     * org.pragmatica.lang.Option, org.pragmatica.lang.Option, java.util.List,
+     * java.util.List)} or by parsing through {@link GrammarParser#parse(String)}.
      */
     public static Result<Parser> fromGrammar(Grammar grammar, ParserConfig config) {
-        return grammar.validate()
-                      .flatMap(g -> PegEngine.create(g, config)
-                                             .map(engine -> (Parser) engine));
+        return PegEngine.create(grammar, config)
+                        .map(engine -> (Parser) engine);
     }
 
     /**
@@ -101,9 +105,8 @@ public final class PegParser {
      * starting from an already-parsed {@link Grammar}.
      */
     public static Result<Parser> fromGrammar(Grammar grammar, ParserConfig config, Actions actions) {
-        return grammar.validate()
-                      .flatMap(g -> PegEngine.create(g, config, actions)
-                                             .map(engine -> (Parser) engine));
+        return PegEngine.create(grammar, config, actions)
+                        .map(engine -> (Parser) engine);
     }
 
     /**
@@ -119,8 +122,8 @@ public final class PegParser {
      * Useful for CST-only parsing where actions are not needed.
      */
     public static Result<Parser> fromGrammarWithoutActions(Grammar grammar, ParserConfig config) {
-        return grammar.validate()
-                      .map(g -> PegEngine.createWithoutActions(g, config));
+        return PegEngine.createWithoutActions(grammar, config)
+                        .map(engine -> (Parser) engine);
     }
 
     /**
@@ -150,10 +153,10 @@ public final class PegParser {
                                                 String packageName,
                                                 String className,
                                                 ParserConfig config) {
-        return GrammarParser.parse(grammarText)
-                            .flatMap(Grammar::validate)
-                            .map(grammar -> ParserGenerator.create(grammar, packageName, className, config)
-                                                           .generate());
+        return GrammarResolver.resolveText(grammarText,
+                                           GrammarSource.empty())
+                              .map(grammar -> ParserGenerator.parserGenerator(grammar, packageName, className, config)
+                                                             .generate());
     }
 
     /**
@@ -218,14 +221,14 @@ public final class PegParser {
                                                    String className,
                                                    ErrorReporting errorReporting,
                                                    ParserConfig config) {
-        return GrammarParser.parse(grammarText)
-                            .flatMap(Grammar::validate)
-                            .map(grammar -> ParserGenerator.create(grammar,
-                                                                   packageName,
-                                                                   className,
-                                                                   errorReporting,
-                                                                   config)
-                                                           .generateCst());
+        return GrammarResolver.resolveText(grammarText,
+                                           GrammarSource.empty())
+                              .map(grammar -> ParserGenerator.parserGenerator(grammar,
+                                                                              packageName,
+                                                                              className,
+                                                                              errorReporting,
+                                                                              config)
+                                                             .generateCst());
     }
 
     /**
@@ -261,7 +264,7 @@ public final class PegParser {
         }
 
         public Result<Parser> build() {
-            var config = ParserConfig.of(packratEnabled, recoveryStrategy, captureTrivia);
+            var config = ParserConfig.parserConfig(packratEnabled, recoveryStrategy, captureTrivia);
             return fromGrammar(grammarText, config);
         }
     }

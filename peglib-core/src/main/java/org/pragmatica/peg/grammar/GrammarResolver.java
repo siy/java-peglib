@@ -162,13 +162,17 @@ public final class GrammarResolver {
             }
         }
         // Produce composed Grammar. imports are cleared (surface-level composition is complete).
-        return Result.success(new Grammar(
+        // 0.4.0 — route through Grammar.grammar(...) so the composed grammar is
+        // validated end-to-end (undefined references / indirect LR cycles).
+        // The root grammar may have referenced unresolved import targets pre-
+        // composition; validation is intentionally deferred to this point.
+        return Grammar.grammar(
         new ArrayList<>(composedRules.values()),
         root.startRule(),
         root.whitespace(),
         root.word(),
         root.suggestRules(),
-        List.of()));
+        List.of());
     }
 
     private Result<Grammar> loadGrammarOrFail(String grammarName, SourceLocation errorLocation, List<String> chain) {

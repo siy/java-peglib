@@ -6,10 +6,13 @@ import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
+import org.pragmatica.lang.Result;
+import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.peg.PegParser;
 import org.pragmatica.peg.generator.ErrorReporting;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -37,6 +40,11 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter(property = "peglib.errorReporting", defaultValue = "BASIC")
     private String errorReporting;
 
+    /**
+     * JBCT boundary: Maven calls into untyped Java land. The Result pipeline
+     * below composes the failure-prone steps; the terminal consumer translates
+     * Result.failure(cause) into MojoFailureException(cause.message()).
+     */
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
         if (grammarFile == null || !grammarFile.isFile()) {
@@ -47,32 +55,46 @@ public class GenerateMojo extends AbstractMojo {
             getLog().info("peglib:generate skipped (up-to-date): " + targetFile);
             return;
         }
-        ErrorReporting reporting;
-        try {
-            reporting = ErrorReporting.valueOf(errorReporting);
-        } catch (IllegalArgumentException iae) {
-            throw new MojoFailureException("Invalid errorReporting: " + errorReporting
-                                           + " (expected BASIC or ADVANCED)");
+        var generated = Result.all(parseErrorReporting(errorReporting),
+                                   readGrammar(grammarFile.toPath()))
+                              .flatMap(this::generateSource);
+        if (generated instanceof Result.Failure<?> failure) {
+            throw new MojoFailureException(failure.cause()
+                                                  .message());
         }
-        String grammarText;
-        try {
-            grammarText = Files.readString(grammarFile.toPath());
-        } catch (Exception e) {
-            throw new MojoExecutionException("Failed to read grammar: " + grammarFile, e);
-        }
-        var result = PegParser.generateCstParser(grammarText, packageName, className, reporting);
-        if (result instanceof org.pragmatica.lang.Result.Failure< ? > failure) {
-            throw new MojoFailureException("Grammar generation failed: " + failure.cause()
-                                                                                  .message());
-        }
-        var source = result.unwrap();
-        try {
-            Files.createDirectories(targetFile.getParent());
-            Files.writeString(targetFile, source);
-        } catch (Exception e) {
-            throw new MojoExecutionException("Failed to write generated source: " + targetFile, e);
+        var write = writeSource(targetFile, generated.unwrap());
+        if (write instanceof Result.Failure<?> failure) {
+            throw new MojoExecutionException(failure.cause()
+                                                    .message());
         }
         getLog().info("peglib:generate wrote " + targetFile);
+    }
+
+    private Result<String> generateSource(ErrorReporting reporting, String grammarText) {
+        return PegParser.generateCstParser(grammarText, packageName, className, reporting);
+    }
+
+    private static Result<ErrorReporting> parseErrorReporting(String value) {
+        return Result.lift(t -> Causes.cause("Invalid errorReporting: " + value
+                                             + " (expected BASIC or ADVANCED)"),
+                           () -> ErrorReporting.valueOf(value));
+    }
+
+    private static Result<String> readGrammar(Path path) {
+        return Result.lift(t -> Causes.cause("Failed to read grammar: " + path + " — "
+                                             + t.getMessage()),
+                           () -> Files.readString(path));
+    }
+
+    private static Result<Path> writeSource(Path targetFile, String source) {
+        return Result.lift(t -> Causes.cause("Failed to write generated source: "
+                                             + targetFile + " — " + t.getMessage()),
+                           () -> writeSourceUnchecked(targetFile, source));
+    }
+
+    private static Path writeSourceUnchecked(Path targetFile, String source) throws IOException {
+        Files.createDirectories(targetFile.getParent());
+        return Files.writeString(targetFile, source);
     }
 
     /** For programmatic invocation from tests. */

@@ -117,8 +117,8 @@ final class IncrementalParityTest {
         }
 
         Session session = incremental.initialize(initialText, 0);
-        long oracleHash = CstHash.of(oracleInitial.unwrap());
-        assertThat(CstHash.of(session.root()))
+        long oracleHash = CstHash.cstHash(oracleInitial.unwrap());
+        assertThat(CstHash.cstHash(session.root()))
             .as("initial parity for %s", file.getFileName())
             .isEqualTo(oracleHash);
 
@@ -150,8 +150,8 @@ final class IncrementalParityTest {
                 session = next;
                 continue;
             }
-            long expected = CstHash.of(oracleResult.unwrap());
-            long actual = CstHash.of(next.root());
+            long expected = CstHash.cstHash(oracleResult.unwrap());
+            long actual = CstHash.cstHash(next.root());
             assertThat(actual)
                 .as("parity after edit %d in %s (edit=%s)", i, file.getFileName(), edit)
                 .isEqualTo(expected);

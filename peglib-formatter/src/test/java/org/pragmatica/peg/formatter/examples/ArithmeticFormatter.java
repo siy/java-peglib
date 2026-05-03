@@ -50,14 +50,15 @@ public final class ArithmeticFormatter {
 
     public static ArithmeticFormatter create() {
         var parser = PegParser.fromGrammar(GRAMMAR).unwrap();
-        var fmt = new Formatter()
+        var config = Formatter.builder()
             .defaultIndent(2)
             .maxLineWidth(80)
             .triviaPolicy(TriviaPolicy.DROP_ALL)
             .rule("Expr", ArithmeticFormatter::formatBinaryChain)
             .rule("Term", ArithmeticFormatter::formatBinaryChain)
-            .rule("Factor", ArithmeticFormatter::formatFactor);
-        return new ArithmeticFormatter(parser, fmt);
+            .rule("Factor", ArithmeticFormatter::formatFactor)
+            .build();
+        return new ArithmeticFormatter(parser, Formatter.formatter(config));
     }
 
     public Result<String> format(String input) {

@@ -2,7 +2,9 @@ package org.pragmatica.peg.playground;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Option;
+import org.pragmatica.lang.Result;
 import org.pragmatica.peg.error.RecoveryStrategy;
 import org.pragmatica.peg.playground.PlaygroundEngine.ParseOutcome;
 import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
@@ -47,6 +49,14 @@ public final class PlaygroundServer {
         this.port = port;
     }
 
+    /**
+     * JBCT boundary: CLI entry point invoked by the JVM. The HTTP handler
+     * methods ({@link #handleParse}, {@link #handleStatic}) own the adapter
+     * lift — {@link #parseRequestBody} returns {@code Result<ParseRequest>}
+     * and request-body decode failures surface through that channel rather
+     * than through {@code main}'s untyped boundary. This method merely
+     * starts the server and registers a shutdown hook.
+     */
     public static void main(String[] args) throws IOException {
         int port = parsePort(args);
         var server = start(port);
@@ -97,14 +107,15 @@ public final class PlaygroundServer {
             }
             body = new String(bytes, StandardCharsets.UTF_8);
         }
-        ParseRequest request;
-        try {
-            request = parseRequestBody(body);
-        } catch (IllegalArgumentException ex) {
-            sendJson(exchange, 400, Map.of("error", "bad request", "detail", ex.getMessage()));
+        // 0.4.0 — Result.lift wraps the JSON-parse adapter; the validate step
+        // stays as a pure Result so the bad-request branch surfaces both
+        // decode and missing-field failures uniformly.
+        var requestResult = parseRequestBody(body);
+        if (requestResult.isFailure()) {
+            sendJson(exchange, 400, badRequestPayload(requestResult));
             return;
         }
-        var result = PlaygroundEngine.run(request);
+        var result = PlaygroundEngine.run(requestResult.unwrap());
         if (result.isFailure()) {
             sendJson(exchange, 200, grammarErrorPayload(result.toString()));
             return;
@@ -131,19 +142,42 @@ public final class PlaygroundServer {
         return payload;
     }
 
-    private static ParseRequest parseRequestBody(String body) {
-        Map<String, Object> obj = JsonDecoder.decodeObject(body);
+    /**
+     * 0.4.0 — JBCT adapter boundary: {@link Result#lift} captures any
+     * {@link IllegalArgumentException} raised by {@link JsonDecoder#decodeObject}
+     * and the validation step propagates the missing-grammar failure through
+     * the same monadic channel.
+     */
+    static Result<ParseRequest> parseRequestBody(String body) {
+        return Result.lift(BadRequest::new, () -> JsonDecoder.decodeObject(body))
+                     .flatMap(PlaygroundServer::buildRequest);
+    }
+
+    private static Result<ParseRequest> buildRequest(Map<String, Object> obj) {
         String grammar = stringField(obj, "grammar", "");
-        String input = stringField(obj, "input", "");
-        Option<String> startRule = optionalString(obj, "startRule");
-        boolean packrat = booleanField(obj, "packrat", true);
-        boolean captureTrivia = booleanField(obj, "trivia", true);
-        boolean astMode = "ast".equalsIgnoreCase(stringField(obj, "mode", "cst"));
-        RecoveryStrategy recovery = parseRecovery(stringField(obj, "recovery", "BASIC"));
         if (grammar.isEmpty()) {
-            throw new IllegalArgumentException("grammar field is required");
+            return new BadRequest("grammar field is required").result();
         }
-        return new ParseRequest(grammar, input, startRule, packrat, recovery, captureTrivia, astMode);
+        return Result.success(new ParseRequest(
+                grammar,
+                stringField(obj, "input", ""),
+                optionalString(obj, "startRule"),
+                booleanField(obj, "packrat", true),
+                parseRecovery(stringField(obj, "recovery", "BASIC")),
+                booleanField(obj, "trivia", true),
+                "ast".equalsIgnoreCase(stringField(obj, "mode", "cst"))));
+    }
+
+    private static Map<String, Object> badRequestPayload(Result<ParseRequest> failed) {
+        var detail = failed.fold(Cause::message, _ -> "");
+        return Map.of("error", "bad request", "detail", detail);
+    }
+
+    /** Adapter-boundary cause for parse-request decoding/validation failures. */
+    record BadRequest(String message) implements Cause {
+        BadRequest(Throwable t) {
+            this(t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+        }
     }
 
     private static RecoveryStrategy parseRecovery(String raw) {

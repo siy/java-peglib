@@ -51,7 +51,7 @@ public interface IncrementalParser {
      * incremental partial-parse calls.
      */
     static IncrementalParser create(Grammar grammar, ParserConfig config) {
-        return SessionFactory.create(grammar, config);
+        return SessionFactory.sessionFactory(grammar, config);
     }
 
     /**
@@ -69,7 +69,7 @@ public interface IncrementalParser {
      * @since 0.3.2
      */
     static IncrementalParser create(Grammar grammar, ParserConfig config, boolean triviaFastPathEnabled) {
-        return SessionFactory.create(grammar, config, triviaFastPathEnabled);
+        return SessionFactory.sessionFactory(grammar, config, triviaFastPathEnabled);
     }
 
     /**

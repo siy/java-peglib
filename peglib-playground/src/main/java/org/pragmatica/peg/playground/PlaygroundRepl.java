@@ -58,6 +58,14 @@ public final class PlaygroundRepl {
         this.trace = trace;
     }
 
+    /**
+     * JBCT boundary: CLI entry point invoked by the JVM. The method is
+     * intentionally untyped (void/throws IOException) because the JVM's
+     * launch contract owns this signature — wrap each interactive iteration
+     * in {@link PlaygroundRepl#run()}, and let typed {@code Result}-returning
+     * helpers ({@link PlaygroundEngine#run}, the grammar parser) drive the
+     * REPL loop.
+     */
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
             System.err.println("usage: PlaygroundRepl <grammar.peg> [--trace]");

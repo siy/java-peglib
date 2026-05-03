@@ -32,7 +32,7 @@ import org.pragmatica.peg.formatter.TriviaPolicy;
 import static org.pragmatica.peg.formatter.Docs.*;
 
 var parser = PegParser.fromGrammar(GRAMMAR).unwrap();
-var formatter = new Formatter()
+var config = Formatter.builder()
     .defaultIndent(2)
     .maxLineWidth(80)
     .triviaPolicy(TriviaPolicy.DROP_ALL)
@@ -40,7 +40,9 @@ var formatter = new Formatter()
         group(text("{"),
               indent(ctx.defaultIndent(), concat(line(), concat(children))),
               line(),
-              text("}")));
+              text("}")))
+    .build();
+var formatter = Formatter.formatter(config);
 
 String input = "{ foo bar }";
 String out = parser.parseCst(input)
@@ -118,7 +120,8 @@ peglib-formatter/
 │   ├── Docs.java               # static builders
 │   ├── FormatContext.java      # node + source + indent + width + trivia policy
 │   ├── FormatterRule.java      # functional interface
-│   ├── Formatter.java          # fluent builder + walker (+ FormatterError)
+│   ├── FormatterConfig.java    # immutable config record + immutable builder
+│   ├── Formatter.java          # immutable walker (+ FormatterError)
 │   ├── TriviaPolicy.java       # functional interface + built-ins
 │   └── internal/
 │       └── Renderer.java       # Wadler/Lindig best algorithm

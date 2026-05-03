@@ -32,11 +32,11 @@ public record TraceRecord(EventKind kind,
         NOTE
     }
 
-    public static TraceRecord of(EventKind kind,
-                                 String rule,
-                                 int offset,
-                                 long elapsedNanos,
-                                 String detail) {
+    public static TraceRecord traceRecord(EventKind kind,
+                                          String rule,
+                                          int offset,
+                                          long elapsedNanos,
+                                          String detail) {
         return new TraceRecord(kind,
                                rule == null ? "" : rule,
                                offset,

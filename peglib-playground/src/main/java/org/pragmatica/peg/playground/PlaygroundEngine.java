@@ -49,7 +49,7 @@ public final class PlaygroundEngine {
     }
 
     private static ParserConfig buildConfig(ParseRequest request) {
-        return ParserConfig.of(request.packrat(), request.recovery(), request.captureTrivia());
+        return ParserConfig.parserConfig(request.packrat(), request.recovery(), request.captureTrivia());
     }
 
     /**

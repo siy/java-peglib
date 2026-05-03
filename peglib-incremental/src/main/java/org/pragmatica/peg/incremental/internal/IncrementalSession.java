@@ -6,9 +6,6 @@ import org.pragmatica.peg.incremental.Session;
 import org.pragmatica.peg.incremental.Stats;
 import org.pragmatica.peg.tree.CstNode;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-
 /**
  * Package-private {@link Session} implementation carrying the SPEC §5.1
  * state: text, root, cursor, enclosing-node pointer, and stats.
@@ -25,55 +22,29 @@ import java.util.Deque;
  * allocates a new {@code ParsingContext}). No cross-edit cache persistence.
  * SPEC §5.4 v1 choice.
  *
+ * <p>0.4.0 — converted from {@code SessionImpl} class to a {@code record} to
+ * remove the {@code Impl} anti-pattern. The seven components are internal
+ * implementation state; callers continue to consume the {@link Session}
+ * interface, which keeps the public surface narrow.
+ *
  * @since 0.3.1
  */
-final class SessionImpl implements Session {
-    private final SessionFactory factory;
-    private final String text;
-    private final CstNode root;
-    private final int cursor;
-    private final CstNode enclosingNode;
-    private final NodeIndex index;
-    private final Stats stats;
-
-    private SessionImpl(SessionFactory factory,
-                        String text,
-                        CstNode root,
-                        int cursor,
-                        CstNode enclosingNode,
-                        NodeIndex index,
-                        Stats stats) {
-        this.factory = factory;
-        this.text = text;
-        this.root = root;
-        this.cursor = cursor;
-        this.enclosingNode = enclosingNode;
-        this.index = index;
-        this.stats = stats;
-    }
+record IncrementalSession(
+    SessionFactory factory,
+    String text,
+    CstNode root,
+    int cursor,
+    CstNode enclosingNode,
+    NodeIndex index,
+    Stats stats
+) implements Session {
 
     /** Build the initial session after a fresh full parse. */
-    static SessionImpl initial(SessionFactory factory, String text, int cursor, CstNode root) {
+    static IncrementalSession initial(SessionFactory factory, String text, int cursor, CstNode root) {
         var index = NodeIndex.build(root);
         var enclosing = index.smallestContaining(cursor)
                              .or(root);
-        return new SessionImpl(factory, text, root, cursor, enclosing, index, Stats.INITIAL);
-    }
-
-    @Override public CstNode root() {
-        return root;
-    }
-
-    @Override public String text() {
-        return text;
-    }
-
-    @Override public int cursor() {
-        return cursor;
-    }
-
-    @Override public Stats stats() {
-        return stats;
+        return new IncrementalSession(factory, text, root, cursor, enclosing, index, Stats.INITIAL);
     }
 
     @Override
@@ -113,28 +84,13 @@ final class SessionImpl implements Session {
                 var nextIndex = NodeIndex.build(triviaRoot);
                 var nextEnclosing = nextIndex.smallestContaining(newCursor)
                                              .or(triviaRoot);
-                return new SessionImpl(factory, newText, triviaRoot, newCursor, nextEnclosing, nextIndex, nextStats);
+                return new IncrementalSession(factory, newText, triviaRoot, newCursor, nextEnclosing, nextIndex, nextStats);
             }
         }
         // Try incremental reparse next.
         var incremental = tryIncrementalReparse(newText, edit);
-        if (incremental != null) {
-            // v2: trivia-aware splice normalization (currently a no-op for the
-            // leading-trivia direction since parseRuleAt already attaches
-            // trivia per 0.2.4 attribution; the seam exists for v2.5+).
-            var normalized = TriviaRedistribution.normalizeSplicedTrivia(
-            incremental.newRoot, incremental.spliced);
-            var nextStats = new Stats(
-            stats.reparseCount() + 1,
-            stats.fullReparseCount(),
-            incremental.ruleName,
-            NodeIndex.flatten(incremental.spliced)
-                     .size(),
-            System.nanoTime() - t0);
-            var nextIndex = NodeIndex.build(normalized);
-            var nextEnclosing = nextIndex.smallestContaining(newCursor)
-                                         .or(normalized);
-            return new SessionImpl(factory, newText, normalized, newCursor, nextEnclosing, nextIndex, nextStats);
+        if (incremental.isPresent()) {
+            return applyIncremental(incremental.unwrap(), newText, newCursor, t0);
         }
         // Fall back to a full reparse.
         return fallback(newText, newCursor, t0);
@@ -149,7 +105,7 @@ final class SessionImpl implements Session {
         }
         var newEnclosing = index.smallestContainingFrom(enclosingNode, clamped)
                                 .or(root);
-        return new SessionImpl(factory, text, root, clamped, newEnclosing, index, stats);
+        return new IncrementalSession(factory, text, root, clamped, newEnclosing, index, stats);
     }
 
     @Override
@@ -166,7 +122,7 @@ final class SessionImpl implements Session {
         NodeIndex.flatten(fresh)
                  .size(),
         System.nanoTime() - t0);
-        return new SessionImpl(factory, text, fresh, cursor, enclosing, freshIndex, nextStats);
+        return new IncrementalSession(factory, text, fresh, cursor, enclosing, freshIndex, nextStats);
     }
 
     private Session fallback(String newText, int newCursor, long t0) {
@@ -181,11 +137,34 @@ final class SessionImpl implements Session {
         NodeIndex.flatten(fresh)
                  .size(),
         System.nanoTime() - t0);
-        return new SessionImpl(factory, newText, fresh, newCursor, enclosing, freshIndex, nextStats);
+        return new IncrementalSession(factory, newText, fresh, newCursor, enclosing, freshIndex, nextStats);
     }
 
     /**
-     * Attempt the incremental reparse per SPEC §5.3. Returns {@code null}
+     * Apply a successful incremental reparse: normalise trivia, rebuild the
+     * NodeIndex, and return the next session snapshot. Extracted so the
+     * caller in {@link #edit(Edit)} stays a single Result-style branch.
+     */
+    private Session applyIncremental(IncrementalResult incremental, String newText, int newCursor, long t0) {
+        // v2: trivia-aware splice normalization (currently a no-op for the
+        // leading-trivia direction since parseRuleAt already attaches
+        // trivia per 0.2.4 attribution; the seam exists for v2.5+).
+        var normalized = TriviaRedistribution.normalizeSplicedTrivia(
+                incremental.newRoot, incremental.spliced);
+        var nextStats = new Stats(
+                stats.reparseCount() + 1,
+                stats.fullReparseCount(),
+                incremental.ruleName,
+                NodeIndex.flatten(incremental.spliced).size(),
+                System.nanoTime() - t0);
+        var nextIndex = NodeIndex.build(normalized);
+        var nextEnclosing = nextIndex.smallestContaining(newCursor)
+                                     .or(normalized);
+        return new IncrementalSession(factory, newText, normalized, newCursor, nextEnclosing, nextIndex, nextStats);
+    }
+
+    /**
+     * Attempt the incremental reparse per SPEC §5.3. Returns {@code Option.none()}
      * when the edit should fall back to a full reparse.
      *
      * <p>Walks outward from the enclosing-node pointer to the smallest
@@ -199,56 +178,54 @@ final class SessionImpl implements Session {
      * <p>Any ancestor whose rule is listed in {@link SessionFactory#fallbackRules()}
      * short-circuits to full reparse.
      */
-    private IncrementalResult tryIncrementalReparse(String newText, Edit edit) {
+    private Option<IncrementalResult> tryIncrementalReparse(String newText, Edit edit) {
         int editStart = edit.offset();
         int editEnd = edit.offset() + edit.oldLen();
         int delta = edit.delta();
         // Find the smallest NonTerminal containing [editStart, editEnd] in the pre-edit buffer.
-        var pivot = findBoundaryCandidate(editStart, editEnd);
-        while (pivot != null) {
+        var current = Option.some(findBoundaryCandidate(editStart, editEnd));
+        while (current.isPresent()) {
+            var pivot = current.unwrap();
             if (! (pivot instanceof CstNode.NonTerminal nt)) {
-                // TODO(P3): refactor outward walk to monadic chain once
-                // parentOf returns Option (round 2 sibling landed 0.3.4).
-                pivot = index.parentOf(pivot)
-                             .or((CstNode) null);
+                current = index.parentOf(pivot);
                 continue;
             }
             if (factory.fallbackRules()
                        .contains(nt.rule())) {
-                return null;
+                return Option.none();
             }
             var reparsed = reparseAt(nt, newText, delta);
             if (reparsed.isPresent()) {
-                var reparsedNode = reparsed.unwrap();
-                var path = index.pathTo(nt);
-                if (path.isEmpty()) {
-                    // pivot == root — reparsed subtree replaces root wholesale.
-                    return new IncrementalResult(reparsedNode, reparsedNode, nt.rule());
-                }
-                var newRoot = TreeSplicer.spliceAndShift(path, nt, reparsedNode, editEnd, delta);
-                return new IncrementalResult(newRoot, reparsedNode, nt.rule());
+                return Option.some(buildIncrementalResult(nt, reparsed.unwrap(), editEnd, delta));
             }
-            // TODO(P3): refactor outward walk to monadic chain once
-            // parentOf returns Option (round 2 sibling landed 0.3.4).
-            pivot = index.parentOf(nt)
-                         .or((CstNode) null);
+            current = index.parentOf(nt);
         }
-        return null;
+        return Option.none();
+    }
+
+    private IncrementalResult buildIncrementalResult(CstNode.NonTerminal nt, CstNode reparsedNode, int editEnd, int delta) {
+        var path = index.pathTo(nt);
+        if (path.isEmpty()) {
+            // pivot == root — reparsed subtree replaces root wholesale.
+            return new IncrementalResult(reparsedNode, reparsedNode, nt.rule());
+        }
+        var newRoot = TreeSplicer.spliceAndShift(path, nt, reparsedNode, editEnd, delta);
+        return new IncrementalResult(newRoot, reparsedNode, nt.rule());
     }
 
     /**
      * Walk outward from the enclosing-node pointer to the smallest node
      * whose span fully contains {@code [editStart, editEnd]} in the pre-edit
-     * buffer. Returns the pivot; {@code null} when the edit exceeds the root
-     * (caller falls back to full reparse).
+     * buffer. Falls back to {@link #root} when the edit exceeds the root
+     * (e.g., append past EOF) so the caller always gets a non-null pivot.
      */
     private CstNode findBoundaryCandidate(int editStart, int editEnd) {
-        CstNode cursorNode = enclosingNode;
-        if (cursorNode == null) {
-            cursorNode = root;
-        }
-        // Walk up until the node's span encloses the entire edit region.
-        while (cursorNode != null) {
+        // 0.4.0 — Option.option() defends against a (theoretically) null
+        // {@code enclosingNode} record component; falls back to {@code root}
+        // so the walk is well-defined.
+        var current = Option.option(enclosingNode).orElse(Option.some(root));
+        while (current.isPresent()) {
+            var cursorNode = current.unwrap();
             int spanStart = cursorNode.span()
                                       .start()
                                       .offset();
@@ -258,10 +235,7 @@ final class SessionImpl implements Session {
             if (spanStart <= editStart && spanEnd >= editEnd) {
                 return cursorNode;
             }
-            // TODO(P3): refactor outward walk to monadic chain once
-            // parentOf returns Option (round 2 sibling landed 0.3.4).
-            cursorNode = index.parentOf(cursorNode)
-                              .or((CstNode) null);
+            current = index.parentOf(cursorNode);
         }
         // Root didn't contain the edit (e.g., append past EOF): pivot at root itself.
         return root;
@@ -316,15 +290,4 @@ final class SessionImpl implements Session {
 
     /** Result of a successful incremental reparse: the new root + pivot. */
     private record IncrementalResult(CstNode newRoot, CstNode spliced, String ruleName) {}
-
-    /**
-     * Bootstrap entry exposed for {@link SessionFactory#initialize(String, int)}.
-     * Non-static for symmetry with the implementation path that produces
-     * {@link #index} inline.
-     */
-    static Deque<CstNode> debugPathTo(SessionImpl session, CstNode node) {
-        return session.index.pathTo(node) == null
-               ? new ArrayDeque<>()
-               : session.index.pathTo(node);
-    }
 }

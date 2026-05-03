@@ -22,9 +22,9 @@ class ErrorRecoveryTest {
     @Test
     void diagnosticFormatsRustStyle() {
         var source = "let x = @invalid;";
-        var span = org.pragmatica.peg.tree.SourceSpan.of(
-            org.pragmatica.peg.tree.SourceLocation.at(1, 9, 8),
-            org.pragmatica.peg.tree.SourceLocation.at(1, 17, 16)
+        var span = org.pragmatica.peg.tree.SourceSpan.sourceSpan(
+            org.pragmatica.peg.tree.SourceLocation.sourceLocation(1, 9, 8),
+            org.pragmatica.peg.tree.SourceLocation.sourceLocation(1, 17, 16)
         );
 
         var diagnostic = Diagnostic.error("unexpected token", span)

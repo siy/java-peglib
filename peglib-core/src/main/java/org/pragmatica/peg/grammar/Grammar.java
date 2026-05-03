@@ -12,7 +12,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * A complete PEG grammar - collection of rules with directives.
+ * A complete PEG grammar — collection of rules with directives.
  *
  * <p>{@code suggestRules} is the list of rule names declared at grammar level via
  * {@code %suggest RuleName}. The literal alternatives of those rules form a
@@ -26,6 +26,23 @@ import java.util.stream.Collectors;
  * or generator. After resolution the composed {@code Grammar} carries an empty
  * {@code imports} list and all imported rules appear as regular entries in
  * {@link #rules()}.
+ *
+ * <h2>Construction (parse-don't-validate)</h2>
+ *
+ * <p>Use {@link #grammar(List, Option, Option, Option, List, List)} to build a
+ * {@code Grammar} — the factory runs the same checks formerly performed by
+ * {@code validate()} (undefined rule references, unsupported indirect
+ * left-recursion) and returns {@link Result.Failure} when those fail.
+ *
+ * <p>The record's canonical constructor remains technically callable (Java
+ * records require canonical-ctor visibility ≥ class visibility), but it is for
+ * internal/library use only — external callers should always go through
+ * {@link #grammar(List, Option, Option, Option, List, List)}. Constructing a
+ * {@code Grammar} via {@code new} bypasses validation and the resulting object
+ * may be rejected by the engine and generator at use time.
+ *
+ * @since 0.4.0 — parse-don't-validate factory replaces the post-construction
+ * {@code validate()} method.
  */
 public record Grammar(
  List<Rule> rules,
@@ -35,24 +52,41 @@ public record Grammar(
  List<String> suggestRules,
  List<Import> imports) {
     /**
-     * Backwards-compatible constructor matching the pre-0.2.4 signature.
+     * Construct a validated {@code Grammar}.
+     *
+     * <p>Runs the legacy {@code validate()} checks during construction:
+     * <ul>
+     *   <li>every {@link Expression.Reference} must point to a rule defined in
+     *       {@code rules};</li>
+     *   <li>the rule reference graph contains no <b>indirect</b> left-recursion
+     *       cycles (cycle length &gt; 1). Direct left-recursion is supported via
+     *       Warth-style seeding and is allowed.</li>
+     * </ul>
+     *
+     * <p>On failure, returns a {@link Result.Failure} carrying a
+     * {@link ParseError.SemanticError} describing the offending rule.
+     *
+     * @since 0.4.0
      */
-    public Grammar(List<Rule> rules,
-                   Option<String> startRule,
-                   Option<Expression> whitespace,
-                   Option<Expression> word) {
-        this(rules, startRule, whitespace, word, List.of(), List.of());
+    public static Result<Grammar> grammar(List<Rule> rules,
+                                          Option<String> startRule,
+                                          Option<Expression> whitespace,
+                                          Option<Expression> word,
+                                          List<String> suggestRules,
+                                          List<Import> imports) {
+        return validate(new Grammar(rules, startRule, whitespace, word, suggestRules, imports));
     }
 
     /**
-     * Backwards-compatible constructor matching the 0.2.4-0.2.7 signature.
+     * Convenience overload — empty {@code suggestRules} and {@code imports}.
+     *
+     * @since 0.4.0
      */
-    public Grammar(List<Rule> rules,
-                   Option<String> startRule,
-                   Option<Expression> whitespace,
-                   Option<Expression> word,
-                   List<String> suggestRules) {
-        this(rules, startRule, whitespace, word, suggestRules, List.of());
+    public static Result<Grammar> grammar(List<Rule> rules,
+                                          Option<String> startRule,
+                                          Option<Expression> whitespace,
+                                          Option<Expression> word) {
+        return grammar(rules, startRule, whitespace, word, List.of(), List.of());
     }
 
     /**
@@ -89,38 +123,6 @@ public record Grammar(
     }
 
     /**
-     * Validate the grammar for undefined references and unsupported recursion
-     * shapes.
-     *
-     * <p>0.2.9: rejects grammars that contain <b>indirect</b> left-recursion
-     * (cycle length &gt; 1 in the left-position reference graph). Direct
-     * left-recursion ({@code Expr <- Expr '+' Term / Term}) is supported via
-     * Warth-style seeding. See {@link LeftRecursionAnalysis}.
-     */
-    public Result<Grammar> validate() {
-        var ruleNames = rules.stream()
-                             .map(Rule::name)
-                             .collect(Collectors.toSet());
-        for (var rule : rules) {
-            var undefinedRef = findUndefinedReference(rule.expression(), ruleNames);
-            if (undefinedRef.isPresent()) {
-                var ref = undefinedRef.unwrap();
-                return new ParseError.SemanticError(
-                ref.span()
-                   .start(),
-                "Undefined rule reference: '" + ref.ruleName() + "'").result();
-            }
-        }
-        var indirect = LeftRecursionAnalysis.findIndirectCycle(this);
-        if (!indirect.isEmpty()) {
-            var chain = String.join(" -> ", indirect);
-            return new ParseError.SemanticError(
-            SourceLocation.START, "indirect left-recursion detected in rule chain " + chain + "; not supported in 0.2.9").result();
-        }
-        return Result.success(this);
-    }
-
-    /**
      * 0.2.9 — the set of directly left-recursive rule names in this grammar.
      * Computed on demand from {@link LeftRecursionAnalysis}. Empty when the
      * grammar has no LR rules (the common case). Engines and generators use
@@ -131,9 +133,38 @@ public record Grammar(
     }
 
     /**
+     * Run the validation checks against {@code candidate} and return either
+     * {@code candidate} on success or a {@link Result.Failure} describing the
+     * first offence. Pure function over the candidate's rule list.
+     */
+    private static Result<Grammar> validate(Grammar candidate) {
+        var ruleNames = candidate.rules.stream()
+                                 .map(Rule::name)
+                                 .collect(Collectors.toSet());
+        for (var rule : candidate.rules) {
+            var undefinedRef = findUndefinedReference(rule.expression(), ruleNames);
+            if (undefinedRef.isPresent()) {
+                var ref = undefinedRef.unwrap();
+                return new ParseError.SemanticError(
+                ref.span()
+                   .start(),
+                "Undefined rule reference: '" + ref.ruleName() + "'").result();
+            }
+        }
+        var indirect = LeftRecursionAnalysis.findIndirectCycle(candidate);
+        if (!indirect.isEmpty()) {
+            var chain = String.join(" -> ", indirect);
+            return new ParseError.SemanticError(
+            SourceLocation.START, "indirect left-recursion detected in rule chain " + chain + "; not supported in 0.2.9").result();
+        }
+        return Result.success(candidate);
+    }
+
+    /**
      * Recursively find the first undefined rule reference in an expression.
      */
-    private Option<Expression.Reference> findUndefinedReference(Expression expr, java.util.Set<String> ruleNames) {
+    private static Option<Expression.Reference> findUndefinedReference(Expression expr,
+                                                                       java.util.Set<String> ruleNames) {
         return switch (expr) {
             case Expression.Reference ref -> ruleNames.contains(ref.ruleName())
                                              ? Option.none()

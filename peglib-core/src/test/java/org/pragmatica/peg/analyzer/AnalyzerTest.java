@@ -2,7 +2,6 @@ package org.pragmatica.peg.analyzer;
 
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 
 import java.nio.file.Files;
@@ -17,8 +16,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AnalyzerTest {
 
     private static AnalyzerReport analyze(String grammarText) {
+        // 0.4.0 — GrammarParser.parse(...) routes through Grammar.grammar(...)
+        // so the returned grammar is already validated.
         var grammar = GrammarParser.parse(grammarText)
-                                   .flatMap(Grammar::validate)
                                    .unwrap();
         return Analyzer.analyze(grammar);
     }

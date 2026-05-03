@@ -5,7 +5,7 @@ package org.pragmatica.peg.tree;
 public record SourceLocation(int line, int column, int offset) {
     public static final SourceLocation START = new SourceLocation(1, 1, 0);
 
-    public static SourceLocation at(int line, int column, int offset) {
+    public static SourceLocation sourceLocation(int line, int column, int offset) {
         return new SourceLocation(line, column, offset);
     }
 
