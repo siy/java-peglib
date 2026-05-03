@@ -1070,8 +1070,10 @@ public final class PegEngine implements Parser {
                                                       String ruleName,
                                                       List<Object> values,
                                                       String[] tokenCapture) {
-        var startLoc = ctx.location();
-        var startPos = ctx.pos();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         // Disable whitespace skipping inside token boundary
         ctx.enterTokenBoundary();
         try{
@@ -1085,10 +1087,10 @@ public final class PegEngine implements Parser {
                 return result;
             }
             var endPos = ctx.pos();
-            var text = ctx.substring(startPos, endPos);
+            var text = ctx.substring(startOffset, endPos);
             // Set token capture so $0 returns this captured text
             tokenCapture[0] = text;
-            var span = ctx.spanFrom(startLoc);
+            var span = ctx.spanFrom(SourceLocation.sourceLocation(startLine, startColumn, startOffset));
             var node = new CstNode.Token(span, ruleName, text, ctx.takePendingLeadingTrivia(), List.of());
             return ParseResult.Success.success(node, ctx.location());
         } finally{
@@ -1142,7 +1144,10 @@ public final class PegEngine implements Parser {
         if (ctx.remaining() < len) {
             return literalFailureAt(ctx, text);
         }
-        var startLoc = ctx.location();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         if (lit.caseInsensitive()) {
             for (int i = 0; i < len; i++ ) {
                 if (Character.toLowerCase(text.charAt(i)) != Character.toLowerCase(ctx.peek(i))) {
@@ -1158,7 +1163,7 @@ public final class PegEngine implements Parser {
         }
         advanceLiteral(ctx, text, len);
         var endLoc = ctx.location();
-        var span = SourceSpan.sourceSpan(startLoc, endLoc);
+        var span = SourceSpan.sourceSpan(SourceLocation.sourceLocation(startLine, startColumn, startOffset), endLoc);
         var node = new CstNode.Terminal(span, "", text, ctx.takePendingLeadingTrivia(), List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1193,7 +1198,10 @@ public final class PegEngine implements Parser {
      * Phase-1 optimizations §6.4 + §6.7: bulk-advance on no-newline match; reuse endLoc.
      */
     private ParseResult parseDictionary(ParsingContext ctx, Expression.Dictionary dict) {
-        var startLoc = ctx.location();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         var words = dict.words();
         var caseInsensitive = dict.caseInsensitive();
         // Find longest match
@@ -1218,7 +1226,7 @@ public final class PegEngine implements Parser {
         var matched = longestMatch.unwrap();
         advanceLiteral(ctx, matched, longestLen);
         var endLoc = ctx.location();
-        var span = SourceSpan.sourceSpan(startLoc, endLoc);
+        var span = SourceSpan.sourceSpan(SourceLocation.sourceLocation(startLine, startColumn, startOffset), endLoc);
         var node = new CstNode.Terminal(span, "", matched, ctx.takePendingLeadingTrivia(), List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1257,7 +1265,10 @@ public final class PegEngine implements Parser {
         if (ctx.isAtEnd()) {
             return charClassFailureAt(ctx, cc);
         }
-        var startLoc = ctx.location();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         char c = ctx.peek();
         boolean matches = matchesCharClass(c, cc.pattern(), cc.caseInsensitive());
         if (cc.negated()) {
@@ -1268,7 +1279,7 @@ public final class PegEngine implements Parser {
         }
         ctx.advance();
         var endLoc = ctx.location();
-        var span = SourceSpan.sourceSpan(startLoc, endLoc);
+        var span = SourceSpan.sourceSpan(SourceLocation.sourceLocation(startLine, startColumn, startOffset), endLoc);
         var node = new CstNode.Terminal(span, "", String.valueOf(c), ctx.takePendingLeadingTrivia(), List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1378,10 +1389,13 @@ public final class PegEngine implements Parser {
             ctx.updateFurthest("any character");
             return ParseResult.Failure.failure(ctx.location(), "any character");
         }
-        var startLoc = ctx.location();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         char c = ctx.advance();
         var endLoc = ctx.location();
-        var span = SourceSpan.sourceSpan(startLoc, endLoc);
+        var span = SourceSpan.sourceSpan(SourceLocation.sourceLocation(startLine, startColumn, startOffset), endLoc);
         var node = new CstNode.Terminal(span, "", String.valueOf(c), ctx.takePendingLeadingTrivia(), List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1433,8 +1447,10 @@ public final class PegEngine implements Parser {
 
     // === Special Parsers ===
     private ParseResult parseTokenBoundary(ParsingContext ctx, Expression.TokenBoundary tb, String ruleName) {
-        var startLoc = ctx.location();
-        var startPos = ctx.pos();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         // Disable whitespace skipping inside token boundary
         ctx.enterTokenBoundary();
         try{
@@ -1443,8 +1459,8 @@ public final class PegEngine implements Parser {
                 return result;
             }
             var endPos = ctx.pos();
-            var text = ctx.substring(startPos, endPos);
-            var span = ctx.spanFrom(startLoc);
+            var text = ctx.substring(startOffset, endPos);
+            var span = ctx.spanFrom(SourceLocation.sourceLocation(startLine, startColumn, startOffset));
             var node = new CstNode.Token(span, ruleName, text, ctx.takePendingLeadingTrivia(), List.of());
             return ParseResult.Success.success(node, ctx.location());
         } finally{
@@ -1492,7 +1508,10 @@ public final class PegEngine implements Parser {
         if (ctx.remaining() < text.length()) {
             return ParseResult.Failure.failure(ctx.location(), "'" + text + "'");
         }
-        var startLoc = ctx.location();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         for (int i = 0; i < text.length(); i++ ) {
             if (ctx.peek(i) != text.charAt(i)) {
                 return ParseResult.Failure.failure(ctx.location(), "'" + text + "'");
@@ -1501,7 +1520,7 @@ public final class PegEngine implements Parser {
         for (int i = 0; i < text.length(); i++ ) {
             ctx.advance();
         }
-        var span = ctx.spanFrom(startLoc);
+        var span = ctx.spanFrom(SourceLocation.sourceLocation(startLine, startColumn, startOffset));
         var node = new CstNode.Terminal(span, "", text, ctx.takePendingLeadingTrivia(), List.of());
         return ParseResult.Success.success(node, ctx.location());
     }
@@ -1540,16 +1559,18 @@ public final class PegEngine implements Parser {
             // Extract inner expression from ZeroOrMore/OneOrMore to match one element at a time
             var innerExpr = extractInnerExpression(wsExpr);
             while (!ctx.isAtEnd()) {
-                var startLoc = ctx.location();
-                var startPos = ctx.pos();
+                // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+                int startOffset = ctx.pos();
+                int startLine = ctx.line();
+                int startColumn = ctx.column();
                 var result = parseExpressionWithMode(ctx, innerExpr, "%whitespace", ParseMode.noWhitespace());
-                if (result.isFailure() || ctx.pos() == startPos) {
+                if (result.isFailure() || ctx.pos() == startOffset) {
                     break;
                 }
                 // Collect trivia if enabled
                 if (config.captureTrivia()) {
-                    var text = ctx.substring(startPos, ctx.pos());
-                    var span = ctx.spanFrom(startLoc);
+                    var text = ctx.substring(startOffset, ctx.pos());
+                    var span = ctx.spanFrom(SourceLocation.sourceLocation(startLine, startColumn, startOffset));
                     trivia.add(classifyTrivia(span, text));
                 }
             }
@@ -1704,7 +1725,10 @@ public final class PegEngine implements Parser {
                                                 Expression.ZeroOrMore zom,
                                                 String ruleName,
                                                 ParseMode mode) {
-        var startLoc = ctx.location();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         var children = new ArrayList<CstNode>();
         while (true) {
             var beforeLoc = ctx.location();
@@ -1745,7 +1769,7 @@ public final class PegEngine implements Parser {
                 break;
             }
         }
-        var span = ctx.spanFrom(startLoc);
+        var span = ctx.spanFrom(SourceLocation.sourceLocation(startLine, startColumn, startOffset));
         if (children.size() == 1) {
             return ParseResult.Success.success(children.getFirst(), ctx.location());
         }
@@ -1760,7 +1784,10 @@ public final class PegEngine implements Parser {
                                                Expression.OneOrMore oom,
                                                String ruleName,
                                                ParseMode mode) {
-        var startLoc = ctx.location();
+        // Phase-2 inlineLocations: capture start as ints; materialize SourceLocation only on success.
+        int startOffset = ctx.pos();
+        int startLine = ctx.line();
+        int startColumn = ctx.column();
         var children = new ArrayList<CstNode>();
         // First match is required
         var first = parseExpressionWithMode(ctx, oom.expression(), ruleName, mode);
@@ -1810,7 +1837,7 @@ public final class PegEngine implements Parser {
                 break;
             }
         }
-        var span = ctx.spanFrom(startLoc);
+        var span = ctx.spanFrom(SourceLocation.sourceLocation(startLine, startColumn, startOffset));
         if (children.size() == 1) {
             return ParseResult.Success.success(children.getFirst(), ctx.location());
         }
