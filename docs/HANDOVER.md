@@ -125,47 +125,51 @@ The agent will report which Tier (per `docs/incremental/V2.5-SPIKE.md` § "Alter
 
 **Important context:** the agent assumes 0.3.6 contains the lever 1 fix, which it doesn't. The agent may report numbers worse than the spike's projected 5-15ms (because lever 1 is still not landed). The agent's logic still works as a baseline-capture — just interpret the results in light of "lever 1 not yet shipped."
 
-### 6.2 Lever 1 — incremental perf (deferred from 0.3.6)
+### 6.2 Lever 1 — incremental perf (DEFERRED — deeper than the spike claimed)
 
-**The trap:** a naive swap of `findBoundaryCandidate`'s starting point from `enclosingNode` to `index.smallestContaining(editStart)` produces correctness regressions on `IncrementalParityTest` (12/100 failures observed, all CST-hash mismatches).
+**Status:** the spike doc's "zero correctness risk" claim is **retracted**. See `docs/incremental/V2.5-SPIKE.md` "Addendum (post-0.4.0)" for the retraction. Two failed attempts on this lever:
 
-**Why it fails:** `NodeIndex.contains(node, offset)` uses `<=` on BOTH ends:
+| Attempt | Approach | Failures | Stash |
+|---|---|---|---|
+| 0.3.6 cycle | `findBoundaryCandidate` start = `index.smallestContaining(editStart)` | 12/100 parity | reverted, no stash |
+| post-0.4.0 (this handover) | `findBoundaryCandidate` = new `NodeIndex.smallestEnclosing(editStart, editEnd)` with edit-aware boundary semantics | **31/100 parity** + 1 fallback test | `stash@{0}: lever-1-attempt-incorrect` |
 
-```java
-public static boolean contains(CstNode node, int offset) {
-    var span = node.span();
-    return offset >= span.start().offset() && offset <= span.end().offset();
-}
-```
+**Two distinct root causes diagnosed (both are design-level, not implementation bugs):**
 
-So a node ending exactly at `editStart` "contains" the edit point. `descendTo` walks down picking the first child that contains the offset — at boundaries, this picks the *left* sibling. The walk-up from there finds a smaller (more local) ancestor than the warm-pointer walk would have. Reparse at that smaller pivot succeeds (filter `span.end == expectedEnd` passes), but the resulting CST differs from a full reparse — typically because the splice operation places the edit on the wrong side of the boundary, or because trivia attribution at the parent-level differs.
+1. **Fallback-rule bypass.** `tryIncrementalReparse` only checks the chosen *pivot* against `factory.fallbackRules()`. It does NOT check ancestors. The OLD walk-up algorithm accidentally avoided this because the cursor's spine always passed through the fallback ancestor first. Any descent-from-root strategy can pick a pivot INSIDE a fallback rule, bypassing the safety check entirely. Exposed by `BackReferenceFallbackTest.edit_triggers_full_reparse`. **Latent bug** — predates lever-1 work and would surface for any `moveCursor`-based usage too.
 
-**The data:**
-- Failing edits include trivia insertions (`\t`, ` `, `\n`) at offsets that land exactly between tokens, AND deletions (5-char, 1-char) over similar boundary positions.
-- Hashes differ in the low bits (e.g. `-7458559862016095436` vs `-7458559862044724587`) — small subtree divergence, not wholly-wrong reparse.
+2. **`reparseAt` length-parity ≠ structural-parity.** The acceptance check `partial.node.span.end == expectedEnd` only proves the parsed *length* is right. The internal CST structure can still differ from full reparse due to trivia attribution (Bug C' from 0.3.5 was about exactly this) and other context-sensitive parsing decisions. Small pivots are particularly vulnerable because they don't have surrounding-sibling context that full reparse provides. The OLD algorithm's parity-correctness in `IncrementalParityTest` is an **artifact of the test harness**: cursor is initialized at offset 0 and never moves, so walk-up always reaches a near-root pivot for interior edits, making `reparseAt` essentially a full reparse on a large subtree.
 
-**Approach for the proper fix:**
-1. Decide whether `NodeIndex.contains` should be half-open (exclusive end) — preferred. Audit every caller; some may rely on the current inclusive semantics.
-2. Alternatively, use `smallestContainingFrom(enclosingNode, editStart)` which climbs+descends from the warm pointer (preserving the "warm pointer near edit" optimization) but uses the edit position rather than cursor position as the descent target.
-3. After the fix lands: rerun `IncrementalParityTest` (must stay 100/100) AND `IncrementalTriviaParityTest` (must stay 22/22) AND check `singleCharEdit` median drops to the 5-15 ms band predicted by the spike.
+**Why the spike missed this:** the probe measured timing in Regime A and Regime B, and recommended Regime B's algorithm based on the 12.7× speedup. **Parity was never asserted in either regime.** The spike's "zero correctness risk" claim was an architectural assumption, not an empirical finding.
 
-**Estimated effort:** 1-2 focused days. Highest-value remaining item — unblocks the IDE plugin.
+**What a real fix needs (estimated 5–10 days, mostly correctness analysis, not coding):**
 
-**Spike doc to read first:** `docs/incremental/V2.5-SPIKE.md`. Confirms NO-GO on the SPEC §5.4 v2.5 cache remap (the dominant cost is pivot overshoot, not cache invalidation) and ranks alternative levers.
+- A "safe-pivot" concept — a per-grammar marker on rules whose `parseRuleAt` output provably matches full-reparse for any input. Likely an opt-in attribute on rule definitions (e.g., a `%incremental` directive) that the IDE plugin's grammar would explicitly mark on Block, Stmt, Args, etc.
+- Ancestor-aware fallback check — walk up from the chosen pivot through `parents` and reject if any ancestor is in `fallbackRules`.
+- Strengthened acceptance check — currently length-only; needs structural validation. Options: (a) compare reparsed subtree against an oracle reparse (defeats the purpose), (b) restrict pivot selection to safe rules and trust them.
+- Trivia-context carryover into `parseRuleAt` so reparse-in-isolation can attribute leading trivia like full reparse would.
+- **Wider parity coverage**: `IncrementalParityTest` must run with `moveCursor` interleaved before any incremental perf work is validated. Without this, any algorithm that picks small pivots looks correct in tests but is broken in production.
+
+**Recommended posture:** wait for the 2026-05-08 perf agent's flame graph (§6.1) before committing further effort. The bottleneck may not be where the spike said it was. If it confirms pivot overshoot, prioritize the wider parity coverage first — that's the prerequisite for any future attempt.
+
+**Forensic record:** `git stash show -p stash@{0}` shows the post-0.4.0 attempt — `NodeIndex.smallestEnclosing` + JBCT formatter pass on 8 ancillary files. The `smallestEnclosing` predicate itself is correct for boundary disambiguation; the failure is in the surrounding architecture, not the predicate.
 
 ### 6.3 Maven Central backfill
 
 The arc from v0.2.3 → v0.4.0 is unpublished. If downstream consumers want any of those versions, publish them on demand — the workflow is identical to what was done for v0.2.2. Don't blanket-publish; wait for explicit demand to avoid versioning churn.
 
-### 6.4 Other levers (per spike doc)
+### 6.4 Other levers (per spike doc) — **with corrections**
 
-If the 2026-05-08 perf agent's flame graph identifies a Tier-1/2/3 hot spot, follow the spike's ranking:
+If the 2026-05-08 perf agent's flame graph identifies a Tier-1/2/3 hot spot, the spike's ranking applies, but **the spike's Tier-1 claim is wrong** for the IDE plugin's path:
 
-- **Tier 1**: Phase-2 perf flags from 0.2.2 spec (`inlineLocations`, `markResetChildren`, `selectivePackrat`) — already designed, just need flipping if measurements warrant.
-- **Tier 2**: Subtree reuse on stable spans (the actually-clever incremental fix), streaming/window-bounded parsing, rule-level failure caching.
-- **Tier 3**: ASCII-whitespace fast path, allocation reduction, char[] vs String.
+- **Tier 1**: `inlineLocations`, `markResetChildren`, `selectivePackrat` from the 0.2.2 spec.
+  - **Correction (audited 2026-05-03):** these are **generator-only flags**. The interpreter (`PegEngine`) does NOT honor `inlineLocations` or `markResetChildren` — grep confirms zero references in `PegEngine.java`. `selectivePackrat` is partially honored by `PegEngine` for LR-rule validation only; the cache-skip optimization itself is generator-only.
+  - **Consequence:** flipping these flags speeds up users of `PegParser.generateParser(...)` only. The IDE plugin uses `IncrementalParser.create(...)` → `PegParser.fromGrammar(...)` → `PegEngine` (interpreter), so flag-flips do nothing for it.
+  - **What CAN help:** port the optimizations themselves (`SourceLocation` allocation elision, mark-and-trim child restore) from `ParserGenerator` emission templates into `PegEngine` runtime methods. The generator path proves they work; porting is mechanical but bounded (~3–5 days, parity-validated by the existing test suite since the interpreter is what the parity test exercises).
+- **Tier 2**: Subtree reuse on stable spans (the actually-clever incremental fix), streaming/window-bounded parsing, rule-level failure caching. Same `parseRuleAt` correctness puzzle as lever 1 — needs the safe-pivot infrastructure first.
+- **Tier 3**: ASCII-whitespace fast path, allocation reduction, char[] vs String. Pure interpreter-level work, no incremental-correctness implications.
 
-These are conjectural until the agent's flame graph lands.
+These are conjectural until the agent's flame graph lands. **Do not act on Tier-1 as the spike doc described it** — the flags do not affect runtime parser behavior.
 
 ## 7. Conventions you'll need
 
@@ -245,7 +249,9 @@ Regen via:
 - **`mvn jbct:format` before every push.** CI rejects unformatted commits. Skipping costs you a round-trip.
 - **Don't merge release PRs without confirming `build` CI passes.** CodeRabbit can stall; skip it if needed. Merge only when `build` is green.
 - **Baseline shifts need a separate commit.** Don't bundle into the fix that drove them.
-- **`NodeIndex.contains` is half-inclusive on BOTH ends** (line 149 of NodeIndex.java). This is the lever 1 trap. If you change pivot selection, audit boundary semantics first.
+- **`NodeIndex.contains` is half-inclusive on BOTH ends** (line 149 of NodeIndex.java) — intentional for cursor APIs (an editor cursor at a boundary feels inside the adjacent node). Six callers rely on this. **Do NOT change `contains` globally** to "fix" pivot selection. The post-0.4.0 lever-1 attempt added a separate `smallestEnclosing(start, end)` for edit anchoring; it is correctness-incomplete (see §6.2) but the *predicate* design — half-open right end on insertion, inclusive on modification — is sound and reusable.
+- **`tryIncrementalReparse` only checks the chosen pivot for `fallbackRules` membership, NOT its ancestors.** Latent bug: any descent-from-root pivot strategy can pick a node inside a fallback rule and bypass the safety check. The OLD walk-up-from-cursor algorithm hides this because cursor's spine always passes through the fallback ancestor first. Address before any lever-1 retry.
+- **`reparseAt`'s acceptance check (`partial.node.span.end == expectedEnd`) only proves length parity, NOT structural parity.** Trivia attribution and other context-sensitive parsing decisions can diverge between a small-pivot reparse and a full reparse with matching length. The current `IncrementalParityTest` doesn't catch this because it never moves the cursor, so pivots are always near-root.
 - **`autoPublish=true` + `waitUntil=published` makes Maven Central deploys irreversible.** Once the build's `[INFO] Uploaded bundle successfully` line lands, you cannot un-publish. Be sure before running `mvn deploy -P release`.
 - **`Grammar` is a public record.** Its canonical constructor cannot have narrower visibility than the record itself. The `grammar(...)` factory is the documented entry; the constructor is `internal/library use only` per Javadoc but technically still accessible.
 - **`peglib-incremental` and `peglib-formatter` cross-reference `peglib-core` types.** When renaming/refactoring core types, search across all 5 modules — not just the test resources.
@@ -261,13 +267,13 @@ Regen via:
 
 ## 11. Recommended next session
 
-1. **Read `docs/incremental/V2.5-SPIKE.md` and `peglib-incremental/.../NodeIndex.java`** — necessary context for lever 1.
-2. **Wait for the 2026-05-08 scheduled agent's flame graph** — informs whether lever 1 is still the top priority.
-3. **Implement lever 1 properly** — the boundary-semantics fix in `NodeIndex.contains` first, then the pivot-selection swap. Verify with `IncrementalParityTest` (must stay 100/100) and `IncrementalTriviaParityTest` (must stay 22/22).
-4. **Ship v0.4.1** — non-breaking. Single commit lever-1 fix + bench-results commit. Per the established release pattern.
+1. **Read `docs/incremental/V2.5-SPIKE.md` (including the post-0.4.0 addendum) and §6.2 above** before touching any incremental perf work. The "1-2 day fix" framing is dead.
+2. **Wait for the 2026-05-08 scheduled agent's flame graph** (§6.1) — informs whether the bottleneck is actually pivot overshoot or somewhere else (e.g., per-rule allocation in `PegEngine`).
+3. **If perf is still the goal after the flame graph:** the cleanest available path is **porting `inlineLocations` and `markResetChildren` from the generator to the interpreter** (§6.4 correction). This is mechanically guided by working code in `ParserGenerator`, and the existing parity test validates it because the test exercises the interpreter. Estimated 3–5 days. Independent of the lever-1 correctness puzzle.
+4. **If lever 1 must be revisited:** start by extending `IncrementalParityTest` to interleave `moveCursor` with edits, then make all the existing failures visible. Without that, no lever-1 algorithm can be validated. Then design the safe-pivot infrastructure per §6.2's "What a real fix needs" list.
 
-If lever 1 turns out to be more involved than 1-2 days, escalate. Don't sink a week into it without consulting; the alternative levers (Phase-2 perf flags, subtree reuse, etc.) may be a faster win depending on what the flame graph shows.
+Do NOT attempt lever 1 again as a "quick swap" — both attempts proved that approach is fundamentally broken. The 5–10 day estimate in §6.2 is the floor, not the ceiling.
 
 ---
 
-**Last updated:** 2026-05-03, after v0.4.0 release + retroactive v0.2.2 Central publish. Handover from the 0.3.5→0.4.0 arc.
+**Last updated:** 2026-05-03, after the post-0.4.0 lever-1 retry failed (31/100 parity regressions). Handover from the 0.3.5 → 0.4.0 arc, plus the failed-lever-1 forensics.
