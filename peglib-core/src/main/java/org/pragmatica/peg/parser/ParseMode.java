@@ -23,6 +23,9 @@ public final class ParseMode {
     private final Option<List<Object>> semanticValues;
     private final Option<String[] > tokenCapture;
 
+    private static final ParseMode STANDARD = new ParseMode(true, false, Option.none(), Option.none());
+    private static final ParseMode NO_WHITESPACE = new ParseMode(false, false, Option.none(), Option.none());
+
     private ParseMode(boolean skipWhitespace,
                       boolean collectActions,
                       Option<List<Object>> semanticValues,
@@ -37,7 +40,7 @@ public final class ParseMode {
      * Standard CST parsing mode - skips whitespace, doesn't collect semantic values.
      */
     public static ParseMode standard() {
-        return new ParseMode(true, false, Option.none(), Option.none());
+        return STANDARD;
     }
 
     /**
@@ -51,7 +54,7 @@ public final class ParseMode {
      * No-whitespace mode - for parsing the %whitespace rule itself.
      */
     public static ParseMode noWhitespace() {
-        return new ParseMode(false, false, Option.none(), Option.none());
+        return NO_WHITESPACE;
     }
 
     /**
