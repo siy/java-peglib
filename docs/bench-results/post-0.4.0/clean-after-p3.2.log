@@ -1,0 +1,224 @@
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 2 s each
+# Measurement: 10 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.bench.Java25ParseBenchmark.parse
+# Parameters: (variant = phase1)
+
+# Run progress: 0.00% complete, ETA 00:03:00
+# Fork: 1 of 2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: Note: /var/folders/m7/lwdzwk711cl83l1tf25ssnkm0000gn/T/peglib-bench-generated5734758273935799434/generated/bench/Java25BenchParser_phase1.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+170.202 ms/op
+# Warmup Iteration   2: 119.101 ms/op
+# Warmup Iteration   3: 95.107 ms/op
+# Warmup Iteration   4: 80.789 ms/op
+# Warmup Iteration   5: 79.020 ms/op
+Iteration   1: 80.801 ms/op
+Iteration   2: 79.255 ms/op
+Iteration   3: 81.333 ms/op
+Iteration   4: 77.486 ms/op
+Iteration   5: 85.671 ms/op
+Iteration   6: 79.515 ms/op
+Iteration   7: 80.639 ms/op
+Iteration   8: 79.056 ms/op
+Iteration   9: 77.443 ms/op
+Iteration  10: 81.562 ms/op
+
+# Run progress: 16.67% complete, ETA 00:02:44
+# Fork: 2 of 2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: Note: /var/folders/m7/lwdzwk711cl83l1tf25ssnkm0000gn/T/peglib-bench-generated9381505760907073326/generated/bench/Java25BenchParser_phase1.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+144.946 ms/op
+# Warmup Iteration   2: 93.700 ms/op
+# Warmup Iteration   3: 88.976 ms/op
+# Warmup Iteration   4: 78.886 ms/op
+# Warmup Iteration   5: 79.853 ms/op
+Iteration   1: 80.059 ms/op
+Iteration   2: 79.626 ms/op
+Iteration   3: 76.352 ms/op
+Iteration   4: 79.198 ms/op
+Iteration   5: 75.894 ms/op
+Iteration   6: 80.839 ms/op
+Iteration   7: 80.888 ms/op
+Iteration   8: 76.848 ms/op
+Iteration   9: 77.368 ms/op
+Iteration  10: 77.606 ms/op
+
+
+Result "org.pragmatica.peg.bench.Java25ParseBenchmark.parse":
+  79.372 ±(99.9%) 1.983 ms/op [Average]
+  (min, avg, max) = (75.894, 79.372, 85.671), stdev = 2.284
+  CI (99.9%): [77.389, 81.355] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 2 s each
+# Measurement: 10 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.bench.Java25ParseBenchmark.parse
+# Parameters: (variant = phase1_allStructural)
+
+# Run progress: 33.33% complete, ETA 00:02:10
+# Fork: 1 of 2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: Note: /var/folders/m7/lwdzwk711cl83l1tf25ssnkm0000gn/T/peglib-bench-generated2866390915329891241/generated/bench/Java25BenchParser_phase1_allStructural.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+135.580 ms/op
+# Warmup Iteration   2: 107.396 ms/op
+# Warmup Iteration   3: 81.975 ms/op
+# Warmup Iteration   4: 82.580 ms/op
+# Warmup Iteration   5: 72.550 ms/op
+Iteration   1: 109.211 ms/op
+Iteration   2: 74.589 ms/op
+Iteration   3: 73.816 ms/op
+Iteration   4: 74.359 ms/op
+Iteration   5: 75.031 ms/op
+Iteration   6: 72.563 ms/op
+Iteration   7: 74.631 ms/op
+Iteration   8: 73.179 ms/op
+Iteration   9: 74.794 ms/op
+Iteration  10: 74.658 ms/op
+
+# Run progress: 50.00% complete, ETA 00:01:37
+# Fork: 2 of 2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: Note: /var/folders/m7/lwdzwk711cl83l1tf25ssnkm0000gn/T/peglib-bench-generated8339979706331478414/generated/bench/Java25BenchParser_phase1_allStructural.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+134.351 ms/op
+# Warmup Iteration   2: 90.588 ms/op
+# Warmup Iteration   3: 80.065 ms/op
+# Warmup Iteration   4: 91.139 ms/op
+# Warmup Iteration   5: 75.372 ms/op
+Iteration   1: 79.360 ms/op
+Iteration   2: 74.524 ms/op
+Iteration   3: 73.048 ms/op
+Iteration   4: 73.414 ms/op
+Iteration   5: 78.108 ms/op
+Iteration   6: 73.468 ms/op
+Iteration   7: 77.827 ms/op
+Iteration   8: 73.501 ms/op
+Iteration   9: 73.724 ms/op
+Iteration  10: 74.470 ms/op
+
+
+Result "org.pragmatica.peg.bench.Java25ParseBenchmark.parse":
+  76.414 ±(99.9%) 6.877 ms/op [Average]
+  (min, avg, max) = (72.563, 76.414, 109.211), stdev = 7.920
+  CI (99.9%): [69.537, 83.291] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 5 iterations, 2 s each
+# Measurement: 10 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.bench.Java25ParseBenchmark.parse
+# Parameters: (variant = interpreter)
+
+# Run progress: 66.67% complete, ETA 00:01:05
+# Fork: 1 of 2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 80.598 ms/op
+# Warmup Iteration   2: 73.002 ms/op
+# Warmup Iteration   3: 72.605 ms/op
+# Warmup Iteration   4: 74.806 ms/op
+# Warmup Iteration   5: 73.054 ms/op
+Iteration   1: 71.911 ms/op
+Iteration   2: 71.632 ms/op
+Iteration   3: 72.390 ms/op
+Iteration   4: 72.471 ms/op
+Iteration   5: 71.870 ms/op
+Iteration   6: 72.163 ms/op
+Iteration   7: 73.794 ms/op
+Iteration   8: 71.876 ms/op
+Iteration   9: 73.449 ms/op
+Iteration  10: 72.462 ms/op
+
+# Run progress: 83.33% complete, ETA 00:00:32
+# Fork: 2 of 2
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 80.609 ms/op
+# Warmup Iteration   2: 73.346 ms/op
+# Warmup Iteration   3: 72.462 ms/op
+# Warmup Iteration   4: 73.946 ms/op
+# Warmup Iteration   5: 72.411 ms/op
+Iteration   1: 72.249 ms/op
+Iteration   2: 71.650 ms/op
+Iteration   3: 72.058 ms/op
+Iteration   4: 72.265 ms/op
+Iteration   5: 72.232 ms/op
+Iteration   6: 74.503 ms/op
+Iteration   7: 73.263 ms/op
+Iteration   8: 72.105 ms/op
+Iteration   9: 72.319 ms/op
+Iteration  10: 71.853 ms/op
+
+
+Result "org.pragmatica.peg.bench.Java25ParseBenchmark.parse":
+  72.426 ±(99.9%) 0.654 ms/op [Average]
+  (min, avg, max) = (71.632, 72.426, 74.503), stdev = 0.754
+  CI (99.9%): [71.771, 73.080] (assumes normal distribution)
+
+
+# Run complete. Total time: 00:03:11
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                              (variant)  Mode  Cnt   Score   Error  Units
+Java25ParseBenchmark.parse                phase1  avgt   20  79.372 ± 1.983  ms/op
+Java25ParseBenchmark.parse  phase1_allStructural  avgt   20  76.414 ± 6.877  ms/op
+Java25ParseBenchmark.parse           interpreter  avgt   20  72.426 ± 0.654  ms/op
+
+Benchmark result is saved to docs/bench-results/post-0.4.0/clean-after-p3.2.json

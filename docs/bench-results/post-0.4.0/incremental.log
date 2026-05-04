@@ -1,0 +1,425 @@
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = initialize)
+
+# Run progress: 0.00% complete, ETA 00:03:12
+# Fork: 1 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 294.215 ms/op
+# Warmup Iteration   2: 292.225 ms/op
+# Warmup Iteration   3: 289.223 ms/op
+Iteration   1: 298.859 ms/op
+Iteration   2: 294.982 ms/op
+Iteration   3: 294.149 ms/op
+Iteration   4: 295.628 ms/op
+Iteration   5: 293.819 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+# Run progress: 8.33% complete, ETA 00:03:12
+# Fork: 2 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 357.455 ms/op
+# Warmup Iteration   2: 324.786 ms/op
+# Warmup Iteration   3: 332.448 ms/op
+Iteration   1: 336.138 ms/op
+Iteration   2: 328.882 ms/op
+Iteration   3: 409.311 ms/op
+Iteration   4: 346.086 ms/op
+Iteration   5: 306.494 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+
+Result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run":
+  320.435 ±(99.9%) 55.657 ms/op [Average]
+  (min, avg, max) = (293.819, 320.435, 409.311), stdev = 36.814
+  CI (99.9%): [264.777, 376.092] (assumes normal distribution)
+
+Secondary result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run:jfr":
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-initialize/profile.jfr
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-initialize/profile.jfr
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = singleCharEdit)
+
+# Run progress: 16.67% complete, ETA 00:03:02
+# Fork: 1 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 338.690 ms/op
+# Warmup Iteration   2: 319.284 ms/op
+# Warmup Iteration   3: 321.092 ms/op
+Iteration   1: 306.564 ms/op
+Iteration   2: 339.058 ms/op
+Iteration   3: 322.962 ms/op
+Iteration   4: 318.405 ms/op
+Iteration   5: 300.755 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+# Run progress: 25.00% complete, ETA 00:02:45
+# Fork: 2 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 298.540 ms/op
+# Warmup Iteration   2: 322.977 ms/op
+# Warmup Iteration   3: 307.972 ms/op
+Iteration   1: 417.166 ms/op
+Iteration   2: 306.837 ms/op
+Iteration   3: 307.542 ms/op
+Iteration   4: 302.292 ms/op
+Iteration   5: 294.713 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+
+Result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run":
+  321.629 ±(99.9%) 54.328 ms/op [Average]
+  (min, avg, max) = (294.713, 321.629, 417.166), stdev = 35.934
+  CI (99.9%): [267.302, 375.957] (assumes normal distribution)
+
+Secondary result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run:jfr":
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-singleCharEdit/profile.jfr
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-singleCharEdit/profile.jfr
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = wordEdit)
+
+# Run progress: 33.33% complete, ETA 00:02:26
+# Fork: 1 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 17.541 ms/op
+# Warmup Iteration   2: 16.625 ms/op
+# Warmup Iteration   3: 16.636 ms/op
+Iteration   1: 18.487 ms/op
+Iteration   2: 17.760 ms/op
+Iteration   3: 17.179 ms/op
+Iteration   4: 17.157 ms/op
+Iteration   5: 16.448 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+# Run progress: 41.67% complete, ETA 00:02:06
+# Fork: 2 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 18.059 ms/op
+# Warmup Iteration   2: 16.841 ms/op
+# Warmup Iteration   3: 16.725 ms/op
+Iteration   1: 17.353 ms/op
+Iteration   2: 17.755 ms/op
+Iteration   3: 16.751 ms/op
+Iteration   4: 17.014 ms/op
+Iteration   5: 18.093 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+
+Result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run":
+  17.400 ±(99.9%) 0.943 ms/op [Average]
+  (min, avg, max) = (16.448, 17.400, 18.487), stdev = 0.624
+  CI (99.9%): [16.457, 18.343] (assumes normal distribution)
+
+Secondary result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run:jfr":
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-wordEdit/profile.jfr
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-wordEdit/profile.jfr
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = lineEdit)
+
+# Run progress: 50.00% complete, ETA 00:01:47
+# Fork: 1 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: <failure>
+
+java.lang.IllegalStateException: full parse failed: Unexpected 'v' at 1093:35, expected [ \t\r\n] or '//' or '/*' or '.' or '[' or '(' or '++' or '--' or '::' or '*=' or '*' or '/=' or '/' or '%=' or '%' or '+=' or '+' or '-=' or '->' or '-' or '<<=' or '<<' or '>>>=' or '>>>' or '>>=' or '>>' or '<=' or '>=' or '<' or '>' or 'instanceof' or '==' or '!=' or '&&' or '&=' or '&' or '^=' or '^' or '||' or '|=' or '|' or '?' or '=' or ';'
+	at org.pragmatica.peg.incremental.internal.SessionFactory.lambda$parseFull$0(SessionFactory.java:117)
+	at org.pragmatica.lang.Result$Failure.fold(Result.java:957)
+	at org.pragmatica.peg.incremental.internal.SessionFactory.parseFull(SessionFactory.java:116)
+	at org.pragmatica.peg.incremental.internal.IncrementalSession.fallback(IncrementalSession.java:129)
+	at org.pragmatica.peg.incremental.internal.IncrementalSession.edit(IncrementalSession.java:96)
+	at org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run(IncrementalBenchmark.java:133)
+	at org.pragmatica.peg.incremental.bench.jmh_generated.IncrementalBenchmark_run_jmhTest.run_avgt_jmhStub(IncrementalBenchmark_run_jmhTest.java:236)
+	at org.pragmatica.peg.incremental.bench.jmh_generated.IncrementalBenchmark_run_jmhTest.run_AverageTime(IncrementalBenchmark_run_jmhTest.java:176)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.openjdk.jmh.runner.BenchmarkHandler$BenchmarkTask.call(BenchmarkHandler.java:527)
+	at org.openjdk.jmh.runner.BenchmarkHandler$BenchmarkTask.call(BenchmarkHandler.java:504)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:328)
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:545)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:328)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+
+
+
+# Run progress: 58.33% complete, ETA 00:01:18
+# Fork: 2 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: <failure>
+
+java.lang.IllegalStateException: full parse failed: Unexpected 'v' at 1093:35, expected [ \t\r\n] or '//' or '/*' or '.' or '[' or '(' or '++' or '--' or '::' or '*=' or '*' or '/=' or '/' or '%=' or '%' or '+=' or '+' or '-=' or '->' or '-' or '<<=' or '<<' or '>>>=' or '>>>' or '>>=' or '>>' or '<=' or '>=' or '<' or '>' or 'instanceof' or '==' or '!=' or '&&' or '&=' or '&' or '^=' or '^' or '||' or '|=' or '|' or '?' or '=' or ';'
+	at org.pragmatica.peg.incremental.internal.SessionFactory.lambda$parseFull$0(SessionFactory.java:117)
+	at org.pragmatica.lang.Result$Failure.fold(Result.java:957)
+	at org.pragmatica.peg.incremental.internal.SessionFactory.parseFull(SessionFactory.java:116)
+	at org.pragmatica.peg.incremental.internal.IncrementalSession.fallback(IncrementalSession.java:129)
+	at org.pragmatica.peg.incremental.internal.IncrementalSession.edit(IncrementalSession.java:96)
+	at org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run(IncrementalBenchmark.java:133)
+	at org.pragmatica.peg.incremental.bench.jmh_generated.IncrementalBenchmark_run_jmhTest.run_avgt_jmhStub(IncrementalBenchmark_run_jmhTest.java:236)
+	at org.pragmatica.peg.incremental.bench.jmh_generated.IncrementalBenchmark_run_jmhTest.run_AverageTime(IncrementalBenchmark_run_jmhTest.java:176)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at org.openjdk.jmh.runner.BenchmarkHandler$BenchmarkTask.call(BenchmarkHandler.java:527)
+	at org.openjdk.jmh.runner.BenchmarkHandler$BenchmarkTask.call(BenchmarkHandler.java:504)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:328)
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:545)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:328)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)
+	at java.base/java.lang.Thread.run(Thread.java:1474)
+
+
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = fullReparse)
+
+# Run progress: 66.67% complete, ETA 00:00:55
+# Fork: 1 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 302.780 ms/op
+# Warmup Iteration   2: 299.407 ms/op
+# Warmup Iteration   3: 306.126 ms/op
+Iteration   1: 312.266 ms/op
+Iteration   2: 306.765 ms/op
+Iteration   3: 306.314 ms/op
+Iteration   4: 299.027 ms/op
+Iteration   5: 296.944 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+# Run progress: 75.00% complete, ETA 00:00:42
+# Fork: 2 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 298.885 ms/op
+# Warmup Iteration   2: 301.910 ms/op
+# Warmup Iteration   3: 297.304 ms/op
+Iteration   1: 308.142 ms/op
+Iteration   2: 305.986 ms/op
+Iteration   3: 300.715 ms/op
+Iteration   4: 293.880 ms/op
+Iteration   5: 296.037 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+
+Result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run":
+  302.608 ±(99.9%) 9.212 ms/op [Average]
+  (min, avg, max) = (293.880, 302.608, 312.266), stdev = 6.093
+  CI (99.9%): [293.395, 311.820] (assumes normal distribution)
+
+Secondary result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run:jfr":
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-fullReparse/profile.jfr
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-fullReparse/profile.jfr
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = undoRestore)
+
+# Run progress: 83.33% complete, ETA 00:00:29
+# Fork: 1 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: ≈ 10⁻⁶ ms/op
+# Warmup Iteration   2: ≈ 10⁻⁶ ms/op
+# Warmup Iteration   3: ≈ 10⁻⁶ ms/op
+Iteration   1: ≈ 10⁻⁶ ms/op
+Iteration   2: ≈ 10⁻⁶ ms/op
+Iteration   3: ≈ 10⁻⁶ ms/op
+Iteration   4: ≈ 10⁻⁶ ms/op
+Iteration   5: ≈ 10⁻⁶ ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+# Run progress: 91.67% complete, ETA 00:00:14
+# Fork: 2 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: ≈ 10⁻⁶ ms/op
+# Warmup Iteration   2: ≈ 10⁻⁶ ms/op
+# Warmup Iteration   3: ≈ 10⁻⁶ ms/op
+Iteration   1: ≈ 10⁻⁶ ms/op
+Iteration   2: ≈ 10⁻⁶ ms/op
+Iteration   3: ≈ 10⁻⁶ ms/op
+Iteration   4: ≈ 10⁻⁶ ms/op
+Iteration   5: ≈ 10⁻⁶ ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+
+Result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run":
+  ≈ 10⁻⁶ ms/op
+
+Secondary result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run:jfr":
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-undoRestore/profile.jfr
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run-AverageTime-variant-undoRestore/profile.jfr
+
+
+# Run complete. Total time: 00:03:00
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                          (variant)  Mode  Cnt    Score    Error  Units
+IncrementalBenchmark.run          initialize  avgt   10  320.435 ± 55.657  ms/op
+IncrementalBenchmark.run:jfr      initialize  avgt           NaN             ---
+IncrementalBenchmark.run      singleCharEdit  avgt   10  321.629 ± 54.328  ms/op
+IncrementalBenchmark.run:jfr  singleCharEdit  avgt           NaN             ---
+IncrementalBenchmark.run            wordEdit  avgt   10   17.400 ±  0.943  ms/op
+IncrementalBenchmark.run:jfr        wordEdit  avgt           NaN             ---
+IncrementalBenchmark.run         fullReparse  avgt   10  302.608 ±  9.212  ms/op
+IncrementalBenchmark.run:jfr     fullReparse  avgt           NaN             ---
+IncrementalBenchmark.run         undoRestore  avgt   10   ≈ 10⁻⁶           ms/op
+IncrementalBenchmark.run:jfr     undoRestore  avgt           NaN             ---
+
+Benchmark result is saved to docs/bench-results/post-0.4.0/incremental.json

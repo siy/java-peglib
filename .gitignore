@@ -46,3 +46,6 @@ buildNumber.properties
 ehthumbs.db
 Thumbs.db
 .ndx/
+
+# JMH per-benchmark profile output directories (left at repo root)
+org.pragmatica.peg.*-variant-*/
