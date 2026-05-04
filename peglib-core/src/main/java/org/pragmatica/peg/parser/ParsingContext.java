@@ -35,7 +35,9 @@ public final class ParsingContext {
     private int furthestLine;
     private int furthestColumn;
     private final LinkedHashSet<String> furthestExpected = new LinkedHashSet<>();
-    private String furthestExpectedJoined;  // null = stale, must rebuild from set
+    private String furthestExpectedJoined;
+
+    // null = stale, must rebuild from set
     private int tokenBoundaryDepth;
 
     // Error recovery state
