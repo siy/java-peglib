@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-05-04
+
+_Work in progress._
+
 ## [0.4.1] - 2026-05-04
 
 Performance — 3.88× interpreter speedup, 3× incremental edit speedup, no API changes.
