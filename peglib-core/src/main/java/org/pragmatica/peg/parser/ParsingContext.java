@@ -11,6 +11,7 @@ import org.pragmatica.peg.tree.Trivia;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -33,7 +34,8 @@ public final class ParsingContext {
     private int furthestPos;
     private int furthestLine;
     private int furthestColumn;
-    private final StringBuilder furthestExpected;
+    private final LinkedHashSet<String> furthestExpected = new LinkedHashSet<>();
+    private String furthestExpectedJoined;  // null = stale, must rebuild from set
     private int tokenBoundaryDepth;
 
     // Error recovery state
@@ -91,7 +93,7 @@ public final class ParsingContext {
         this.furthestPos = 0;
         this.furthestLine = 1;
         this.furthestColumn = 1;
-        this.furthestExpected = new StringBuilder();
+        this.furthestExpectedJoined = null;
         this.inRecovery = false;
         this.recoveryStartPos = Option.none();
     }
@@ -173,13 +175,11 @@ public final class ParsingContext {
             furthestPos = pos;
             furthestLine = line;
             furthestColumn = column;
-            furthestExpected.setLength(0);
-            furthestExpected.append(expected);
-        }else if (pos == furthestPos && furthestExpected.indexOf(expected) < 0) {
-            if (!furthestExpected.isEmpty()) {
-                furthestExpected.append(" or ");
-            }
-            furthestExpected.append(expected);
+            furthestExpected.clear();
+            furthestExpected.add(expected);
+            furthestExpectedJoined = null;
+        }else if (pos == furthestPos && furthestExpected.add(expected)) {
+            furthestExpectedJoined = null;
         }
     }
 
@@ -192,7 +192,10 @@ public final class ParsingContext {
     }
 
     public String furthestExpected() {
-        return furthestExpected.toString();
+        if (furthestExpectedJoined == null) {
+            furthestExpectedJoined = String.join(" or ", furthestExpected);
+        }
+        return furthestExpectedJoined;
     }
 
     // === Diagnostic Collection (for advanced error recovery) ===
