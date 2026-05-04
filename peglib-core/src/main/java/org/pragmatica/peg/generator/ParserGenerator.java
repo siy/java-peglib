@@ -212,6 +212,7 @@ public final class ParserGenerator {
 
             import java.util.ArrayList;
             import java.util.HashMap;
+            import java.util.LinkedHashSet;
             import java.util.List;
             import java.util.Map;
             import java.util.function.Function;
@@ -255,7 +256,8 @@ public final class ParserGenerator {
                 private int furthestPos;
                 private int furthestLine;
                 private int furthestColumn;
-                private String furthestExpected;
+                private final LinkedHashSet<String> furthestExpected = new LinkedHashSet<>();
+                private String furthestExpectedJoined;
 
                 /**
                  * Enable or disable packrat memoization.
@@ -275,7 +277,8 @@ public final class ParserGenerator {
                     this.furthestPos = 0;
                     this.furthestLine = 1;
                     this.furthestColumn = 1;
-                    this.furthestExpected = "";
+                    this.furthestExpected.clear();
+                    this.furthestExpectedJoined = null;
                 }
 
                 private boolean isAtEnd() {
@@ -318,10 +321,19 @@ public final class ParserGenerator {
                         furthestPos = pos;
                         furthestLine = line;
                         furthestColumn = column;
-                        furthestExpected = expected;
-                    } else if (pos == furthestPos && !furthestExpected.contains(expected)) {
-                        furthestExpected = furthestExpected.isEmpty() ? expected : furthestExpected + " or " + expected;
+                        furthestExpected.clear();
+                        furthestExpected.add(expected);
+                        furthestExpectedJoined = null;
+                    } else if (pos == furthestPos && furthestExpected.add(expected)) {
+                        furthestExpectedJoined = null;
                     }
+                }
+
+                private String furthestExpectedJoined() {
+                    if (furthestExpectedJoined == null) {
+                        furthestExpectedJoined = String.join(" or ", furthestExpected);
+                    }
+                    return furthestExpectedJoined;
                 }
 
             """);
@@ -344,7 +356,7 @@ public final class ParserGenerator {
                     if (result.isFailure()) {
                         var errorLine = furthestPos > 0 ? furthestLine : line;
                         var errorColumn = furthestPos > 0 ? furthestColumn : column;
-                        var expected = !furthestExpected.isEmpty() ? furthestExpected : result.expected.or("valid input");
+                        var expected = !furthestExpected.isEmpty() ? furthestExpectedJoined() : result.expected.or("valid input");
                         return Result.failure(new ParseError(errorLine, errorColumn, "expected " + expected));
                     }
                     if (!isAtEnd()) {
@@ -1510,6 +1522,7 @@ public final class ParserGenerator {
 
             import java.util.ArrayList;
             import java.util.HashMap;
+            import java.util.LinkedHashSet;
             import java.util.List;
             import java.util.Map;
             import java.util.function.Function;
