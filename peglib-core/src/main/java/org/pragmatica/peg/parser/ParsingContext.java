@@ -113,24 +113,6 @@ public final class ParsingContext {
         return SourceLocation.sourceLocation(line, column, pos);
     }
 
-    /**
-     * Phase-2 perf: int accessor for the current line, paired with {@link #pos()} and
-     * {@link #column()} so callers at rule-entry can capture position-as-ints
-     * without allocating a {@link SourceLocation}. The location is materialized
-     * only on the success path where it is consumed by a {@code SourceSpan}.
-     * Mirrors the {@code inlineLocations} optimization the generator already emits.
-     */
-    public int line() {
-        return line;
-    }
-
-    /**
-     * Phase-2 perf: int accessor for the current column. See {@link #line()}.
-     */
-    public int column() {
-        return column;
-    }
-
     public void restoreLocation(SourceLocation loc) {
         this.pos = loc.offset();
         this.line = loc.line();
