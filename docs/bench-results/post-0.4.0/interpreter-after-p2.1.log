@@ -1,0 +1,153 @@
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+# Benchmark: org.pragmatica.peg.bench.Java25ParseBenchmark.parse
+# Parameters: (variant = interpreter)
+
+# Run progress: 0.00% complete, ETA 00:01:04
+# Fork: 1 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 0.006 ops/ms
+# Warmup Iteration   2: 0.006 ops/ms
+# Warmup Iteration   3: 0.006 ops/ms
+Iteration   1: 0.006 ops/ms
+Iteration   2: 0.006 ops/ms
+Iteration   3: 0.006 ops/ms
+Iteration   4: 0.006 ops/ms
+Iteration   5: 0.006 ops/ms
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+# Run progress: 25.00% complete, ETA 00:00:50
+# Fork: 2 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 0.005 ops/ms
+# Warmup Iteration   2: 0.006 ops/ms
+# Warmup Iteration   3: 0.004 ops/ms
+Iteration   1: 0.005 ops/ms
+Iteration   2: 0.003 ops/ms
+Iteration   3: 0.006 ops/ms
+Iteration   4: 0.006 ops/ms
+Iteration   5: 0.006 ops/ms
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+
+Result "org.pragmatica.peg.bench.Java25ParseBenchmark.parse":
+  0.006 ±(99.9%) 0.002 ops/ms [Average]
+  (min, avg, max) = (0.003, 0.006, 0.006), stdev = 0.001
+  CI (99.9%): [0.004, 0.007] (assumes normal distribution)
+
+Secondary result "org.pragmatica.peg.bench.Java25ParseBenchmark.parse:jfr":
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.bench.Java25ParseBenchmark.parse-Throughput-variant-interpreter/profile.jfr
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.bench.Java25ParseBenchmark.parse-Throughput-variant-interpreter/profile.jfr
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.bench.Java25ParseBenchmark.parse
+# Parameters: (variant = interpreter)
+
+# Run progress: 50.00% complete, ETA 00:00:34
+# Fork: 1 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 170.888 ms/op
+# Warmup Iteration   2: 155.703 ms/op
+# Warmup Iteration   3: 154.366 ms/op
+Iteration   1: 156.124 ms/op
+Iteration   2: 155.722 ms/op
+Iteration   3: 155.471 ms/op
+Iteration   4: 154.405 ms/op
+Iteration   5: 158.955 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+# Run progress: 75.00% complete, ETA 00:00:17
+# Fork: 2 of 2
+# Preparing profilers: JavaFlightRecorderProfiler 
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-core/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 170.556 ms/op
+# Warmup Iteration   2: 155.345 ms/op
+# Warmup Iteration   3: 155.124 ms/op
+Iteration   1: 159.079 ms/op
+Iteration   2: 159.690 ms/op
+Iteration   3: 159.606 ms/op
+Iteration   4: 159.135 ms/op
+Iteration   5: 160.713 ms/op
+                 jfr: (text only)
+
+# Processing profiler results: JavaFlightRecorderProfiler 
+
+
+Result "org.pragmatica.peg.bench.Java25ParseBenchmark.parse":
+  157.890 ±(99.9%) 3.345 ms/op [Average]
+  (min, avg, max) = (154.405, 157.890, 160.713), stdev = 2.213
+  CI (99.9%): [154.545, 161.235] (assumes normal distribution)
+
+Secondary result "org.pragmatica.peg.bench.Java25ParseBenchmark.parse:jfr":
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.bench.Java25ParseBenchmark.parse-AverageTime-variant-interpreter/profile.jfr
+JFR profiler results:
+  /Users/sergiyyevtushenko/IdeaProjects/java-peglib/org.pragmatica.peg.bench.Java25ParseBenchmark.parse-AverageTime-variant-interpreter/profile.jfr
+
+
+# Run complete. Total time: 00:01:08
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                         (variant)   Mode  Cnt    Score   Error   Units
+Java25ParseBenchmark.parse      interpreter  thrpt   10    0.006 ± 0.002  ops/ms
+Java25ParseBenchmark.parse:jfr  interpreter  thrpt           NaN             ---
+Java25ParseBenchmark.parse      interpreter   avgt   10  157.890 ± 3.345   ms/op
+Java25ParseBenchmark.parse:jfr  interpreter   avgt           NaN             ---
+
+Benchmark result is saved to docs/bench-results/post-0.4.0/interpreter-after-p2.1.json

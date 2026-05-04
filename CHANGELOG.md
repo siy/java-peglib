@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-04
+
+Performance — 3.88× interpreter speedup, 3× incremental edit speedup, no API changes.
+
+### Performance
+
+- **`PegEngine.lookupRule` HashMap cache.** Replaced `Grammar.rule(name)` linear scan + stream pipeline with a `Map<String, Rule>` populated once at engine construction. Eliminates 14% of parse CPU + 14% of allocations on the interpreter hot path. (Commit `26dea5e`)
+- **`ParseMode.standard()` and `ParseMode.noWhitespace()` are static singletons.** Previously allocated a fresh record per call (4% of allocations). The records are immutable; no semantic change. (Commit `2e05d44`)
+- **`ParsingContext.updateFurthest` uses `LinkedHashSet` for dedup.** Previously stored expected-token messages in a `StringBuilder` and dedup'd via `indexOf` (O(n*m) per backtrack at the deepest position). Replaced by `LinkedHashSet<String>` (O(1) add+contains) with a lazy " or "-joined cache. **2.12× standalone speedup on the interpreter.** (Commit `654a1c6`)
+- **Generated parsers emit the LinkedHashSet pattern for `furthestExpected`.** Same fix at the gen-time emission level for `ParserGenerator`'s BASIC error-reporting path. ADVANCED path uses a different `Option<String>` pattern and was deferred. (Commit `cca46c5`)
+
+### Benchmarks (1900-LOC `FactoryClassGenerator.java.txt` fixture, JDK 25, Apple Silicon)
+
+| Benchmark | 0.4.0 | 0.4.1 | Speedup |
+|---|---:|---:|---:|
+| `Java25ParseBenchmark.parse` interpreter | 281 ms | **72.4 ± 0.7 ms** | **3.88×** |
+| `Java25ParseBenchmark.parse` phase1 (generator) | 86 ms | 79.4 ± 2.0 ms | 1.08× |
+| `IncrementalBenchmark.run` initialize | 320 ms | 107 ms | 3.0× |
+| `IncrementalBenchmark.run` singleCharEdit (Regime A) | 322 ms | **107 ms** | **3.0×** |
+| `IncrementalBenchmark.run` wordEdit (Regime B) | 17 ms | 16 ms | ~no change (already small) |
+
+The interpreter (PegEngine) is now FASTER than the generator's phase1 path because the `LinkedHashSet` fix's interpreter wins (+2.12×) outweigh the equivalent fix's generator wins (+1.08×) — the generator was already heavily optimized, so the same fix had less to bite.
+
+### Documentation
+
+- **HANDOVER §6.2 retraction.** The lever-1 incremental-perf "1-2 day fix" framing was wrong. Two failed attempts (12/100 and 31/100 parity regressions). Real fix needs 5-10 days of correctness analysis. Documented two latent bugs: (a) fallback-rule bypass — `tryIncrementalReparse` only checks the chosen pivot, not its ancestors; (b) `reparseAt`'s acceptance check proves length parity but not structural parity.
+- **`docs/incremental/V2.5-SPIKE.md` addendum.** Retracts the spike doc's "zero correctness risk" claim. Parity was never asserted in the spike's probe — only timing.
+- **HANDOVER §6.4 correction.** Tier-1 perf flags (`inlineLocations`, `markResetChildren`, `selectivePackrat`) are generator-only. They do NOT speed up the interpreter path that `IncrementalParser` uses.
+
+### Reverted
+
+- **`dc7b80d` perf: inline location ints (P2.1).** Ported `inlineLocations` from generator to interpreter at rule entry. 0% wall-time impact — failure paths are rare in successful-parse benchmarks under packrat caching, so the failure-path-only optimization had nothing to bite. Reverted as `023b776`.
+
+### Notes for downstream
+
+- No public API changes. Drop-in replacement.
+- Generated parsers from 0.3.x and 0.4.0 should be regenerated with 0.4.1's `ParserGenerator` to pick up the gen-time `furthestExpected` `LinkedHashSet` emission.
+
 ## [0.4.0] - 2026-05-01
 
 API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap (the original 0.4.0 plan item; superseded by `docs/incremental/V2.5-SPIKE.md`'s NO-GO recommendation — the actual lever is pivot-selection, not cache invalidation).

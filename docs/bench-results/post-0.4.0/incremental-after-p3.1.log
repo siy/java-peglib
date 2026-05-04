@@ -1,0 +1,129 @@
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = initialize)
+
+# Run progress: 0.00% complete, ETA 00:00:48
+# Fork: 1 of 1
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 108.868 ms/op
+# Warmup Iteration   2: 114.895 ms/op
+# Warmup Iteration   3: 106.013 ms/op
+Iteration   1: 113.915 ms/op
+Iteration   2: 109.156 ms/op
+Iteration   3: 105.903 ms/op
+Iteration   4: 106.852 ms/op
+Iteration   5: 101.562 ms/op
+
+
+Result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run":
+  107.478 ±(99.9%) 17.447 ms/op [Average]
+  (min, avg, max) = (101.562, 107.478, 113.915), stdev = 4.531
+  CI (99.9%): [90.030, 124.925] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = singleCharEdit)
+
+# Run progress: 33.33% complete, ETA 00:00:33
+# Fork: 1 of 1
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 109.130 ms/op
+# Warmup Iteration   2: 110.189 ms/op
+# Warmup Iteration   3: 107.855 ms/op
+Iteration   1: 109.844 ms/op
+Iteration   2: 110.387 ms/op
+Iteration   3: 106.356 ms/op
+Iteration   4: 104.240 ms/op
+Iteration   5: 106.199 ms/op
+
+
+Result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run":
+  107.405 ±(99.9%) 10.080 ms/op [Average]
+  (min, avg, max) = (104.240, 107.405, 110.387), stdev = 2.618
+  CI (99.9%): [97.325, 117.486] (assumes normal distribution)
+
+
+# JMH version: 1.37
+# VM version: JDK 25.0.2, OpenJDK 64-Bit Server VM, 25.0.2
+# VM invoker: /opt/homebrew/Cellar/openjdk/25.0.2/libexec/openjdk.jdk/Contents/Home/bin/java
+# VM options: <none>
+# Blackhole mode: compiler (auto-detected, use -Djmh.blackhole.autoDetect=false to disable)
+# Warmup: 3 iterations, 2 s each
+# Measurement: 5 iterations, 2 s each
+# Timeout: 10 min per iteration
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Average time, time/op
+# Benchmark: org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run
+# Parameters: (variant = wordEdit)
+
+# Run progress: 66.67% complete, ETA 00:00:16
+# Fork: 1 of 1
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils (file:/Users/sergiyyevtushenko/IdeaProjects/java-peglib/peglib-incremental/target/benchmarks.jar)
+WARNING: Please consider reporting this to the maintainers of class org.openjdk.jmh.util.Utils
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+# Warmup Iteration   1: 16.479 ms/op
+# Warmup Iteration   2: 15.236 ms/op
+# Warmup Iteration   3: 16.535 ms/op
+Iteration   1: 15.710 ms/op
+Iteration   2: 15.455 ms/op
+Iteration   3: 15.607 ms/op
+Iteration   4: 16.037 ms/op
+Iteration   5: 15.436 ms/op
+
+
+Result "org.pragmatica.peg.incremental.bench.IncrementalBenchmark.run":
+  15.649 ±(99.9%) 0.942 ms/op [Average]
+  (min, avg, max) = (15.436, 15.649, 16.037), stdev = 0.245
+  CI (99.9%): [14.707, 16.591] (assumes normal distribution)
+
+
+# Run complete. Total time: 00:00:50
+
+REMEMBER: The numbers below are just data. To gain reusable insights, you need to follow up on
+why the numbers are the way they are. Use profilers (see -prof, -lprof), design factorial
+experiments, perform baseline and negative tests that provide experimental control, make sure
+the benchmarking environment is safe on JVM/OS/HW level, ask for reviews from the domain experts.
+Do not assume the numbers tell you what you want them to tell.
+
+NOTE: Current JVM experimentally supports Compiler Blackholes, and they are in use. Please exercise
+extra caution when trusting the results, look into the generated code to check the benchmark still
+works, and factor in a small probability of new VM bugs. Additionally, while comparisons between
+different JVMs are already problematic, the performance difference caused by different Blackhole
+modes can be very significant. Please make sure you use the consistent Blackhole mode for comparisons.
+
+Benchmark                      (variant)  Mode  Cnt    Score    Error  Units
+IncrementalBenchmark.run      initialize  avgt    5  107.478 ± 17.447  ms/op
+IncrementalBenchmark.run  singleCharEdit  avgt    5  107.405 ± 10.080  ms/op
+IncrementalBenchmark.run        wordEdit  avgt    5   15.649 ±  0.942  ms/op
+
+Benchmark result is saved to docs/bench-results/post-0.4.0/incremental-after-p3.1.json
