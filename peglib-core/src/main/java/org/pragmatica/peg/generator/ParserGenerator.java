@@ -210,12 +210,14 @@ public final class ParserGenerator {
             import org.pragmatica.lang.Option;
             import org.pragmatica.lang.Result;
 
+            import java.util.ArrayDeque;
             import java.util.ArrayList;
             import java.util.HashMap;
             import java.util.LinkedHashSet;
             import java.util.List;
             import java.util.Map;
             import java.util.function.Function;
+            import java.util.function.Supplier;
 
             """);
     }
@@ -1424,7 +1426,7 @@ public final class ParserGenerator {
      * 0.2.6 — emit the Actions dispatch field + setter + nested SemanticValues.
      * Used only by the AST path (generate()). Lambdas attached here override any
      * inline grammar actions for the matching rule class. Generated parsers
-     * continue to depend only on pragmatica-lite:core plus peglib's RuleId type.
+     * continue to depend only on pragmatica-lite:core.
      */
     private void generateActionsField(StringBuilder sb) {
         sb.append("""
@@ -1520,12 +1522,14 @@ public final class ParserGenerator {
             import org.pragmatica.lang.Option;
             import org.pragmatica.lang.Result;
 
+            import java.util.ArrayDeque;
             import java.util.ArrayList;
             import java.util.HashMap;
             import java.util.LinkedHashSet;
             import java.util.List;
             import java.util.Map;
             import java.util.function.Function;
+            import java.util.function.Supplier;
 
             """);
     }
@@ -1545,11 +1549,10 @@ public final class ParserGenerator {
         var rules = grammar.rules();
         sb.append("    // === Rule ID Types ===\n\n");
         // Nested records are implicitly permitted - no need for explicit permits clause.
-        // Extends the library's RuleId so callers can pass RuleId classes through the
-        // peglib Actions API (0.2.6) and, forward-compat, parseRuleAt (0.3.0).
-        sb.append("    public sealed interface RuleId extends org.pragmatica.peg.action.RuleId {\n");
+        // Standalone marker interface — generated parsers do not depend on peglib at runtime.
+        sb.append("    public sealed interface RuleId {\n");
         sb.append("        int ordinal();\n");
-        sb.append("        @Override String name();\n\n");
+        sb.append("        String name();\n\n");
         // Generate record for each rule
         int ordinal = 0;
         for (var rule : rules) {
@@ -2017,7 +2020,7 @@ public final class ParserGenerator {
             // first (the stack is unwound by the time recovery runs), then
             // the live stack, then the global default char-set.
             sb.append("""
-                    private final java.util.ArrayDeque<String> recoveryOverrideStack = new java.util.ArrayDeque<>();
+                    private final ArrayDeque<String> recoveryOverrideStack = new ArrayDeque<>();
                     private Option<String> pendingFailureRecoveryOverride = Option.none();
 
                     private void pushRecoveryOverride(String terminator) {
@@ -2401,13 +2404,13 @@ public final class ParserGenerator {
                 public record PartialParse(CstNode node, int endOffset) {}
 
                 // Dispatch table: RuleId marker class -> rule method.
-                private final Map<Class<? extends org.pragmatica.peg.action.RuleId>,
-                                  java.util.function.Supplier<CstParseResult>> ruleDispatch = buildRuleDispatch();
+                private final Map<Class<? extends RuleId>,
+                                  Supplier<CstParseResult>> ruleDispatch = buildRuleDispatch();
 
-                private Map<Class<? extends org.pragmatica.peg.action.RuleId>,
-                            java.util.function.Supplier<CstParseResult>> buildRuleDispatch() {
-                    var m = new java.util.HashMap<Class<? extends org.pragmatica.peg.action.RuleId>,
-                                                  java.util.function.Supplier<CstParseResult>>();
+                private Map<Class<? extends RuleId>,
+                            Supplier<CstParseResult>> buildRuleDispatch() {
+                    var m = new HashMap<Class<? extends RuleId>,
+                                        Supplier<CstParseResult>>();
                 """);
         for (var rule : grammar.rules()) {
             var ruleClassName = toClassName(rule.name());
@@ -2419,7 +2422,7 @@ public final class ParserGenerator {
               .append(");\n");
         }
         sb.append("""
-                    return java.util.Map.copyOf(m);
+                    return Map.copyOf(m);
                 }
 
                 /**
@@ -2432,7 +2435,7 @@ public final class ParserGenerator {
                  * @since 0.3.0
                  */
                 public Result<PartialParse> parseRuleAt(
-                        Class<? extends org.pragmatica.peg.action.RuleId> ruleId,
+                        Class<? extends RuleId> ruleId,
                         String input, int offset) {
                     if (ruleId == null) {
                         return Result.failure(new ParseError(SourceLocation.START, "Rule id class is null"));

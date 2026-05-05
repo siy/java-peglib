@@ -15,8 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Verifies that {@link org.pragmatica.peg.generator.ParserGenerator} emits:
  * <ul>
- *   <li>a nested {@code sealed interface RuleId extends
- *       org.pragmatica.peg.action.RuleId}</li>
+ *   <li>a nested standalone {@code sealed interface RuleId} (no extension of
+ *       a peglib base type — generated parsers must compile with no peglib
+ *       runtime dependency)</li>
  *   <li>a parameter-less record per grammar rule, with class names matching
  *       the sanitized rule name (so {@code Class.getSimpleName()} lines up with
  *       {@link Actions} dispatch)</li>
@@ -26,12 +27,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </ul>
  *
  * <p>These are the shape guarantees the 0.3.0 {@code parseRuleAt} signature
- * will rely on.
+ * relies on, scoped to the locally-emitted {@code RuleId} interface.
  */
 class RuleIdEmissionTest {
 
     @Test
-    void generatedCstParser_emitsSealedRuleIdExtendingLibraryBase() {
+    void generatedCstParser_emitsStandaloneSealedRuleId() {
         var grammar = """
             Number <- < [0-9]+ >
             Sum    <- Number '+' Number
@@ -39,7 +40,8 @@ class RuleIdEmissionTest {
             """;
         var source = PegParser.generateCstParser(grammar, "emit.cst", "CstParser").unwrap();
 
-        assertThat(source).contains("public sealed interface RuleId extends org.pragmatica.peg.action.RuleId");
+        assertThat(source).contains("public sealed interface RuleId {");
+        assertThat(source).doesNotContain("org.pragmatica.peg.action.RuleId");
         assertThat(source).contains("record Number() implements RuleId");
         assertThat(source).contains("record Sum() implements RuleId");
     }
@@ -53,7 +55,8 @@ class RuleIdEmissionTest {
             """;
         var source = PegParser.generateParser(grammar, "emit.ast", "AstParser").unwrap();
 
-        assertThat(source).contains("public sealed interface RuleId extends org.pragmatica.peg.action.RuleId");
+        assertThat(source).contains("public sealed interface RuleId {");
+        assertThat(source).doesNotContain("org.pragmatica.peg.action.RuleId");
         assertThat(source).contains("record Number() implements RuleId");
         assertThat(source).contains("record Sum() implements RuleId");
         assertThat(source).contains("public AstParser withAction(Class<? extends RuleId> ruleIdClass");
@@ -91,8 +94,6 @@ class RuleIdEmissionTest {
         var numberClass = Class.forName("emit.lambda.LambdaParser$RuleId$Number", true, parserClass.getClassLoader());
         var semanticValuesClass = Class.forName("emit.lambda.LambdaParser$SemanticValues", true, parserClass.getClassLoader());
         assertThat(ruleIdIface.isAssignableFrom(numberClass)).isTrue();
-        // Generated RuleId must extend library's RuleId — enforces API shape for parseRuleAt.
-        assertThat(RuleId.class.isAssignableFrom(ruleIdIface)).isTrue();
 
         // Attach a lambda that returns matched-int-times-10 so it is distinguishable from the inline action (sv.toInt()).
         var withAction = parserClass.getMethod("withAction", Class.class, Function.class);
