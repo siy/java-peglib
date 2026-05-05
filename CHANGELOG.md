@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.2] - 2026-05-04
 
-_Work in progress._
+Standalone-parser fix. No API changes for the interpreter / incremental / formatter paths.
+
+### Fixed
+
+- **Generated parsers are now truly standalone.** Previous releases' generated `RuleId` interface declared `extends org.pragmatica.peg.action.RuleId` and the emitted `parseRuleAt` signature used `Class<? extends org.pragmatica.peg.action.RuleId>`. This contradicted the documented contract on `ParserGenerator` ("The generated parser depends only on pragmatica-lite:core") — downstream projects without peglib on their compile classpath could not build the emitted source. The link was vestigial: the generated `withAction(Class<? extends RuleId>, ...)` API uses string-based dispatch (`ruleIdClass.getSimpleName()`) and does not need parent-type linkage. (Commit `b72c97f`)
+- **Generated parsers no longer reference any FQCN in emitted source.** Audit removed `org.pragmatica.peg.action.RuleId`, `java.util.ArrayDeque`, and other fully-qualified names from `sb.append(...)` emission templates. Proper imports are now emitted in `generateImports` / `generateCstImports` and simple names are used throughout the emitted source. (Commit `b72c97f`)
+
+### Test changes
+
+- `RuleIdEmissionTest` updated to assert standalone shape (`public sealed interface RuleId {`) and the absence of `org.pragmatica.peg.action.RuleId` in emitted source. The test that previously verified the parent-type link via reflection now verifies the local `RuleId` hierarchy instead.
+
+### Notes for downstream
+
+- **Regenerate parsers** to pick up the standalone fix.
+- Generated parsers continue to depend only on `pragmatica-lite:core` (for `Result`, `Option`, `Cause`).
+- The `peglib-incremental` module's interpreter-based `parseRuleAt` API is unchanged — that path still uses `org.pragmatica.peg.action.RuleId` (interpreter-only, not generator-emitted).
 
 ## [0.4.1] - 2026-05-04
 
