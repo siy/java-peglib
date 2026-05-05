@@ -15,7 +15,7 @@ A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peg
 - **Source code generation** - Generate standalone parser Java files
 - **Java 25** - Uses latest Java features (records, sealed interfaces, pattern matching)
 
-## Module Layout (0.3.0)
+## Module Layout (0.4.0+)
 
 Peglib is a multi-module Maven reactor. Pick the module you need; transitive deps stay minimal.
 
@@ -362,9 +362,8 @@ Run from code:
 ```java
 import org.pragmatica.peg.analyzer.Analyzer;
 
-var grammar = GrammarParser.parse(grammarText)
-                           .flatMap(Grammar::validate)
-                           .unwrap();
+// 0.4.0+: GrammarParser.parse already returns a validated Result<Grammar>.
+var grammar = GrammarParser.parse(grammarText).unwrap();
 var report = Analyzer.analyze(grammar);
 
 if (report.hasErrors()) {
@@ -419,7 +418,7 @@ The `peglib-playground` module (separate artifact, sibling to `peglib`) bundles 
 REPL and an embedded web UI for experimenting with grammars interactively.
 
 - **CLI REPL:** `java -cp peglib-playground.jar org.pragmatica.peg.playground.PlaygroundRepl grammar.peg`
-- **Web UI:** `java -jar peglib-playground-0.2.7-uber.jar --port 8080` then open
+- **Web UI:** `java -jar peglib-playground-0.4.2-uber.jar --port 8080` then open
   `http://localhost:8080` — three panes (grammar / input / output) plus controls
   for start rule, CST/AST, trivia, recovery, packrat, and auto-refresh.
 - **HTTP API:** `POST /parse` with `{"grammar":"…","input":"…","recovery":"BASIC","packrat":true,"trivia":true}`
@@ -429,17 +428,17 @@ See [docs/PLAYGROUND.md](docs/PLAYGROUND.md) for the full usage guide.
 
 ## Examples
 
-See the [examples](src/test/java/org/pragmatica/peg/examples/) directory:
+See the [examples](peglib-core/src/test/java/org/pragmatica/peg/examples/) directory:
 
 | Example | Description |
 |---------|-------------|
-| [CalculatorExample](src/test/java/org/pragmatica/peg/examples/CalculatorExample.java) | Arithmetic with semantic actions |
-| [JsonParserExample](src/test/java/org/pragmatica/peg/examples/JsonParserExample.java) | JSON CST parsing |
-| [SExpressionExample](src/test/java/org/pragmatica/peg/examples/SExpressionExample.java) | Lisp-like syntax |
-| [CsvParserExample](src/test/java/org/pragmatica/peg/examples/CsvParserExample.java) | CSV data format |
-| [ErrorRecoveryExample](src/test/java/org/pragmatica/peg/examples/ErrorRecoveryExample.java) | Error recovery patterns |
-| [SourceGenerationExample](src/test/java/org/pragmatica/peg/examples/SourceGenerationExample.java) | Standalone parser generation |
-| [Java25GrammarExample](src/test/java/org/pragmatica/peg/examples/Java25GrammarExample.java) | Java 25 syntax parsing |
+| [CalculatorExample](peglib-core/src/test/java/org/pragmatica/peg/examples/CalculatorExample.java) | Arithmetic with semantic actions |
+| [JsonParserExample](peglib-core/src/test/java/org/pragmatica/peg/examples/JsonParserExample.java) | JSON CST parsing |
+| [SExpressionExample](peglib-core/src/test/java/org/pragmatica/peg/examples/SExpressionExample.java) | Lisp-like syntax |
+| [CsvParserExample](peglib-core/src/test/java/org/pragmatica/peg/examples/CsvParserExample.java) | CSV data format |
+| [ErrorRecoveryExample](peglib-core/src/test/java/org/pragmatica/peg/examples/ErrorRecoveryExample.java) | Error recovery patterns |
+| [SourceGenerationExample](peglib-core/src/test/java/org/pragmatica/peg/examples/SourceGenerationExample.java) | Standalone parser generation |
+| [Java25GrammarExample](peglib-core/src/test/java/org/pragmatica/peg/examples/Java25GrammarExample.java) | Java 25 syntax parsing |
 
 ## CST Node Types
 
@@ -454,7 +453,13 @@ public sealed interface CstNode {
 
 ## Performance
 
-As of 0.2.2 the generated CST parser emits tuned helper variants driven by generator-time flags in `ParserConfig`. On a 1,900-LOC Java 25 fixture (`FactoryClassGenerator.java`), the new `ParserConfig.DEFAULT` yields a **4.23× speedup** over the pre-0.2.2 baseline (JMH 1.37 avgT, JDK 25.0.2, Apple Silicon; raw data in [`docs/bench-results/`](docs/bench-results/)).
+### Interpreter (PegEngine) — 0.4.1
+
+On the same 1,900-LOC Java 25 fixture, the interpreter (`PegParser.fromGrammar(...).parseCst(...)`) is **3.88× faster in 0.4.1** than 0.4.0 (281 ms → 72.4 ms; JMH 1.37 avgT, JDK 25.0.2, Apple Silicon). Incremental cursor-far edits (`peglib-incremental`) drop from 322 ms to 107 ms (3.0×). Three flame-graph-driven changes: HashMap rule-lookup cache, singleton `ParseMode` constants, `LinkedHashSet` dedup for the furthest-failure expected-set. See [`docs/bench-results/post-0.4.0/`](docs/bench-results/post-0.4.0/) for raw JMH + JFR data.
+
+### Generated parsers — 0.2.2
+
+The generated CST parser emits tuned helper variants driven by generator-time flags in `ParserConfig`. On the same fixture, the all-flags `phase1` variant runs at ~76 ms (4.7× over the pre-0.2.2 baseline; raw data in [`docs/bench-results/`](docs/bench-results/)).
 
 Flags (all consumed at generation time — no runtime branching in the emitted parser):
 
@@ -477,7 +482,8 @@ To reproduce benchmarks:
 
 ```bash
 mvn -Pbench -DskipTests package
-java -jar target/benchmarks.jar org.pragmatica.peg.bench.Java25ParseBenchmark
+java -jar peglib-core/target/benchmarks.jar org.pragmatica.peg.bench.Java25ParseBenchmark
+java -jar peglib-incremental/target/benchmarks.jar org.pragmatica.peg.incremental.bench.IncrementalBenchmark
 ```
 
 See [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) for the full JMH harness
@@ -492,6 +498,24 @@ mvn verify     # Full verification
 ```
 
 Requires Java 25+. For JMH benchmarks see [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md).
+
+## Recent Releases
+
+Full history in [`CHANGELOG.md`](CHANGELOG.md). Highlights since the 0.2.x line:
+
+| Version | Date | What |
+|---|---|---|
+| **0.4.2** | 2026-05-05 | Generated parsers now truly standalone — emit zero peglib FQCN references in their source. Drop them into a project with no peglib runtime and they compile. |
+| **0.4.1** | 2026-05-04 | **3.88× interpreter speedup** + 3.0× incremental cursor-far edit. Three flame-graph-driven fixes; no API change. |
+| **0.4.0** | 2026-05-03 | **Breaking** — API consolidation. Multi-module split (`peglib`, `peglib-incremental`, `peglib-formatter`, `peglib-maven-plugin`, `peglib-playground`). Consistent factory naming. Result-typed pipelines at every boundary. Parse-don't-validate `Grammar`. Immutable `FormatterConfig` record. Migration notes in CHANGELOG. |
+| **0.3.6** | 2026-05-01 | Generator-side `%recover` per-rule overrides. Both interpreter and source-generated parsers now honor the directive end-to-end. |
+| **0.3.5** | 2026-05-01 | Trivia round-trip resolution (5 attribution bugs A–C''). `RoundTripTest` re-enabled (22/22 byte-equal corpus). Interpreter `%recover` directive. |
+| **0.3.3** | 2026-04-25 | `peglib-formatter` module — Wadler–Lindig pretty-printer framework. |
+| **0.3.2** | 2026-04-23 | `peglib-incremental` v2 — cursor-anchored reparse with edit-anchored boundary detection. |
+| **0.3.0** | 2026-04-22 | Multi-module reactor introduced. `parseRuleAt` partial-parse API. Incremental parsing v1. |
+| **0.2.9** | 2026-04-22 | Direct left-recursion via Warth-style seed-and-grow. |
+| **0.2.8** | 2026-04-21 | `%import GrammarName.RuleName` for cross-grammar rule composition. |
+| **0.2.2** | 2026-04-21 | Performance rework — generator-time perf flags in `ParserConfig`. 4.23× speedup on the 1,900-LOC Java 25 fixture. |
 
 ## References
 
