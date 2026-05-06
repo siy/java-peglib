@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Work in progress — incremental-native architectural rework. See `docs/incremental/ARCHITECTURE-0.5.0.md`._
 
+### Phase 0 — spike GO verdict (2026-05-07)
+
+Sandbox prototype of Lever A (stable IDs + LongLongMap NodeIndex) lands additively in `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/experimental/`. Existing 897-test suite untouched. Three GO/NO-GO gates green:
+
+- **Identity-preservation invariant** — `IdTreeSplicer` preserves sibling subtree reference equality through splices (spec §8 Q3 gate).
+- **Trivia-bearing edits** — calculator grammar with `%whitespace` + comments, three representative edits, incremental update equivalent to full rebuild (spec §8 Q4 gate).
+- **Perf** — JMH bench: 38× speedup at 100 nodes, 47× at 1000, 67× at 10000. Well above the 5× gate threshold; consistent with spec §2's projected 300× per-edit reduction. See [`docs/bench-results/phase0-spike-results.md`](docs/bench-results/phase0-spike-results.md) and [`docs/incremental/PHASE-0-RESULTS.md`](docs/incremental/PHASE-0-RESULTS.md).
+
+Phases 1–5 (production migration of all 5 modules) is the next-session entry point.
+
 ## [0.4.3] - 2026-05-06
 
 Performance — interactive editing focus. 19% faster median, 26% faster p95 on the IncrementalBenchmark editing-session suite. **One breaking change**: SourceSpan record components changed from two SourceLocations to six ints (see migration note).

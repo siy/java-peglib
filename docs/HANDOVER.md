@@ -270,17 +270,34 @@ Regen via:
 
 ## 11. Recommended next session
 
-The 0.4.x perf arc is complete (281 ms → 10.8 ms median, 26× from baseline; 0.4.3 ships at p99 ≈ 53 ms with 91.5% of edits under the 16 ms frame budget). Further per-edit-cost reductions are gated on architectural change, not algorithmic tweaks.
+**Phase 0 spike landed GO on 2026-05-07.** All three GO/NO-GO gates green; Phase 1 (production migration of Lever A) is the next-session entry. Read `docs/incremental/PHASE-0-RESULTS.md` for the full verdict + bench numbers (38–67× speedup confirmed) before starting.
 
-1. **Read `docs/incremental/ARCHITECTURE-0.5.0.md` first** — the spec that supersedes the §6.2 lever-1 puzzle and §6.4 unsafe-generator work. Both items dissolve into the proposed 0.5.0 design.
-2. **Phase 0 prototype** (per spec §6) — Lever A (stable node IDs + `LongLongMap` NodeIndex) on the calculator grammar end-to-end. ~1 week. GO/NO-GO gate on whether incremental NodeIndex update materially beats the 0.4.3 baseline on synthetic edits.
-3. **If GO:** execute Phases 1–5 over 4–5 weeks. Levers B (top-down pivot), C (`peglib-rt` interpreter/generator unification), D (Cursor split). Single major-version bump at 0.5.0.
-4. **If NO-GO:** revisit individual levers tactically; the spec stays as a future reference; ship 0.4.x patches as needed for downstream bugs.
+State of `release-0.5.0` branch (5 commits past `1619604` chore — local only, not pushed):
 
-Do NOT attempt lever 1 as a 0.4.x patch — both attempts proved the data structure forbids it. The 5-10 day correctness estimate in §6.2 is what's required to make it work *without* the architectural change; the spec proposes a path that makes lever-1 a 30-line method instead.
+- `d00eaa1` Phase 0a — `IdGenerator` + `LongLongMap` foundation
+- `f0696a1` Phase 0b — sandbox `IdCstNode` + `IdCstNodeBuilder`
+- `849b4ba` Phase 0c — sandbox `IdNodeIndex` with O(splicedSize+depth) incremental update
+- `9b55253` Phase 0d.1 — `IdTreeSplicer` + identity-invariant + trivia-edit gates
+- `a2dd8ac` Phase 0d.2 — JMH `Phase0SpikeBench` + results note
 
-Do NOT pursue further allocation reduction in the 0.4.x interpreter without the architectural change — the SourceLocation interning probe and ParseResult.Failure singleton probe both confirmed bytes-allocated metrics don't translate to wall-time wins under the current data structure (HashMap.Node entries promote and dominate). The structural SourceSpan refactor that DID ship in 0.4.3 was the exception because it eliminated long-lived refs from CstNodes.
+All work additive in `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/experimental/` and the parallel test/jmh directories. 897-test production surface untouched throughout. Local incremental count: 154 (was 100, +54 sandbox tests). 699 core unchanged.
+
+### Phase 1 — production Lever A migration (next session)
+
+Per spec §6 Phase 1 (~1 week elapsed): migrate production `CstNode` to ID-bearing variants, switch `NodeIndex` from `IdentityHashMap` to `LongLongMap`. Three concrete items surfaced by Phase 0 (per `PHASE-0-RESULTS.md` §"Notes for Phase 1") that Phase 1 should address:
+
+1. **Cross-parse record sharing** — `IdCstNodeBuilder` re-assigns fresh IDs every conversion. The 0.5.0 perf depends on `TreeSplicer.spliceAndShift` being the source of identity-shared trees, not the parser. Phase 1 task #1: confirm `TreeSplicer.spliceAndShift` preserves sibling identity (spec §8 Q3 second sentence). Fix it if not.
+2. **`applyIncremental` mutate-in-place semantics** — sandbox API invalidates the receiver. Production needs to choose: copy-on-write via `LongLongMap.copy()` (cheap — primitive arrays vs IdentityHashMap entries) or persistent map. Decision affects `IncrementalSession`'s API shape.
+3. **Worst-case splices not benched** — spike measures depth-3, small-pivot. Class-body-scale rewrites need a separate bench.
+
+After Phase 1 lands and IncrementalParityTest stays green at 22×100, proceed to Phase 2 (Lever B top-down pivot — should dissolve the §6.2 lever-1 puzzle into a 30-line method per spec §3).
+
+### Items now superseded
+
+§6.2 lever-1 puzzle and §6.4 unsafe-generator work are both dissolved by the 0.5.0 design. Do NOT attempt lever 1 as a 0.4.x patch.
+
+Do NOT pursue further allocation reduction in the 0.4.x interpreter without the architectural change — the SourceLocation interning probe and ParseResult.Failure singleton probe both confirmed bytes-allocated metrics don't translate to wall-time wins under the current data structure.
 
 ---
 
-**Last updated:** 2026-05-03, after the post-0.4.0 lever-1 retry failed (31/100 parity regressions). Handover from the 0.3.5 → 0.4.0 arc, plus the failed-lever-1 forensics.
+**Last updated:** 2026-05-07, after Phase 0 spike GO verdict. Previous update: 2026-05-03 post-failed-lever-1 forensics. Handover spans the 0.3.5 → 0.4.3 arc + the 0.5.0 Phase 0 spike completion.
