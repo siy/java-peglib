@@ -1,10 +1,12 @@
-# peglib — handover (post-0.4.0)
+# peglib — handover (post-0.4.3 + 0.5.0 spec ready)
 
-**Status:** `main` at `v0.4.0`. 4 tagged releases shipped in this arc (v0.3.5, v0.3.6, v0.4.0, plus retroactive Maven Central publish of v0.2.2). 897 tests passing, 0 skipped. Tree clean.
+**Status:** `main` at `v0.4.3`. 7 tagged releases shipped: v0.3.5, v0.3.6, v0.4.0, v0.4.1, v0.4.2, v0.4.3 + retroactive v0.2.2 Central publish. 897 tests passing, 0 skipped. Tree clean.
 
-This document supersedes the prior handover (now historical) — it captures the complete post-0.4.0 state including the trivia round-trip resolution, the API consolidation pass, the v2.5 NO-GO finding, and the deferred lever 1 correctness puzzle.
+**0.5.0 architectural spec ready** at `docs/incremental/ARCHITECTURE-0.5.0.md` with all 5 open questions resolved. `release-0.5.0` branch exists locally with chore commit `1619604` (not pushed). Phase 0 prototype is the next session's first step.
 
-If you want to do anything with this repo, read §1–§4 first; everything else is reference.
+This document captures the complete post-0.4.3 state including: the 26× perf arc from the 0.4.x line, the 0.4.3 SourceSpan structural refactor, the IncrementalSessionBench infrastructure, and the 0.5.0 forward plan.
+
+If you want to do anything with this repo, read §1–§5 first; §6 onwards is historical reference superseded by the 0.5.0 spec.
 
 ---
 
@@ -20,7 +22,7 @@ PEG (Parsing Expression Grammar) parser library for Java 25. Inspired by cpp-peg
 
 ## 2. Maven Central status
 
-Only **v0.2.1** and **v0.2.2** are on Maven Central as of this handover. The arc from v0.2.3 → v0.4.0 (12 versions) has tagged releases on GitHub but no Maven Central publish.
+Published on Central: **v0.2.1**, **v0.2.2**, **v0.4.1**, **v0.4.2**, **v0.4.3**. The intermediate arc v0.2.3 → v0.4.0 (12 versions) has tagged releases on GitHub but no Maven Central publish — publish on demand if downstream needs them.
 
 The release profile is set up correctly (parent `pom.xml`, activated by `-DperformRelease=true`): GPG signing, `central-publishing-maven-plugin` 0.6.0, `autoPublish=true`, `waitUntil=published`. v0.2.2 was published successfully via:
 
@@ -52,8 +54,13 @@ java -jar target/peglib-playground-*-uber.jar 8080
 # then open http://localhost:8080
 
 # Run grammar analyzer CLI
-java -cp peglib-core/target/peglib-0.4.0.jar \
+java -cp peglib-core/target/peglib-0.4.3.jar \
      org.pragmatica.peg.analyzer.AnalyzerMain path/to/grammar.peg
+
+# Run incremental editing-session bench (interactive perf measurement)
+mvn -pl peglib-incremental -Pbench -DskipTests package
+java -cp peglib-incremental/target/benchmarks.jar \
+     org.pragmatica.peg.incremental.bench.IncrementalSessionBench
 
 # Maven Central publish (any tag)
 git checkout vX.Y.Z
@@ -114,6 +121,43 @@ Migration guide is in `CHANGELOG.md` § [0.4.0].
 ### v0.2.2 (2026-05-03 retroactive Maven Central publish)
 
 Tagged 2026-04-21 originally. Published to Central on demand because a downstream project depends on it. Released artifact at https://repo1.maven.org/maven2/org/pragmatica-lite/peglib/0.2.2/
+
+### v0.4.1 (2026-05-04) — 3.88× interpreter perf
+
+Flame-graph-driven optimization arc. Three commits, all interpreter-side, no API changes:
+
+- `Grammar.rule` HashMap cache in `PegEngine` — eliminates per-reference O(N) linear scan + stream pipeline (14% CPU + 14% allocations)
+- `ParseMode.standard()`/`noWhitespace()` static singletons — eliminate per-call record allocation (4% allocations)
+- `LinkedHashSet` for `furthestExpected` dedup in `ParsingContext` — replaces `StringBuilder.indexOf` O(n*m) scan (53% inclusive CPU before fix; 2.12× speedup standalone). Mirrored to generator emission templates.
+
+Measured on 1900-LOC Java fixture: full parse 281 → 72.4 ms (3.88×). Incremental cursor-far edit 322 → 107 ms (3.0×).
+
+### v0.4.2 (2026-05-04) — standalone-parser fix
+
+Single-fix maintenance release. Generated parsers no longer leak FQCN references to peglib runtime — emitted `RuleId` interface no longer extends `org.pragmatica.peg.action.RuleId`, emitted `parseRuleAt` signature uses local `RuleId`, all FQCN occurrences in emission templates eliminated. Generated parsers now compile in projects with no peglib runtime on classpath, matching the documented contract.
+
+### v0.4.3 (2026-05-06) — interactive-editing perf + 0.5.0 spec
+
+Performance release focused on interactive editing. **One breaking change**: `SourceSpan` record components changed from `(SourceLocation start, SourceLocation end)` to six int triples; `start()`/`end()` preserved as lazy methods. Drove the 26% p95 improvement.
+
+Other changes:
+- `NodeIndex.build` pre-sizes IdentityHashMap from descendant count — eliminates resize churn (was 22.8% of bench allocations)
+- New `IncrementalSessionBench` in `peglib-incremental/src/jmh/java` — durable measurement harness for realistic 1,000-edit interactive sessions, two regimes (cursor-moved-to-edit + cursor-pinned), reports per-class p50/p95/p99/max + frame-budget hit rate + top-10 outlier diagnostics
+- JVM tuning recommendation in `peglib-incremental/README.md`: `-Xms2g -Xmx2g -XX:MaxGCPauseMillis=20` reduces p99 by 33% (60ms → 40ms)
+
+Bench numbers (Regime B, cursor-moved-to-edit, 1900-LOC fixture):
+
+| Metric | 0.4.2 | 0.4.3 | Change |
+|---|---:|---:|---:|
+| Median | 13.3 ms | 10.8 ms | -19% |
+| p95 | 30.1 ms | 22.4 ms | -26% |
+| p99 | 56.4 ms | 53.3 ms | -5% |
+| Max | 101.9 ms | 98.6 ms | -3% |
+| % under 16ms (frame budget) | 83% | 91.5% | +8.5pp |
+
+**Failed experiments documented:** SourceLocation interning probe (no wall-time win — proved bytes-allocated ≠ wall-time-impact for short-lived young-gen allocations). ParseResult.Failure singleton probe (same negative result). Incremental NodeIndex update via mutable `evolve()` (correctness regressions in IncrementalParityTest, reverted).
+
+**Architectural spec for 0.5.0** landed at `docs/incremental/ARCHITECTURE-0.5.0.md`. All 5 open questions resolved. `release-0.5.0` branch prepared locally (not pushed). Phase 0 prototype is the next-session entry point.
 
 ## 6. Outstanding work — ranked by value-per-effort
 
