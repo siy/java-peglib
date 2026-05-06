@@ -1,5 +1,4 @@
 package org.pragmatica.peg.tree;
-
 /**
  * A range in source text from start (inclusive) to end (exclusive).
  *
@@ -10,12 +9,14 @@ package org.pragmatica.peg.tree;
  * the int accessors directly (e.g., {@link #startLine()}, {@link #endOffset()}) to avoid
  * the materialization cost.
  */
-public record SourceSpan(int startLine, int startColumn, int startOffset,
-                         int endLine, int endColumn, int endOffset) {
-
+public record SourceSpan(int startLine,
+                         int startColumn,
+                         int startOffset,
+                         int endLine,
+                         int endColumn,
+                         int endOffset) {
     public static SourceSpan sourceSpan(SourceLocation start, SourceLocation end) {
-        return new SourceSpan(start.line(), start.column(), start.offset(),
-                              end.line(), end.column(), end.offset());
+        return new SourceSpan(start.line(), start.column(), start.offset(), end.line(), end.column(), end.offset());
     }
 
     public static SourceSpan sourceSpan(SourceLocation location) {
@@ -42,17 +43,24 @@ public record SourceSpan(int startLine, int startColumn, int startOffset,
         int newStartLine, newStartColumn, newStartOffset;
         int newEndLine, newEndColumn, newEndOffset;
         if (startOffset <= other.startOffset) {
-            newStartLine = startLine; newStartColumn = startColumn; newStartOffset = startOffset;
-        } else {
-            newStartLine = other.startLine; newStartColumn = other.startColumn; newStartOffset = other.startOffset;
+            newStartLine = startLine;
+            newStartColumn = startColumn;
+            newStartOffset = startOffset;
+        }else {
+            newStartLine = other.startLine;
+            newStartColumn = other.startColumn;
+            newStartOffset = other.startOffset;
         }
         if (endOffset >= other.endOffset) {
-            newEndLine = endLine; newEndColumn = endColumn; newEndOffset = endOffset;
-        } else {
-            newEndLine = other.endLine; newEndColumn = other.endColumn; newEndOffset = other.endOffset;
+            newEndLine = endLine;
+            newEndColumn = endColumn;
+            newEndOffset = endOffset;
+        }else {
+            newEndLine = other.endLine;
+            newEndColumn = other.endColumn;
+            newEndOffset = other.endOffset;
         }
-        return new SourceSpan(newStartLine, newStartColumn, newStartOffset,
-                              newEndLine, newEndColumn, newEndOffset);
+        return new SourceSpan(newStartLine, newStartColumn, newStartOffset, newEndLine, newEndColumn, newEndOffset);
     }
 
     @Override
