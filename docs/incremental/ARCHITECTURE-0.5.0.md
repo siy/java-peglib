@@ -75,7 +75,24 @@ public sealed interface CstNode {
 }
 ```
 
-ID assignment: `ParsingContext` holds a `nextId` counter. Each node-construction call assigns the next ID and increments. The counter persists across edits within a Session — new nodes always get fresh IDs.
+ID assignment is abstracted behind an interface so the strategy can evolve independently of the rest of the architecture:
+
+```java
+public interface IdGenerator {
+    long next();
+}
+```
+
+`ParsingContext` (and `IncrementalSession` for cross-edit allocations) holds an `IdGenerator` reference. Each node-construction call invokes `idGen.next()`. The first implementation is a simple per-Session counter:
+
+```java
+final class PerSessionCounter implements IdGenerator {
+    private long next = 0;
+    @Override public long next() { return next++; }
+}
+```
+
+Per-Session counter is the v0.5.0 default — simplest, no synchronization, sufficient for incremental edit chains within a single Session. The interface lets us swap in a global `AtomicLong`-backed counter later (for cross-Session node tracking, useful for IDE plugins that retain references across save/restore cycles) or a content-hash-based "stable identity" generator without touching the rest of the data structure.
 
 NodeIndex becomes a `LongLongMap` (e.g., Eclipse Collections' MutableLongLongMap, or hand-rolled long → long array hash):
 
@@ -365,15 +382,15 @@ CstNode pattern-match callers in user code break (Lever A). Session API users br
 
 ## 8. Open questions to resolve in Phase 0
 
-1. **ID generation strategy.** Per-Session counter (each Session has its own ID space, easy reset) vs global counter (IDs unique across Sessions, useful for cross-session diff). Vote: per-Session.
+1. **ID generation strategy.** RESOLVED — abstracted behind an `IdGenerator` interface (per spec §2). First implementation: per-Session counter. Future strategies (global counter for cross-Session tracking, content-hash for stable identity) can swap in without touching the data structure.
 
-2. **`LongLongMap` library choice.** Eclipse Collections vs hand-rolled vs `Map<Long, Long>` (boxed). Eclipse Collections is heavyweight (~10 MB jar) for one data structure. Hand-rolled is risk. Boxed is the path-of-least-resistance — measure first.
+2. **`LongLongMap` library choice.** RESOLVED — abstracted behind a `LongLongMap` interface (mirrors the IdGenerator pattern). First implementation: hand-rolled linear-probing open-addressing on `long[]` arrays (~200 LOC, well-understood, low risk). Suffices for typical load factors with proper pre-sizing from descendant count. **Future swap target: Funnel hashing** per Farach-Colton, Krapivin, Kuszmaul, *"Optimal Bounds for Open Addressing Without Reordering"* (2025) — O(log² δ⁻¹) worst-case expected probe complexity, disproving Yao's 1985 conjecture. Justified for swap when profiling shows probe-sequence cost dominating in high-load scenarios (very large grammars, or NodeIndex pre-sizing inaccurate). Cite the paper in the implementation comment when the swap happens.
 
-3. **Subtree identity check semantics.** When walking the new tree, "is this subtree shared with the old tree" requires that record sharing PROPAGATED through TreeSplicer. Verify TreeSplicer doesn't accidentally re-allocate sibling subtrees during ancestor reconstruction.
+3. **Subtree identity check semantics.** RESOLVED — Phase 0 includes an explicit identity-preservation invariant test as a hard gate. Test asserts: after `TreeSplicer.spliceAndShift(...)`, every sibling subtree of the splice path satisfies reference equality (`siblingRoot == oldSiblingRoot`) with the corresponding pre-edit subtree. If the invariant holds, the incremental NodeIndex update is genuine O(splicedSize + ancestorDepth). If TreeSplicer is found to break sibling identity, fixing it is part of Phase 0's scope — likely small, since Java record sharing is the natural pattern; any non-sharing is probably accidental cascade from SourceSpan rebuild paths.
 
-4. **Trivia attribution interaction.** Lever A's IDs are stable per-record. If a record is identity-shared between old and new trees, its leading/trailing trivia is also shared. When the parent changes, its child's trivia attribution context changes — does this cause Bug C-type regressions? Phase 0 prototype must include trivia-bearing edits.
+4. **Trivia attribution interaction.** RESOLVED — Phase 0 prototype's regression suite includes trivia-bearing edits as a hard gate: `%whitespace <- [ \t]+ / Comment` directive enabled in the calculator grammar; representative edits include (a) insert blank line before a method/rule, (b) delete a comment between two statements, (c) insert a comment inside an expression. For each: assert NodeIndex incremental update produces same result as full rebuild, AND sibling subtree refs are preserved (per Question 3). If `TriviaRedistribution.normalizeSplicedTrivia` is found to allocate new records for siblings (breaking identity), the incremental gain is smaller than projected — needs to be known before Phases 1-5.
 
-5. **`peglib-rt` API surface.** What's the minimum public API? Just `ParseRuntime.parseLiteral` etc.? Or a richer "use peglib-rt directly without grammar" API? The latter enables hand-written parsers using peglib's primitives — interesting but expanding scope. Vote: minimum surface.
+5. **`peglib-rt` API surface.** RESOLVED — minimum surface. Public types: `SourceLocation`, `SourceSpan`, `CstNode` (sealed), `Trivia` (sealed), `LongLongMap`, `IdGenerator`. Per-Expression parse helpers (`parseLiteral`, `parseChoice`, `parseSequence`, etc.) live in an internal `ParseRuntime` accessible to the interpreter and generator-emitted code via package access, not as public API. Target jar size ~50 KB. No commitment to "hand-written parsers using peglib primitives" — that use case has no current demand and additive expansion in 0.5.x is non-breaking if it surfaces.
 
 ---
 
