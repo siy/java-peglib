@@ -83,7 +83,16 @@ public final class IncrementalSessionBench {
     private record ClassifiedEdit(Edit edit, EditClass cls) {}
 
     /** Per-edit measurement record. {@code -1} latency means the edit was skipped. */
-    private record Measurement(EditClass cls, long latencyNs, boolean wasFallback, boolean skipped) {}
+    private record Measurement(
+        EditClass cls,
+        long latencyNs,
+        boolean wasFallback,
+        boolean skipped,
+        int editOffset,
+        int editOldLen,
+        int editNewLen,
+        String pivotRule,
+        int pivotNodeCount) {}
 
     public static void main(String[] args) throws Exception {
         var grammarText = loadResource(GRAMMAR_RESOURCE);
@@ -122,7 +131,8 @@ public final class IncrementalSessionBench {
             // text the offsets and lengths may drift. Skip edits that cannot fit.
             int textLen = session.text().length();
             if (edit.offset() > textLen || edit.offset() + edit.oldLen() > textLen) {
-                out[i] = new Measurement(ce.cls(), -1L, false, true);
+                out[i] = new Measurement(ce.cls(), -1L, false, true,
+                    edit.offset(), edit.oldLen(), edit.newText().length(), "", 0);
                 continue;
             }
             try {
@@ -134,13 +144,17 @@ public final class IncrementalSessionBench {
                     next = session.edit(edit);
                 }
                 long t1 = System.nanoTime();
-                int fallbacks = next.stats().fullReparseCount();
+                var stats = next.stats();
+                int fallbacks = stats.fullReparseCount();
                 boolean wasFallback = fallbacks > prevFallbacks;
                 prevFallbacks = fallbacks;
-                out[i] = new Measurement(ce.cls(), t1 - t0, wasFallback, false);
+                out[i] = new Measurement(ce.cls(), t1 - t0, wasFallback, false,
+                    edit.offset(), edit.oldLen(), edit.newText().length(),
+                    stats.lastReparsedRule(), stats.lastReparsedNodeCount());
                 session = next;
             } catch (RuntimeException ex) {
-                out[i] = new Measurement(ce.cls(), -1L, false, true);
+                out[i] = new Measurement(ce.cls(), -1L, false, true,
+                    edit.offset(), edit.oldLen(), edit.newText().length(), "", 0);
             }
         }
         return out;
@@ -298,6 +312,42 @@ public final class IncrementalSessionBench {
         System.out.println();
         System.out.println("DELTA (B vs A on the same edit sequence)");
         printDelta(regimeB, regimeA);
+        System.out.println();
+        System.out.println("TOP 10 OUTLIERS (Regime B, by latency desc)");
+        printOutliers(regimeB);
+        System.out.println();
+        System.out.println("TOP 10 OUTLIERS (Regime A, by latency desc)");
+        printOutliers(regimeA);
+    }
+
+    private static void printOutliers(Measurement[] ms) {
+        var nonSkipped = new ArrayList<Measurement>();
+        for (var m : ms) {
+            if (!m.skipped() && m.latencyNs() >= 0) {
+                nonSkipped.add(m);
+            }
+        }
+        nonSkipped.sort((a, b) -> Long.compare(b.latencyNs(), a.latencyNs()));
+        System.out.printf("  %-5s %-9s %-12s %-9s %-7s %-7s %-22s %-9s %s%n",
+            "rank", "latency", "class", "offset", "oldLen", "newLen", "pivotRule", "pivotNodes", "fallback");
+        int n = Math.min(10, nonSkipped.size());
+        for (int i = 0; i < n; i++) {
+            var m = nonSkipped.get(i);
+            String pivot = m.pivotRule() == null || m.pivotRule().isEmpty() ? "-" : m.pivotRule();
+            if (pivot.length() > 22) {
+                pivot = pivot.substring(0, 21) + "…";
+            }
+            System.out.printf("  %-5d %-9s %-12s %-9d %-7d %-7d %-22s %-9d %s%n",
+                i + 1,
+                fmtMs(m.latencyNs()),
+                m.cls().label(),
+                m.editOffset(),
+                m.editOldLen(),
+                m.editNewLen(),
+                pivot,
+                m.pivotNodeCount(),
+                m.wasFallback());
+        }
     }
 
     private static void printRegime(Measurement[] ms) {
