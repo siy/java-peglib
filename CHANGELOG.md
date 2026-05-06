@@ -5,9 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.3] - 2026-05-05
+## [0.4.3] - 2026-05-06
 
-_Work in progress._
+Performance — interactive editing focus. 19% faster median, 26% faster p95 on the IncrementalBenchmark editing-session suite. **One breaking change**: SourceSpan record components changed from two SourceLocations to six ints (see migration note).
+
+### Performance (interactive editing on 1,900-line Java fixture)
+
+| Metric | 0.4.2 | 0.4.3 | Change |
+|---|---:|---:|---:|
+| Median | 13.3 ms | 10.8 ms | -19% |
+| p95 | 30.1 ms | 22.4 ms | -26% |
+| p99 | 56.4 ms | 53.3 ms | -5% |
+| % under 16ms (frame budget) | 83% | 91.5% | +8.5pp |
+
+### Changed (BREAKING)
+
+- **`SourceSpan` stores int triples instead of `SourceLocation` refs.** Component accessors changed from `start()`/`end()` (returning SourceLocation refs) to `startLine()`/`startColumn()`/`startOffset()`/`endLine()`/`endColumn()`/`endOffset()` (auto-generated record component accessors returning ints). The methods `start()` and `end()` are preserved as regular methods that lazily materialize SourceLocation. The factory `SourceSpan.sourceSpan(SourceLocation, SourceLocation)` is preserved. **Migration:** code that pattern-matches `case SourceSpan(SourceLocation s, SourceLocation e)` must be updated to either `case SourceSpan span` + accessor calls, or `case SourceSpan(int sl, int sc, int so, int el, int ec, int eo)`. Code calling `.span().start().line()` should migrate to `.span().startLine()` to skip the SourceLocation materialization. Drove the 26% p95 improvement.
+
+### Performance — internals
+
+- **`PegEngine` interpreter:** no API change. Continued from 0.4.1.
+- **`NodeIndex.build` pre-sizes the IdentityHashMap** from a descendant-count pass before populating, eliminating resize churn that was 22.8% of bench allocations. (Commit `fcff78f`)
+- **New `IncrementalSessionBench`** in `peglib-incremental/src/jmh/java`: realistic 1,000-edit interactive sessions with cursor-moved-to-edit (Regime B) AND cursor-pinned (Regime A) regimes. Reports per-class median/p95/p99/max + frame-budget hit rate + top-10 outlier diagnostics. Recommended JVM tuning for downstream consumers in `peglib-incremental/README.md`: `-Xms2g -Xmx2g -XX:MaxGCPauseMillis=20` reduces p99 by 33% (60ms → 40ms) — free for downstream. (Commits `716a113`, `77c7c70`)
+
+### Notes for downstream
+
+- **Regenerate generated parsers** with 0.4.3's `ParserGenerator` to pick up the gen-time SourceSpan emission update (also int-based).
+- **Architectural rework planned for 0.5.0.** See `docs/incremental/ARCHITECTURE-0.5.0.md` (when published) for the planned overhaul targeting incremental-native data structures.
 
 ## [0.4.2] - 2026-05-04
 
