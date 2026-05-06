@@ -46,7 +46,7 @@ Quick links:
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.4.3</version>
+    <version>0.5.0</version>
 </dependency>
 ```
 
@@ -394,7 +394,7 @@ The `peglib-maven-plugin` module (separate artifact, sibling to `peglib`) wraps 
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.4.3</version>
+    <version>0.5.0</version>
     <executions>
         <execution>
             <goals>
