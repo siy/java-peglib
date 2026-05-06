@@ -259,20 +259,27 @@ Regen via:
 
 ## 10. Where to find historical context
 
-- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — the plan that drove this arc, marked complete through Phase 8.
-- `docs/AUDIT-REPORTS/CONSOLIDATED-BACKLOG.md` — the audit findings that drove 0.3.4 cleanup. Most P3 items shipped in 0.4.0; check what's left.
+- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — the plan that drove the 0.3.5→0.4.0 arc, marked complete through Phase 8.
+- `docs/AUDIT-REPORTS/CONSOLIDATED-BACKLOG.md` — the audit findings that drove 0.3.4 cleanup. Most P3 items shipped in 0.4.0.
 - `docs/PERF-REWORK-SPEC.md` — the 0.2.2 perf rework spec; historical.
 - `docs/incremental/SPEC.md` — the 0.3.0-0.3.2 incremental spec. v2 shipped, v2.5 NO-GO'd by spike.
+- `docs/incremental/V2.5-SPIKE.md` — the v2.5 NO-GO + lever-1 design + post-0.4.0 retraction. Lever-1 superseded by 0.5.0 architecture.
+- `docs/incremental/UNSAFE-GENERATOR-SPIKE.md` — the post-0.4.0 unsafe-generator design + status. Infrastructure landed (5 commits in `release-0.4.2` history); behavior conversion deferred to 0.5.0.
+- `docs/incremental/ARCHITECTURE-0.5.0.md` — **forward-looking** architectural spec for the 0.5.0 incremental-native rework. Read this before touching incremental perf or correctness.
 - `docs/bench-results/` — committed JMH JSON from each perf-touching release.
 
 ## 11. Recommended next session
 
-1. **Read `docs/incremental/V2.5-SPIKE.md` (including the post-0.4.0 addendum) and §6.2 above** before touching any incremental perf work. The "1-2 day fix" framing is dead.
-2. **Wait for the 2026-05-08 scheduled agent's flame graph** (§6.1) — informs whether the bottleneck is actually pivot overshoot or somewhere else (e.g., per-rule allocation in `PegEngine`).
-3. **If perf is still the goal after the flame graph:** the cleanest available path is **porting `inlineLocations` and `markResetChildren` from the generator to the interpreter** (§6.4 correction). This is mechanically guided by working code in `ParserGenerator`, and the existing parity test validates it because the test exercises the interpreter. Estimated 3–5 days. Independent of the lever-1 correctness puzzle.
-4. **If lever 1 must be revisited:** start by extending `IncrementalParityTest` to interleave `moveCursor` with edits, then make all the existing failures visible. Without that, no lever-1 algorithm can be validated. Then design the safe-pivot infrastructure per §6.2's "What a real fix needs" list.
+The 0.4.x perf arc is complete (281 ms → 10.8 ms median, 26× from baseline; 0.4.3 ships at p99 ≈ 53 ms with 91.5% of edits under the 16 ms frame budget). Further per-edit-cost reductions are gated on architectural change, not algorithmic tweaks.
 
-Do NOT attempt lever 1 again as a "quick swap" — both attempts proved that approach is fundamentally broken. The 5–10 day estimate in §6.2 is the floor, not the ceiling.
+1. **Read `docs/incremental/ARCHITECTURE-0.5.0.md` first** — the spec that supersedes the §6.2 lever-1 puzzle and §6.4 unsafe-generator work. Both items dissolve into the proposed 0.5.0 design.
+2. **Phase 0 prototype** (per spec §6) — Lever A (stable node IDs + `LongLongMap` NodeIndex) on the calculator grammar end-to-end. ~1 week. GO/NO-GO gate on whether incremental NodeIndex update materially beats the 0.4.3 baseline on synthetic edits.
+3. **If GO:** execute Phases 1–5 over 4–5 weeks. Levers B (top-down pivot), C (`peglib-rt` interpreter/generator unification), D (Cursor split). Single major-version bump at 0.5.0.
+4. **If NO-GO:** revisit individual levers tactically; the spec stays as a future reference; ship 0.4.x patches as needed for downstream bugs.
+
+Do NOT attempt lever 1 as a 0.4.x patch — both attempts proved the data structure forbids it. The 5-10 day correctness estimate in §6.2 is what's required to make it work *without* the architectural change; the spec proposes a path that makes lever-1 a 30-line method instead.
+
+Do NOT pursue further allocation reduction in the 0.4.x interpreter without the architectural change — the SourceLocation interning probe and ParseResult.Failure singleton probe both confirmed bytes-allocated metrics don't translate to wall-time wins under the current data structure (HashMap.Node entries promote and dominate). The structural SourceSpan refactor that DID ship in 0.4.3 was the exception because it eliminated long-lived refs from CstNodes.
 
 ---
 
