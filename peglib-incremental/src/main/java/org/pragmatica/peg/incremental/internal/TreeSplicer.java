@@ -69,7 +69,7 @@ public final class TreeSplicer {
             for (var child : nt.children()) {
                 if (child == next) {
                     newChildren.add(replacement);
-                } else if (child.span().start().offset() >= editEnd) {
+                } else if (child.span().startOffset() >= editEnd) {
                     newChildren.add(shiftAll(child, delta));
                 } else {
                     newChildren.add(child);
@@ -156,7 +156,7 @@ public final class TreeSplicer {
         var out = new ArrayList<Trivia>(trivia.size());
         boolean anyShift = false;
         for (var t : trivia) {
-            if (t.span().start().offset() >= editEnd) {
+            if (t.span().startOffset() >= editEnd) {
                 out.add(shiftTriviaOne(t, delta));
                 anyShift = true;
             } else {

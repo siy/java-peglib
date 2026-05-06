@@ -159,9 +159,7 @@ public final class NodeIndex {
      */
     public static boolean contains(CstNode node, int offset) {
         var span = node.span();
-        return offset >= span.start()
-                             .offset() && offset <= span.end()
-                                                        .offset();
+        return offset >= span.startOffset() && offset <= span.endOffset();
     }
 
     /**

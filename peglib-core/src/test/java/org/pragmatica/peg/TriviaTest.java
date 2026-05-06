@@ -158,8 +158,8 @@ class TriviaTest {
         assertThat(node.leadingTrivia()).hasSize(1);
 
         var trivia = node.leadingTrivia().getFirst();
-        assertThat(trivia.span().start().offset()).isEqualTo(0);
-        assertThat(trivia.span().end().offset()).isEqualTo(3);
+        assertThat(trivia.span().startOffset()).isEqualTo(0);
+        assertThat(trivia.span().endOffset()).isEqualTo(3);
         assertThat(trivia.text()).isEqualTo("   ");
     }
 

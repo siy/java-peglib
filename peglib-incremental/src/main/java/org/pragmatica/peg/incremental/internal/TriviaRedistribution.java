@@ -132,8 +132,8 @@ public final class TriviaRedistribution {
         }
         for (int i = 0; i < trivia.size(); i++) {
             var t = trivia.get(i);
-            int a = t.span().start().offset();
-            int b = t.span().end().offset();
+            int a = t.span().startOffset();
+            int b = t.span().endOffset();
             if (a <= editStart && editEnd <= b) {
                 return new TriviaMatch(owner, kind, i, t);
             }
@@ -146,8 +146,8 @@ public final class TriviaRedistribution {
             return null;
         }
         for (var child : nt.children()) {
-            int a = child.span().start().offset();
-            int b = child.span().end().offset();
+            int a = child.span().startOffset();
+            int b = child.span().endOffset();
             // Only descend into children whose own span (plus trivia margins) could contain the edit.
             // Leading trivia of a child sits before child.span().start(); trailing trivia (if any)
             // sits after child.span().end(). Conservative: check the child if any trivia or the
@@ -171,17 +171,17 @@ public final class TriviaRedistribution {
      */
     private static boolean couldContain(CstNode child, int editStart, int editEnd) {
         for (var t : nullToEmpty(child.leadingTrivia())) {
-            if (t.span().start().offset() <= editStart && editEnd <= t.span().end().offset()) {
+            if (t.span().startOffset() <= editStart && editEnd <= t.span().endOffset()) {
                 return true;
             }
         }
         for (var t : nullToEmpty(child.trailingTrivia())) {
-            if (t.span().start().offset() <= editStart && editEnd <= t.span().end().offset()) {
+            if (t.span().startOffset() <= editStart && editEnd <= t.span().endOffset()) {
                 return true;
             }
         }
         // Child's own span containing the edit: descend in case of nested trivia attachments.
-        return child.span().start().offset() <= editStart && editEnd <= child.span().end().offset();
+        return child.span().startOffset() <= editStart && editEnd <= child.span().endOffset();
     }
 
     private static List<Trivia> nullToEmpty(List<Trivia> trivia) {
@@ -237,14 +237,14 @@ public final class TriviaRedistribution {
     }
 
     private static boolean isLineCommentBoundaryUntouched(Trivia.LineComment lc, Edit edit) {
-        int start = lc.span().start().offset();
+        int start = lc.span().startOffset();
         // Don't allow deleting the leading "//" prefix (offsets [start, start+2]).
         return edit.offset() >= start + 2;
     }
 
     private static boolean isBlockCommentBoundaryUntouched(Trivia.BlockComment bc, Edit edit) {
-        int start = bc.span().start().offset();
-        int end = bc.span().end().offset();
+        int start = bc.span().startOffset();
+        int end = bc.span().endOffset();
         // Protect leading "/*" (offsets [start, start+2]) and trailing "*/" (offsets [end-2, end]).
         return edit.offset() >= start + 2 && edit.offset() + edit.oldLen() <= end - 2;
     }
@@ -341,7 +341,7 @@ public final class TriviaRedistribution {
             // then the unaffected case.
             if (childContainsMatch(child, match)) {
                 newChildren.add(rewriteNode(child, match, newText, edit));
-            } else if (child.span().start().offset() >= editEnd) {
+            } else if (child.span().startOffset() >= editEnd) {
                 newChildren.add(shiftAllOffsets(child, delta));
             } else {
                 newChildren.add(child);
@@ -419,7 +419,7 @@ public final class TriviaRedistribution {
         // Children of the owner: shift those at-or-after editEnd; leave others alone.
         var newChildren = new ArrayList<CstNode>(nt.children().size());
         for (var child : nt.children()) {
-            if (child.span().start().offset() >= editEnd) {
+            if (child.span().startOffset() >= editEnd) {
                 newChildren.add(shiftAllOffsets(child, delta));
             } else {
                 newChildren.add(child);
@@ -454,7 +454,7 @@ public final class TriviaRedistribution {
     }
 
     private static Trivia rewriteSingleTrivia(Trivia trivia, String newText, Edit edit) {
-        int triviaStart = trivia.span().start().offset();
+        int triviaStart = trivia.span().startOffset();
         int relStart = edit.offset() - triviaStart;
         int relEnd = relStart + edit.oldLen();
         var oldText = trivia.text();
@@ -462,9 +462,9 @@ public final class TriviaRedistribution {
         var newSpan = SourceSpan.sourceSpan(
             trivia.span().start(),
             new SourceLocation(
-                trivia.span().end().line(),
-                trivia.span().end().column(),
-                trivia.span().end().offset() + edit.delta()));
+                trivia.span().endLine(),
+                trivia.span().endColumn(),
+                trivia.span().endOffset() + edit.delta()));
         return switch (trivia) {
             case Trivia.Whitespace _ -> new Trivia.Whitespace(newSpan, rebuilt);
             case Trivia.LineComment _ -> new Trivia.LineComment(newSpan, rebuilt);
@@ -478,8 +478,8 @@ public final class TriviaRedistribution {
         if (delta == 0) {
             return span;
         }
-        var start = span.start().offset() >= editEnd ? shiftLoc(span.start(), delta) : span.start();
-        var end = span.end().offset() >= editEnd ? shiftLoc(span.end(), delta) : span.end();
+        var start = span.startOffset() >= editEnd ? shiftLoc(span.start(), delta) : span.start();
+        var end = span.endOffset() >= editEnd ? shiftLoc(span.end(), delta) : span.end();
         return SourceSpan.sourceSpan(start, end);
     }
 
@@ -490,7 +490,7 @@ public final class TriviaRedistribution {
         boolean any = false;
         var out = new ArrayList<Trivia>(trivia.size());
         for (var t : trivia) {
-            if (t.span().start().offset() >= editEnd) {
+            if (t.span().startOffset() >= editEnd) {
                 out.add(shiftTrivia(t, delta));
                 any = true;
             } else {

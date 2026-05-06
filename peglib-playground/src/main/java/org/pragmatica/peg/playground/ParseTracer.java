@@ -130,7 +130,7 @@ public final class ParseTracer {
         void visit(CstNode node) {
             nodes++;
             trivia += node.leadingTrivia().size() + node.trailingTrivia().size();
-            int offset = node.span().start().offset();
+            int offset = node.span().startOffset();
             switch (node) {
                 case CstNode.NonTerminal nt -> {
                     recordRuleEnter(nt.rule(), offset);

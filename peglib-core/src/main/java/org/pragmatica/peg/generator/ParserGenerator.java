@@ -1660,13 +1660,40 @@ public final class ParserGenerator {
                     @Override public String toString() { return line + ":" + column; }
                 }
 
-                public record SourceSpan(SourceLocation start, SourceLocation end) {
+                public record SourceSpan(int startLine, int startColumn, int startOffset,
+                                         int endLine, int endColumn, int endOffset) {
                     public static SourceSpan sourceSpan(SourceLocation start, SourceLocation end) {
-                        return new SourceSpan(start, end);
+                        return new SourceSpan(start.line(), start.column(), start.offset(),
+                                              end.line(), end.column(), end.offset());
                     }
-                    public int length() { return end.offset() - start.offset(); }
-                    public String extract(String source) { return source.substring(start.offset(), end.offset()); }
-                    @Override public String toString() { return start + "-" + end; }
+                    public static SourceSpan sourceSpan(SourceLocation location) {
+                        return sourceSpan(location, location);
+                    }
+                    public SourceLocation start() {
+                        return SourceLocation.sourceLocation(startLine, startColumn, startOffset);
+                    }
+                    public SourceLocation end() {
+                        return SourceLocation.sourceLocation(endLine, endColumn, endOffset);
+                    }
+                    public int length() { return endOffset - startOffset; }
+                    public String extract(String source) { return source.substring(startOffset, endOffset); }
+                    public SourceSpan merge(SourceSpan other) {
+                        int nsl, nsc, nso, nel, nec, neo;
+                        if (startOffset <= other.startOffset) {
+                            nsl = startLine; nsc = startColumn; nso = startOffset;
+                        } else {
+                            nsl = other.startLine; nsc = other.startColumn; nso = other.startOffset;
+                        }
+                        if (endOffset >= other.endOffset) {
+                            nel = endLine; nec = endColumn; neo = endOffset;
+                        } else {
+                            nel = other.endLine; nec = other.endColumn; neo = other.endOffset;
+                        }
+                        return new SourceSpan(nsl, nsc, nso, nel, nec, neo);
+                    }
+                    @Override public String toString() {
+                        return startLine + ":" + startColumn + "-" + endLine + ":" + endColumn;
+                    }
                 }
 
                 public sealed interface Trivia {
@@ -1822,11 +1849,11 @@ public final class ParserGenerator {
                         sb.append(loc.line()).append(":").append(loc.column()).append("\\n");
 
                         // Find all lines we need to display
-                        int minLine = span.start().line();
-                        int maxLine = span.end().line();
+                        int minLine = span.startLine();
+                        int maxLine = span.endLine();
                         for (var label : labels) {
-                            minLine = Math.min(minLine, label.span().start().line());
-                            maxLine = Math.max(maxLine, label.span().end().line());
+                            minLine = Math.min(minLine, label.span().startLine());
+                            maxLine = Math.max(maxLine, label.span().endLine());
                         }
 
                         // Calculate gutter width
@@ -1867,13 +1894,13 @@ public final class ParserGenerator {
 
                     private List<DiagnosticLabel> getLabelsOnLine(int lineNum) {
                         var result = new ArrayList<DiagnosticLabel>();
-                        if (span.start().line() <= lineNum && span.end().line() >= lineNum) {
+                        if (span.startLine() <= lineNum && span.endLine() >= lineNum) {
                             if (labels.isEmpty()) {
                                 result.add(DiagnosticLabel.primary(span, ""));
                             }
                         }
                         for (var label : labels) {
-                            if (label.span().start().line() <= lineNum && label.span().end().line() >= lineNum) {
+                            if (label.span().startLine() <= lineNum && label.span().endLine() >= lineNum) {
                                 result.add(label);
                             }
                         }
@@ -1885,13 +1912,13 @@ public final class ParserGenerator {
                         int currentCol = 1;
 
                         var sorted = lineLabels.stream()
-                            .sorted((a, b) -> Integer.compare(a.span().start().column(), b.span().start().column()))
+                            .sorted((a, b) -> Integer.compare(a.span().startColumn(), b.span().startColumn()))
                             .toList();
 
                         for (var label : sorted) {
-                            int startCol = label.span().start().line() == lineNum ? label.span().start().column() : 1;
-                            int endCol = label.span().end().line() == lineNum
-                                ? label.span().end().column()
+                            int startCol = label.span().startLine() == lineNum ? label.span().startColumn() : 1;
+                            int endCol = label.span().endLine() == lineNum
+                                ? label.span().endColumn()
                                 : lineContent.length() + 1;
 
                             while (currentCol < startCol) {
