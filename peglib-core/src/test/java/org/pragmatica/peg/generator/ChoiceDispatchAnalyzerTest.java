@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ChoiceDispatchAnalyzerTest {
 
-    private static final SourceSpan SPAN = new SourceSpan(
+    private static final SourceSpan SPAN = SourceSpan.sourceSpan(
         new SourceLocation(1, 1, 0),
         new SourceLocation(1, 1, 0));
 

@@ -84,10 +84,10 @@ public final class JsonEncoder {
         writeString(sb, nodeKind(node));
         sb.append(",\"rule\":");
         writeString(sb, node.rule());
-        sb.append(",\"start\":").append(node.span().start().offset());
-        sb.append(",\"end\":").append(node.span().end().offset());
-        sb.append(",\"line\":").append(node.span().start().line());
-        sb.append(",\"column\":").append(node.span().start().column());
+        sb.append(",\"start\":").append(node.span().startOffset());
+        sb.append(",\"end\":").append(node.span().endOffset());
+        sb.append(",\"line\":").append(node.span().startLine());
+        sb.append(",\"column\":").append(node.span().startColumn());
         if (!node.leadingTrivia().isEmpty()) {
             sb.append(",\"leadingTrivia\":");
             writeTriviaList(sb, node.leadingTrivia());
@@ -153,8 +153,8 @@ public final class JsonEncoder {
         sb.append('{');
         sb.append("\"kind\":");
         writeString(sb, ParseTracer.triviaKind(trivia));
-        sb.append(",\"start\":").append(trivia.span().start().offset());
-        sb.append(",\"end\":").append(trivia.span().end().offset());
+        sb.append(",\"start\":").append(trivia.span().startOffset());
+        sb.append(",\"end\":").append(trivia.span().endOffset());
         sb.append(",\"text\":");
         writeString(sb, trivia.text());
         sb.append('}');
@@ -166,10 +166,10 @@ public final class JsonEncoder {
         writeString(sb, diag.severity().display());
         sb.append(",\"message\":");
         writeString(sb, diag.message());
-        sb.append(",\"line\":").append(diag.span().start().line());
-        sb.append(",\"column\":").append(diag.span().start().column());
-        sb.append(",\"start\":").append(diag.span().start().offset());
-        sb.append(",\"end\":").append(diag.span().end().offset());
+        sb.append(",\"line\":").append(diag.span().startLine());
+        sb.append(",\"column\":").append(diag.span().startColumn());
+        sb.append(",\"start\":").append(diag.span().startOffset());
+        sb.append(",\"end\":").append(diag.span().endOffset());
         if (diag.tag().isPresent()) {
             sb.append(",\"tag\":");
             writeString(sb, diag.tag().unwrap());

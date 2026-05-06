@@ -44,9 +44,20 @@ public final class NodeIndex {
      * Build a fresh index over {@code root}. O(n) in the node count.
      */
     public static NodeIndex build(CstNode root) {
-        var parents = new IdentityHashMap<CstNode, CstNode>();
+        int expectedSize = countDescendants(root);
+        var parents = new IdentityHashMap<CstNode, CstNode>(expectedSize);
         indexChildren(root, parents);
         return new NodeIndex(root, parents);
+    }
+
+    private static int countDescendants(CstNode node) {
+        int count = 0;
+        if (node instanceof CstNode.NonTerminal nt) {
+            for (var child : nt.children()) {
+                count += 1 + countDescendants(child);
+            }
+        }
+        return count;
     }
 
     private static void indexChildren(CstNode node, Map<CstNode, CstNode> parents) {
@@ -148,9 +159,7 @@ public final class NodeIndex {
      */
     public static boolean contains(CstNode node, int offset) {
         var span = node.span();
-        return offset >= span.start()
-                             .offset() && offset <= span.end()
-                                                        .offset();
+        return offset >= span.startOffset() && offset <= span.endOffset();
     }
 
     /**

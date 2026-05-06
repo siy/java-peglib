@@ -287,8 +287,8 @@ class ErrorRecoveryExample {
 
         var lspDiagnostics = result.diagnostics().stream()
             .map(d -> new LspDiagnostic(
-                d.span().start().line() - 1,  // LSP uses 0-based
-                d.span().start().column() - 1,
+                d.span().startLine() - 1,  // LSP uses 0-based
+                d.span().startColumn() - 1,
                 d.severity() == Diagnostic.Severity.ERROR ? 1 : 2,
                 d.message()
             ))
@@ -314,8 +314,8 @@ class ErrorRecoveryExample {
 
         var ranges = result.diagnostics().stream()
             .map(d -> new ErrorRange(
-                d.span().start().offset(),
-                d.span().end().offset()
+                d.span().startOffset(),
+                d.span().endOffset()
             ))
             .toList();
 
