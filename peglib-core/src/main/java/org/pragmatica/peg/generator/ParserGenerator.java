@@ -2923,7 +2923,10 @@ public final class ParserGenerator {
         }
         sb.append("            var endLoc = location();\n");
         if (inlineLocations) {
-            sb.append("            var span = SourceSpan.sourceSpan(new SourceLocation(startLine, startColumn, startOffset), endLoc);\n");
+            // Phase 1.7 (D2): build SourceSpan from inline ints + endLoc primitives —
+            // skip the sourceSpan(SourceLocation, SourceLocation) factory which would
+            // re-allocate via SourceLocation::new on the start side.
+            sb.append("            var span = new SourceSpan(startLine, startColumn, startOffset, endLoc.line(), endLoc.column(), endLoc.offset());\n");
         }else {
             sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
         }
@@ -3506,7 +3509,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("CstParseResult ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                  .append(" = CstParseResult.successNoLoc(null, \"\");\n");
                 sb.append(pad)
                   .append("int ")
                   .append(seqStartPos)
@@ -3636,9 +3639,9 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, substring(")
+                  .append(" = CstParseResult.successNoLoc(null, substring(")
                   .append(seqStartPos)
-                  .append(", pos), location());\n");
+                  .append(", pos));\n");
                 sb.append(pad)
                   .append("}\n");
             }
@@ -3747,7 +3750,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("CstParseResult ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                  .append(" = CstParseResult.successNoLoc(null, \"\");\n");
                 sb.append(pad)
                   .append("int ")
                   .append(zomStartPos)
@@ -3886,9 +3889,9 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("    ")
                       .append(resultVar)
-                      .append(" = CstParseResult.success(null, substring(")
+                      .append(" = CstParseResult.successNoLoc(null, substring(")
                       .append(zomStartPos)
-                      .append(", pos), location());\n");
+                      .append(", pos));\n");
                     sb.append(pad)
                       .append("} else {\n");
                     sb.append(pad)
@@ -3908,9 +3911,9 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("    ")
                       .append(resultVar)
-                      .append(" = CstParseResult.success(null, substring(")
+                      .append(" = CstParseResult.successNoLoc(null, substring(")
                       .append(zomStartPos)
-                      .append(", pos), location());\n");
+                      .append(", pos));\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -4234,7 +4237,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                  .append(" = CstParseResult.successNoLoc(null, \"\");\n");
                 sb.append(pad)
                   .append("}\n");
             }
@@ -4435,9 +4438,9 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, substring(")
+                  .append(" = CstParseResult.successNoLoc(null, substring(")
                   .append(repStartPos)
-                  .append(", pos), location());\n");
+                  .append(", pos));\n");
                 sb.append(pad)
                   .append("} else {\n");
                 if (addToChildren) {
@@ -4521,7 +4524,7 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = ")
                   .append(andElem)
-                  .append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ")
+                  .append(".isSuccess() ? CstParseResult.successNoLoc(null, \"\") : ")
                   .append(andElem)
                   .append(";\n");
             }
@@ -4580,7 +4583,7 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = ")
                   .append(notElem)
-                  .append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.success(null, \"\", location());\n");
+                  .append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.successNoLoc(null, \"\");\n");
             }
             case Expression.TokenBoundary tb -> {
                 // Phase 1.7 (D): inline int captures — avoid SourceLocation per token.
@@ -4666,11 +4669,11 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(tbNode")
+                  .append(" = CstParseResult.successNoLoc(tbNode")
                   .append(id)
                   .append(", tbText")
                   .append(id)
-                  .append(", location());\n");
+                  .append(");\n");
                 sb.append(pad)
                   .append("} else {\n");
                 sb.append(pad)
@@ -4705,7 +4708,7 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = ")
                   .append(ignElem)
-                  .append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ")
+                  .append(".isSuccess() ? CstParseResult.successNoLoc(null, \"\") : ")
                   .append(ignElem)
                   .append(";\n");
             }
@@ -4803,7 +4806,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("var ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                  .append(" = CstParseResult.successNoLoc(null, \"\");\n");
             }
             case Expression.Group grp -> {
                 generateCstExpressionCode(sb,
@@ -5313,6 +5316,16 @@ public final class ParserGenerator {
                             return new CstParseResult(true, node, text, null, endLocation, false);
                         }
 
+                        // Phase 1.7 (D2): intermediate-result success that omits endLocation.
+                        // Only rule-body and LR-body successes need endLocation (consumed by
+                        // cache hits and LR grow-loop). All in-rule expression results have
+                        // their endLocation field discarded by callers, so skipping the
+                        // location() call here removes the dominant SourceLocation allocator
+                        // on the self-host fixture.
+                        static CstParseResult successNoLoc(CstNode node, String text) {
+                            return new CstParseResult(true, node, text, null, null, false);
+                        }
+
                         static CstParseResult failure(String expected) {
                             return new CstParseResult(false, null, null, expected, null, false);
                         }
@@ -5358,6 +5371,12 @@ public final class ParserGenerator {
                             return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.some(endLocation), false);
                         }
 
+                        // Phase 1.7 (D2): intermediate-result success that omits endLocation.
+                        // See mutable variant above for rationale.
+                        static CstParseResult successNoLoc(CstNode node, String text) {
+                            return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.none(), false);
+                        }
+
                         static CstParseResult failure(String expected) {
                             return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), false);
                         }
@@ -5379,13 +5398,11 @@ public final class ParserGenerator {
     }
 
     // === Match-method emitters (phase 1 perf flags) ===
+    // Phase 1.7 (D2): match helpers return successNoLoc — endLocation field on
+    // intermediate (per-leaf) results is never read by callers. The
+    // reuseEndLocation flag is now a no-op for these emitters since the span
+    // is built from primitive ints and no SourceLocation is materialized.
     private void emitMatchLiteralCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation()
-                        ? "endLoc"
-                        : "location()";
-        var endLocDecl = config.reuseEndLocation()
-                         ? "        var endLoc = location();\n"
-                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {\n");
         if (config.literalFailureCache()) {
@@ -5469,17 +5486,10 @@ public final class ParserGenerator {
             sb.append("            advance();\n");
             sb.append("        }\n");
         }
-        sb.append(endLocDecl);
-        // Phase 1.7 (D): build SourceSpan from inline ints — no startLoc allocation.
-        if (config.reuseEndLocation()) {
-            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, endLoc.line(), endLoc.column(), endLoc.offset());\n");
-        }else {
-            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
-        }
+        // Phase 1.7 (D2): build SourceSpan from inline ints — no SourceLocation alloc.
+        sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, text, takePendingLeading(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ")
-          .append(endLocVar)
-          .append(");\n");
+        sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");
         if (config.literalFailureCache()) {
@@ -5496,12 +5506,6 @@ public final class ParserGenerator {
     }
 
     private void emitMatchDictionaryCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation()
-                        ? "endLoc"
-                        : "location()";
-        var endLocDecl = config.reuseEndLocation()
-                         ? "        var endLoc = location();\n"
-                         : "";
         sb.append("    private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {\n");
         sb.append("        String longestMatch = null;\n");
         sb.append("        int longestLen = 0;\n");
@@ -5522,27 +5526,15 @@ public final class ParserGenerator {
         sb.append("        for (int i = 0; i < longestLen; i++) {\n");
         sb.append("            advance();\n");
         sb.append("        }\n");
-        sb.append(endLocDecl);
-        if (config.reuseEndLocation()) {
-            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, endLoc.line(), endLoc.column(), endLoc.offset());\n");
-        }else {
-            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
-        }
+        // Phase 1.7 (D2): primitive-int span; successNoLoc result.
+        sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, longestMatch, takePendingLeading(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, longestMatch, ")
-          .append(endLocVar)
-          .append(");\n");
+        sb.append("        return CstParseResult.successNoLoc(node, longestMatch);\n");
         sb.append("    }\n");
         sb.append("\n");
     }
 
     private void emitMatchCharClassCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation()
-                        ? "endLoc"
-                        : "location()";
-        var endLocDecl = config.reuseEndLocation()
-                         ? "        var endLoc = location();\n"
-                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {\n");
         if (config.charClassFailureCache()) {
@@ -5586,16 +5578,10 @@ public final class ParserGenerator {
         }
         sb.append("        advance();\n");
         sb.append("        var text = String.valueOf(c);\n");
-        sb.append(endLocDecl);
-        if (config.reuseEndLocation()) {
-            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, endLoc.line(), endLoc.column(), endLoc.offset());\n");
-        }else {
-            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
-        }
+        // Phase 1.7 (D2): primitive-int span; successNoLoc result.
+        sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ")
-          .append(endLocVar)
-          .append(");\n");
+        sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");
         if (config.charClassFailureCache()) {
@@ -5613,12 +5599,6 @@ public final class ParserGenerator {
     }
 
     private void emitMatchAnyCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation()
-                        ? "endLoc"
-                        : "location()";
-        var endLocDecl = config.reuseEndLocation()
-                         ? "        var endLoc = location();\n"
-                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchAnyCst() {\n");
         sb.append("        if (isAtEnd()) {\n");
@@ -5631,16 +5611,10 @@ public final class ParserGenerator {
         sb.append("        int startColumn = column;\n");
         sb.append("        char c = advance();\n");
         sb.append("        var text = String.valueOf(c);\n");
-        sb.append(endLocDecl);
-        if (config.reuseEndLocation()) {
-            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, endLoc.line(), endLoc.column(), endLoc.offset());\n");
-        }else {
-            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
-        }
+        // Phase 1.7 (D2): primitive-int span; successNoLoc result.
+        sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ")
-          .append(endLocVar)
-          .append(");\n");
+        sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");
     }
