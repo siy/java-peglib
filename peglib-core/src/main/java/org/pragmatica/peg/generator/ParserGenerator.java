@@ -2123,8 +2123,23 @@ public final class ParserGenerator {
                 private int tokenBoundaryDepth;
                 private boolean skippingWhitespace;
                 private boolean packratEnabled = true;
-                private Option<SourceLocation> furthestFailure;
-                private Option<String> furthestExpected;
+            """);
+        if (config.mutableParseResult()) {
+            // A coverage extension: raw nullable for hot-path failure tracking.
+            // trackFailure() runs on every failed match (millions of times per
+            // parse on a large input); Option.some(loc)/Option.some(expected)
+            // dominated the residual Option$Some samples after the spike.
+            sb.append("""
+                    private SourceLocation furthestFailure;   // raw nullable
+                    private String furthestExpected;          // raw nullable
+                """);
+        }else {
+            sb.append("""
+                    private Option<SourceLocation> furthestFailure;
+                    private Option<String> furthestExpected;
+                """);
+        }
+        sb.append("""
 
                 // Pending leading trivia — trivia captured between sibling
                 // sequence elements that will attach to the following sibling's
@@ -2152,39 +2167,75 @@ public final class ParserGenerator {
             // before popping. skipToRecoveryPoint consults the pending field
             // first (the stack is unwound by the time recovery runs), then
             // the live stack, then the global default char-set.
-            sb.append("""
-                    private final ArrayDeque<String> recoveryOverrideStack = new ArrayDeque<>();
-                    private Option<String> pendingFailureRecoveryOverride = Option.none();
+            if (config.mutableParseResult()) {
+                sb.append("""
+                        private final ArrayDeque<String> recoveryOverrideStack = new ArrayDeque<>();
+                        private String pendingFailureRecoveryOverride;   // raw nullable
 
-                    private void pushRecoveryOverride(String terminator) {
-                        recoveryOverrideStack.push(terminator);
-                    }
-
-                    private void popRecoveryOverride() {
-                        if (!recoveryOverrideStack.isEmpty()) {
-                            recoveryOverrideStack.pop();
+                        private void pushRecoveryOverride(String terminator) {
+                            recoveryOverrideStack.push(terminator);
                         }
-                    }
 
-                    private void recordFailureRecoveryOverride(String terminator) {
-                        if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride.isEmpty()) {
-                            pendingFailureRecoveryOverride = Option.some(terminator);
+                        private void popRecoveryOverride() {
+                            if (!recoveryOverrideStack.isEmpty()) {
+                                recoveryOverrideStack.pop();
+                            }
                         }
-                    }
 
-                    private void clearPendingRecoveryOverride() {
-                        pendingFailureRecoveryOverride = Option.none();
-                    }
-
-                    private boolean matchesOverrideAt(String term) {
-                        if (remaining() < term.length()) return false;
-                        for (int i = 0; i < term.length(); i++) {
-                            if (peek(i) != term.charAt(i)) return false;
+                        private void recordFailureRecoveryOverride(String terminator) {
+                            if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride == null) {
+                                pendingFailureRecoveryOverride = terminator;
+                            }
                         }
-                        return true;
-                    }
 
-                """);
+                        private void clearPendingRecoveryOverride() {
+                            pendingFailureRecoveryOverride = null;
+                        }
+
+                        private boolean matchesOverrideAt(String term) {
+                            if (remaining() < term.length()) return false;
+                            for (int i = 0; i < term.length(); i++) {
+                                if (peek(i) != term.charAt(i)) return false;
+                            }
+                            return true;
+                        }
+
+                    """);
+            }else {
+                sb.append("""
+                        private final ArrayDeque<String> recoveryOverrideStack = new ArrayDeque<>();
+                        private Option<String> pendingFailureRecoveryOverride = Option.none();
+
+                        private void pushRecoveryOverride(String terminator) {
+                            recoveryOverrideStack.push(terminator);
+                        }
+
+                        private void popRecoveryOverride() {
+                            if (!recoveryOverrideStack.isEmpty()) {
+                                recoveryOverrideStack.pop();
+                            }
+                        }
+
+                        private void recordFailureRecoveryOverride(String terminator) {
+                            if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride.isEmpty()) {
+                                pendingFailureRecoveryOverride = Option.some(terminator);
+                            }
+                        }
+
+                        private void clearPendingRecoveryOverride() {
+                            pendingFailureRecoveryOverride = Option.none();
+                        }
+
+                        private boolean matchesOverrideAt(String term) {
+                            if (remaining() < term.length()) return false;
+                            for (int i = 0; i < term.length(); i++) {
+                                if (peek(i) != term.charAt(i)) return false;
+                            }
+                            return true;
+                        }
+
+                    """);
+            }
         }
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
@@ -2212,17 +2263,36 @@ public final class ParserGenerator {
                     this.growingSeeds = new HashMap<>();
                     this.captures = new HashMap<>();
                     this.tokenBoundaryDepth = 0;
-                    this.furthestFailure = Option.none();
-                    this.furthestExpected = Option.none();
+            """);
+        if (config.mutableParseResult()) {
+            sb.append("""
+                        this.furthestFailure = null;
+                        this.furthestExpected = null;
+                """);
+        }else {
+            sb.append("""
+                        this.furthestFailure = Option.none();
+                        this.furthestExpected = Option.none();
+                """);
+        }
+        sb.append("""
                     this.pendingLeadingTrivia.clear();
                     this.idGen = new IdGenerator.PerSessionCounter();
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("""
-                        this.diagnostics = new ArrayList<>();
-                        this.recoveryOverrideStack.clear();
-                        this.pendingFailureRecoveryOverride = Option.none();
-                """);
+            if (config.mutableParseResult()) {
+                sb.append("""
+                            this.diagnostics = new ArrayList<>();
+                            this.recoveryOverrideStack.clear();
+                            this.pendingFailureRecoveryOverride = null;
+                    """);
+            }else {
+                sb.append("""
+                            this.diagnostics = new ArrayList<>();
+                            this.recoveryOverrideStack.clear();
+                            this.pendingFailureRecoveryOverride = Option.none();
+                    """);
+            }
         }
         sb.append("""
                 }
@@ -2274,37 +2344,75 @@ public final class ParserGenerator {
 
             """);
         if (config.fastTrackFailure()) {
-            sb.append("""
-                    private void trackFailure(String expected) {
-                        if (!furthestFailure.isEmpty()) {
-                            int furthestOffset = furthestFailure.unwrap().offset();
-                            if (pos < furthestOffset) return;
-                            if (pos == furthestOffset) {
-                                String existing = furthestExpected.or("");
-                                if (existing.contains(expected)) return;
-                                furthestExpected = Option.some(
-                                    existing.isEmpty() ? expected : existing + " or " + expected);
-                                return;
+            if (config.mutableParseResult()) {
+                // A coverage extension: raw-nullable trackFailure — no Option boxing
+                // on the hot path. Equivalent semantics to the Option version.
+                sb.append("""
+                        private void trackFailure(String expected) {
+                            if (furthestFailure != null) {
+                                int furthestOffset = furthestFailure.offset();
+                                if (pos < furthestOffset) return;
+                                if (pos == furthestOffset) {
+                                    String existing = furthestExpected != null ? furthestExpected : "";
+                                    if (existing.contains(expected)) return;
+                                    furthestExpected = existing.isEmpty() ? expected : existing + " or " + expected;
+                                    return;
+                                }
+                            }
+                            furthestFailure = location();
+                            furthestExpected = expected;
+                        }
+
+                    """);
+            }else {
+                sb.append("""
+                        private void trackFailure(String expected) {
+                            if (!furthestFailure.isEmpty()) {
+                                int furthestOffset = furthestFailure.unwrap().offset();
+                                if (pos < furthestOffset) return;
+                                if (pos == furthestOffset) {
+                                    String existing = furthestExpected.or("");
+                                    if (existing.contains(expected)) return;
+                                    furthestExpected = Option.some(
+                                        existing.isEmpty() ? expected : existing + " or " + expected);
+                                    return;
+                                }
+                            }
+                            furthestFailure = Option.some(location());
+                            furthestExpected = Option.some(expected);
+                        }
+
+                    """);
+            }
+        }else {
+            if (config.mutableParseResult()) {
+                sb.append("""
+                        private void trackFailure(String expected) {
+                            var loc = location();
+                            if (furthestFailure == null || loc.offset() > furthestFailure.offset()) {
+                                furthestFailure = loc;
+                                furthestExpected = expected;
+                            } else if (loc.offset() == furthestFailure.offset() && !(furthestExpected != null ? furthestExpected : "").contains(expected)) {
+                                String existing = furthestExpected != null ? furthestExpected : "";
+                                furthestExpected = existing.isEmpty() ? expected : existing + " or " + expected;
                             }
                         }
-                        furthestFailure = Option.some(location());
-                        furthestExpected = Option.some(expected);
-                    }
 
-                """);
-        }else {
-            sb.append("""
-                    private void trackFailure(String expected) {
-                        var loc = location();
-                        if (furthestFailure.isEmpty() || loc.offset() > furthestFailure.unwrap().offset()) {
-                            furthestFailure = Option.some(loc);
-                            furthestExpected = Option.some(expected);
-                        } else if (loc.offset() == furthestFailure.unwrap().offset() && !furthestExpected.or("").contains(expected)) {
-                            furthestExpected = Option.some(furthestExpected.or("").isEmpty() ? expected : furthestExpected.or("") + " or " + expected);
+                    """);
+            }else {
+                sb.append("""
+                        private void trackFailure(String expected) {
+                            var loc = location();
+                            if (furthestFailure.isEmpty() || loc.offset() > furthestFailure.unwrap().offset()) {
+                                furthestFailure = Option.some(loc);
+                                furthestExpected = Option.some(expected);
+                            } else if (loc.offset() == furthestFailure.unwrap().offset() && !furthestExpected.or("").contains(expected)) {
+                                furthestExpected = Option.some(furthestExpected.or("").isEmpty() ? expected : furthestExpected.or("") + " or " + expected);
+                            }
                         }
-                    }
 
-                """);
+                    """);
+            }
         }
         if (errorReporting == ErrorReporting.ADVANCED) {
             // 0.3.6: stack-aware recovery — per-rule %recover overrides are
@@ -2314,33 +2422,63 @@ public final class ParserGenerator {
             // (the stack is unwound by the time recovery runs), then the
             // live stack, then the global default char-set. Mirrors
             // ParsingContext.skipToRecoveryPoint.
-            sb.append("""
-                    private SourceSpan skipToRecoveryPoint() {
-                        var start = location();
-                        String override = null;
-                        if (pendingFailureRecoveryOverride.isPresent()) {
-                            override = pendingFailureRecoveryOverride.unwrap();
-                            pendingFailureRecoveryOverride = Option.none();
-                        } else if (!recoveryOverrideStack.isEmpty()) {
-                            override = recoveryOverrideStack.peek();
-                        }
-                        if (override != null && !override.isEmpty()) {
-                            while (!isAtEnd() && !matchesOverrideAt(override)) {
+            if (config.mutableParseResult()) {
+                sb.append("""
+                        private SourceSpan skipToRecoveryPoint() {
+                            var start = location();
+                            String override = null;
+                            if (pendingFailureRecoveryOverride != null) {
+                                override = pendingFailureRecoveryOverride;
+                                pendingFailureRecoveryOverride = null;
+                            } else if (!recoveryOverrideStack.isEmpty()) {
+                                override = recoveryOverrideStack.peek();
+                            }
+                            if (override != null && !override.isEmpty()) {
+                                while (!isAtEnd() && !matchesOverrideAt(override)) {
+                                    advance();
+                                }
+                                return SourceSpan.sourceSpan(start, location());
+                            }
+                            while (!isAtEnd()) {
+                                char c = peek();
+                                if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
+                                    break;
+                                }
                                 advance();
                             }
                             return SourceSpan.sourceSpan(start, location());
                         }
-                        while (!isAtEnd()) {
-                            char c = peek();
-                            if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
-                                break;
-                            }
-                            advance();
-                        }
-                        return SourceSpan.sourceSpan(start, location());
-                    }
 
-                """);
+                    """);
+            }else {
+                sb.append("""
+                        private SourceSpan skipToRecoveryPoint() {
+                            var start = location();
+                            String override = null;
+                            if (pendingFailureRecoveryOverride.isPresent()) {
+                                override = pendingFailureRecoveryOverride.unwrap();
+                                pendingFailureRecoveryOverride = Option.none();
+                            } else if (!recoveryOverrideStack.isEmpty()) {
+                                override = recoveryOverrideStack.peek();
+                            }
+                            if (override != null && !override.isEmpty()) {
+                                while (!isAtEnd() && !matchesOverrideAt(override)) {
+                                    advance();
+                                }
+                                return SourceSpan.sourceSpan(start, location());
+                            }
+                            while (!isAtEnd()) {
+                                char c = peek();
+                                if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
+                                    break;
+                                }
+                                advance();
+                            }
+                            return SourceSpan.sourceSpan(start, location());
+                        }
+
+                    """);
+            }
             sb.append("""
                     private void addDiagnostic(String message, SourceSpan span) {
                         diagnostics.add(Diagnostic.error(message, span).withTag("error.unexpected-input"));
@@ -2423,12 +2561,20 @@ public final class ParserGenerator {
                                      .getFirst()
                                      .name();
         var sanitizedName = sanitize(startRuleName);
-        var resultExpectedExpr = config.mutableParseResult()
-                                 ? "(result.expected != null ? Option.some(result.expected) : Option.<String>none())"
-                                 : "result.expected";
         var resultNodeUnwrapExpr = config.mutableParseResult()
                                    ? "result.node"
                                    : "result.node.unwrap()";
+        // Read-site exprs for furthestFailure / furthestExpected. Under
+        // mutableParseResult these are raw nullable; emit fallback expressions
+        // that mirror Option.or(...) semantics without re-introducing boxing.
+        // The legacy variant continues to use Option.or(...) calls.
+        var furthestFailureOrLoc = config.mutableParseResult()
+                                   ? "(furthestFailure != null ? furthestFailure : location())"
+                                   : "furthestFailure.or(location())";
+        // expectedExpr matches `furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"))`.
+        var expectedExpr = config.mutableParseResult()
+                           ? "((furthestExpected != null && !furthestExpected.isEmpty()) ? furthestExpected : (result.expected != null ? result.expected : \"valid input\"))"
+                           : "furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or(\"valid input\"))";
         sb.append("""
                 // === Public Parse Methods ===
 
@@ -2436,13 +2582,13 @@ public final class ParserGenerator {
                     init(input);
                     var result = parse_%s();
                     if (result.isFailure()) {
-                        var errorLoc = furthestFailure.or(location());
-                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(%s.or("valid input"));
+                        var errorLoc = %s;
+                        var expected = %s;
                         return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
                     var trailingTrivia = skipWhitespace(); // Capture trailing trivia
                     if (!isAtEnd()) {
-                        var errorLoc = furthestFailure.or(location());
+                        var errorLoc = %s;
                         return Result.failure(new ParseError(errorLoc, "unexpected input"));
                     }
                     // Attach trailing trivia to root node
@@ -2470,7 +2616,7 @@ public final class ParserGenerator {
                     };
                 }
 
-            """.formatted(sanitizedName, resultExpectedExpr, resultNodeUnwrapExpr));
+            """.formatted(sanitizedName, furthestFailureOrLoc, expectedExpr, furthestFailureOrLoc, resultNodeUnwrapExpr));
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     /**
@@ -2484,9 +2630,9 @@ public final class ParserGenerator {
 
                         if (result.isFailure()) {
                             // Record the failure and attempt recovery
-                            var errorLoc = furthestFailure.or(location());
+                            var errorLoc = %s;
                             var errorSpan = SourceSpan.sourceSpan(errorLoc, errorLoc);
-                            var expected = furthestExpected.filter(s -> !s.isEmpty()).or(%s.or("valid input"));
+                            var expected = %s;
                             addDiagnostic("expected " + expected, errorSpan);
 
                             // Skip to recovery point and try to continue
@@ -2502,7 +2648,7 @@ public final class ParserGenerator {
                         var trailingTrivia = skipWhitespace();
                         if (!isAtEnd()) {
                             // Unexpected trailing input - use furthest failure position for error
-                            var errorLoc = furthestFailure.or(location());
+                            var errorLoc = %s;
                             var skippedSpan = skipToRecoveryPoint();
                             var errorSpan = SourceSpan.sourceSpan(errorLoc, skippedSpan.end());
                             addDiagnostic("unexpected input", errorSpan, "expected end of input");
@@ -2519,7 +2665,12 @@ public final class ParserGenerator {
                         return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                     }
 
-                """.formatted(sanitizedName, resultExpectedExpr, resultNodeUnwrapExpr, resultNodeUnwrapExpr));
+                """.formatted(sanitizedName,
+                              furthestFailureOrLoc,
+                              expectedExpr,
+                              furthestFailureOrLoc,
+                              resultNodeUnwrapExpr,
+                              resultNodeUnwrapExpr));
         }
         generateCstParseRuleAt(sb);
     }
@@ -2533,12 +2684,15 @@ public final class ParserGenerator {
      * rule's generated {@code parse_<name>()} method.
      */
     private void generateCstParseRuleAt(StringBuilder sb) {
-        var resultExpectedExpr = config.mutableParseResult()
-                                 ? "(result.expected != null ? Option.some(result.expected) : Option.<String>none())"
-                                 : "result.expected";
         var resultNodeUnwrapExpr = config.mutableParseResult()
                                    ? "result.node"
                                    : "result.node.unwrap()";
+        var furthestFailureOrLoc = config.mutableParseResult()
+                                   ? "(furthestFailure != null ? furthestFailure : location())"
+                                   : "furthestFailure.or(location())";
+        var expectedExpr = config.mutableParseResult()
+                           ? "((furthestExpected != null && !furthestExpected.isEmpty()) ? furthestExpected : (result.expected != null ? result.expected : \"valid input\"))"
+                           : "furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or(\"valid input\"))";
         var ruleAtBlock = new StringBuilder();
         ruleAtBlock.append("""
                 // === PartialParse (0.3.0) ===
@@ -2603,8 +2757,8 @@ public final class ParserGenerator {
                     seekTo(offset);
                     var result = supplier.get();
                     if (result.isFailure()) {
-                        var errorLoc = furthestFailure.or(location());
-                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(__RESULT_EXPECTED__.or("valid input"));
+                        var errorLoc = __FURTHEST_FAILURE_OR_LOC__;
+                        var expected = __EXPECTED_EXPR__;
                         return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
                     return Result.success(new PartialParse(__RESULT_NODE__, pos));
@@ -2632,7 +2786,8 @@ public final class ParserGenerator {
 
             """);
         sb.append(ruleAtBlock.toString()
-                             .replace("__RESULT_EXPECTED__", resultExpectedExpr)
+                             .replace("__FURTHEST_FAILURE_OR_LOC__", furthestFailureOrLoc)
+                             .replace("__EXPECTED_EXPR__", expectedExpr)
                              .replace("__RESULT_NODE__", resultNodeUnwrapExpr));
     }
 
