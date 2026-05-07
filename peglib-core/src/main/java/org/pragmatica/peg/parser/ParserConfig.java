@@ -21,10 +21,12 @@ import java.util.Set;
  * {@code skipWhitespaceFastPath}, {@code reuseEndLocation}) default to
  * {@code true} in {@link #DEFAULT} after corpus parity validation.
  * Phase 2 {@code choiceDispatch} defaults to {@code true} (2.49x speedup vs
- * phase-1 baseline on the reference workload); {@code markResetChildren},
- * {@code inlineLocations}, and {@code selectivePackrat} default to {@code false}
- * — no statistically significant individual win measured on the reference JVM
- * (see {@code docs/bench-results/java25-parse.json}).
+ * phase-1 baseline on the reference workload). Phase 1.7 (D)
+ * {@code inlineLocations} defaults to {@code true} after the emission-template
+ * sweep that eliminated SourceLocation/SourceSpan allocations on the
+ * rule-entry path. {@code markResetChildren} and {@code selectivePackrat}
+ * default to {@code false} — no statistically significant individual win
+ * measured on the reference JVM (see {@code docs/bench-results/java25-parse.json}).
  *
  * <p><b>Scope:</b> {@code fastTrackFailure}, {@code literalFailureCache},
  * {@code charClassFailureCache}, {@code bulkAdvanceLiteral},
@@ -66,7 +68,7 @@ public record ParserConfig(
  Set<String> packratSkipRules,
  boolean mutableParseResult) {
     public static final ParserConfig DEFAULT = new ParserConfig(
-    true, RecoveryStrategy.BASIC, true, true, true, true, true, true, true, true, false, false, false, Set.of(), false);
+    true, RecoveryStrategy.BASIC, true, true, true, true, true, true, true, true, false, true, false, Set.of(), false);
 
     /**
      * Convenience factory for the three-field runtime configuration. Phase 1
@@ -89,7 +91,7 @@ public record ParserConfig(
         true,
         true,
         false,
-        false,
+        true,
         false,
         Set.of(),
         false);

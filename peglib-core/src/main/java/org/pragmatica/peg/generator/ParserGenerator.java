@@ -2340,6 +2340,15 @@ public final class ParserGenerator {
                     this.column = loc.column();
                 }
 
+                // v0.5.0 phase 1.7 (D): raw-int location restore. Skips
+                // SourceLocation allocation in the hot path; called from emission
+                // sites that capture (pos,line,column) as int locals at entry.
+                private void restoreLocationRaw(int pos, int line, int column) {
+                    this.pos = pos;
+                    this.line = line;
+                    this.column = column;
+                }
+
             """);
         if (config.fastTrackFailure()) {
             if (config.mutableParseResult()) {
@@ -3187,7 +3196,10 @@ public final class ParserGenerator {
         sb.append("    private CstParseResult ")
           .append(bodyMethodName)
           .append("() {\n");
-        sb.append("        var startLoc = location();\n");
+        // Phase 1.7 (D): inline int captures — no SourceLocation allocation on entry.
+        sb.append("        int startOffset = pos;\n");
+        sb.append("        int startLine = line;\n");
+        sb.append("        int startColumn = column;\n");
         sb.append("        var children = new ArrayList<CstNode>();\n");
         sb.append("        var __ruleName = ")
           .append(ruleIdConst)
@@ -3198,7 +3210,7 @@ public final class ParserGenerator {
         sb.append("        \n");
         sb.append("        if (result.isSuccess()) {\n");
         sb.append("            var endLoc = location();\n");
-        sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
+        sb.append("            var span = new SourceSpan(startLine, startColumn, startOffset, endLoc.line(), endLoc.column(), endLoc.offset());\n");
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", List.<Trivia>of());\n");
@@ -3483,7 +3495,11 @@ public final class ParserGenerator {
                 }
             }
             case Expression.Sequence seq -> {
-                var seqStart = "seqStart" + id;
+                // Phase 1.7 (D): inline int captures — sequence is the most common
+                // emission, every restore here was allocating a SourceLocation.
+                var seqStartPos = "seqStartPos" + id;
+                var seqStartLine = "seqStartLine" + id;
+                var seqStartColumn = "seqStartColumn" + id;
                 var seqPending = "seqPending" + id;
                 var seqChildren = "seqChildren" + id;
                 var cutVar = "cut" + id;
@@ -3492,9 +3508,17 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = CstParseResult.success(null, \"\", location());\n");
                 sb.append(pad)
-                  .append("var ")
-                  .append(seqStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(seqStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(seqStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(seqStartColumn)
+                  .append(" = column;\n");
                 // Snapshot pending-leading so any between-element trivia appended
                 // inside this sequence can be rolled back on failure.
                 sb.append(pad)
@@ -3534,8 +3558,12 @@ public final class ParserGenerator {
                       .append(elemVar)
                       .append(".isCutFailure()) {\n");
                     sb.append(pad)
-                      .append("        restoreLocation(")
-                      .append(seqStart)
+                      .append("        restoreLocationRaw(")
+                      .append(seqStartPos)
+                      .append(", ")
+                      .append(seqStartLine)
+                      .append(", ")
+                      .append(seqStartColumn)
                       .append(");\n");
                     sb.append(pad)
                       .append("        restorePendingLeading(")
@@ -3560,8 +3588,12 @@ public final class ParserGenerator {
                       .append(elemVar)
                       .append(".isFailure()) {\n");
                     sb.append(pad)
-                      .append("        restoreLocation(")
-                      .append(seqStart)
+                      .append("        restoreLocationRaw(")
+                      .append(seqStartPos)
+                      .append(", ")
+                      .append(seqStartLine)
+                      .append(", ")
+                      .append(seqStartColumn)
                       .append(");\n");
                     sb.append(pad)
                       .append("        restorePendingLeading(")
@@ -3605,12 +3637,15 @@ public final class ParserGenerator {
                   .append("    ")
                   .append(resultVar)
                   .append(" = CstParseResult.success(null, substring(")
-                  .append(seqStart)
-                  .append(".offset(), pos), location());\n");
+                  .append(seqStartPos)
+                  .append(", pos), location());\n");
                 sb.append(pad)
                   .append("}\n");
             }
             case Expression.Choice choice -> {
+                // Phase 1.7 (D): inline int captures — Choice restore is hot under
+                // backtracking. The base name is reused across helpers; suffixes
+                // Pos/Line/Column denote the 3 inline ints.
                 var choiceStart = "choiceStart" + id;
                 // §7.2: the child-state variable is either a pre-cloned ArrayList
                 // (legacy path, flag off) or an int size mark (optimized path, flag on).
@@ -3624,9 +3659,17 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = null;\n");
                 sb.append(pad)
-                  .append("var ")
+                  .append("int ")
                   .append(choiceStart)
-                  .append(" = location();\n");
+                  .append("Pos = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(choiceStart)
+                  .append("Line = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(choiceStart)
+                  .append("Column = column;\n");
                 // Snapshot pending-leading so failed alternatives can be rolled
                 // back — captured trivia inside one alt must not leak forward
                 // into sibling alternatives.
@@ -3692,8 +3735,13 @@ public final class ParserGenerator {
                   .append("}\n");
             }
             case Expression.ZeroOrMore zom -> {
-                var zomStart = "zomStart" + id;
-                var beforeLoc = "beforeLoc" + id;
+                // Phase 1.7 (D): inline int captures — no SourceLocation per iteration.
+                var zomStartPos = "zomStartPos" + id;
+                var zomStartLine = "zomStartLine" + id;
+                var zomStartColumn = "zomStartColumn" + id;
+                var beforePos = "beforePos" + id;
+                var beforeLine = "beforeLine" + id;
+                var beforeColumn = "beforeColumn" + id;
                 var zomElem = "zomElem" + id;
                 var savedChildrenZom = "savedChildrenZom" + id;
                 sb.append(pad)
@@ -3701,9 +3749,17 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = CstParseResult.success(null, \"\", location());\n");
                 sb.append(pad)
-                  .append("var ")
-                  .append(zomStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(zomStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(zomStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(zomStartColumn)
+                  .append(" = column;\n");
                 // Save parent children and collect loop children separately
                 if (addToChildren) {
                     sb.append(pad)
@@ -3716,9 +3772,17 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("while (true) {\n");
                 sb.append(pad)
-                  .append("    var ")
-                  .append(beforeLoc)
-                  .append(" = location();\n");
+                  .append("    int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforeLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforeColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("    List<Trivia> zomIterPending")
                   .append(id)
@@ -3752,12 +3816,16 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    if (")
                   .append(zomElem)
-                  .append(".isFailure() || location().offset() == ")
-                  .append(beforeLoc)
-                  .append(".offset()) {\n");
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
                 sb.append(pad)
-                  .append("        restoreLocation(")
-                  .append(beforeLoc)
+                  .append("        restoreLocationRaw(")
+                  .append(beforePos)
+                  .append(", ")
+                  .append(beforeLine)
+                  .append(", ")
+                  .append(beforeColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("        restorePendingLeading(zomIterPending")
@@ -3800,9 +3868,13 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var zomSpan")
                       .append(id)
-                      .append(" = SourceSpan.sourceSpan(")
-                      .append(zomStart)
-                      .append(", location());\n");
+                      .append(" = new SourceSpan(")
+                      .append(zomStartLine)
+                      .append(", ")
+                      .append(zomStartColumn)
+                      .append(", ")
+                      .append(zomStartPos)
+                      .append(", line, column, pos);\n");
                     sb.append(pad)
                       .append("        children.add(new CstNode.NonTerminal(idGen.next(), zomSpan")
                       .append(id)
@@ -3815,8 +3887,8 @@ public final class ParserGenerator {
                       .append("    ")
                       .append(resultVar)
                       .append(" = CstParseResult.success(null, substring(")
-                      .append(zomStart)
-                      .append(".offset(), pos), location());\n");
+                      .append(zomStartPos)
+                      .append(", pos), location());\n");
                     sb.append(pad)
                       .append("} else {\n");
                     sb.append(pad)
@@ -3837,16 +3909,21 @@ public final class ParserGenerator {
                       .append("    ")
                       .append(resultVar)
                       .append(" = CstParseResult.success(null, substring(")
-                      .append(zomStart)
-                      .append(".offset(), pos), location());\n");
+                      .append(zomStartPos)
+                      .append(", pos), location());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
             }
             case Expression.OneOrMore oom -> {
+                // Phase 1.7 (D): inline int captures — no SourceLocation per iteration.
                 var oomFirst = "oomFirst" + id;
-                var oomStart = "oomStart" + id;
-                var beforeLoc = "beforeLoc" + id;
+                var oomStartPos = "oomStartPos" + id;
+                var oomStartLine = "oomStartLine" + id;
+                var oomStartColumn = "oomStartColumn" + id;
+                var beforePos = "beforePos" + id;
+                var beforeLine = "beforeLine" + id;
+                var beforeColumn = "beforeColumn" + id;
                 var oomElem = "oomElem" + id;
                 var savedChildrenOom = "savedChildrenOom" + id;
                 // Save parent children before first match
@@ -3876,9 +3953,17 @@ public final class ParserGenerator {
                   .append(oomFirst)
                   .append(";\n");
                 sb.append(pad)
-                  .append("var ")
-                  .append(oomStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(oomStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(oomStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(oomStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("if (!")
                   .append(oomFirst)
@@ -3896,9 +3981,17 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    while (true) {\n");
                 sb.append(pad)
-                  .append("        var ")
-                  .append(beforeLoc)
-                  .append(" = location();\n");
+                  .append("        int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("        int ")
+                  .append(beforeLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("        int ")
+                  .append(beforeColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("        List<Trivia> oomIterPending")
                   .append(id)
@@ -3932,12 +4025,16 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("        if (")
                   .append(oomElem)
-                  .append(".isFailure() || location().offset() == ")
-                  .append(beforeLoc)
-                  .append(".offset()) {\n");
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
                 sb.append(pad)
-                  .append("            restoreLocation(")
-                  .append(beforeLoc)
+                  .append("            restoreLocationRaw(")
+                  .append(beforePos)
+                  .append(", ")
+                  .append(beforeLine)
+                  .append(", ")
+                  .append(beforeColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("            restorePendingLeading(oomIterPending")
@@ -3982,9 +4079,13 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var oomSpan")
                       .append(id)
-                      .append(" = SourceSpan.sourceSpan(")
-                      .append(oomStart)
-                      .append(", location());\n");
+                      .append(" = new SourceSpan(")
+                      .append(oomStartLine)
+                      .append(", ")
+                      .append(oomStartColumn)
+                      .append(", ")
+                      .append(oomStartPos)
+                      .append(", line, column, pos);\n");
                     sb.append(pad)
                       .append("        children.add(new CstNode.NonTerminal(idGen.next(), oomSpan")
                       .append(id)
@@ -4006,13 +4107,24 @@ public final class ParserGenerator {
                 }
             }
             case Expression.Optional opt -> {
-                var optStart = "optStart" + id;
+                // Phase 1.7 (D): inline int captures for restore-on-failure path.
+                var optStartPos = "optStartPos" + id;
+                var optStartLine = "optStartLine" + id;
+                var optStartColumn = "optStartColumn" + id;
                 var optElem = "optElem" + id;
                 var savedChildrenOpt = "savedChildrenOpt" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(optStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(optStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(optStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(optStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("List<Trivia> optPending")
                   .append(id)
@@ -4044,8 +4156,12 @@ public final class ParserGenerator {
                   .append(optElem)
                   .append(".isCutFailure()) {\n");
                 sb.append(pad)
-                  .append("    restoreLocation(")
-                  .append(optStart)
+                  .append("    restoreLocationRaw(")
+                  .append(optStartPos)
+                  .append(", ")
+                  .append(optStartLine)
+                  .append(", ")
+                  .append(optStartColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("    restorePendingLeading(optPending")
@@ -4096,8 +4212,12 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("} else {\n");
                 sb.append(pad)
-                  .append("    restoreLocation(")
-                  .append(optStart)
+                  .append("    restoreLocationRaw(")
+                  .append(optStartPos)
+                  .append(", ")
+                  .append(optStartLine)
+                  .append(", ")
+                  .append(optStartColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("    restorePendingLeading(optPending")
@@ -4119,9 +4239,14 @@ public final class ParserGenerator {
                   .append("}\n");
             }
             case Expression.Repetition rep -> {
+                // Phase 1.7 (D): inline int captures — no SourceLocation per iteration.
                 var repCount = "repCount" + id;
-                var repStart = "repStart" + id;
-                var beforeLoc = "beforeLoc" + id;
+                var repStartPos = "repStartPos" + id;
+                var repStartLine = "repStartLine" + id;
+                var repStartColumn = "repStartColumn" + id;
+                var beforePos = "beforePos" + id;
+                var beforeLine = "beforeLine" + id;
+                var beforeColumn = "beforeColumn" + id;
                 var repElem = "repElem" + id;
                 var repCutFailed = "repCutFailed" + id;
                 var savedChildrenRep = "savedChildrenRep" + id;
@@ -4130,9 +4255,17 @@ public final class ParserGenerator {
                   .append(repCount)
                   .append(" = 0;\n");
                 sb.append(pad)
-                  .append("var ")
-                  .append(repStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(repStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("CstParseResult ")
                   .append(repCutFailed)
@@ -4158,9 +4291,17 @@ public final class ParserGenerator {
                   .append(maxStr)
                   .append(") {\n");
                 sb.append(pad)
-                  .append("    var ")
-                  .append(beforeLoc)
-                  .append(" = location();\n");
+                  .append("    int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforeLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforeColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("    List<Trivia> repIterPending")
                   .append(id)
@@ -4196,12 +4337,16 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    if (")
                   .append(repElem)
-                  .append(".isFailure() || location().offset() == ")
-                  .append(beforeLoc)
-                  .append(".offset()) {\n");
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
                 sb.append(pad)
-                  .append("        restoreLocation(")
-                  .append(beforeLoc)
+                  .append("        restoreLocationRaw(")
+                  .append(beforePos)
+                  .append(", ")
+                  .append(beforeLine)
+                  .append(", ")
+                  .append(beforeColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("        restorePendingLeading(repIterPending")
@@ -4271,9 +4416,13 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var repSpan")
                       .append(id)
-                      .append(" = SourceSpan.sourceSpan(")
-                      .append(repStart)
-                      .append(", location());\n");
+                      .append(" = new SourceSpan(")
+                      .append(repStartLine)
+                      .append(", ")
+                      .append(repStartColumn)
+                      .append(", ")
+                      .append(repStartPos)
+                      .append(", line, column, pos);\n");
                     sb.append(pad)
                       .append("        children.add(new CstNode.NonTerminal(idGen.next(), repSpan")
                       .append(id)
@@ -4287,8 +4436,8 @@ public final class ParserGenerator {
                   .append("    ")
                   .append(resultVar)
                   .append(" = CstParseResult.success(null, substring(")
-                  .append(repStart)
-                  .append(".offset(), pos), location());\n");
+                  .append(repStartPos)
+                  .append(", pos), location());\n");
                 sb.append(pad)
                   .append("} else {\n");
                 if (addToChildren) {
@@ -4300,8 +4449,12 @@ public final class ParserGenerator {
                       .append(");\n");
                 }
                 sb.append(pad)
-                  .append("    restoreLocation(")
-                  .append(repStart)
+                  .append("    restoreLocationRaw(")
+                  .append(repStartPos)
+                  .append(", ")
+                  .append(repStartLine)
+                  .append(", ")
+                  .append(repStartColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("    ")
@@ -4313,13 +4466,24 @@ public final class ParserGenerator {
                   .append("}\n");
             }
             case Expression.And and -> {
-                var andStart = "andStart" + id;
+                // Phase 1.7 (D): inline int captures for predicate restore.
+                var andStartPos = "andStartPos" + id;
+                var andStartLine = "andStartLine" + id;
+                var andStartColumn = "andStartColumn" + id;
                 var savedChildren = "savedChildrenAnd" + id;
                 var andElem = "andElem" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(andStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(andStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(andStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(andStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("List<Trivia> andPending")
                   .append(id)
@@ -4332,8 +4496,12 @@ public final class ParserGenerator {
                 }
                 generateCstExpressionCode(sb, and.expression(), andElem, indent, false, counter, inWhitespaceRule);
                 sb.append(pad)
-                  .append("restoreLocation(")
-                  .append(andStart)
+                  .append("restoreLocationRaw(")
+                  .append(andStartPos)
+                  .append(", ")
+                  .append(andStartLine)
+                  .append(", ")
+                  .append(andStartColumn)
                   .append(");\n");
                 // Predicates don't consume trivia state either.
                 sb.append(pad)
@@ -4358,13 +4526,24 @@ public final class ParserGenerator {
                   .append(";\n");
             }
             case Expression.Not not -> {
-                var notStart = "notStart" + id;
+                // Phase 1.7 (D): inline int captures for predicate restore.
+                var notStartPos = "notStartPos" + id;
+                var notStartLine = "notStartLine" + id;
+                var notStartColumn = "notStartColumn" + id;
                 var savedChildren = "savedChildrenNot" + id;
                 var notElem = "notElem" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(notStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(notStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(notStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(notStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("List<Trivia> notPending")
                   .append(id)
@@ -4377,8 +4556,12 @@ public final class ParserGenerator {
                 }
                 generateCstExpressionCode(sb, not.expression(), notElem, indent, false, counter, inWhitespaceRule);
                 sb.append(pad)
-                  .append("restoreLocation(")
-                  .append(notStart)
+                  .append("restoreLocationRaw(")
+                  .append(notStartPos)
+                  .append(", ")
+                  .append(notStartLine)
+                  .append(", ")
+                  .append(notStartColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("restorePendingLeading(notPending")
@@ -4400,13 +4583,24 @@ public final class ParserGenerator {
                   .append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.success(null, \"\", location());\n");
             }
             case Expression.TokenBoundary tb -> {
-                var tbStart = "tbStart" + id;
+                // Phase 1.7 (D): inline int captures — avoid SourceLocation per token.
+                var tbStartPos = "tbStartPos" + id;
+                var tbStartLine = "tbStartLine" + id;
+                var tbStartColumn = "tbStartColumn" + id;
                 var savedChildren = "savedChildrenTb" + id;
                 var tbElem = "tbElem" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(tbStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(tbStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(tbStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(tbStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("tokenBoundaryDepth++;\n");
                 if (addToChildren) {
@@ -4438,14 +4632,18 @@ public final class ParserGenerator {
                   .append("    var tbText")
                   .append(id)
                   .append(" = substring(")
-                  .append(tbStart)
-                  .append(".offset(), pos);\n");
+                  .append(tbStartPos)
+                  .append(", pos);\n");
                 sb.append(pad)
                   .append("    var tbSpan")
                   .append(id)
-                  .append(" = SourceSpan.sourceSpan(")
-                  .append(tbStart)
-                  .append(", location());\n");
+                  .append(" = new SourceSpan(")
+                  .append(tbStartLine)
+                  .append(", ")
+                  .append(tbStartColumn)
+                  .append(", ")
+                  .append(tbStartPos)
+                  .append(", line, column, pos);\n");
                 var tokenRuleId = inWhitespaceRule
                                   ? "RULE_PEG_TOKEN"
                                   : "__ruleName";
@@ -4512,12 +4710,13 @@ public final class ParserGenerator {
                   .append(";\n");
             }
             case Expression.Capture cap -> {
-                var capStart = "capStart" + id;
+                // Phase 1.7 (D): inline int capture — only pos is needed (substring offset).
+                var capStartPos = "capStartPos" + id;
                 var capElem = "capElem" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(capStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(capStartPos)
+                  .append(" = pos;\n");
                 generateCstExpressionCode(sb,
                                           cap.expression(),
                                           capElem,
@@ -4533,8 +4732,8 @@ public final class ParserGenerator {
                   .append("    captures.put(\"")
                   .append(cap.name())
                   .append("\", substring(")
-                  .append(capStart)
-                  .append(".offset(), pos));\n");
+                  .append(capStartPos)
+                  .append(", pos));\n");
                 sb.append(pad)
                   .append("}\n");
                 sb.append(pad)
@@ -4663,9 +4862,13 @@ public final class ParserGenerator {
         sb.append(pad)
           .append("} else {\n");
         sb.append(pad)
-          .append("    restoreLocation(")
+          .append("    restoreLocationRaw(")
           .append(choiceStart)
-          .append(");\n");
+          .append("Pos, ")
+          .append(choiceStart)
+          .append("Line, ")
+          .append(choiceStart)
+          .append("Column);\n");
         // Roll back any pending-leading trivia captured inside the failed alt,
         // so sibling alternatives start from the same buffer state as the Choice entry.
         sb.append(pad)
@@ -4870,12 +5073,14 @@ public final class ParserGenerator {
                                 .unwrap();
             var innerExpr = extractInnerExpression(wsExpr);
             sb.append("        while (!isAtEnd()) {\n");
-            sb.append("            var wsStartLoc = location();\n");
-            sb.append("            var wsStartPos = pos;\n");
+            // Phase 1.7 (D): inline int captures — no SourceLocation allocation per trivia element.
+            sb.append("            int wsStartLine = line;\n");
+            sb.append("            int wsStartColumn = column;\n");
+            sb.append("            int wsStartPos = pos;\n");
             generateCstExpressionCode(sb, innerExpr, "wsResult", 3, false, new int[]{0}, true);
             sb.append("            if (wsResult.isFailure() || pos == wsStartPos) break;\n");
             sb.append("            var wsText = substring(wsStartPos, pos);\n");
-            sb.append("            var wsSpan = SourceSpan.sourceSpan(wsStartLoc, location());\n");
+            sb.append("            var wsSpan = new SourceSpan(wsStartLine, wsStartColumn, wsStartPos, line, column, pos);\n");
             sb.append("            trivia.add(classifyTrivia(wsSpan, wsText));\n");
             sb.append("        }\n");
         }
@@ -5192,7 +5397,10 @@ public final class ParserGenerator {
               .append(");\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
-            sb.append("        var startLoc = location();\n");
+            // Phase 1.7 (D): inline int captures — no SourceLocation per literal.
+            sb.append("        int startPos = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
             sb.append("        if (caseInsensitive) {\n");
             sb.append("            for (int i = 0; i < len; i++) {\n");
             sb.append("                if (Character.toLowerCase(text.charAt(i)) != Character.toLowerCase(input.charAt(pos + i))) {\n");
@@ -5219,7 +5427,10 @@ public final class ParserGenerator {
             sb.append("            trackFailure(\"'\" + text + \"'\");\n");
             sb.append("            return CstParseResult.failure(\"'\" + text + \"'\");\n");
             sb.append("        }\n");
-            sb.append("        var startLoc = location();\n");
+            // Phase 1.7 (D): inline int captures — no SourceLocation per literal.
+            sb.append("        int startPos = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
             sb.append("        for (int i = 0; i < text.length(); i++) {\n");
             sb.append("            char expected = text.charAt(i);\n");
             sb.append("            char actual = peek(i);\n");
@@ -5259,9 +5470,12 @@ public final class ParserGenerator {
             sb.append("        }\n");
         }
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
-          .append(endLocVar)
-          .append(");\n");
+        // Phase 1.7 (D): build SourceSpan from inline ints — no startLoc allocation.
+        if (config.reuseEndLocation()) {
+            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, endLoc.line(), endLoc.column(), endLoc.offset());\n");
+        }else {
+            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
+        }
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, text, takePendingLeading(), List.of());\n");
         sb.append("        return CstParseResult.success(node, text, ")
           .append(endLocVar)
@@ -5301,14 +5515,19 @@ public final class ParserGenerator {
         sb.append("            trackFailure(\"dictionary word\");\n");
         sb.append("            return CstParseResult.failure(\"dictionary word\");\n");
         sb.append("        }\n");
-        sb.append("        var startLoc = location();\n");
+        // Phase 1.7 (D): inline int captures.
+        sb.append("        int startPos = pos;\n");
+        sb.append("        int startLine = line;\n");
+        sb.append("        int startColumn = column;\n");
         sb.append("        for (int i = 0; i < longestLen; i++) {\n");
         sb.append("            advance();\n");
         sb.append("        }\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
-          .append(endLocVar)
-          .append(");\n");
+        if (config.reuseEndLocation()) {
+            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, endLoc.line(), endLoc.column(), endLoc.offset());\n");
+        }else {
+            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
+        }
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, longestMatch, takePendingLeading(), List.of());\n");
         sb.append("        return CstParseResult.success(node, longestMatch, ")
           .append(endLocVar)
@@ -5334,7 +5553,10 @@ public final class ParserGenerator {
               .append(");\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
-            sb.append("        var startLoc = location();\n");
+            // Phase 1.7 (D): inline int captures — no SourceLocation per char-class match.
+            sb.append("        int startPos = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
             sb.append("        char c = peek();\n");
             sb.append("        boolean matches = matchesPattern(c, pattern, caseInsensitive);\n");
             sb.append("        if (negated) matches = !matches;\n");
@@ -5350,7 +5572,10 @@ public final class ParserGenerator {
             sb.append("            trackFailure(\"[\" + (negated ? \"^\" : \"\") + pattern + \"]\");\n");
             sb.append("            return CstParseResult.failure(\"character class\");\n");
             sb.append("        }\n");
-            sb.append("        var startLoc = location();\n");
+            // Phase 1.7 (D): inline int captures.
+            sb.append("        int startPos = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
             sb.append("        char c = peek();\n");
             sb.append("        boolean matches = matchesPattern(c, pattern, caseInsensitive);\n");
             sb.append("        if (negated) matches = !matches;\n");
@@ -5362,9 +5587,11 @@ public final class ParserGenerator {
         sb.append("        advance();\n");
         sb.append("        var text = String.valueOf(c);\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
-          .append(endLocVar)
-          .append(");\n");
+        if (config.reuseEndLocation()) {
+            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, endLoc.line(), endLoc.column(), endLoc.offset());\n");
+        }else {
+            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
+        }
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
         sb.append("        return CstParseResult.success(node, text, ")
           .append(endLocVar)
@@ -5398,13 +5625,18 @@ public final class ParserGenerator {
         sb.append("            trackFailure(\"any character\");\n");
         sb.append("            return CstParseResult.failure(\"any character\");\n");
         sb.append("        }\n");
-        sb.append("        var startLoc = location();\n");
+        // Phase 1.7 (D): inline int captures — no SourceLocation per any-match.
+        sb.append("        int startPos = pos;\n");
+        sb.append("        int startLine = line;\n");
+        sb.append("        int startColumn = column;\n");
         sb.append("        char c = advance();\n");
         sb.append("        var text = String.valueOf(c);\n");
         sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
-          .append(endLocVar)
-          .append(");\n");
+        if (config.reuseEndLocation()) {
+            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, endLoc.line(), endLoc.column(), endLoc.offset());\n");
+        }else {
+            sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
+        }
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");
         sb.append("        return CstParseResult.success(node, text, ")
           .append(endLocVar)
