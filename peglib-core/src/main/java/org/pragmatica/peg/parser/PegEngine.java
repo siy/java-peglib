@@ -17,6 +17,7 @@ import org.pragmatica.peg.grammar.analysis.ExpressionShape;
 import org.pragmatica.peg.grammar.analysis.FirstCharAnalysis;
 import org.pragmatica.peg.tree.AstNode;
 import org.pragmatica.peg.tree.CstNode;
+import org.pragmatica.peg.tree.IdGenerator;
 import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
 import org.pragmatica.peg.tree.Trivia;
@@ -249,12 +250,24 @@ public final class PegEngine implements Parser {
 
     @Override
     public Result<CstNode> parseCst(String input, String startRule) {
+        return parseCst(input, startRule, new IdGenerator.PerSessionCounter());
+    }
+
+    /**
+     * Phase 1.5 (v0.5.0): caller-supplied id-generator overload. Used by
+     * {@code IncrementalSession} so node IDs stay stable across reparses
+     * within a Session lineage (precondition for Path D's optimized
+     * {@code NodeIndex.applyIncremental}). Plain {@link Parser#parseCst}
+     * callers continue to allocate a fresh per-call counter via the
+     * no-idGen overload above.
+     */
+    public Result<CstNode> parseCst(String input, String startRule, IdGenerator idGen) {
         var ruleOpt = lookupRule(startRule);
         if (ruleOpt.isEmpty()) {
             return new ParseError.SemanticError(
             SourceLocation.START, "Unknown rule: " + startRule).result();
         }
-        var ctx = ParsingContext.create(input, grammar, config);
+        var ctx = ParsingContext.create(input, grammar, config, idGen);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         var result = parseRule(ctx, ruleOpt.unwrap());
         if (result.isFailure()) {
@@ -382,6 +395,20 @@ public final class PegEngine implements Parser {
      */
     @Override
     public Result<PartialParse> parseRuleAt(Class< ? extends RuleId> ruleId, String input, int offset) {
+        return parseRuleAt(ruleId, input, offset, new IdGenerator.PerSessionCounter());
+    }
+
+    /**
+     * Phase 1.5 (v0.5.0): caller-supplied id-generator overload of
+     * {@link Parser#parseRuleAt(Class, String, int)}. Used by
+     * {@code IncrementalSession} during incremental reparse so the spliced
+     * subtree's node IDs come from the same counter as the rest of the
+     * session's tree (Path D precondition).
+     */
+    public Result<PartialParse> parseRuleAt(Class< ? extends RuleId> ruleId,
+                                            String input,
+                                            int offset,
+                                            IdGenerator idGen) {
         if (ruleId == null) {
             return new ParseError.SemanticError(
             SourceLocation.START, "Rule id class is null").result();
@@ -400,7 +427,7 @@ public final class PegEngine implements Parser {
             return new ParseError.SemanticError(
             SourceLocation.START, "Unknown rule for class " + ruleId.getSimpleName() + ": " + ruleName).result();
         }
-        var ctx = ParsingContext.create(input, grammar, config);
+        var ctx = ParsingContext.create(input, grammar, config, idGen);
         ctx.setSuggestionVocabulary(suggestionVocabulary);
         ctx.restoreLocation(computeLocation(input, offset));
         var result = parseRule(ctx, ruleOpt.unwrap());

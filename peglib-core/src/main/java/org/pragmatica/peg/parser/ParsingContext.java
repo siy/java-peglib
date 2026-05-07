@@ -83,7 +83,10 @@ public final class ParsingContext {
     // backtracked alternative's override does not leak forward.
     private Option<String> pendingFailureRecoveryOverride = Option.none();
 
-    private ParsingContext(String input, Grammar grammar, ParserConfig config) {
+    private ParsingContext(String input, Grammar grammar, ParserConfig config, IdGenerator idGen) {
+        if (idGen == null) {
+            throw new IllegalArgumentException("idGen must not be null");
+        }
         this.input = input;
         this.grammar = grammar;
         this.config = config;
@@ -95,7 +98,7 @@ public final class ParsingContext {
                        : Option.none();
         this.captures = new HashMap<>();
         this.diagnostics = new ArrayList<>();
-        this.idGen = new IdGenerator.PerSessionCounter();
+        this.idGen = idGen;
         this.pos = 0;
         this.line = 1;
         this.column = 1;
@@ -107,8 +110,23 @@ public final class ParsingContext {
         this.recoveryStartPos = Option.none();
     }
 
+    /**
+     * Default factory: allocates a fresh per-session ID counter. Used by
+     * one-shot parses ({@link PegEngine#parseCst}, etc.).
+     */
     public static ParsingContext create(String input, Grammar grammar, ParserConfig config) {
-        return new ParsingContext(input, grammar, config);
+        return new ParsingContext(input, grammar, config, new IdGenerator.PerSessionCounter());
+    }
+
+    /**
+     * Phase 1.5 (v0.5.0): Session-aware factory. {@link IncrementalSession} owns
+     * a single {@link IdGenerator.PerSessionCounter} for the lifetime of a
+     * Session lineage and threads it through every reparse so node IDs remain
+     * stable across edits — a hard precondition for the Path D optimized
+     * {@code NodeIndex.applyIncremental}.
+     */
+    public static ParsingContext create(String input, Grammar grammar, ParserConfig config, IdGenerator idGen) {
+        return new ParsingContext(input, grammar, config, idGen);
     }
 
     // === Position Management ===

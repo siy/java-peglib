@@ -7,7 +7,9 @@ import org.pragmatica.peg.incremental.IncrementalParser;
 import org.pragmatica.peg.incremental.Session;
 import org.pragmatica.peg.parser.Parser;
 import org.pragmatica.peg.parser.ParserConfig;
+import org.pragmatica.peg.parser.PegEngine;
 import org.pragmatica.peg.tree.CstNode;
+import org.pragmatica.peg.tree.IdGenerator;
 
 import java.util.Set;
 
@@ -98,8 +100,12 @@ public final class SessionFactory implements IncrementalParser {
         }
         int clampedCursor = Math.max(0,
                                      Math.min(cursorOffset, buffer.length()));
-        CstNode root = parseFull(buffer);
-        return IncrementalSession.initial(this, buffer, clampedCursor, root);
+        // Phase 1.5 (v0.5.0): allocate ONE IdGenerator per Session lineage; thread
+        // it through every reparse so node IDs stay stable across edits. This is
+        // the precondition for Path D's optimized NodeIndex.applyIncremental.
+        var idGen = new IdGenerator.PerSessionCounter();
+        CstNode root = parseFull(buffer, idGen);
+        return IncrementalSession.initial(this, buffer, clampedCursor, root, idGen);
     }
 
     Grammar grammar() {
@@ -136,6 +142,28 @@ public final class SessionFactory implements IncrementalParser {
      */
     CstNode parseFull(String buffer) {
         return parser.parseCst(buffer)
+                     .fold(cause -> {
+                               throw new IllegalStateException("full parse failed: " + cause.message());
+                           },
+                           node -> node);
+    }
+
+    /**
+     * Phase 1.5 (v0.5.0): Session-aware full-parse that uses the supplied
+     * {@link IdGenerator}. Routes through {@link PegEngine}'s id-aware overload
+     * so node IDs come from the Session's counter rather than a fresh per-call
+     * one. Surfaces errors identically to {@link #parseFull(String)}.
+     */
+    CstNode parseFull(String buffer, IdGenerator idGen) {
+        var startRule = grammar.effectiveStartRule();
+        if (startRule.isEmpty()) {
+            throw new IllegalStateException("full parse failed: No start rule defined in grammar");
+        }
+        var engine = (PegEngine) parser;
+        return engine.parseCst(buffer,
+                               startRule.unwrap()
+                                        .name(),
+                               idGen)
                      .fold(cause -> {
                                throw new IllegalStateException("full parse failed: " + cause.message());
                            },

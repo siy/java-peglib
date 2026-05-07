@@ -4,7 +4,11 @@ import org.pragmatica.lang.Option;
 import org.pragmatica.peg.incremental.Edit;
 import org.pragmatica.peg.incremental.Session;
 import org.pragmatica.peg.incremental.Stats;
+import org.pragmatica.peg.parser.PegEngine;
 import org.pragmatica.peg.tree.CstNode;
+import org.pragmatica.peg.tree.IdGenerator;
+
+import java.util.List;
 
 /**
  * Package-private {@link Session} implementation carrying the SPEC §5.1
@@ -36,13 +40,18 @@ record IncrementalSession(
  int cursor,
  CstNode enclosingNode,
  NodeIndex index,
+ IdGenerator idGen,
  Stats stats) implements Session {
     /** Build the initial session after a fresh full parse. */
-    static IncrementalSession initial(SessionFactory factory, String text, int cursor, CstNode root) {
+    static IncrementalSession initial(SessionFactory factory,
+                                      String text,
+                                      int cursor,
+                                      CstNode root,
+                                      IdGenerator idGen) {
         var index = NodeIndex.build(root);
         var enclosing = index.smallestContaining(cursor)
                              .or(root);
-        return new IncrementalSession(factory, text, root, cursor, enclosing, index, Stats.INITIAL);
+        return new IncrementalSession(factory, text, root, cursor, enclosing, index, idGen, Stats.INITIAL);
     }
 
     @Override
@@ -88,6 +97,7 @@ record IncrementalSession(
                                               newCursor,
                                               nextEnclosing,
                                               nextIndex,
+                                              idGen,
                                               nextStats);
             }
         }
@@ -109,13 +119,13 @@ record IncrementalSession(
         }
         var newEnclosing = index.smallestContainingFrom(enclosingNode, clamped)
                                 .or(root);
-        return new IncrementalSession(factory, text, root, clamped, newEnclosing, index, stats);
+        return new IncrementalSession(factory, text, root, clamped, newEnclosing, index, idGen, stats);
     }
 
     @Override
     public Session reparseAll() {
         long t0 = System.nanoTime();
-        var fresh = factory.parseFull(text);
+        var fresh = factory.parseFull(text, idGen);
         var freshIndex = NodeIndex.build(fresh);
         var enclosing = freshIndex.smallestContaining(cursor)
                                   .or(fresh);
@@ -126,11 +136,11 @@ record IncrementalSession(
         NodeIndex.flatten(fresh)
                  .size(),
         System.nanoTime() - t0);
-        return new IncrementalSession(factory, text, fresh, cursor, enclosing, freshIndex, nextStats);
+        return new IncrementalSession(factory, text, fresh, cursor, enclosing, freshIndex, idGen, nextStats);
     }
 
     private Session fallback(String newText, int newCursor, long t0) {
-        var fresh = factory.parseFull(newText);
+        var fresh = factory.parseFull(newText, idGen);
         var freshIndex = NodeIndex.build(fresh);
         var enclosing = freshIndex.smallestContaining(newCursor)
                                   .or(fresh);
@@ -141,18 +151,28 @@ record IncrementalSession(
         NodeIndex.flatten(fresh)
                  .size(),
         System.nanoTime() - t0);
-        return new IncrementalSession(factory, newText, fresh, newCursor, enclosing, freshIndex, nextStats);
+        return new IncrementalSession(factory, newText, fresh, newCursor, enclosing, freshIndex, idGen, nextStats);
     }
 
     /**
-     * Apply a successful incremental reparse: normalise trivia, rebuild the
+     * Apply a successful incremental reparse: normalise trivia, update the
      * NodeIndex, and return the next session snapshot. Extracted so the
      * caller in {@link #edit(Edit)} stays a single Result-style branch.
+     *
+     * <p>Phase 1.6 (v0.5.0): Path D — calls
+     * {@link NodeIndex#applyIncremental(CstNode, java.util.List, java.util.List)}
+     * instead of {@link NodeIndex#build(CstNode)}. Cost drops from O(N) to
+     * O(oldPivotSize + newPivotSize). The receiver index is invalidated; we
+     * use only the returned instance.
+     *
+     * <p><strong>Trivia-redistribution caveat.</strong> When
+     * {@link TriviaRedistribution#normalizeSplicedTrivia} mutates the spliced
+     * subtree (currently a no-op for the leading-trivia direction; the seam
+     * exists for v2.5+), the {@code newPath} we computed before normalisation
+     * may carry stale record references for the pivot. We fall back to a full
+     * {@link NodeIndex#build} on that path so structural sharing isn't broken.
      */
     private Session applyIncremental(IncrementalResult incremental, String newText, int newCursor, long t0) {
-        // v2: trivia-aware splice normalization (currently a no-op for the
-        // leading-trivia direction since parseRuleAt already attaches
-        // trivia per 0.2.4 attribution; the seam exists for v2.5+).
         var normalized = TriviaRedistribution.normalizeSplicedTrivia(
         incremental.newRoot, incremental.spliced);
         var nextStats = new Stats(
@@ -162,10 +182,21 @@ record IncrementalSession(
         NodeIndex.flatten(incremental.spliced)
                  .size(),
         System.nanoTime() - t0);
-        var nextIndex = NodeIndex.build(normalized);
+        NodeIndex nextIndex;
+        if (normalized == incremental.newRoot && incremental.oldPath != null && incremental.newPath != null) {
+            // Path D fast-path: trivia normalisation was a no-op (the common
+            // case today) — apply the optimised O(oldPivotSize + newPivotSize)
+            // index update.
+            nextIndex = index.applyIncremental(normalized, incremental.oldPath, incremental.newPath);
+        }else {
+            // Trivia normalisation mutated the tree, OR the pivot was the root
+            // (newPath == null path-was-root branch in buildIncrementalResult).
+            // Fall back to a full rebuild — correct, just not Path-D-fast.
+            nextIndex = NodeIndex.build(normalized);
+        }
         var nextEnclosing = nextIndex.smallestContaining(newCursor)
                                      .or(normalized);
-        return new IncrementalSession(factory, newText, normalized, newCursor, nextEnclosing, nextIndex, nextStats);
+        return new IncrementalSession(factory, newText, normalized, newCursor, nextEnclosing, nextIndex, idGen, nextStats);
     }
 
     /**
@@ -214,11 +245,14 @@ record IncrementalSession(
                                                      int delta) {
         var path = index.pathTo(nt);
         if (path.isEmpty()) {
-            // pivot == root — reparsed subtree replaces root wholesale.
-            return new IncrementalResult(reparsedNode, reparsedNode, nt.rule());
+            // pivot == root — reparsed subtree replaces root wholesale. No
+            // path information for Path D; the caller falls back to
+            // NodeIndex.build via the null-newPath branch in applyIncremental.
+            return new IncrementalResult(reparsedNode, reparsedNode, nt.rule(), null, null);
         }
-        var newRoot = TreeSplicer.spliceAndShift(path, nt, reparsedNode, editEnd, delta);
-        return new IncrementalResult(newRoot, reparsedNode, nt.rule());
+        var oldPath = List.copyOf(path);
+        var splice = TreeSplicer.spliceAndShift(path, nt, reparsedNode, editEnd, delta);
+        return new IncrementalResult(splice.newRoot(), reparsedNode, nt.rule(), oldPath, splice.newPath());
     }
 
     /**
@@ -259,8 +293,12 @@ record IncrementalSession(
                             .offset() + delta;
         var ruleId = factory.registry()
                             .classFor(nt.rule());
-        var partial = factory.parser()
-                             .parseRuleAt(ruleId, newText, startOffset);
+        // Phase 1.5 (v0.5.0): route through the id-aware overload so the
+        // spliced subtree's CstNode ids come from THIS session's counter,
+        // not a fresh per-call one. Path D's NodeIndex.applyIncremental
+        // requires every node in the lineage to share the same id space.
+        var engine = (PegEngine) factory.parser();
+        var partial = engine.parseRuleAt(ruleId, newText, startOffset, idGen);
         return partial.option()
                       .filter(p -> p.node()
                                     .span()
@@ -297,6 +335,15 @@ record IncrementalSession(
         return oldCursor + edit.delta();
     }
 
-    /** Result of a successful incremental reparse: the new root + pivot. */
-    private record IncrementalResult(CstNode newRoot, CstNode spliced, String ruleName) {}
+    /**
+     * Result of a successful incremental reparse: the new root + pivot, plus
+     * the {@code oldPath} and {@code newPath} bookkeeping needed by Path D's
+     * {@link NodeIndex#applyIncremental}. {@code oldPath} and {@code newPath}
+     * are {@code null} when the pivot equals the root (no spine to splice).
+     */
+    private record IncrementalResult(CstNode newRoot,
+                                     CstNode spliced,
+                                     String ruleName,
+                                     List<CstNode> oldPath,
+                                     List<CstNode> newPath) {}
 }

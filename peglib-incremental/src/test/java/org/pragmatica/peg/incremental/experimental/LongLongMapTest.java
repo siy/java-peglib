@@ -2,9 +2,11 @@ package org.pragmatica.peg.incremental.experimental;
 
 import java.util.HashMap;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -218,6 +220,28 @@ final class LongLongMapTest {
         // Re-insert across the tombstone — still finds itself.
         map.put(32L, 12345L);
         assertThat(map.get(32L)).isEqualTo(12345L);
+    }
+
+    @Test
+    @DisplayName("Tombstone accumulation does NOT hang put (regression: Phase 1.5)")
+    @Timeout(value = 10, unit = TimeUnit.SECONDS)
+    void doesNotHangOnTombstoneAccumulation() {
+        // Pattern: insert N keys, remove half, insert another N. Without the
+        // tombstone-aware resize, this hangs (the second insert phase finds
+        // no EMPTY slot once tombstones + occupied saturate the table).
+        var map = new LinearProbingLongLongMap(16);
+        // small table to stress
+        int n = 200;
+        for (int i = 0; i < n; i++) {
+            map.put(i, i);
+        }
+        for (int i = 0; i < n; i += 2) {
+            map.remove(i);
+        }
+        for (int i = n; i < 2 * n; i++) {
+            map.put(i, i);
+        }
+        assertThat(map.size()).isEqualTo(n + n / 2);
     }
 
     @Test

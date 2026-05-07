@@ -4,8 +4,9 @@ import org.pragmatica.lang.Option;
 import org.pragmatica.peg.tree.CstNode;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
-import java.util.IdentityHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -16,38 +17,50 @@ import java.util.Map;
  * <ul>
  *   <li>{@link #parentOf(CstNode)} — O(1) parent lookup.</li>
  *   <li>{@link #smallestContaining(int)} — locate the smallest node whose
- *       span contains a given offset (used when a {@link Session} has no
- *       warm enclosing-node pointer yet).</li>
+ *       span contains a given offset (used when a {@link
+ *       org.pragmatica.peg.incremental.Session Session} has no warm
+ *       enclosing-node pointer yet).</li>
  *   <li>{@link #smallestContainingFrom(CstNode, int)} — climb outward from
  *       a hot pointer until a node containing {@code offset} is found, then
  *       descend to the smallest containing child. O(depth) for adjacent
  *       moves.</li>
  * </ul>
  *
- * <p>The index is keyed by {@link System#identityHashCode identity}. peglib
- * CST records are value objects and two structurally equal subtrees may be
- * equal by {@code .equals}; identity-based mapping is required to keep
- * parent links unambiguous.
+ * <p>Phase 1.5 (v0.5.0): the index is keyed by the stable {@code long id}
+ * carried on each {@link CstNode} record (Phase 1.2 invariant) using a
+ * primitive-keyed {@link LongLongMap}. The id→node lookup is held in a boxed
+ * {@code HashMap<Long, CstNode>}; promoting that to a primitive
+ * {@code long → object} map is a future micro-optimisation.
+ *
+ * <p>Phase 1.6 (v0.5.0): Path D's optimised {@link #applyIncremental} replaces
+ * the previous {@link #build}-on-every-edit hot path. Cost drops from
+ * {@code O(N)} to {@code O(oldPivotSize + newPivotSize)} — independent of N
+ * <em>and</em> of tree shape — by trusting the stable-ancestor-id invariant
+ * established by {@link TreeSplicer#spliceAndShift}.
  *
  * @since 0.3.1
  */
 public final class NodeIndex {
     private final CstNode root;
-    private final Map<CstNode, CstNode> parents;
+    private final LongLongMap parents;
+    private final Map<Long, CstNode> nodesById;
 
-    private NodeIndex(CstNode root, Map<CstNode, CstNode> parents) {
+    private NodeIndex(CstNode root, LongLongMap parents, Map<Long, CstNode> nodesById) {
         this.root = root;
         this.parents = parents;
+        this.nodesById = nodesById;
     }
 
     /**
      * Build a fresh index over {@code root}. O(n) in the node count.
      */
     public static NodeIndex build(CstNode root) {
-        int expectedSize = countDescendants(root);
-        var parents = new IdentityHashMap<CstNode, CstNode>(expectedSize);
-        indexChildren(root, parents);
-        return new NodeIndex(root, parents);
+        int expectedSize = countDescendants(root) + 1;
+        var parents = new LinearProbingLongLongMap(Math.max(expectedSize, 4));
+        var nodesById = new HashMap<Long, CstNode>(expectedSize * 2);
+        nodesById.put(root.id(), root);
+        indexChildren(root, parents, nodesById);
+        return new NodeIndex(root, parents, nodesById);
     }
 
     private static int countDescendants(CstNode node) {
@@ -60,13 +73,88 @@ public final class NodeIndex {
         return count;
     }
 
-    private static void indexChildren(CstNode node, Map<CstNode, CstNode> parents) {
+    private static void indexChildren(CstNode node, LongLongMap parents, Map<Long, CstNode> nodesById) {
         if (node instanceof CstNode.NonTerminal nt) {
             for (var child : nt.children()) {
-                parents.put(child, nt);
-                indexChildren(child, parents);
+                parents.put(child.id(), nt.id());
+                nodesById.put(child.id(), child);
+                indexChildren(child, parents, nodesById);
             }
         }
+    }
+
+    private static void flattenDescendantsInto(CstNode node, List<CstNode> out) {
+        if (node instanceof CstNode.NonTerminal nt) {
+            for (var child : nt.children()) {
+                out.add(child);
+                flattenDescendantsInto(child, out);
+            }
+        }
+    }
+
+    /**
+     * Phase 1.6 (v0.5.0) — Path D optimised splice update.
+     *
+     * <p>Mutates the receiver's {@code parents} map in place and returns a NEW
+     * {@code NodeIndex} sharing that same map. <em>The receiver becomes
+     * invalid after the call.</em> Callers MUST use the returned instance and
+     * discard {@code this}.
+     *
+     * <p>Cost: {@code O(oldPivotSize + newPivotSize)}. Only the wholesale-replaced
+     * subtree (oldPivot) and the newly inserted subtree (newPivot) need touch
+     * the map. Spine ancestors keep their stable ids ({@link
+     * TreeSplicer#spliceAndShift} reuses {@code oldAncestor.id()} on rebuild),
+     * so their parent-map entries remain valid; right-of-edit subtrees that
+     * {@link TreeSplicer#shiftAll} rebuilt also keep every node's id, so their
+     * internal parent-map entries are unaffected.
+     *
+     * @param newRoot root of the post-edit tree (must be {@code newPath.get(0)})
+     * @param oldPath {@code root → oldPivot} chain in the pre-edit tree
+     *                (size ≥ 1)
+     * @param newPath {@code newRoot → newPivot} chain in the post-edit tree
+     *                (size ≥ 1; ancestors carry stable ids matching
+     *                {@code oldPath})
+     * @return a new index reflecting the post-edit tree; the receiver is
+     *         invalidated
+     */
+    public NodeIndex applyIncremental(CstNode newRoot, List<CstNode> oldPath, List<CstNode> newPath) {
+        if (oldPath == null || oldPath.isEmpty()) {
+            throw new IllegalArgumentException("oldPath must contain at least the old pivot");
+        }
+        if (newPath == null || newPath.isEmpty()) {
+            throw new IllegalArgumentException("newPath must contain at least the new pivot");
+        }
+        var oldPivot = oldPath.get(oldPath.size() - 1);
+        var newPivot = newPath.get(newPath.size() - 1);
+        // Step 1 — remove the old pivot's descendants (wholesale-replaced subtree).
+        // Their ids are dead: newPivot has fresh ids from the parser's id-gen.
+        var oldPivotDescendants = new ArrayList<CstNode>();
+        flattenDescendantsInto(oldPivot, oldPivotDescendants);
+        for (var d : oldPivotDescendants) {
+            parents.remove(d.id());
+            nodesById.remove(d.id());
+        }
+        // Step 2 — remove the old pivot's own up-pointer; newPivot has a fresh id.
+        parents.remove(oldPivot.id());
+        nodesById.remove(oldPivot.id());
+        // Step 3 — insert the new pivot's subtree internal links.
+        nodesById.put(newPivot.id(), newPivot);
+        indexChildren(newPivot, parents, nodesById);
+        // Step 4 — wire newPivot to its parent on the new spine. When the pivot
+        // is itself the root, there is no parent entry to write.
+        if (newPath.size() >= 2) {
+            var newPivotParent = newPath.get(newPath.size() - 2);
+            parents.put(newPivot.id(), newPivotParent.id());
+        }
+        // Step 5 — refresh the spine ancestors' record references in nodesById
+        // so subsequent lookups resolve to the post-splice records (their ids
+        // are stable, but the records themselves are rebuilt). We DO NOT touch
+        // the parents map for these — every ancestor's id is unchanged, so the
+        // up-pointer entries already reflect the correct logical parent.
+        for (var ancestor : newPath) {
+            nodesById.put(ancestor.id(), ancestor);
+        }
+        return new NodeIndex(newRoot, parents, nodesById);
     }
 
     /** Root of the CST this index was built over. */
@@ -79,7 +167,14 @@ public final class NodeIndex {
      * is the root (or not present in this index).
      */
     public Option<CstNode> parentOf(CstNode node) {
-        return Option.option(parents.get(node));
+        if (node == null) {
+            return Option.none();
+        }
+        long parentId = parents.get(node.id());
+        if (parentId == LongLongMap.MISSING) {
+            return Option.none();
+        }
+        return Option.option(nodesById.get(parentId));
     }
 
     /**
@@ -103,12 +198,23 @@ public final class NodeIndex {
      * back to {@link #smallestContaining(int)} from the root.
      */
     public Option<CstNode> smallestContainingFrom(CstNode start, int offset) {
-        if (start == null || !parents.containsKey(start) && start != root) {
+        if (start == null) {
+            return smallestContaining(offset);
+        }
+        // start may legitimately BE the root (no parent entry in the map). Check
+        // both conditions: present as a key in the parents map OR equal to root.
+        boolean knownToIndex = start == root || parents.containsKey(start.id());
+        if (!knownToIndex) {
             return smallestContaining(offset);
         }
         var cursor = start;
         while (cursor != null && !contains(cursor, offset)) {
-            cursor = parents.get(cursor);
+            long parentId = parents.get(cursor.id());
+            if (parentId == LongLongMap.MISSING) {
+                cursor = null;
+            }else {
+                cursor = nodesById.get(parentId);
+            }
         }
         if (cursor == null) {
             return Option.none();
@@ -130,7 +236,12 @@ public final class NodeIndex {
             if (cursor == root) {
                 return stack;
             }
-            cursor = parents.get(cursor);
+            long parentId = parents.get(cursor.id());
+            if (parentId == LongLongMap.MISSING) {
+                cursor = null;
+            }else {
+                cursor = nodesById.get(parentId);
+            }
         }
         stack.clear();
         return stack;

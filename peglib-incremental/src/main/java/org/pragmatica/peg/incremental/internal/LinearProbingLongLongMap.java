@@ -1,4 +1,4 @@
-package org.pragmatica.peg.incremental.experimental;
+package org.pragmatica.peg.incremental.internal;
 /**
  * Open-addressing, linear-probing implementation of {@link LongLongMap}.
  *
@@ -20,6 +20,9 @@ package org.pragmatica.peg.incremental.experimental;
  *   <li>{@link #get}, {@link #containsKey}, {@link #remove}: walk past
  *       tombstones, stop at empty.
  * </ul>
+ *
+ * <p>Promoted to production from {@code experimental.LinearProbingLongLongMap}
+ * in Phase 1.5 (release 0.5.0).
  *
  * @since 0.5.0
  */
@@ -161,31 +164,6 @@ public final class LinearProbingLongLongMap implements LongLongMap {
         java.util.Arrays.fill(state, EMPTY);
         size = 0;
         tombstones = 0;
-    }
-
-    @Override
-    public LongLongMap copy() {
-        var copy = new LinearProbingLongLongMap(state.length);
-        // Bypass the rounding/threshold dance — same capacity by construction.
-        System.arraycopy(this.keys, 0, copy.keys, 0, this.keys.length);
-        System.arraycopy(this.values, 0, copy.values, 0, this.values.length);
-        System.arraycopy(this.state, 0, copy.state, 0, this.state.length);
-        copy.size = this.size;
-        copy.tombstones = this.tombstones;
-        return copy;
-    }
-
-    @Override
-    public void forEachEntry(EntryVisitor visitor) {
-        for (int i = 0; i < state.length; i++) {
-            if (state[i] == OCCUPIED) {
-                long oldValue = values[i];
-                long newValue = visitor.visit(keys[i], oldValue);
-                if (newValue != oldValue) {
-                    values[i] = newValue;
-                }
-            }
-        }
     }
 
     private int slotFor(long key) {
