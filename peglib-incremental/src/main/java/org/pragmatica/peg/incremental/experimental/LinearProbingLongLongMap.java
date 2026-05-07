@@ -159,6 +159,19 @@ public final class LinearProbingLongLongMap implements LongLongMap {
         return copy;
     }
 
+    @Override
+    public void forEachEntry(EntryVisitor visitor) {
+        for (int i = 0; i < state.length; i++) {
+            if (state[i] == OCCUPIED) {
+                long oldValue = values[i];
+                long newValue = visitor.visit(keys[i], oldValue);
+                if (newValue != oldValue) {
+                    values[i] = newValue;
+                }
+            }
+        }
+    }
+
     private int slotFor(long key) {
         return Long.hashCode(key) & mask;
     }

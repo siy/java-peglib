@@ -61,4 +61,31 @@ public sealed interface LongLongMap permits LinearProbingLongLongMap {
      * future {@code TreeSplicer} work.
      */
     LongLongMap copy();
+
+    /**
+     * Visit every live (occupied, non-tombstone) entry exactly once. Iteration
+     * order is implementation-defined and not stable across mutations. Callers
+     * MUST NOT mutate the map (put/remove) during iteration; the visitor may
+     * read other entries via {@link #get}/{@link #containsKey} but writes are
+     * unsupported and may corrupt the table.
+     *
+     * <p>Added in Phase 1.0/1.1 to support {@link SpanIndex#shift}, which needs
+     * to rewrite values in place when used with the packed-long encoding. This
+     * is additive: existing call sites are unaffected.
+     */
+    void forEachEntry(EntryVisitor visitor);
+
+    /** Visitor for {@link #forEachEntry}. */
+    @FunctionalInterface
+    interface EntryVisitor {
+        /**
+         * Receive one entry. Return the new value to write into the slot, or
+         * the same value to leave the entry untouched. Implementations may
+         * fast-path "no change" by reference comparison on the boxed value —
+         * but for the {@code long} signature here, the fast path is a numeric
+         * equality test and the implementation rewrites unconditionally
+         * (cheap on a primitive {@code long[]}).
+         */
+        long visit(long key, long value);
+    }
 }
