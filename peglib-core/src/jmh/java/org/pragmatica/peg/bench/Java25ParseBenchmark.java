@@ -61,6 +61,7 @@ public class Java25ParseBenchmark {
         "phase1_inlineLocations",
         "phase1_allStructural",
         "phase1_allStructural_skipPackrat",
+        "phase1_allStructural_mutableResult",
         "interpreter"
     })
     public String variant;
@@ -115,6 +116,7 @@ public class Java25ParseBenchmark {
             case "phase1_allStructural" -> withStructural(true, true, true, false, Set.of());
             case "phase1_allStructural_skipPackrat" -> withStructural(true, true, true, true,
                     Set.of("Identifier", "QualifiedName", "Type"));
+            case "phase1_allStructural_mutableResult" -> withStructural(true, true, true, false, Set.of(), true);
             default -> throw new IllegalArgumentException("Unknown variant: " + variant);
         };
     }
@@ -135,7 +137,8 @@ public class Java25ParseBenchmark {
                 false,                      // markResetChildren
                 false,                      // inlineLocations
                 false,                      // selectivePackrat
-                Set.of());                  // packratSkipRules
+                Set.of(),                   // packratSkipRules
+                false);                     // mutableParseResult
     }
 
     /**
@@ -147,6 +150,15 @@ public class Java25ParseBenchmark {
                                                boolean inlineLocations,
                                                boolean selectivePackrat,
                                                Set<String> packratSkipRules) {
+        return withStructural(choiceDispatch, markResetChildren, inlineLocations, selectivePackrat, packratSkipRules, false);
+    }
+
+    private static ParserConfig withStructural(boolean choiceDispatch,
+                                               boolean markResetChildren,
+                                               boolean inlineLocations,
+                                               boolean selectivePackrat,
+                                               Set<String> packratSkipRules,
+                                               boolean mutableParseResult) {
         return new ParserConfig(
                 true,                       // packratEnabled
                 RecoveryStrategy.BASIC,
@@ -161,7 +173,8 @@ public class Java25ParseBenchmark {
                 markResetChildren,
                 inlineLocations,
                 selectivePackrat,
-                Set.copyOf(packratSkipRules));
+                Set.copyOf(packratSkipRules),
+                mutableParseResult);
     }
 
     static String loadResource(String resourcePath) throws Exception {

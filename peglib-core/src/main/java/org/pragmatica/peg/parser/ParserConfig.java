@@ -63,9 +63,10 @@ public record ParserConfig(
  boolean markResetChildren,
  boolean inlineLocations,
  boolean selectivePackrat,
- Set<String> packratSkipRules) {
+ Set<String> packratSkipRules,
+ boolean mutableParseResult) {
     public static final ParserConfig DEFAULT = new ParserConfig(
-    true, RecoveryStrategy.BASIC, true, true, true, true, true, true, true, true, false, false, false, Set.of());
+    true, RecoveryStrategy.BASIC, true, true, true, true, true, true, true, true, false, false, false, Set.of(), false);
 
     /**
      * Convenience factory for the three-field runtime configuration. Phase 1
@@ -90,6 +91,7 @@ public record ParserConfig(
         false,
         false,
         false,
-        Set.of());
+        Set.of(),
+        false);
     }
 }

@@ -46,7 +46,8 @@ class Phase2MarkResetChildrenParityTest {
         /* markResetChildren      */ true,
         /* inlineLocations        */ false,
         /* selectivePackrat       */ false,
-        /* packratSkipRules       */ Set.of()
+        /* packratSkipRules       */ Set.of(),
+        /* mutableParseResult     */ false
     );
 
     static Stream<Path> corpusFiles() throws IOException {

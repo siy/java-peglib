@@ -138,6 +138,37 @@ public final class ParserGenerator {
         }
     }
 
+    // === Spike A: emission helpers for raw-nullable vs Option CstParseResult ===
+    private String nodeUnwrap(String varName) {
+        return config.mutableParseResult()
+               ? varName + ".node"
+               : varName + ".node.unwrap()";
+    }
+
+    private String nodeIsPresent(String varName) {
+        return config.mutableParseResult()
+               ? varName + ".node != null"
+               : varName + ".node.isPresent()";
+    }
+
+    private String textOrEmpty(String varName) {
+        return config.mutableParseResult()
+               ? "(" + varName + ".text != null ? " + varName + ".text : \"\")"
+               : varName + ".text.or(\"\")";
+    }
+
+    private String endLocationUnwrap(String varName) {
+        return config.mutableParseResult()
+               ? varName + ".endLocation"
+               : varName + ".endLocation.unwrap()";
+    }
+
+    private String expectedUnwrap(String varName) {
+        return config.mutableParseResult()
+               ? varName + ".expected"
+               : varName + ".expected.unwrap()";
+    }
+
     public static ParserGenerator parserGenerator(Grammar grammar, String packageName, String className) {
         return new ParserGenerator(grammar, packageName, className, ErrorReporting.BASIC, ParserConfig.DEFAULT);
     }
@@ -2392,6 +2423,12 @@ public final class ParserGenerator {
                                      .getFirst()
                                      .name();
         var sanitizedName = sanitize(startRuleName);
+        var resultExpectedExpr = config.mutableParseResult()
+                                 ? "(result.expected != null ? Option.some(result.expected) : Option.<String>none())"
+                                 : "result.expected";
+        var resultNodeUnwrapExpr = config.mutableParseResult()
+                                   ? "result.node"
+                                   : "result.node.unwrap()";
         sb.append("""
                 // === Public Parse Methods ===
 
@@ -2400,7 +2437,7 @@ public final class ParserGenerator {
                     var result = parse_%s();
                     if (result.isFailure()) {
                         var errorLoc = furthestFailure.or(location());
-                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(%s.or("valid input"));
                         return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
                     var trailingTrivia = skipWhitespace(); // Capture trailing trivia
@@ -2409,7 +2446,7 @@ public final class ParserGenerator {
                         return Result.failure(new ParseError(errorLoc, "unexpected input"));
                     }
                     // Attach trailing trivia to root node
-                    var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
+                    var rootNode = attachTrailingTrivia(%s, trailingTrivia);
                     return Result.success(rootNode);
                 }
 
@@ -2433,7 +2470,7 @@ public final class ParserGenerator {
                     };
                 }
 
-            """.formatted(sanitizedName));
+            """.formatted(sanitizedName, resultExpectedExpr, resultNodeUnwrapExpr));
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     /**
@@ -2449,7 +2486,7 @@ public final class ParserGenerator {
                             // Record the failure and attempt recovery
                             var errorLoc = furthestFailure.or(location());
                             var errorSpan = SourceSpan.sourceSpan(errorLoc, errorLoc);
-                            var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                            var expected = furthestExpected.filter(s -> !s.isEmpty()).or(%s.or("valid input"));
                             addDiagnostic("expected " + expected, errorSpan);
 
                             // Skip to recovery point and try to continue
@@ -2471,18 +2508,18 @@ public final class ParserGenerator {
                             addDiagnostic("unexpected input", errorSpan, "expected end of input");
 
                             // Attach error node to result
-                            var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
+                            var rootNode = attachTrailingTrivia(%s, trailingTrivia);
                             return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                         }
 
-                        var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
+                        var rootNode = attachTrailingTrivia(%s, trailingTrivia);
                         if (diagnostics.isEmpty()) {
                             return ParseResultWithDiagnostics.success(rootNode, input);
                         }
                         return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                     }
 
-                """.formatted(sanitizedName));
+                """.formatted(sanitizedName, resultExpectedExpr, resultNodeUnwrapExpr, resultNodeUnwrapExpr));
         }
         generateCstParseRuleAt(sb);
     }
@@ -2496,7 +2533,14 @@ public final class ParserGenerator {
      * rule's generated {@code parse_<name>()} method.
      */
     private void generateCstParseRuleAt(StringBuilder sb) {
-        sb.append("""
+        var resultExpectedExpr = config.mutableParseResult()
+                                 ? "(result.expected != null ? Option.some(result.expected) : Option.<String>none())"
+                                 : "result.expected";
+        var resultNodeUnwrapExpr = config.mutableParseResult()
+                                   ? "result.node"
+                                   : "result.node.unwrap()";
+        var ruleAtBlock = new StringBuilder();
+        ruleAtBlock.append("""
                 // === PartialParse (0.3.0) ===
 
                 /**
@@ -2518,13 +2562,13 @@ public final class ParserGenerator {
         for (var rule : grammar.rules()) {
             var ruleClassName = toClassName(rule.name());
             var methodName = "parse_" + sanitize(rule.name());
-            sb.append("        m.put(RuleId.")
-              .append(ruleClassName)
-              .append(".class, this::")
-              .append(methodName)
-              .append(");\n");
+            ruleAtBlock.append("        m.put(RuleId.")
+                       .append(ruleClassName)
+                       .append(".class, this::")
+                       .append(methodName)
+                       .append(");\n");
         }
-        sb.append("""
+        ruleAtBlock.append("""
                     return Map.copyOf(m);
                 }
 
@@ -2560,10 +2604,10 @@ public final class ParserGenerator {
                     var result = supplier.get();
                     if (result.isFailure()) {
                         var errorLoc = furthestFailure.or(location());
-                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(__RESULT_EXPECTED__.or("valid input"));
                         return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
-                    return Result.success(new PartialParse(result.node.unwrap(), pos));
+                    return Result.success(new PartialParse(__RESULT_NODE__, pos));
                 }
 
                 /**
@@ -2587,6 +2631,9 @@ public final class ParserGenerator {
                 }
 
             """);
+        sb.append(ruleAtBlock.toString()
+                             .replace("__RESULT_EXPECTED__", resultExpectedExpr)
+                             .replace("__RESULT_NODE__", resultNodeUnwrapExpr));
     }
 
     private void generateCstRuleMethods(StringBuilder sb) {
@@ -2651,10 +2698,16 @@ public final class ParserGenerator {
             sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
             sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
             sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
-            sb.append("                    var hitEndLoc = cached.endLocation.unwrap();\n");
+            sb.append("                    var hitEndLoc = ")
+              .append(endLocationUnwrap("cached"))
+              .append(";\n");
             sb.append("                    restoreLocation(hitEndLoc);\n");
-            sb.append("                    var hitNode = attachLeadingTrivia(cached.node.unwrap(), hitLeading);\n");
-            sb.append("                    return CstParseResult.success(hitNode, cached.text.or(\"\"), hitEndLoc);\n");
+            sb.append("                    var hitNode = attachLeadingTrivia(")
+              .append(nodeUnwrap("cached"))
+              .append(", hitLeading);\n");
+            sb.append("                    return CstParseResult.success(hitNode, ")
+              .append(textOrEmpty("cached"))
+              .append(", hitEndLoc);\n");
             sb.append("                }\n");
             sb.append("                return cached;\n");
             sb.append("            }\n");
@@ -2731,8 +2784,12 @@ public final class ParserGenerator {
         sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
         sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
         sb.append("            }\n");
-        sb.append("            cacheableResult = CstParseResult.success(cacheNode, result.text.or(\"\"), endLoc);\n");
-        sb.append("            finalResult = CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
+        sb.append("            cacheableResult = CstParseResult.success(cacheNode, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
+        sb.append("            finalResult = CstParseResult.success(node, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
         sb.append("        } else {\n");
         if (inlineLocations) {
             // Inline field restore — no SourceLocation allocation on failure path.
@@ -2819,10 +2876,16 @@ public final class ParserGenerator {
         sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
         sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
         sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
-        sb.append("                    var hitEndLoc = cached.endLocation.unwrap();\n");
+        sb.append("                    var hitEndLoc = ")
+          .append(endLocationUnwrap("cached"))
+          .append(";\n");
         sb.append("                    restoreLocation(hitEndLoc);\n");
-        sb.append("                    var hitNode = attachLeadingTrivia(cached.node.unwrap(), hitLeading);\n");
-        sb.append("                    return CstParseResult.success(hitNode, cached.text.or(\"\"), hitEndLoc);\n");
+        sb.append("                    var hitNode = attachLeadingTrivia(")
+          .append(nodeUnwrap("cached"))
+          .append(", hitLeading);\n");
+        sb.append("                    return CstParseResult.success(hitNode, ")
+          .append(textOrEmpty("cached"))
+          .append(", hitEndLoc);\n");
         sb.append("                }\n");
         sb.append("                return cached;\n");
         sb.append("            }\n");
@@ -2833,7 +2896,9 @@ public final class ParserGenerator {
         // duplicate leading-trivia per growth iteration.
         sb.append("        var activeSeed = growingSeeds.get(key);\n");
         sb.append("        if (activeSeed != null) {\n");
-        sb.append("            if (activeSeed.isSuccess()) restoreLocation(activeSeed.endLocation.unwrap());\n");
+        sb.append("            if (activeSeed.isSuccess()) restoreLocation(")
+          .append(endLocationUnwrap("activeSeed"))
+          .append(");\n");
         sb.append("            return activeSeed;\n");
         sb.append("        }\n");
         // Capture leading whitespace & carried pending at the outer level.
@@ -2866,8 +2931,12 @@ public final class ParserGenerator {
           .append("();\n");
         sb.append("            if (iter.isCutFailure()) { cutFired = true; break; }\n");
         sb.append("            if (iter.isFailure()) break;\n");
-        sb.append("            int newEnd = iter.endLocation.unwrap().offset();\n");
-        sb.append("            int prevEnd = lastSeed.isSuccess() ? lastSeed.endLocation.unwrap().offset() : bodyStartPos;\n");
+        sb.append("            int newEnd = ")
+          .append(endLocationUnwrap("iter"))
+          .append(".offset();\n");
+        sb.append("            int prevEnd = lastSeed.isSuccess() ? ")
+          .append(endLocationUnwrap("lastSeed"))
+          .append(".offset() : bodyStartPos;\n");
         sb.append("            if (newEnd <= prevEnd) break;\n");
         sb.append("            lastSeed = iter;\n");
         sb.append("            growingSeeds.put(key, lastSeed);\n");
@@ -2891,9 +2960,17 @@ public final class ParserGenerator {
             // 0.3.6: clear pending override on success path.
             sb.append("            clearPendingRecoveryOverride();\n");
         }
-        sb.append("            restoreLocation(lastSeed.endLocation.unwrap());\n");
-        sb.append("            var node = attachLeadingTrivia(lastSeed.node.unwrap(), leadingTrivia);\n");
-        sb.append("            finalResult = CstParseResult.success(node, lastSeed.text.or(\"\"), lastSeed.endLocation.unwrap());\n");
+        sb.append("            restoreLocation(")
+          .append(endLocationUnwrap("lastSeed"))
+          .append(");\n");
+        sb.append("            var node = attachLeadingTrivia(")
+          .append(nodeUnwrap("lastSeed"))
+          .append(", leadingTrivia);\n");
+        sb.append("            finalResult = CstParseResult.success(node, ")
+          .append(textOrEmpty("lastSeed"))
+          .append(", ")
+          .append(endLocationUnwrap("lastSeed"))
+          .append(");\n");
         // Bug C fix: cache the empty-leading lastSeed (body emission attaches no
         // leading trivia). The wrapped node above is for return only. Bug C' is
         // intentionally NOT applied at the LR settle path: PegEngine's LR path
@@ -2971,7 +3048,9 @@ public final class ParserGenerator {
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", List.<Trivia>of());\n");
-        sb.append("            return CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
+        sb.append("            return CstParseResult.success(node, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
         sb.append("        }\n");
         sb.append("        return result;\n");
         sb.append("    }\n\n");
@@ -3122,11 +3201,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -3148,11 +3231,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -3178,11 +3265,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -3198,11 +3289,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -3220,11 +3315,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -4334,11 +4433,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -4632,13 +4735,20 @@ public final class ParserGenerator {
                 private CstNode wrapWithRuleName(CstParseResult result, List<CstNode> children, SourceSpan span, RuleId ruleId, List<Trivia> leadingTrivia) {
                     // If result produced a single node (Token or Terminal), re-wrap with rule name and trivia
                     // This matches PegEngine.wrapWithRuleName behavior
-                    if (result.node.isPresent()) {
-                        var inner = result.node.unwrap();
+                    if (__NODE_PRESENT__) {
+                        var inner = __NODE_UNWRAP__;
                         return switch (inner) {
                             case CstNode.Token tok -> new CstNode.Token(tok.id(), span, ruleId, tok.text(), leadingTrivia, List.of());
                             case CstNode.Terminal t -> new CstNode.Terminal(t.id(), span, ruleId, t.text(), leadingTrivia, List.of());
                             case CstNode.NonTerminal nt -> new CstNode.NonTerminal(nt.id(), span, ruleId, nt.children(), leadingTrivia, List.of());
-            """);
+            """.replace("__NODE_PRESENT__",
+                        config.mutableParseResult()
+                        ? "result.node != null"
+                        : "result.node.isPresent()")
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .replace("__NODE_UNWRAP__",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         config.mutableParseResult()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         ? "result.node"
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         : "result.node.unwrap()"));
         // Add Error case only for ADVANCED mode
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
@@ -4810,50 +4920,103 @@ public final class ParserGenerator {
         sb.append("""
                 // === CST Parse Result ===
             """);
-        sb.append("""
+        if (config.mutableParseResult()) {
+            // Spike A: raw nullable fields — no Option boxing on the parse hot path.
+            // Field names match the Option-typed variant ('node', 'text', 'expected',
+            // 'endLocation') so emission sites can be uniformly rewritten with raw
+            // access patterns. CstParseResult instances are still freshly allocated
+            // per call (cache safety), but the per-call Option$Some allocations are
+            // gone — that's the spike's primary target.
+            sb.append("""
 
-                private static final class CstParseResult {
-                    final boolean success;
-                    final Option<CstNode> node;
-                    final Option<String> text;
-                    final Option<String> expected;
-                    final Option<SourceLocation> endLocation;
-                    final boolean cutFailed;
+                    private static final class CstParseResult {
+                        final boolean success;
+                        final CstNode node;          // raw nullable
+                        final String text;           // raw nullable
+                        final String expected;       // raw nullable
+                        final SourceLocation endLocation; // raw nullable
+                        final boolean cutFailed;
 
-                    private CstParseResult(boolean success, Option<CstNode> node, Option<String> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
-                        this.success = success;
-                        this.node = node;
-                        this.text = text;
-                        this.expected = expected;
-                        this.endLocation = endLocation;
-                        this.cutFailed = cutFailed;
+                        private CstParseResult(boolean success, CstNode node, String text, String expected, SourceLocation endLocation, boolean cutFailed) {
+                            this.success = success;
+                            this.node = node;
+                            this.text = text;
+                            this.expected = expected;
+                            this.endLocation = endLocation;
+                            this.cutFailed = cutFailed;
+                        }
+
+                        boolean isSuccess() { return success; }
+                        boolean isFailure() { return !success; }
+                        boolean isCutFailure() { return !success && cutFailed; }
+
+                        static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
+                            return new CstParseResult(true, node, text, null, endLocation, false);
+                        }
+
+                        static CstParseResult failure(String expected) {
+                            return new CstParseResult(false, null, null, expected, null, false);
+                        }
+
+                        static CstParseResult cutFailure(String expected) {
+                            return new CstParseResult(false, null, null, expected, null, true);
+                        }
+
+                        CstParseResult asCutFailure() {
+                            return cutFailed ? this : new CstParseResult(false, null, null, expected, null, true);
+                        }
+
+                        CstParseResult asRegularFailure() {
+                            return cutFailed ? new CstParseResult(false, null, null, expected, null, false) : this;
+                        }
                     }
+                """);
+        }else {
+            sb.append("""
 
-                    boolean isSuccess() { return success; }
-                    boolean isFailure() { return !success; }
-                    boolean isCutFailure() { return !success && cutFailed; }
+                    private static final class CstParseResult {
+                        final boolean success;
+                        final Option<CstNode> node;
+                        final Option<String> text;
+                        final Option<String> expected;
+                        final Option<SourceLocation> endLocation;
+                        final boolean cutFailed;
 
-                    static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
-                        return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.some(endLocation), false);
+                        private CstParseResult(boolean success, Option<CstNode> node, Option<String> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
+                            this.success = success;
+                            this.node = node;
+                            this.text = text;
+                            this.expected = expected;
+                            this.endLocation = endLocation;
+                            this.cutFailed = cutFailed;
+                        }
+
+                        boolean isSuccess() { return success; }
+                        boolean isFailure() { return !success; }
+                        boolean isCutFailure() { return !success && cutFailed; }
+
+                        static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
+                            return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.some(endLocation), false);
+                        }
+
+                        static CstParseResult failure(String expected) {
+                            return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), false);
+                        }
+
+                        static CstParseResult cutFailure(String expected) {
+                            return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), true);
+                        }
+
+                        CstParseResult asCutFailure() {
+                            return cutFailed ? this : new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), true);
+                        }
+
+                        CstParseResult asRegularFailure() {
+                            return cutFailed ? new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), false) : this;
+                        }
                     }
-
-                    static CstParseResult failure(String expected) {
-                        return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), false);
-                    }
-
-                    static CstParseResult cutFailure(String expected) {
-                        return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), true);
-                    }
-
-                    CstParseResult asCutFailure() {
-                        return cutFailed ? this : new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), true);
-                    }
-
-                    CstParseResult asRegularFailure() {
-                        return cutFailed ? new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), false) : this;
-                    }
-                }
-            """);
+                """);
+        }
     }
 
     // === Match-method emitters (phase 1 perf flags) ===
@@ -4870,7 +5033,9 @@ public final class ParserGenerator {
             sb.append("        int len = text.length();\n");
             sb.append("        if (input.length() - pos < len) {\n");
             sb.append("            var f = literalFailure(text);\n");
-            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
             sb.append("        var startLoc = location();\n");
@@ -4878,7 +5043,9 @@ public final class ParserGenerator {
             sb.append("            for (int i = 0; i < len; i++) {\n");
             sb.append("                if (Character.toLowerCase(text.charAt(i)) != Character.toLowerCase(input.charAt(pos + i))) {\n");
             sb.append("                    var f = literalFailure(text);\n");
-            sb.append("                    trackFailure(f.expected.unwrap());\n");
+            sb.append("                    trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("                    return f;\n");
             sb.append("                }\n");
             sb.append("            }\n");
@@ -4886,7 +5053,9 @@ public final class ParserGenerator {
             sb.append("            for (int i = 0; i < len; i++) {\n");
             sb.append("                if (text.charAt(i) != input.charAt(pos + i)) {\n");
             sb.append("                    var f = literalFailure(text);\n");
-            sb.append("                    trackFailure(f.expected.unwrap());\n");
+            sb.append("                    trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("                    return f;\n");
             sb.append("                }\n");
             sb.append("            }\n");
@@ -5006,7 +5175,9 @@ public final class ParserGenerator {
         if (config.charClassFailureCache()) {
             sb.append("        if (isAtEnd()) {\n");
             sb.append("            var f = charClassFailure(pattern, negated);\n");
-            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
             sb.append("        var startLoc = location();\n");
@@ -5015,7 +5186,9 @@ public final class ParserGenerator {
             sb.append("        if (negated) matches = !matches;\n");
             sb.append("        if (!matches) {\n");
             sb.append("            var f = charClassFailure(pattern, negated);\n");
-            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
         }else {
