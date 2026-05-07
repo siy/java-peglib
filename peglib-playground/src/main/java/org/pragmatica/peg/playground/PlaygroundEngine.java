@@ -25,7 +25,8 @@ public final class PlaygroundEngine {
      * the playground surfaces need.
      */
     public static Result<ParseOutcome> run(ParseRequest request) {
-        return PegParser.fromGrammar(request.grammar(), buildConfig(request))
+        return PegParser.fromGrammar(request.grammar(),
+                                     buildConfig(request))
                         .map(parser -> executeParse(parser, request));
     }
 
@@ -33,10 +34,15 @@ public final class PlaygroundEngine {
         var tracer = ParseTracer.start();
         var parseResult = parseWithRecovery(parser, request);
         var nodeOption = parseResult.node();
-        int nodeCount = nodeOption.map(ParseTracer::countNodes).or(0);
-        int triviaCount = nodeOption.map(ParseTracer::countTrivia).or(0);
+        int nodeCount = nodeOption.map(ParseTracer::countNodes)
+                                  .or(0);
+        int triviaCount = nodeOption.map(ParseTracer::countTrivia)
+                                    .or(0);
         nodeOption.onPresent(tracer::walkCst);
-        var stats = tracer.stats(nodeCount, triviaCount, parseResult.diagnostics().size());
+        var stats = tracer.stats(nodeCount,
+                                 triviaCount,
+                                 parseResult.diagnostics()
+                                            .size());
         return new ParseOutcome(nodeOption, parseResult.diagnostics(), stats, tracer, parseResult.source());
     }
 
@@ -79,7 +85,6 @@ public final class PlaygroundEngine {
                                Stats stats,
                                ParseTracer tracer,
                                String source) {
-
         public boolean hasNode() {
             return node.isPresent();
         }

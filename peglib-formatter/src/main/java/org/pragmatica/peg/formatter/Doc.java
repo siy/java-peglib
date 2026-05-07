@@ -46,7 +46,7 @@ public sealed interface Doc {
             }
             if (value.indexOf('\n') >= 0) {
                 throw new IllegalArgumentException(
-                    "Text.value must not contain newlines; use Doc.line() for line breaks");
+                "Text.value must not contain newlines; use Doc.line() for line breaks");
             }
         }
     }
@@ -108,12 +108,12 @@ public sealed interface Doc {
      * Convenience: flatten a list of docs into a single {@link Concat} chain
      * (right-associated). Returns {@link Empty} for an empty list.
      */
-    static Doc concatAll(List<? extends Doc> parts) {
+    static Doc concatAll(List< ? extends Doc> parts) {
         if (parts == null || parts.isEmpty()) {
             return new Empty();
         }
         Doc acc = parts.getLast();
-        for (int i = parts.size() - 2; i >= 0; i--) {
+        for (int i = parts.size() - 2; i >= 0; i-- ) {
             acc = new Concat(parts.get(i), acc);
         }
         return acc;

@@ -73,7 +73,7 @@ public final class LinearProbingLongLongMap implements LongLongMap {
                 keys[target] = key;
                 values[target] = value;
                 state[target] = OCCUPIED;
-                size++;
+                size++ ;
                 if (size > threshold) {
                     resize(state.length<< 1);
                 }
@@ -130,7 +130,7 @@ public final class LinearProbingLongLongMap implements LongLongMap {
             }
             if (s == OCCUPIED && keys[slot] == key) {
                 state[slot] = TOMBSTONE;
-                size--;
+                size-- ;
                 return;
             }
             slot = (slot + 1) & mask;
@@ -161,7 +161,7 @@ public final class LinearProbingLongLongMap implements LongLongMap {
 
     @Override
     public void forEachEntry(EntryVisitor visitor) {
-        for (int i = 0; i < state.length; i++) {
+        for (int i = 0; i < state.length; i++ ) {
             if (state[i] == OCCUPIED) {
                 long oldValue = values[i];
                 long newValue = visitor.visit(keys[i], oldValue);
@@ -186,7 +186,7 @@ public final class LinearProbingLongLongMap implements LongLongMap {
         this.mask = newCapacity - 1;
         this.threshold = (int)(newCapacity * LOAD_FACTOR);
         this.size = 0;
-        for (int i = 0; i < oldState.length; i++) {
+        for (int i = 0; i < oldState.length; i++ ) {
             if (oldState[i] == OCCUPIED) {
                 put(oldKeys[i], oldValues[i]);
             }

@@ -38,7 +38,7 @@ public interface TriviaPolicy {
     TriviaPolicy STRIP_WHITESPACE = trivia -> {
         var out = new ArrayList<Trivia>(trivia.size());
         for (var t : trivia) {
-            if (!(t instanceof Trivia.Whitespace)) {
+            if (! (t instanceof Trivia.Whitespace)) {
                 out.add(t);
             }
         }
@@ -58,7 +58,7 @@ public interface TriviaPolicy {
         for (var t : trivia) {
             if (t instanceof Trivia.Whitespace ws) {
                 out.add(collapseBlankLines(ws));
-            } else {
+            }else {
                 out.add(t);
             }
         }
@@ -68,9 +68,9 @@ public interface TriviaPolicy {
     private static Trivia.Whitespace collapseBlankLines(Trivia.Whitespace ws) {
         var text = ws.text();
         int newlines = 0;
-        for (int i = 0; i < text.length(); i++) {
+        for (int i = 0; i < text.length(); i++ ) {
             if (text.charAt(i) == '\n') {
-                newlines++;
+                newlines++ ;
             }
         }
         if (newlines <= 1) {

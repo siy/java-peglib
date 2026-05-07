@@ -48,7 +48,7 @@ public final class ParseTracer {
     }
 
     public void recordRuleEnter(String rule, int offset) {
-        ruleEntries++;
+        ruleEntries++ ;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_ENTER, rule, offset, elapsedNanos(), ""));
     }
 
@@ -61,27 +61,27 @@ public final class ParseTracer {
     }
 
     public void recordCacheHit(String rule, int offset) {
-        cacheHits++;
+        cacheHits++ ;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_HIT, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCacheMiss(String rule, int offset) {
-        cacheMisses++;
+        cacheMisses++ ;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_MISS, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCachePut(String rule, int offset) {
-        cachePuts++;
+        cachePuts++ ;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_PUT, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCutFired(String rule, int offset) {
-        cutsFired++;
+        cutsFired++ ;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CUT_FIRED, rule, offset, elapsedNanos(), "cut"));
     }
 
     public void note(String detail) {
-        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.NOTE, "", -1, elapsedNanos(), detail));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.NOTE, "", - 1, elapsedNanos(), detail));
     }
 
     public List<TraceRecord> records() {
@@ -128,9 +128,12 @@ public final class ParseTracer {
         int trivia;
 
         void visit(CstNode node) {
-            nodes++;
-            trivia += node.leadingTrivia().size() + node.trailingTrivia().size();
-            int offset = node.span().startOffset();
+            nodes++ ;
+            trivia += node.leadingTrivia()
+                          .size() + node.trailingTrivia()
+                                       .size();
+            int offset = node.span()
+                             .startOffset();
             switch (node) {
                 case CstNode.NonTerminal nt -> {
                     recordRuleEnter(nt.rule(), offset);
@@ -181,11 +184,18 @@ public final class ParseTracer {
         var sb = new StringBuilder();
         sb.append("trace (" + records.size() + " events)\n");
         sb.append(String.format("  rule entries: %d, cache hits: %d, misses: %d, puts: %d, cuts fired: %d%n",
-                                ruleEntries, cacheHits, cacheMisses, cachePuts, cutsFired));
+                                ruleEntries,
+                                cacheHits,
+                                cacheMisses,
+                                cachePuts,
+                                cutsFired));
         for (var rec : records) {
             sb.append(String.format("  %-14s %-30s @%-5d +%dus %s%n",
                                     rec.kind(),
-                                    rec.rule().isEmpty() ? "-" : rec.rule(),
+                                    rec.rule()
+                                       .isEmpty()
+                                    ? "-"
+                                    : rec.rule(),
                                     rec.offset(),
                                     rec.elapsedNanos() / 1000L,
                                     rec.detail()));
@@ -198,7 +208,9 @@ public final class ParseTracer {
      * need the count without constructing a WalkResult.
      */
     public static int countTrivia(CstNode root) {
-        int count = root.leadingTrivia().size() + root.trailingTrivia().size();
+        int count = root.leadingTrivia()
+                        .size() + root.trailingTrivia()
+                                     .size();
         if (root instanceof CstNode.NonTerminal nt) {
             for (var child : nt.children()) {
                 count += countTrivia(child);

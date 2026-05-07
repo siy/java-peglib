@@ -66,7 +66,6 @@ import java.util.List;
  * @since 0.5.0
  */
 public final class OffsetDecoupledSplicer {
-
     /**
      * Result of a splice — the new root, the new ancestor path
      * ({@code root → newPivot}, inclusive), and the new (independent)
@@ -112,75 +111,63 @@ public final class OffsetDecoupledSplicer {
         if (oldSpans == null) {
             throw new IllegalArgumentException("oldSpans must not be null");
         }
-
         // Step 1 — Independent span index for the post-edit tree.
         var newSpans = oldSpans.copy();
-
         // Step 2 — Eager shift on the new span index.
         newSpans.shift(editEnd, delta);
-
         // Pivot IS the root: no ancestor rebuild. The pivot's spans must
         // already be registered in oldSpans by the caller.
         if (oldPath.size() == 1) {
             return new Result(newPivot, List.of(newPivot), newSpans);
         }
-
         // Step 3 — Rebuild the ancestor chain leaf-to-root, splicing
         // newPivot in and reference-sharing every sibling slot.
         var reversedNewPath = new ArrayList<OffsetDecoupledNode>(oldPath.size());
         reversedNewPath.add(newPivot);
-
         OffsetDecoupledNode current = newPivot;
         OffsetDecoupledNode oldChild = oldPath.get(oldPath.size() - 1);
-
-        for (int i = oldPath.size() - 2; i >= 0; i--) {
+        for (int i = oldPath.size() - 2; i >= 0; i-- ) {
             var oldAncestor = oldPath.get(i);
-            if (!(oldAncestor instanceof OffsetDecoupledNode.NonTerminal nt)) {
+            if (! (oldAncestor instanceof OffsetDecoupledNode.NonTerminal nt)) {
                 throw new IllegalStateException(
-                    "splice path element at depth " + i + " is not a NonTerminal: " + oldAncestor);
+                "splice path element at depth " + i + " is not a NonTerminal: " + oldAncestor);
             }
             var children = nt.children();
             int slot = indexOfByIdentity(children, oldChild);
             if (slot < 0) {
                 throw new IllegalStateException(
-                    "splice path broken at depth " + i
-                    + ": child " + oldChild + " not found in parent's children list");
+                "splice path broken at depth " + i + ": child " + oldChild + " not found in parent's children list");
             }
-
             // Reference-share every sibling slot — both LEFT AND RIGHT of
             // the edit. This is the path-A invariant: siblings right of the
             // edit don't need rebuilding because their offsets live in
             // newSpans, which we already shifted.
             var newChildren = new ArrayList<OffsetDecoupledNode>(children.size());
-            for (int k = 0; k < children.size(); k++) {
-                newChildren.add(k == slot ? current : children.get(k));
+            for (int k = 0; k < children.size(); k++ ) {
+                newChildren.add(k == slot
+                                ? current
+                                : children.get(k));
             }
-
             long newAncestorId = idGen.next();
             var newAncestor = new OffsetDecoupledNode.NonTerminal(
-                newAncestorId,
-                nt.rule(),
-                List.copyOf(newChildren),
-                nt.leadingTrivia(),
-                nt.trailingTrivia());
-
+            newAncestorId, nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia());
             // Compute the new ancestor's span:
             //   start = old start (unchanged — ancestor began before the edit)
             //   end   = old end + delta if old end >= editEnd, else old end
             // Mirrors TreeSplicer.rebuildNonTerminal.
             int oldStart = oldSpans.startOffset(oldAncestor.id());
             int oldEnd = oldSpans.endOffset(oldAncestor.id());
-            int newEnd = oldEnd >= editEnd ? oldEnd + delta : oldEnd;
+            int newEnd = oldEnd >= editEnd
+                         ? oldEnd + delta
+                         : oldEnd;
             newSpans.put(newAncestorId, oldStart, newEnd);
-
             reversedNewPath.add(newAncestor);
             current = newAncestor;
             oldChild = oldAncestor;
         }
-
         // Reverse to get root → newPivot order.
         var newPath = new ArrayList<OffsetDecoupledNode>(reversedNewPath.size());
-        for (int i = reversedNewPath.size() - 1; i >= 0; i--) {
+        for (int i = reversedNewPath.size() - 1; i >= 0; i-- ) {
             newPath.add(reversedNewPath.get(i));
         }
         return new Result(current, List.copyOf(newPath), newSpans);
@@ -188,11 +175,11 @@ public final class OffsetDecoupledSplicer {
 
     /** Linear scan for a child by record identity ({@code ==}). */
     private static int indexOfByIdentity(List<OffsetDecoupledNode> children, OffsetDecoupledNode target) {
-        for (int i = 0; i < children.size(); i++) {
+        for (int i = 0; i < children.size(); i++ ) {
             if (children.get(i) == target) {
                 return i;
             }
         }
-        return -1;
+        return - 1;
     }
 }

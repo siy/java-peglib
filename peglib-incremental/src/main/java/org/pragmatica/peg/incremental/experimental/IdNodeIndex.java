@@ -82,7 +82,7 @@ public final class IdNodeIndex {
         int expectedSize = countDescendants(root);
         var parents = new LinearProbingLongLongMap(Math.max(expectedSize, 4));
         indexChildren(root, parents);
-        return new IdNodeIndex(root, parents, -1);
+        return new IdNodeIndex(root, parents, - 1);
     }
 
     /**
@@ -163,9 +163,7 @@ public final class IdNodeIndex {
         }
         var oldPivot = oldPath.get(oldPath.size() - 1);
         var newPivot = newPath.get(newPath.size() - 1);
-
         int putCount = 0;
-
         // Step 1a — Remove every old-path node's up-entry (their records are dead).
         for (var oldNode : oldPath) {
             parents.remove(oldNode.id());
@@ -176,7 +174,6 @@ public final class IdNodeIndex {
         for (var d : oldPivotDescendants) {
             parents.remove(d.id());
         }
-
         // Step 2 — Insert new pivot's subtree internal links.
         indexChildren(newPivot, parents);
         putCount += subtreeChildCount(newPivot);
@@ -184,22 +181,20 @@ public final class IdNodeIndex {
         if (newPath.size() >= 2) {
             var newPivotParent = newPath.get(newPath.size() - 2);
             parents.put(newPivot.id(), newPivotParent.id());
-            putCount++;
+            putCount++ ;
         }
-
         // Step 3 — Walk new ancestor chain (excluding pivot — already wired in step 2).
         // For each ancestor, set parent links for ALL its direct children. Sibling
         // subtrees keep their internal entries (same IDs, still correct).
-        for (int i = 0; i < newPath.size() - 1; i++) {
+        for (int i = 0; i < newPath.size() - 1; i++ ) {
             var ancestor = newPath.get(i);
             if (ancestor instanceof IdCstNode.NonTerminal nt) {
                 for (var child : nt.children()) {
                     parents.put(child.id(), ancestor.id());
-                    putCount++;
+                    putCount++ ;
                 }
             }
         }
-
         return new IdNodeIndex(newRoot, parents, putCount);
     }
 
@@ -235,7 +230,6 @@ public final class IdNodeIndex {
     }
 
     // -- Helpers (mirror the production NodeIndex static helpers) --
-
     private static int countDescendants(IdCstNode node) {
         int count = 0;
         if (node instanceof IdCstNode.NonTerminal nt) {

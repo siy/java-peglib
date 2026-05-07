@@ -32,11 +32,16 @@ public final class CstHash {
         if (node == null) {
             return 0L;
         }
-        long h = 1125899906842597L; // large prime seed
-        h = 31 * h + node.getClass().getName().hashCode();
+        long h = 1125899906842597L;
+        // large prime seed
+        h = 31 * h + node.getClass()
+                        .getName()
+                        .hashCode();
         h = 31 * h + safeHash(node.rule());
-        h = 31 * h + node.span().startOffset();
-        h = 31 * h + node.span().endOffset();
+        h = 31 * h + node.span()
+                        .startOffset();
+        h = 31 * h + node.span()
+                        .endOffset();
         switch (node) {
             case CstNode.Terminal t -> h = 31 * h + safeHash(t.text());
             case CstNode.Token t -> h = 31 * h + safeHash(t.text());
@@ -58,6 +63,8 @@ public final class CstHash {
     }
 
     private static int safeHash(String s) {
-        return s == null ? 0 : s.hashCode();
+        return s == null
+               ? 0
+               : s.hashCode();
     }
 }

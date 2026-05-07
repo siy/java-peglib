@@ -1,5 +1,4 @@
 package org.pragmatica.peg.incremental.experimental;
-
 /**
  * External {@code id → (startOffset, endOffset)} index for the path-A spike of
  * the v0.5.0 incremental-native rework
@@ -113,13 +112,13 @@ public final class SpanIndex {
             return;
         }
         map.forEachEntry((nodeId, packed) -> {
-            int start = unpackStart(packed);
-            if (start >= afterOffset) {
-                int end = unpackEnd(packed);
-                return pack(start + delta, end + delta);
-            }
-            return packed;
-        });
+                             int start = unpackStart(packed);
+                             if (start >= afterOffset) {
+                             int end = unpackEnd(packed);
+                             return pack(start + delta, end + delta);
+                         }
+                             return packed;
+                         });
     }
 
     /** Independent deep copy; subsequent mutations on either side are isolated. */
@@ -128,13 +127,12 @@ public final class SpanIndex {
     }
 
     // --- packing helpers ---
-
     private static long pack(int start, int end) {
-        return ((long) start << 32) | (end & 0xFFFFFFFFL);
+        return ((long) start<< 32) | (end & 0xFFFFFFFFL);
     }
 
     private static int unpackStart(long packed) {
-        return (int) (packed >> 32);
+        return (int)(packed>> 32);
     }
 
     private static int unpackEnd(long packed) {

@@ -35,7 +35,7 @@ public final class JsonDecoder {
     @SuppressWarnings("unchecked")
     public static Map<String, Object> decodeObject(String text) {
         var decoded = decode(text);
-        if (decoded instanceof Map<?, ?> map) {
+        if (decoded instanceof Map< ? , ? > map) {
             return (Map<String, Object>) map;
         }
         return new LinkedHashMap<>();
@@ -48,11 +48,11 @@ public final class JsonDecoder {
         }
         char c = input.charAt(pos);
         return switch (c) {
-            case '{' -> parseObject();
-            case '[' -> parseArray();
-            case '"' -> parseString();
-            case 't', 'f' -> parseBoolean();
-            case 'n' -> parseNull();
+            case'{' -> parseObject();
+            case'[' -> parseArray();
+            case'"' -> parseString();
+            case't', 'f' -> parseBoolean();
+            case'n' -> parseNull();
             default -> parseNumber();
         };
     }
@@ -62,7 +62,7 @@ public final class JsonDecoder {
         var result = new LinkedHashMap<String, Object>();
         skipWs();
         if (peek() == '}') {
-            pos++;
+            pos++ ;
             return result;
         }
         while (true) {
@@ -75,11 +75,11 @@ public final class JsonDecoder {
             skipWs();
             char nc = peek();
             if (nc == ',') {
-                pos++;
+                pos++ ;
                 continue;
             }
             if (nc == '}') {
-                pos++;
+                pos++ ;
                 return result;
             }
             throw new IllegalArgumentException("expected ',' or '}' at offset " + pos);
@@ -91,7 +91,7 @@ public final class JsonDecoder {
         var result = new ArrayList<>();
         skipWs();
         if (peek() == ']') {
-            pos++;
+            pos++ ;
             return result;
         }
         while (true) {
@@ -100,11 +100,11 @@ public final class JsonDecoder {
             skipWs();
             char nc = peek();
             if (nc == ',') {
-                pos++;
+                pos++ ;
                 continue;
             }
             if (nc == ']') {
-                pos++;
+                pos++ ;
                 return result;
             }
             throw new IllegalArgumentException("expected ',' or ']' at offset " + pos);
@@ -115,7 +115,7 @@ public final class JsonDecoder {
         expect('"');
         var sb = new StringBuilder();
         while (pos < input.length()) {
-            char c = input.charAt(pos++);
+            char c = input.charAt(pos++ );
             if (c == '"') {
                 return sb.toString();
             }
@@ -123,17 +123,17 @@ public final class JsonDecoder {
                 if (pos >= input.length()) {
                     throw new IllegalArgumentException("unterminated escape in string");
                 }
-                char esc = input.charAt(pos++);
+                char esc = input.charAt(pos++ );
                 switch (esc) {
-                    case '"' -> sb.append('"');
-                    case '\\' -> sb.append('\\');
-                    case '/' -> sb.append('/');
-                    case 'b' -> sb.append('\b');
-                    case 'f' -> sb.append('\f');
-                    case 'n' -> sb.append('\n');
-                    case 'r' -> sb.append('\r');
-                    case 't' -> sb.append('\t');
-                    case 'u' -> {
+                    case'"' -> sb.append('"');
+                    case'\\' -> sb.append('\\');
+                    case'/' -> sb.append('/');
+                    case'b' -> sb.append('\b');
+                    case'f' -> sb.append('\f');
+                    case'n' -> sb.append('\n');
+                    case'r' -> sb.append('\r');
+                    case't' -> sb.append('\t');
+                    case'u' -> {
                         if (pos + 4 > input.length()) {
                             throw new IllegalArgumentException("bad unicode escape");
                         }
@@ -143,7 +143,7 @@ public final class JsonDecoder {
                     }
                     default -> throw new IllegalArgumentException("bad escape: \\" + esc);
                 }
-            } else {
+            }else {
                 sb.append(c);
             }
         }
@@ -173,17 +173,17 @@ public final class JsonDecoder {
     private Object parseNumber() {
         int start = pos;
         if (peek() == '-') {
-            pos++;
+            pos++ ;
         }
         boolean isFloat = false;
         while (pos < input.length()) {
             char c = input.charAt(pos);
             if (Character.isDigit(c)) {
-                pos++;
-            } else if (c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') {
+                pos++ ;
+            }else if (c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') {
                 isFloat = true;
-                pos++;
-            } else {
+                pos++ ;
+            }else {
                 break;
             }
         }
@@ -201,7 +201,7 @@ public final class JsonDecoder {
         if (pos >= input.length() || input.charAt(pos) != c) {
             throw new IllegalArgumentException("expected '" + c + "' at offset " + pos);
         }
-        pos++;
+        pos++ ;
     }
 
     private char peek() {
@@ -215,8 +215,8 @@ public final class JsonDecoder {
         while (pos < input.length()) {
             char c = input.charAt(pos);
             if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
-                pos++;
-            } else {
+                pos++ ;
+            }else {
                 break;
             }
         }

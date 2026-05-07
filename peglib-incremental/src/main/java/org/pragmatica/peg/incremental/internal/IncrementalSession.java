@@ -30,15 +30,13 @@ import org.pragmatica.peg.tree.CstNode;
  * @since 0.3.1
  */
 record IncrementalSession(
-    SessionFactory factory,
-    String text,
-    CstNode root,
-    int cursor,
-    CstNode enclosingNode,
-    NodeIndex index,
-    Stats stats
-) implements Session {
-
+ SessionFactory factory,
+ String text,
+ CstNode root,
+ int cursor,
+ CstNode enclosingNode,
+ NodeIndex index,
+ Stats stats) implements Session {
     /** Build the initial session after a fresh full parse. */
     static IncrementalSession initial(SessionFactory factory, String text, int cursor, CstNode root) {
         var index = NodeIndex.build(root);
@@ -84,7 +82,13 @@ record IncrementalSession(
                 var nextIndex = NodeIndex.build(triviaRoot);
                 var nextEnclosing = nextIndex.smallestContaining(newCursor)
                                              .or(triviaRoot);
-                return new IncrementalSession(factory, newText, triviaRoot, newCursor, nextEnclosing, nextIndex, nextStats);
+                return new IncrementalSession(factory,
+                                              newText,
+                                              triviaRoot,
+                                              newCursor,
+                                              nextEnclosing,
+                                              nextIndex,
+                                              nextStats);
             }
         }
         // Try incremental reparse next.
@@ -150,13 +154,14 @@ record IncrementalSession(
         // leading-trivia direction since parseRuleAt already attaches
         // trivia per 0.2.4 attribution; the seam exists for v2.5+).
         var normalized = TriviaRedistribution.normalizeSplicedTrivia(
-                incremental.newRoot, incremental.spliced);
+        incremental.newRoot, incremental.spliced);
         var nextStats = new Stats(
-                stats.reparseCount() + 1,
-                stats.fullReparseCount(),
-                incremental.ruleName,
-                NodeIndex.flatten(incremental.spliced).size(),
-                System.nanoTime() - t0);
+        stats.reparseCount() + 1,
+        stats.fullReparseCount(),
+        incremental.ruleName,
+        NodeIndex.flatten(incremental.spliced)
+                 .size(),
+        System.nanoTime() - t0);
         var nextIndex = NodeIndex.build(normalized);
         var nextEnclosing = nextIndex.smallestContaining(newCursor)
                                      .or(normalized);
@@ -203,7 +208,10 @@ record IncrementalSession(
         return Option.none();
     }
 
-    private IncrementalResult buildIncrementalResult(CstNode.NonTerminal nt, CstNode reparsedNode, int editEnd, int delta) {
+    private IncrementalResult buildIncrementalResult(CstNode.NonTerminal nt,
+                                                     CstNode reparsedNode,
+                                                     int editEnd,
+                                                     int delta) {
         var path = index.pathTo(nt);
         if (path.isEmpty()) {
             // pivot == root — reparsed subtree replaces root wholesale.
@@ -223,7 +231,8 @@ record IncrementalSession(
         // 0.4.0 — Option.option() defends against a (theoretically) null
         // {@code enclosingNode} record component; falls back to {@code root}
         // so the walk is well-defined.
-        var current = Option.option(enclosingNode).orElse(Option.some(root));
+        var current = Option.option(enclosingNode)
+                            .orElse(Option.some(root));
         while (current.isPresent()) {
             var cursorNode = current.unwrap();
             int spanStart = cursorNode.span()

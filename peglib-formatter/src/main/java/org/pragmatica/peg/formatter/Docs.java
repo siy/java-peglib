@@ -84,7 +84,7 @@ public final class Docs {
     }
 
     /** Concatenate a list of docs. */
-    public static Doc concat(List<? extends Doc> parts) {
+    public static Doc concat(List< ? extends Doc> parts) {
         return Doc.concatAll(parts);
     }
 
@@ -92,12 +92,12 @@ public final class Docs {
      * Join {@code parts} with {@code separator} between adjacent elements.
      * Returns {@link #empty()} for an empty list.
      */
-    public static Doc join(Doc separator, List<? extends Doc> parts) {
+    public static Doc join(Doc separator, List< ? extends Doc> parts) {
         if (parts == null || parts.isEmpty()) {
             return empty();
         }
         Doc acc = parts.getFirst();
-        for (int i = 1; i < parts.size(); i++) {
+        for (int i = 1; i < parts.size(); i++ ) {
             acc = new Doc.Concat(new Doc.Concat(acc, separator), parts.get(i));
         }
         return acc;

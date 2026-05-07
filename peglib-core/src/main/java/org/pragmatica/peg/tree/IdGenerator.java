@@ -1,13 +1,12 @@
-package org.pragmatica.peg.incremental.experimental;
+package org.pragmatica.peg.tree;
 /**
  * Source of stable {@code long} identifiers for CST nodes.
  *
- * <p>Phase 0 of the v0.5.0 incremental-native rework introduces stable per-node
- * IDs (Lever A in {@code docs/incremental/ARCHITECTURE-0.5.0.md} §2). Open
- * question Q1 in §8 is resolved: the v0.5.0 strategy is a per-Session counter,
- * not a process-global counter. Each {@link org.pragmatica.peg.incremental.Session}
- * instantiates its own generator and the IDs it produces are unique only
- * within that session's lineage.
+ * <p>Phase 1.2 of the v0.5.0 incremental-native rework promotes the sandbox
+ * Phase-0 spike (Lever A in {@code docs/incremental/ARCHITECTURE-0.5.0.md} §2)
+ * into the production tree. Each {@link org.pragmatica.peg.parser.ParsingContext}
+ * instantiates its own generator at parse start; IDs are unique within that
+ * parse session's lineage but not across sessions.
  *
  * <p>The interface exists so that future strategies — a process-global
  * {@link java.util.concurrent.atomic.AtomicLong}, content-derived hashes, or
@@ -16,10 +15,7 @@ package org.pragmatica.peg.incremental.experimental;
  * concrete need lands).
  *
  * <p>Implementations are <strong>not required to be thread-safe</strong>.
- * {@link org.pragmatica.peg.incremental.Session} is single-threaded by design
- * (per the {@code Session} Javadoc, concurrent edits against the same
- * instance are undefined), so the parser engine never races on ID
- * allocation.
+ * Parsing is single-threaded; the engine never races on ID allocation.
  *
  * @since 0.5.0
  */

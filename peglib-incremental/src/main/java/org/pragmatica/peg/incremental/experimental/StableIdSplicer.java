@@ -59,7 +59,6 @@ import java.util.List;
  * @since 0.5.0
  */
 public final class StableIdSplicer {
-
     /**
      * Result of a splice — the new root and the new path (root → newPivot,
      * inclusive). Path elements at indices {@code [0, newPath.size() - 2]}
@@ -96,61 +95,49 @@ public final class StableIdSplicer {
         if (newPivot == null) {
             throw new IllegalArgumentException("newPivot must not be null");
         }
-
         // Pivot IS the root — no rebuild needed.
         if (oldPath.size() == 1) {
             return new Result(newPivot, List.of(newPivot));
         }
-
         // Accumulator: builds newPath in REVERSE (leaf → root), reversed at end.
         var reversedNewPath = new ArrayList<IdCstNode>(oldPath.size());
         reversedNewPath.add(newPivot);
-
         var current = newPivot;
         var oldChild = oldPath.get(oldPath.size() - 1);
-
-        for (int i = oldPath.size() - 2; i >= 0; i--) {
+        for (int i = oldPath.size() - 2; i >= 0; i-- ) {
             var oldAncestor = oldPath.get(i);
-            if (!(oldAncestor instanceof IdCstNode.NonTerminal nt)) {
+            if (! (oldAncestor instanceof IdCstNode.NonTerminal nt)) {
                 throw new IllegalStateException(
-                    "splice path element at depth " + i + " is not a NonTerminal: " + oldAncestor);
+                "splice path element at depth " + i + " is not a NonTerminal: " + oldAncestor);
             }
             var children = nt.children();
             int slot = indexOfByIdentity(children, oldChild);
             if (slot < 0) {
                 throw new IllegalStateException(
-                    "splice path broken at depth " + i
-                    + ": child " + oldChild + " not found in parent's children list");
+                "splice path broken at depth " + i + ": child " + oldChild + " not found in parent's children list");
             }
-
             // Copy the children list, replacing only the spliced slot. Every
             // other entry is the same reference — preserves the spec §8 Q3
             // identity invariant.
             var newChildren = new ArrayList<IdCstNode>(children.size());
-            for (int k = 0; k < children.size(); k++) {
-                newChildren.add(k == slot ? current : children.get(k));
+            for (int k = 0; k < children.size(); k++ ) {
+                newChildren.add(k == slot
+                                ? current
+                                : children.get(k));
             }
-
             // SOLE DIVERGENCE FROM IdTreeSplicer: reuse oldAncestor.id() instead
             // of idGen.next(). The new record is structurally distinct from the
             // old (different children list) but carries the same id; the
             // parents map in any StableIdNodeIndex therefore preserves every
             // sibling's parent-link entry across the edit.
             var newAncestor = new IdCstNode.NonTerminal(
-                oldAncestor.id(),
-                nt.span(),
-                nt.rule(),
-                List.copyOf(newChildren),
-                nt.leadingTrivia(),
-                nt.trailingTrivia());
-
+            oldAncestor.id(), nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia());
             reversedNewPath.add(newAncestor);
             current = newAncestor;
             oldChild = oldAncestor;
         }
-
         var newPath = new ArrayList<IdCstNode>(reversedNewPath.size());
-        for (int i = reversedNewPath.size() - 1; i >= 0; i--) {
+        for (int i = reversedNewPath.size() - 1; i >= 0; i-- ) {
             newPath.add(reversedNewPath.get(i));
         }
         return new Result(current, List.copyOf(newPath));
@@ -162,11 +149,11 @@ public final class StableIdSplicer {
      * approach.
      */
     private static int indexOfByIdentity(List<IdCstNode> children, IdCstNode target) {
-        for (int i = 0; i < children.size(); i++) {
+        for (int i = 0; i < children.size(); i++ ) {
             if (children.get(i) == target) {
                 return i;
             }
         }
-        return -1;
+        return - 1;
     }
 }

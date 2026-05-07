@@ -4,6 +4,7 @@ import org.pragmatica.lang.Option;
 import org.pragmatica.peg.error.Diagnostic;
 import org.pragmatica.peg.error.RecoveryStrategy;
 import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.tree.IdGenerator;
 import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
 import org.pragmatica.peg.tree.Trivia;
@@ -27,6 +28,11 @@ public final class ParsingContext {
     private final Option<Map<Long, CacheEntry>> packratCache;
     private final Option<Map<String, Integer>> ruleIds;
     private final Map<String, String> captures;
+
+    // Phase 1.2 (v0.5.0): per-session ID generator. Allocated once per parse;
+    // every CstNode constructed by PegEngine pulls its id from here. Spec
+    // §2 Lever A; see docs/incremental/ARCHITECTURE-0.5.0.md.
+    private final IdGenerator idGen;
 
     private int pos;
     private int line;
@@ -89,6 +95,7 @@ public final class ParsingContext {
                        : Option.none();
         this.captures = new HashMap<>();
         this.diagnostics = new ArrayList<>();
+        this.idGen = new IdGenerator.PerSessionCounter();
         this.pos = 0;
         this.line = 1;
         this.column = 1;
@@ -647,6 +654,14 @@ public final class ParsingContext {
 
     public ParserConfig config() {
         return config;
+    }
+
+    /**
+     * Phase 1.2 (v0.5.0): the per-session ID generator. PegEngine pulls a
+     * fresh id from this for every {@code CstNode} it constructs.
+     */
+    public IdGenerator idGen() {
+        return idGen;
     }
 
     // === Span Creation ===

@@ -47,21 +47,11 @@ public final class IdCstNodeBuilder {
     }
 
     private IdCstNode buildTerminal(CstNode.Terminal t) {
-        return new IdCstNode.Terminal(idGen.next(),
-                                      t.span(),
-                                      t.rule(),
-                                      t.text(),
-                                      t.leadingTrivia(),
-                                      t.trailingTrivia());
+        return new IdCstNode.Terminal(idGen.next(), t.span(), t.rule(), t.text(), t.leadingTrivia(), t.trailingTrivia());
     }
 
     private IdCstNode buildToken(CstNode.Token t) {
-        return new IdCstNode.Token(idGen.next(),
-                                   t.span(),
-                                   t.rule(),
-                                   t.text(),
-                                   t.leadingTrivia(),
-                                   t.trailingTrivia());
+        return new IdCstNode.Token(idGen.next(), t.span(), t.rule(), t.text(), t.leadingTrivia(), t.trailingTrivia());
     }
 
     private IdCstNode buildError(CstNode.Error e) {

@@ -58,7 +58,6 @@ public final class OffsetDecoupledNodeIndex {
         }
         var oldPivot = oldPath.get(oldPath.size() - 1);
         var newPivot = newPath.get(newPath.size() - 1);
-
         // Step 1a — Remove every old-path node's up-entry.
         for (var oldNode : oldPath) {
             parents.remove(oldNode.id());
@@ -69,17 +68,15 @@ public final class OffsetDecoupledNodeIndex {
         for (var d : oldPivotDescendants) {
             parents.remove(d.id());
         }
-
         // Step 2 — Insert new pivot's subtree internal links.
         indexChildren(newPivot, parents);
         if (newPath.size() >= 2) {
             var newPivotParent = newPath.get(newPath.size() - 2);
             parents.put(newPivot.id(), newPivotParent.id());
         }
-
         // Step 3 — Walk new ancestor chain top-down, set parent links for
         // ALL direct children of each ancestor.
-        for (int i = 0; i < newPath.size() - 1; i++) {
+        for (int i = 0; i < newPath.size() - 1; i++ ) {
             var ancestor = newPath.get(i);
             if (ancestor instanceof OffsetDecoupledNode.NonTerminal nt) {
                 for (var child : nt.children()) {
@@ -87,7 +84,6 @@ public final class OffsetDecoupledNodeIndex {
                 }
             }
         }
-
         return new OffsetDecoupledNodeIndex(newRoot, parents);
     }
 
@@ -111,7 +107,6 @@ public final class OffsetDecoupledNodeIndex {
     }
 
     // -- Helpers --
-
     private static int countDescendants(OffsetDecoupledNode node) {
         int count = 0;
         if (node instanceof OffsetDecoupledNode.NonTerminal nt) {

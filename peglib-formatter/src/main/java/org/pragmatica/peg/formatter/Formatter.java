@@ -115,7 +115,7 @@ public final class Formatter {
         if (source == null) {
             return FormatterError.NULL_SOURCE.result();
         }
-        try {
+        try{
             var doc = walk(cst, source);
             var out = Renderer.render(doc, config.maxLineWidth());
             return Result.success(out);
@@ -132,7 +132,8 @@ public final class Formatter {
 
     private List<Doc> collectChildDocs(CstNode node, String source) {
         if (node instanceof CstNode.NonTerminal nt) {
-            var out = new ArrayList<Doc>(nt.children().size());
+            var out = new ArrayList<Doc>(nt.children()
+                                           .size());
             for (var child : nt.children()) {
                 out.add(walk(child, source));
             }
@@ -145,7 +146,11 @@ public final class Formatter {
         Map<String, FormatterRule> rules = config.rules();
         var rule = rules.get(node.rule());
         if (rule != null) {
-            var ctx = new FormatContext(node, source, config.defaultIndent(), config.maxLineWidth(), config.triviaPolicy());
+            var ctx = new FormatContext(node,
+                                        source,
+                                        config.defaultIndent(),
+                                        config.maxLineWidth(),
+                                        config.triviaPolicy());
             return rule.format(ctx, childDocs);
         }
         return defaultFallback(node, source, childDocs);
@@ -172,7 +177,8 @@ public final class Formatter {
     private static Doc triviaDoc(Trivia trivia) {
         return switch (trivia) {
             case Trivia.Whitespace ws -> whitespaceDoc(ws.text());
-            case Trivia.LineComment lc -> Docs.concat(Docs.text(stripTrailingNewline(lc.text())), Docs.hardline());
+            case Trivia.LineComment lc -> Docs.concat(Docs.text(stripTrailingNewline(lc.text())),
+                                                      Docs.hardline());
             case Trivia.BlockComment bc -> blockCommentDoc(bc.text());
         };
     }
@@ -194,7 +200,7 @@ public final class Formatter {
         }
         var parts = new ArrayList<Doc>();
         var run = new StringBuilder();
-        for (int i = 0; i < text.length(); i++) {
+        for (int i = 0; i < text.length(); i++ ) {
             var c = text.charAt(i);
             if (c == '\n') {
                 if (!run.isEmpty()) {
@@ -202,7 +208,7 @@ public final class Formatter {
                     run.setLength(0);
                 }
                 parts.add(hardBreak());
-            } else {
+            }else {
                 run.append(c);
             }
         }
@@ -216,9 +222,9 @@ public final class Formatter {
         if (text.indexOf('\n') < 0) {
             return Docs.text(text);
         }
-        var lines = text.split("\n", -1);
+        var lines = text.split("\n", - 1);
         var parts = new ArrayList<Doc>(lines.length * 2 - 1);
-        for (int i = 0; i < lines.length; i++) {
+        for (int i = 0; i < lines.length; i++ ) {
             if (i > 0) {
                 parts.add(hardBreak());
             }
@@ -241,8 +247,12 @@ public final class Formatter {
                 // case of rules whose CST is essentially a single literal match.
                 if (childDocs.isEmpty() && !source.isEmpty()) {
                     var span = nt.span();
-                    int start = Math.max(0, span.start().offset());
-                    int end = Math.min(source.length(), span.end().offset());
+                    int start = Math.max(0,
+                                         span.start()
+                                             .offset());
+                    int end = Math.min(source.length(),
+                                       span.end()
+                                           .offset());
                     if (start < end) {
                         yield Docs.text(source.substring(start, end));
                     }
@@ -258,13 +268,10 @@ public final class Formatter {
         enum General implements FormatterError {
             NULL_NODE("Cannot format a null CST node"),
             NULL_SOURCE("Source buffer must not be null");
-
             private final String message;
-
             General(String message) {
                 this.message = message;
             }
-
             @Override
             public String message() {
                 return message;
@@ -280,8 +287,8 @@ public final class Formatter {
         record RuleFailed(String rule, Throwable cause) implements FormatterError {
             @Override
             public String message() {
-                return "Formatter rule for '" + rule + "' threw: " + cause.getClass().getSimpleName()
-                       + ": " + cause.getMessage();
+                return "Formatter rule for '" + rule + "' threw: " + cause.getClass()
+                                                                          .getSimpleName() + ": " + cause.getMessage();
             }
         }
     }

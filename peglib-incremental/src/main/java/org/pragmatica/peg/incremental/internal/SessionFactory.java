@@ -73,16 +73,20 @@ public final class SessionFactory implements IncrementalParser {
      * {@code false}; opt-in via {@link IncrementalParser#create(Grammar,
      * ParserConfig, boolean)}.
      */
-    public static IncrementalParser sessionFactory(Grammar grammar, ParserConfig config, boolean triviaFastPathEnabled) {
+    public static IncrementalParser sessionFactory(Grammar grammar,
+                                                   ParserConfig config,
+                                                   boolean triviaFastPathEnabled) {
         // 0.4.0 — caller is expected to supply a validated Grammar (constructed
         // through {@link Grammar#grammar(java.util.List, org.pragmatica.lang.Option,
         // org.pragmatica.lang.Option, org.pragmatica.lang.Option, java.util.List,
         // java.util.List)} or via {@link GrammarParser#parse(String)}). Surface
         // PegEngine construction errors as IllegalArgumentException to preserve
         // the pre-0.4.0 contract — IncrementalParser is a construction-time API.
-        var parser = PegParser.fromGrammar(grammar, config).fold(
-            cause -> { throw new IllegalArgumentException("invalid grammar: " + cause.message()); },
-            p -> p);
+        var parser = PegParser.fromGrammar(grammar, config)
+                              .fold(cause -> {
+                                        throw new IllegalArgumentException("invalid grammar: " + cause.message());
+                                    },
+                                    p -> p);
         var fallback = BackReferenceScan.unsafeRules(grammar);
         return new SessionFactory(grammar, config, parser, fallback, triviaFastPathEnabled);
     }
@@ -92,17 +96,35 @@ public final class SessionFactory implements IncrementalParser {
         if (buffer == null) {
             throw new IllegalArgumentException("buffer must not be null");
         }
-        int clampedCursor = Math.max(0, Math.min(cursorOffset, buffer.length()));
+        int clampedCursor = Math.max(0,
+                                     Math.min(cursorOffset, buffer.length()));
         CstNode root = parseFull(buffer);
         return IncrementalSession.initial(this, buffer, clampedCursor, root);
     }
 
-    Grammar grammar() { return grammar; }
-    ParserConfig config() { return config; }
-    Parser parser() { return parser; }
-    Set<String> fallbackRules() { return fallbackRules; }
-    RuleIdRegistry registry() { return registry; }
-    boolean triviaFastPathEnabled() { return triviaFastPathEnabled; }
+    Grammar grammar() {
+        return grammar;
+    }
+
+    ParserConfig config() {
+        return config;
+    }
+
+    Parser parser() {
+        return parser;
+    }
+
+    Set<String> fallbackRules() {
+        return fallbackRules;
+    }
+
+    RuleIdRegistry registry() {
+        return registry;
+    }
+
+    boolean triviaFastPathEnabled() {
+        return triviaFastPathEnabled;
+    }
 
     /**
      * Full-parse the buffer via the backing {@link Parser}. Surfaces errors
@@ -113,8 +135,10 @@ public final class SessionFactory implements IncrementalParser {
      * diagnostics from the resulting tree's {@link CstNode.Error} nodes.
      */
     CstNode parseFull(String buffer) {
-        return parser.parseCst(buffer).fold(
-            cause -> { throw new IllegalStateException("full parse failed: " + cause.message()); },
-            node -> node);
+        return parser.parseCst(buffer)
+                     .fold(cause -> {
+                               throw new IllegalStateException("full parse failed: " + cause.message());
+                           },
+                           node -> node);
     }
 }

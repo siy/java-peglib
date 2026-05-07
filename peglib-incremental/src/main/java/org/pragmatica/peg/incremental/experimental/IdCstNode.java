@@ -53,12 +53,10 @@ public sealed interface IdCstNode {
                     List<Trivia> trailingTrivia) implements IdCstNode {
         @Override
         public boolean equals(Object other) {
-            return other instanceof Terminal that
-                && Objects.equals(span, that.span)
-                && Objects.equals(rule, that.rule)
-                && Objects.equals(text, that.text)
-                && Objects.equals(leadingTrivia, that.leadingTrivia)
-                && Objects.equals(trailingTrivia, that.trailingTrivia);
+            return other instanceof Terminal that && Objects.equals(span, that.span) && Objects.equals(rule, that.rule) && Objects.equals(text,
+                                                                                                                                          that.text) && Objects.equals(leadingTrivia,
+                                                                                                                                                                       that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                                                             that.trailingTrivia);
         }
 
         @Override
@@ -76,12 +74,11 @@ public sealed interface IdCstNode {
                        List<Trivia> trailingTrivia) implements IdCstNode {
         @Override
         public boolean equals(Object other) {
-            return other instanceof NonTerminal that
-                && Objects.equals(span, that.span)
-                && Objects.equals(rule, that.rule)
-                && Objects.equals(children, that.children)
-                && Objects.equals(leadingTrivia, that.leadingTrivia)
-                && Objects.equals(trailingTrivia, that.trailingTrivia);
+            return other instanceof NonTerminal that && Objects.equals(span, that.span) && Objects.equals(rule,
+                                                                                                          that.rule) && Objects.equals(children,
+                                                                                                                                       that.children) && Objects.equals(leadingTrivia,
+                                                                                                                                                                        that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                                                              that.trailingTrivia);
         }
 
         @Override
@@ -102,12 +99,10 @@ public sealed interface IdCstNode {
                  List<Trivia> trailingTrivia) implements IdCstNode {
         @Override
         public boolean equals(Object other) {
-            return other instanceof Token that
-                && Objects.equals(span, that.span)
-                && Objects.equals(rule, that.rule)
-                && Objects.equals(text, that.text)
-                && Objects.equals(leadingTrivia, that.leadingTrivia)
-                && Objects.equals(trailingTrivia, that.trailingTrivia);
+            return other instanceof Token that && Objects.equals(span, that.span) && Objects.equals(rule, that.rule) && Objects.equals(text,
+                                                                                                                                       that.text) && Objects.equals(leadingTrivia,
+                                                                                                                                                                    that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                                                          that.trailingTrivia);
         }
 
         @Override
@@ -134,12 +129,11 @@ public sealed interface IdCstNode {
 
         @Override
         public boolean equals(Object other) {
-            return other instanceof Error that
-                && Objects.equals(span, that.span)
-                && Objects.equals(skippedText, that.skippedText)
-                && Objects.equals(expected, that.expected)
-                && Objects.equals(leadingTrivia, that.leadingTrivia)
-                && Objects.equals(trailingTrivia, that.trailingTrivia);
+            return other instanceof Error that && Objects.equals(span, that.span) && Objects.equals(skippedText,
+                                                                                                    that.skippedText) && Objects.equals(expected,
+                                                                                                                                        that.expected) && Objects.equals(leadingTrivia,
+                                                                                                                                                                         that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                                                               that.trailingTrivia);
         }
 
         @Override

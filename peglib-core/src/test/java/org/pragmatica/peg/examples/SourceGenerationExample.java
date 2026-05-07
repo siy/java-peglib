@@ -449,8 +449,8 @@ class SourceGenerationExample {
         // Verify parseWithDiagnostics method
         assertThat(source).contains("public ParseResultWithDiagnostics parseWithDiagnostics(String input)");
 
-        // Verify Error node type for CST
-        assertThat(source).contains("record Error(SourceSpan span, String skippedText");
+        // Verify Error node type for CST (v0.5.0 Phase 1.2: long id is the first component)
+        assertThat(source).contains("record Error(long id, SourceSpan span, String skippedText");
 
         // Verify error recovery helpers
         assertThat(source).contains("skipToRecoveryPoint");

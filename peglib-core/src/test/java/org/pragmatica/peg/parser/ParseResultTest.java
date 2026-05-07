@@ -203,6 +203,6 @@ class ParseResultTest {
     // === Helper Methods ===
 
     private static CstNode.Terminal createTerminal(String text) {
-        return new CstNode.Terminal(SPAN, "Test", text, List.of(), List.of());
+        return new CstNode.Terminal(0L, SPAN, "Test", text, List.of(), List.of());
     }
 }

@@ -1704,27 +1704,97 @@ public final class ParserGenerator {
                     record BlockComment(SourceSpan span, String text) implements Trivia {}
                 }
 
+                /**
+                 * v0.5.0 Phase 1.2 (Lever A): per-parse stable-ID source for CST nodes.
+                 * IDs are unique within a parse-session lineage and excluded from
+                 * structural equality (see CstNode equals/hashCode).
+                 */
+                public sealed interface IdGenerator permits IdGenerator.PerSessionCounter {
+                    long next();
+
+                    final class PerSessionCounter implements IdGenerator {
+                        private long next = 0L;
+                        @Override public long next() { return next++; }
+                    }
+                }
+
                 public sealed interface CstNode {
+                    long id();
                     SourceSpan span();
                     RuleId rule();
                     List<Trivia> leadingTrivia();
                     List<Trivia> trailingTrivia();
 
-                    record Terminal(SourceSpan span, RuleId rule, String text,
-                                    List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
+                    record Terminal(long id, SourceSpan span, RuleId rule, String text,
+                                    List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        @Override
+                        public boolean equals(Object other) {
+                            return other instanceof Terminal that
+                                && java.util.Objects.equals(span, that.span)
+                                && java.util.Objects.equals(rule, that.rule)
+                                && java.util.Objects.equals(text, that.text)
+                                && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
+                                && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
+                        }
+                        @Override
+                        public int hashCode() {
+                            return java.util.Objects.hash(Terminal.class, span, rule, text, leadingTrivia, trailingTrivia);
+                        }
+                    }
 
-                    record NonTerminal(SourceSpan span, RuleId rule, List<CstNode> children,
-                                       List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
+                    record NonTerminal(long id, SourceSpan span, RuleId rule, List<CstNode> children,
+                                       List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        @Override
+                        public boolean equals(Object other) {
+                            return other instanceof NonTerminal that
+                                && java.util.Objects.equals(span, that.span)
+                                && java.util.Objects.equals(rule, that.rule)
+                                && java.util.Objects.equals(children, that.children)
+                                && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
+                                && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
+                        }
+                        @Override
+                        public int hashCode() {
+                            return java.util.Objects.hash(NonTerminal.class, span, rule, children, leadingTrivia, trailingTrivia);
+                        }
+                    }
 
-                    record Token(SourceSpan span, RuleId rule, String text,
-                                 List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
+                    record Token(long id, SourceSpan span, RuleId rule, String text,
+                                 List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        @Override
+                        public boolean equals(Object other) {
+                            return other instanceof Token that
+                                && java.util.Objects.equals(span, that.span)
+                                && java.util.Objects.equals(rule, that.rule)
+                                && java.util.Objects.equals(text, that.text)
+                                && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
+                                && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
+                        }
+                        @Override
+                        public int hashCode() {
+                            return java.util.Objects.hash(Token.class, span, rule, text, leadingTrivia, trailingTrivia);
+                        }
+                    }
             """);
         // Only add Error node type for ADVANCED mode (used in error recovery)
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
-                        record Error(SourceSpan span, String skippedText, String expected,
+                        record Error(long id, SourceSpan span, String skippedText, String expected,
                                      List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
                             @Override public RuleId rule() { return null; }
+                            @Override
+                            public boolean equals(Object other) {
+                                return other instanceof Error that
+                                    && java.util.Objects.equals(span, that.span)
+                                    && java.util.Objects.equals(skippedText, that.skippedText)
+                                    && java.util.Objects.equals(expected, that.expected)
+                                    && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
+                                    && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
+                            }
+                            @Override
+                            public int hashCode() {
+                                return java.util.Objects.hash(Error.class, span, skippedText, expected, leadingTrivia, trailingTrivia);
+                            }
                         }
                 """);
         }
@@ -2030,6 +2100,11 @@ public final class ParserGenerator {
                 // leadingTrivia. Backtracking combinators save/restore snapshots.
                 private final ArrayList<Trivia> pendingLeadingTrivia = new ArrayList<>();
 
+                // v0.5.0 Phase 1.2 (Lever A): per-parse stable-ID allocator.
+                // Reset on every init() so each parse session has its own
+                // monotonically increasing ID lineage starting from 0.
+                private IdGenerator idGen = new IdGenerator.PerSessionCounter();
+
                 /**
                  * Enable or disable packrat memoization.
                  * Disabling may reduce memory usage for large inputs.
@@ -2109,6 +2184,7 @@ public final class ParserGenerator {
                     this.furthestFailure = Option.none();
                     this.furthestExpected = Option.none();
                     this.pendingLeadingTrivia.clear();
+                    this.idGen = new IdGenerator.PerSessionCounter();
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
@@ -2380,7 +2456,7 @@ public final class ParserGenerator {
                             var skippedSpan = skipToRecoveryPoint();
                             if (skippedSpan.length() > 0) {
                                 var skippedText = skippedSpan.extract(input);
-                                var errorNode = new CstNode.Error(skippedSpan, skippedText, expected, List.of(), List.of());
+                                var errorNode = new CstNode.Error(idGen.next(), skippedSpan, skippedText, expected, List.of(), List.of());
                                 return ParseResultWithDiagnostics.withErrors(Option.some(errorNode), diagnostics, input);
                             }
                             return ParseResultWithDiagnostics.withErrors(Option.none(), diagnostics, input);
@@ -3475,7 +3551,7 @@ public final class ParserGenerator {
                       .append(zomStart)
                       .append(", location());\n");
                     sb.append(pad)
-                      .append("        children.add(new CstNode.NonTerminal(zomSpan")
+                      .append("        children.add(new CstNode.NonTerminal(idGen.next(), zomSpan")
                       .append(id)
                       .append(", __ruleName, zomChildren")
                       .append(id)
@@ -3657,7 +3733,7 @@ public final class ParserGenerator {
                       .append(oomStart)
                       .append(", location());\n");
                     sb.append(pad)
-                      .append("        children.add(new CstNode.NonTerminal(oomSpan")
+                      .append("        children.add(new CstNode.NonTerminal(idGen.next(), oomSpan")
                       .append(id)
                       .append(", __ruleName, oomChildren")
                       .append(id)
@@ -3946,7 +4022,7 @@ public final class ParserGenerator {
                       .append(repStart)
                       .append(", location());\n");
                     sb.append(pad)
-                      .append("        children.add(new CstNode.NonTerminal(repSpan")
+                      .append("        children.add(new CstNode.NonTerminal(idGen.next(), repSpan")
                       .append(id)
                       .append(", __ruleName, repChildren")
                       .append(id)
@@ -4123,7 +4199,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    var tbNode")
                   .append(id)
-                  .append(" = new CstNode.Token(tbSpan")
+                  .append(" = new CstNode.Token(idGen.next(), tbSpan")
                   .append(id)
                   .append(", ")
                   .append(tokenRuleId)
@@ -4559,21 +4635,21 @@ public final class ParserGenerator {
                     if (result.node.isPresent()) {
                         var inner = result.node.unwrap();
                         return switch (inner) {
-                            case CstNode.Token tok -> new CstNode.Token(span, ruleId, tok.text(), leadingTrivia, List.of());
-                            case CstNode.Terminal t -> new CstNode.Terminal(span, ruleId, t.text(), leadingTrivia, List.of());
-                            case CstNode.NonTerminal nt -> new CstNode.NonTerminal(span, ruleId, nt.children(), leadingTrivia, List.of());
+                            case CstNode.Token tok -> new CstNode.Token(tok.id(), span, ruleId, tok.text(), leadingTrivia, List.of());
+                            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), span, ruleId, t.text(), leadingTrivia, List.of());
+                            case CstNode.NonTerminal nt -> new CstNode.NonTerminal(nt.id(), span, ruleId, nt.children(), leadingTrivia, List.of());
             """);
         // Add Error case only for ADVANCED mode
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
-                            case CstNode.Error err -> new CstNode.NonTerminal(span, ruleId, children, leadingTrivia, List.of());
+                            case CstNode.Error err -> new CstNode.NonTerminal(err.id(), span, ruleId, children, leadingTrivia, List.of());
                 """);
         }
         sb.append("""
                         };
                     }
                     // No inner node — wrap children in NonTerminal
-                    return new CstNode.NonTerminal(span, ruleId, children, leadingTrivia, List.of());
+                    return new CstNode.NonTerminal(idGen.next(), span, ruleId, children, leadingTrivia, List.of());
                 }
 
                 private Trivia classifyTrivia(SourceSpan span, String text) {
@@ -4628,19 +4704,19 @@ public final class ParserGenerator {
                     }
                     return switch (node) {
                         case CstNode.Terminal t -> new CstNode.Terminal(
-                            t.span(), t.rule(), t.text(), leadingTrivia, t.trailingTrivia()
+                            t.id(), t.span(), t.rule(), t.text(), leadingTrivia, t.trailingTrivia()
                         );
                         case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
-                            nt.span(), nt.rule(), nt.children(), leadingTrivia, nt.trailingTrivia()
+                            nt.id(), nt.span(), nt.rule(), nt.children(), leadingTrivia, nt.trailingTrivia()
                         );
                         case CstNode.Token tok -> new CstNode.Token(
-                            tok.span(), tok.rule(), tok.text(), leadingTrivia, tok.trailingTrivia()
+                            tok.id(), tok.span(), tok.rule(), tok.text(), leadingTrivia, tok.trailingTrivia()
                         );
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
-                                err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia()
+                                err.id(), err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia()
                             );
                 """);
         }
@@ -4654,20 +4730,20 @@ public final class ParserGenerator {
                     }
                     return switch (node) {
                         case CstNode.Terminal t -> new CstNode.Terminal(
-                            t.span(), t.rule(), t.text(), t.leadingTrivia(), trailingTrivia
+                            t.id(), t.span(), t.rule(), t.text(), t.leadingTrivia(), trailingTrivia
                         );
                         case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
-                            nt.span(), nt.rule(), nt.children(), nt.leadingTrivia(), trailingTrivia
+                            nt.id(), nt.span(), nt.rule(), nt.children(), nt.leadingTrivia(), trailingTrivia
                         );
                         case CstNode.Token tok -> new CstNode.Token(
-                            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
+                            tok.id(), tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
                         );
             """);
         // Add Error case only for ADVANCED mode
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
-                                err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia
+                                err.id(), err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia
                             );
                 """);
         }
@@ -4692,7 +4768,7 @@ public final class ParserGenerator {
                             if (ntChildren.isEmpty()) {
                                 var combined = concatTrivia(nt.trailingTrivia(), trivia);
                                 yield new CstNode.NonTerminal(
-                                    nt.span(), nt.rule(), ntChildren, nt.leadingTrivia(), combined
+                                    nt.id(), nt.span(), nt.rule(), ntChildren, nt.leadingTrivia(), combined
                                 );
                             }
                             var newChildren = new ArrayList<CstNode>(ntChildren);
@@ -4700,20 +4776,20 @@ public final class ParserGenerator {
                             var lastChild = newChildren.get(lastIdx);
                             newChildren.set(lastIdx, attachTrailingToTail(lastChild, trivia));
                             yield new CstNode.NonTerminal(
-                                nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia()
+                                nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia()
                             );
                         }
                         case CstNode.Terminal t -> new CstNode.Terminal(
-                            t.span(), t.rule(), t.text(), t.leadingTrivia(), concatTrivia(t.trailingTrivia(), trivia)
+                            t.id(), t.span(), t.rule(), t.text(), t.leadingTrivia(), concatTrivia(t.trailingTrivia(), trivia)
                         );
                         case CstNode.Token tok -> new CstNode.Token(
-                            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), concatTrivia(tok.trailingTrivia(), trivia)
+                            tok.id(), tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), concatTrivia(tok.trailingTrivia(), trivia)
                         );
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
-                                err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), concatTrivia(err.trailingTrivia(), trivia)
+                                err.id(), err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), concatTrivia(err.trailingTrivia(), trivia)
                             );
                 """);
         }
@@ -4863,7 +4939,7 @@ public final class ParserGenerator {
         sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
           .append(endLocVar)
           .append(");\n");
-        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, takePendingLeading(), List.of());\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, text, takePendingLeading(), List.of());\n");
         sb.append("        return CstParseResult.success(node, text, ")
           .append(endLocVar)
           .append(");\n");
@@ -4910,7 +4986,7 @@ public final class ParserGenerator {
         sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
           .append(endLocVar)
           .append(");\n");
-        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, takePendingLeading(), List.of());\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, longestMatch, takePendingLeading(), List.of());\n");
         sb.append("        return CstParseResult.success(node, longestMatch, ")
           .append(endLocVar)
           .append(");\n");
@@ -4962,7 +5038,7 @@ public final class ParserGenerator {
         sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
           .append(endLocVar)
           .append(");\n");
-        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
         sb.append("        return CstParseResult.success(node, text, ")
           .append(endLocVar)
           .append(");\n");
@@ -5002,7 +5078,7 @@ public final class ParserGenerator {
         sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
           .append(endLocVar)
           .append(");\n");
-        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");
         sb.append("        return CstParseResult.success(node, text, ")
           .append(endLocVar)
           .append(");\n");

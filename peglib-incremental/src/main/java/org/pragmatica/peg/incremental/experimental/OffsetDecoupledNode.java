@@ -76,11 +76,9 @@ public sealed interface OffsetDecoupledNode {
                     List<Trivia> trailingTrivia) implements OffsetDecoupledNode {
         @Override
         public boolean equals(Object other) {
-            return other instanceof Terminal that
-                && Objects.equals(rule, that.rule)
-                && Objects.equals(text, that.text)
-                && Objects.equals(leadingTrivia, that.leadingTrivia)
-                && Objects.equals(trailingTrivia, that.trailingTrivia);
+            return other instanceof Terminal that && Objects.equals(rule, that.rule) && Objects.equals(text, that.text) && Objects.equals(leadingTrivia,
+                                                                                                                                          that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                                that.trailingTrivia);
         }
 
         @Override
@@ -97,11 +95,10 @@ public sealed interface OffsetDecoupledNode {
                        List<Trivia> trailingTrivia) implements OffsetDecoupledNode {
         @Override
         public boolean equals(Object other) {
-            return other instanceof NonTerminal that
-                && Objects.equals(rule, that.rule)
-                && Objects.equals(children, that.children)
-                && Objects.equals(leadingTrivia, that.leadingTrivia)
-                && Objects.equals(trailingTrivia, that.trailingTrivia);
+            return other instanceof NonTerminal that && Objects.equals(rule, that.rule) && Objects.equals(children,
+                                                                                                          that.children) && Objects.equals(leadingTrivia,
+                                                                                                                                           that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                                 that.trailingTrivia);
         }
 
         @Override
@@ -121,11 +118,9 @@ public sealed interface OffsetDecoupledNode {
                  List<Trivia> trailingTrivia) implements OffsetDecoupledNode {
         @Override
         public boolean equals(Object other) {
-            return other instanceof Token that
-                && Objects.equals(rule, that.rule)
-                && Objects.equals(text, that.text)
-                && Objects.equals(leadingTrivia, that.leadingTrivia)
-                && Objects.equals(trailingTrivia, that.trailingTrivia);
+            return other instanceof Token that && Objects.equals(rule, that.rule) && Objects.equals(text, that.text) && Objects.equals(leadingTrivia,
+                                                                                                                                       that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                             that.trailingTrivia);
         }
 
         @Override

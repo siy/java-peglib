@@ -602,7 +602,13 @@ public final class PegEngine implements Parser {
                                                       skippedSpan.end()
                                                                  .offset());
                     var errorNode = new CstNode.Error(
-                    skippedSpan, skippedText, failureExpected, leadingTrivia, List.of());
+                    ctx.idGen()
+                       .next(),
+                    skippedSpan,
+                    skippedText,
+                    failureExpected,
+                    leadingTrivia,
+                    List.of());
                     fragments.add(errorNode);
                 }
                 // Skip the recovery character itself (;, }, newline, etc.)
@@ -627,7 +633,13 @@ public final class PegEngine implements Parser {
                                     .span();
             var fullSpan = SourceSpan.sourceSpan(firstSpan.start(), lastSpan.end());
             rootNode = Option.some(new CstNode.NonTerminal(
-            fullSpan, startRule.name(), fragments, List.of(), trailingTrivia));
+            ctx.idGen()
+               .next(),
+            fullSpan,
+            startRule.name(),
+            fragments,
+            List.of(),
+            trailingTrivia));
         }
         return ParseResultWithDiagnostics.withErrors(rootNode, ctx.diagnostics(), input);
     }
@@ -1089,7 +1101,13 @@ public final class PegEngine implements Parser {
             // Set token capture so $0 returns this captured text
             tokenCapture[0] = text;
             var span = ctx.spanFrom(startLoc);
-            var node = new CstNode.Token(span, ruleName, text, ctx.takePendingLeadingTrivia(), List.of());
+            var node = new CstNode.Token(ctx.idGen()
+                                            .next(),
+                                         span,
+                                         ruleName,
+                                         text,
+                                         ctx.takePendingLeadingTrivia(),
+                                         List.of());
             return ParseResult.Success.success(node, ctx.location());
         } finally{
             ctx.exitTokenBoundary();
@@ -1159,7 +1177,13 @@ public final class PegEngine implements Parser {
         advanceLiteral(ctx, text, len);
         var endLoc = ctx.location();
         var span = SourceSpan.sourceSpan(startLoc, endLoc);
-        var node = new CstNode.Terminal(span, "", text, ctx.takePendingLeadingTrivia(), List.of());
+        var node = new CstNode.Terminal(ctx.idGen()
+                                           .next(),
+                                        span,
+                                        "",
+                                        text,
+                                        ctx.takePendingLeadingTrivia(),
+                                        List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
 
@@ -1219,7 +1243,13 @@ public final class PegEngine implements Parser {
         advanceLiteral(ctx, matched, longestLen);
         var endLoc = ctx.location();
         var span = SourceSpan.sourceSpan(startLoc, endLoc);
-        var node = new CstNode.Terminal(span, "", matched, ctx.takePendingLeadingTrivia(), List.of());
+        var node = new CstNode.Terminal(ctx.idGen()
+                                           .next(),
+                                        span,
+                                        "",
+                                        matched,
+                                        ctx.takePendingLeadingTrivia(),
+                                        List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
 
@@ -1269,7 +1299,13 @@ public final class PegEngine implements Parser {
         ctx.advance();
         var endLoc = ctx.location();
         var span = SourceSpan.sourceSpan(startLoc, endLoc);
-        var node = new CstNode.Terminal(span, "", String.valueOf(c), ctx.takePendingLeadingTrivia(), List.of());
+        var node = new CstNode.Terminal(ctx.idGen()
+                                           .next(),
+                                        span,
+                                        "",
+                                        String.valueOf(c),
+                                        ctx.takePendingLeadingTrivia(),
+                                        List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
 
@@ -1382,7 +1418,13 @@ public final class PegEngine implements Parser {
         char c = ctx.advance();
         var endLoc = ctx.location();
         var span = SourceSpan.sourceSpan(startLoc, endLoc);
-        var node = new CstNode.Terminal(span, "", String.valueOf(c), ctx.takePendingLeadingTrivia(), List.of());
+        var node = new CstNode.Terminal(ctx.idGen()
+                                           .next(),
+                                        span,
+                                        "",
+                                        String.valueOf(c),
+                                        ctx.takePendingLeadingTrivia(),
+                                        List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
 
@@ -1445,7 +1487,13 @@ public final class PegEngine implements Parser {
             var endPos = ctx.pos();
             var text = ctx.substring(startPos, endPos);
             var span = ctx.spanFrom(startLoc);
-            var node = new CstNode.Token(span, ruleName, text, ctx.takePendingLeadingTrivia(), List.of());
+            var node = new CstNode.Token(ctx.idGen()
+                                            .next(),
+                                         span,
+                                         ruleName,
+                                         text,
+                                         ctx.takePendingLeadingTrivia(),
+                                         List.of());
             return ParseResult.Success.success(node, ctx.location());
         } finally{
             ctx.exitTokenBoundary();
@@ -1502,7 +1550,13 @@ public final class PegEngine implements Parser {
             ctx.advance();
         }
         var span = ctx.spanFrom(startLoc);
-        var node = new CstNode.Terminal(span, "", text, ctx.takePendingLeadingTrivia(), List.of());
+        var node = new CstNode.Terminal(ctx.idGen()
+                                           .next(),
+                                        span,
+                                        "",
+                                        text,
+                                        ctx.takePendingLeadingTrivia(),
+                                        List.of());
         return ParseResult.Success.success(node, ctx.location());
     }
 
@@ -1647,7 +1701,13 @@ public final class PegEngine implements Parser {
             }
         }
         var span = ctx.spanFrom(startLoc);
-        var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
+        var node = new CstNode.NonTerminal(ctx.idGen()
+                                              .next(),
+                                           span,
+                                           ruleName,
+                                           children,
+                                           List.of(),
+                                           List.of());
         return ParseResult.Success.success(node, ctx.location());
     }
 
@@ -1749,7 +1809,13 @@ public final class PegEngine implements Parser {
         if (children.size() == 1) {
             return ParseResult.Success.success(children.getFirst(), ctx.location());
         }
-        var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
+        var node = new CstNode.NonTerminal(ctx.idGen()
+                                              .next(),
+                                           span,
+                                           ruleName,
+                                           children,
+                                           List.of(),
+                                           List.of());
         return ParseResult.Success.success(node, ctx.location());
     }
 
@@ -1814,7 +1880,13 @@ public final class PegEngine implements Parser {
         if (children.size() == 1) {
             return ParseResult.Success.success(children.getFirst(), ctx.location());
         }
-        var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
+        var node = new CstNode.NonTerminal(ctx.idGen()
+                                              .next(),
+                                           span,
+                                           ruleName,
+                                           children,
+                                           List.of(),
+                                           List.of());
         return ParseResult.Success.success(node, ctx.location());
     }
 
@@ -1839,7 +1911,13 @@ public final class PegEngine implements Parser {
         ctx.restoreLocation(startLoc);
         ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
         var span = SourceSpan.sourceSpan(startLoc);
-        var node = new CstNode.NonTerminal(span, ruleName, List.of(), List.of(), List.of());
+        var node = new CstNode.NonTerminal(ctx.idGen()
+                                              .next(),
+                                           span,
+                                           ruleName,
+                                           List.of(),
+                                           List.of(),
+                                           List.of());
         return ParseResult.Success.success(node, ctx.location());
     }
 
@@ -1906,7 +1984,13 @@ public final class PegEngine implements Parser {
         if (children.size() == 1) {
             return ParseResult.Success.success(children.getFirst(), ctx.location());
         }
-        var node = new CstNode.NonTerminal(span, ruleName, children, List.of(), List.of());
+        var node = new CstNode.NonTerminal(ctx.idGen()
+                                              .next(),
+                                           span,
+                                           ruleName,
+                                           children,
+                                           List.of(),
+                                           List.of());
         return ParseResult.Success.success(node, ctx.location());
     }
 
@@ -1984,13 +2068,13 @@ public final class PegEngine implements Parser {
     private CstNode wrapWithRuleName(CstNode node, String ruleName, List<Trivia> leadingTrivia) {
         return switch (node) {
             case CstNode.Terminal t -> new CstNode.Terminal(
-            t.span(), ruleName, t.text(), leadingTrivia, t.trailingTrivia());
+            t.id(), t.span(), ruleName, t.text(), leadingTrivia, t.trailingTrivia());
             case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
-            nt.span(), ruleName, nt.children(), leadingTrivia, nt.trailingTrivia());
+            nt.id(), nt.span(), ruleName, nt.children(), leadingTrivia, nt.trailingTrivia());
             case CstNode.Token tok -> new CstNode.Token(
-            tok.span(), ruleName, tok.text(), leadingTrivia, tok.trailingTrivia());
+            tok.id(), tok.span(), ruleName, tok.text(), leadingTrivia, tok.trailingTrivia());
             case CstNode.Error err -> new CstNode.Error(
-            err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia());
+            err.id(), err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia());
         };
     }
 
@@ -2005,13 +2089,13 @@ public final class PegEngine implements Parser {
         }
         return switch (node) {
             case CstNode.Terminal t -> new CstNode.Terminal(
-            t.span(), t.rule(), t.text(), leadingTrivia, t.trailingTrivia());
+            t.id(), t.span(), t.rule(), t.text(), leadingTrivia, t.trailingTrivia());
             case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
-            nt.span(), nt.rule(), nt.children(), leadingTrivia, nt.trailingTrivia());
+            nt.id(), nt.span(), nt.rule(), nt.children(), leadingTrivia, nt.trailingTrivia());
             case CstNode.Token tok -> new CstNode.Token(
-            tok.span(), tok.rule(), tok.text(), leadingTrivia, tok.trailingTrivia());
+            tok.id(), tok.span(), tok.rule(), tok.text(), leadingTrivia, tok.trailingTrivia());
             case CstNode.Error err -> new CstNode.Error(
-            err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia());
+            err.id(), err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia());
         };
     }
 
@@ -2024,13 +2108,13 @@ public final class PegEngine implements Parser {
         }
         return switch (node) {
             case CstNode.Terminal t -> new CstNode.Terminal(
-            t.span(), t.rule(), t.text(), t.leadingTrivia(), trailingTrivia);
+            t.id(), t.span(), t.rule(), t.text(), t.leadingTrivia(), trailingTrivia);
             case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
-            nt.span(), nt.rule(), nt.children(), nt.leadingTrivia(), trailingTrivia);
+            nt.id(), nt.span(), nt.rule(), nt.children(), nt.leadingTrivia(), trailingTrivia);
             case CstNode.Token tok -> new CstNode.Token(
-            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia);
+            tok.id(), tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia);
             case CstNode.Error err -> new CstNode.Error(
-            err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia);
+            err.id(), err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia);
         };
     }
 
@@ -2052,20 +2136,26 @@ public final class PegEngine implements Parser {
                 if (children.isEmpty()) {
                     var combined = combineTrivia(nt.trailingTrivia(), trivia);
                     yield new CstNode.NonTerminal(
-                    nt.span(), nt.rule(), children, nt.leadingTrivia(), combined);
+                    nt.id(), nt.span(), nt.rule(), children, nt.leadingTrivia(), combined);
                 }
                 var newChildren = new ArrayList<>(children);
                 var lastIdx = newChildren.size() - 1;
                 var lastChild = newChildren.get(lastIdx);
                 newChildren.set(lastIdx, attachTrailingToTail(lastChild, trivia));
                 yield new CstNode.NonTerminal(
-                nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia());
+                nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia());
             }
             case CstNode.Terminal t -> new CstNode.Terminal(
-            t.span(), t.rule(), t.text(), t.leadingTrivia(), combineTrivia(t.trailingTrivia(), trivia));
+            t.id(), t.span(), t.rule(), t.text(), t.leadingTrivia(), combineTrivia(t.trailingTrivia(), trivia));
             case CstNode.Token tok -> new CstNode.Token(
-            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), combineTrivia(tok.trailingTrivia(), trivia));
+            tok.id(),
+            tok.span(),
+            tok.rule(),
+            tok.text(),
+            tok.leadingTrivia(),
+            combineTrivia(tok.trailingTrivia(), trivia));
             case CstNode.Error err -> new CstNode.Error(
+            err.id(),
             err.span(),
             err.skippedText(),
             err.expected(),

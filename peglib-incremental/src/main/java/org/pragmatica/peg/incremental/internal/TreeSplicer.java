@@ -58,20 +58,22 @@ public final class TreeSplicer {
         var pathList = new ArrayList<>(path);
         // Start with the new subtree, walk up the spine replacing each ancestor.
         var replacement = newSubtree;
-        for (int i = pathList.size() - 2; i >= 0; i--) {
+        for (int i = pathList.size() - 2; i >= 0; i-- ) {
             var ancestor = pathList.get(i);
             var next = pathList.get(i + 1);
             // replacement replaces `next` among ancestor's children.
-            if (!(ancestor instanceof CstNode.NonTerminal nt)) {
+            if (! (ancestor instanceof CstNode.NonTerminal nt)) {
                 throw new IllegalStateException("ancestor at depth " + i + " is not a NonTerminal: " + ancestor);
             }
-            var newChildren = new ArrayList<CstNode>(nt.children().size());
+            var newChildren = new ArrayList<CstNode>(nt.children()
+                                                       .size());
             for (var child : nt.children()) {
                 if (child == next) {
                     newChildren.add(replacement);
-                } else if (child.span().startOffset() >= editEnd) {
+                }else if (child.span()
+                               .startOffset() >= editEnd) {
                     newChildren.add(shiftAll(child, delta));
-                } else {
+                }else {
                     newChildren.add(child);
                 }
             }
@@ -97,11 +99,12 @@ public final class TreeSplicer {
                      : oldEnd;
         var newSpan = SourceSpan.sourceSpan(oldSpan.start(), newEnd);
         return new CstNode.NonTerminal(
-            newSpan,
-            ancestor.rule(),
-            List.copyOf(newChildren),
-            shiftTrivia(ancestor.leadingTrivia(), delta, editEnd),
-            shiftTrivia(ancestor.trailingTrivia(), delta, editEnd));
+        ancestor.id(),
+        newSpan,
+        ancestor.rule(),
+        List.copyOf(newChildren),
+        shiftTrivia(ancestor.leadingTrivia(), delta, editEnd),
+        shiftTrivia(ancestor.trailingTrivia(), delta, editEnd));
     }
 
     /**
@@ -117,26 +120,39 @@ public final class TreeSplicer {
         var span = shiftSpan(node.span(), delta);
         return switch (node) {
             case CstNode.Terminal t -> new CstNode.Terminal(
-                span, t.rule(), t.text(),
-                shiftTriviaAll(t.leadingTrivia(), delta),
-                shiftTriviaAll(t.trailingTrivia(), delta));
+            t.id(),
+            span,
+            t.rule(),
+            t.text(),
+            shiftTriviaAll(t.leadingTrivia(), delta),
+            shiftTriviaAll(t.trailingTrivia(), delta));
             case CstNode.Token t -> new CstNode.Token(
-                span, t.rule(), t.text(),
-                shiftTriviaAll(t.leadingTrivia(), delta),
-                shiftTriviaAll(t.trailingTrivia(), delta));
+            t.id(),
+            span,
+            t.rule(),
+            t.text(),
+            shiftTriviaAll(t.leadingTrivia(), delta),
+            shiftTriviaAll(t.trailingTrivia(), delta));
             case CstNode.Error e -> new CstNode.Error(
-                span, e.skippedText(), e.expected(),
-                shiftTriviaAll(e.leadingTrivia(), delta),
-                shiftTriviaAll(e.trailingTrivia(), delta));
+            e.id(),
+            span,
+            e.skippedText(),
+            e.expected(),
+            shiftTriviaAll(e.leadingTrivia(), delta),
+            shiftTriviaAll(e.trailingTrivia(), delta));
             case CstNode.NonTerminal nt -> {
-                var shifted = new ArrayList<CstNode>(nt.children().size());
+                var shifted = new ArrayList<CstNode>(nt.children()
+                                                       .size());
                 for (var child : nt.children()) {
                     shifted.add(shiftAll(child, delta));
                 }
                 yield new CstNode.NonTerminal(
-                    span, nt.rule(), List.copyOf(shifted),
-                    shiftTriviaAll(nt.leadingTrivia(), delta),
-                    shiftTriviaAll(nt.trailingTrivia(), delta));
+                nt.id(),
+                span,
+                nt.rule(),
+                List.copyOf(shifted),
+                shiftTriviaAll(nt.leadingTrivia(), delta),
+                shiftTriviaAll(nt.trailingTrivia(), delta));
             }
         };
     }
@@ -151,24 +167,31 @@ public final class TreeSplicer {
 
     private static List<Trivia> shiftTrivia(List<Trivia> trivia, int delta, int editEnd) {
         if (trivia == null || trivia.isEmpty() || delta == 0) {
-            return trivia == null ? List.of() : trivia;
+            return trivia == null
+                   ? List.of()
+                   : trivia;
         }
         var out = new ArrayList<Trivia>(trivia.size());
         boolean anyShift = false;
         for (var t : trivia) {
-            if (t.span().startOffset() >= editEnd) {
+            if (t.span()
+                 .startOffset() >= editEnd) {
                 out.add(shiftTriviaOne(t, delta));
                 anyShift = true;
-            } else {
+            }else {
                 out.add(t);
             }
         }
-        return anyShift ? List.copyOf(out) : trivia;
+        return anyShift
+               ? List.copyOf(out)
+               : trivia;
     }
 
     private static List<Trivia> shiftTriviaAll(List<Trivia> trivia, int delta) {
         if (trivia == null || trivia.isEmpty() || delta == 0) {
-            return trivia == null ? List.of() : trivia;
+            return trivia == null
+                   ? List.of()
+                   : trivia;
         }
         var out = new ArrayList<Trivia>(trivia.size());
         for (var t : trivia) {

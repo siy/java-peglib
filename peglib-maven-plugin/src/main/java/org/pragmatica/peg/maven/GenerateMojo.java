@@ -1,11 +1,5 @@
 package org.pragmatica.peg.maven;
 
-import org.apache.maven.plugin.AbstractMojo;
-import org.apache.maven.plugin.MojoExecutionException;
-import org.apache.maven.plugin.MojoFailureException;
-import org.apache.maven.plugins.annotations.LifecyclePhase;
-import org.apache.maven.plugins.annotations.Mojo;
-import org.apache.maven.plugins.annotations.Parameter;
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.peg.PegParser;
@@ -16,6 +10,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import org.apache.maven.plugin.AbstractMojo;
+import org.apache.maven.plugin.MojoExecutionException;
+import org.apache.maven.plugin.MojoFailureException;
+import org.apache.maven.plugins.annotations.LifecyclePhase;
+import org.apache.maven.plugins.annotations.Mojo;
+import org.apache.maven.plugins.annotations.Parameter;
+
 /**
  * Generate a standalone PEG parser Java source file from a grammar.
  *
@@ -24,7 +25,6 @@ import java.nio.file.Path;
  */
 @Mojo(name = "generate", defaultPhase = LifecyclePhase.GENERATE_SOURCES, threadSafe = true)
 public class GenerateMojo extends AbstractMojo {
-
     @Parameter(property = "peglib.grammarFile", required = true)
     private File grammarFile;
 
@@ -52,22 +52,24 @@ public class GenerateMojo extends AbstractMojo {
         }
         var targetFile = targetSourceFile();
         if (isUpToDate(targetFile)) {
-            getLog().info("peglib:generate skipped (up-to-date): " + targetFile);
+            getLog()
+            .info("peglib:generate skipped (up-to-date): " + targetFile);
             return;
         }
         var generated = Result.all(parseErrorReporting(errorReporting),
                                    readGrammar(grammarFile.toPath()))
                               .flatMap(this::generateSource);
-        if (generated instanceof Result.Failure<?> failure) {
+        if (generated instanceof Result.Failure< ? > failure) {
             throw new MojoFailureException(failure.cause()
                                                   .message());
         }
         var write = writeSource(targetFile, generated.unwrap());
-        if (write instanceof Result.Failure<?> failure) {
+        if (write instanceof Result.Failure< ? > failure) {
             throw new MojoExecutionException(failure.cause()
                                                     .message());
         }
-        getLog().info("peglib:generate wrote " + targetFile);
+        getLog()
+        .info("peglib:generate wrote " + targetFile);
     }
 
     private Result<String> generateSource(ErrorReporting reporting, String grammarText) {
@@ -75,20 +77,17 @@ public class GenerateMojo extends AbstractMojo {
     }
 
     private static Result<ErrorReporting> parseErrorReporting(String value) {
-        return Result.lift(t -> Causes.cause("Invalid errorReporting: " + value
-                                             + " (expected BASIC or ADVANCED)"),
+        return Result.lift(t -> Causes.cause("Invalid errorReporting: " + value + " (expected BASIC or ADVANCED)"),
                            () -> ErrorReporting.valueOf(value));
     }
 
     private static Result<String> readGrammar(Path path) {
-        return Result.lift(t -> Causes.cause("Failed to read grammar: " + path + " — "
-                                             + t.getMessage()),
+        return Result.lift(t -> Causes.cause("Failed to read grammar: " + path + " — " + t.getMessage()),
                            () -> Files.readString(path));
     }
 
     private static Result<Path> writeSource(Path targetFile, String source) {
-        return Result.lift(t -> Causes.cause("Failed to write generated source: "
-                                             + targetFile + " — " + t.getMessage()),
+        return Result.lift(t -> Causes.cause("Failed to write generated source: " + targetFile + " — " + t.getMessage()),
                            () -> writeSourceUnchecked(targetFile, source));
     }
 

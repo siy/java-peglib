@@ -26,7 +26,7 @@ final class IdCstNodeBuilderTest {
     @Test
     @DisplayName("Single Terminal gets id 0")
     void single_terminal_gets_id_zero() {
-        CstNode source = new CstNode.Terminal(SPAN, "Number", "123", NO_TRIVIA, NO_TRIVIA);
+        CstNode source = new CstNode.Terminal(0L, SPAN, "Number", "123", NO_TRIVIA, NO_TRIVIA);
         var built = freshBuilder().build(source);
         assertThat(built).isInstanceOf(IdCstNode.Terminal.class);
         var terminal = (IdCstNode.Terminal) built;
@@ -39,10 +39,10 @@ final class IdCstNodeBuilderTest {
     @Test
     @DisplayName("NonTerminal with three Terminal children: children 0,1,2 / parent 3 (post-order)")
     void nonterminal_post_order_ids() {
-        var c1 = new CstNode.Terminal(SPAN, "Number", "1", NO_TRIVIA, NO_TRIVIA);
-        var c2 = new CstNode.Terminal(SPAN, "Number", "2", NO_TRIVIA, NO_TRIVIA);
-        var c3 = new CstNode.Terminal(SPAN, "Number", "3", NO_TRIVIA, NO_TRIVIA);
-        CstNode parent = new CstNode.NonTerminal(SPAN, "Expr", List.of(c1, c2, c3), NO_TRIVIA, NO_TRIVIA);
+        var c1 = new CstNode.Terminal(0L, SPAN, "Number", "1", NO_TRIVIA, NO_TRIVIA);
+        var c2 = new CstNode.Terminal(0L, SPAN, "Number", "2", NO_TRIVIA, NO_TRIVIA);
+        var c3 = new CstNode.Terminal(0L, SPAN, "Number", "3", NO_TRIVIA, NO_TRIVIA);
+        CstNode parent = new CstNode.NonTerminal(0L, SPAN, "Expr", List.of(c1, c2, c3), NO_TRIVIA, NO_TRIVIA);
 
         var built = (IdCstNode.NonTerminal) freshBuilder().build(parent);
 
@@ -56,9 +56,9 @@ final class IdCstNodeBuilderTest {
     @Test
     @DisplayName("3-deep nested NonTerminal -> NonTerminal -> Terminal: 0,1,2 inside-out")
     void three_deep_nested_ids() {
-        var leaf = new CstNode.Terminal(SPAN_INNER, "Atom", "x", NO_TRIVIA, NO_TRIVIA);
-        var middle = new CstNode.NonTerminal(SPAN_INNER, "Inner", List.of(leaf), NO_TRIVIA, NO_TRIVIA);
-        CstNode root = new CstNode.NonTerminal(SPAN, "Outer", List.of(middle), NO_TRIVIA, NO_TRIVIA);
+        var leaf = new CstNode.Terminal(0L, SPAN_INNER, "Atom", "x", NO_TRIVIA, NO_TRIVIA);
+        var middle = new CstNode.NonTerminal(0L, SPAN_INNER, "Inner", List.of(leaf), NO_TRIVIA, NO_TRIVIA);
+        CstNode root = new CstNode.NonTerminal(0L, SPAN, "Outer", List.of(middle), NO_TRIVIA, NO_TRIVIA);
 
         var builtRoot = (IdCstNode.NonTerminal) freshBuilder().build(root);
         var builtMiddle = (IdCstNode.NonTerminal) builtRoot.children().get(0);
@@ -72,10 +72,10 @@ final class IdCstNodeBuilderTest {
     @Test
     @DisplayName("Mixed tree with Token and Error preserves all fields and assigns ids to every node")
     void mixed_variants_round_trip() {
-        var token = new CstNode.Token(SPAN_INNER, "Ident", "foo", NO_TRIVIA, NO_TRIVIA);
-        var error = new CstNode.Error(SPAN_INNER, "@@@", "expected ident", NO_TRIVIA, NO_TRIVIA);
-        var terminal = new CstNode.Terminal(SPAN_INNER, "Number", "1", NO_TRIVIA, NO_TRIVIA);
-        CstNode root = new CstNode.NonTerminal(SPAN, "Mixed", List.of(token, error, terminal), NO_TRIVIA, NO_TRIVIA);
+        var token = new CstNode.Token(0L, SPAN_INNER, "Ident", "foo", NO_TRIVIA, NO_TRIVIA);
+        var error = new CstNode.Error(0L, SPAN_INNER, "@@@", "expected ident", NO_TRIVIA, NO_TRIVIA);
+        var terminal = new CstNode.Terminal(0L, SPAN_INNER, "Number", "1", NO_TRIVIA, NO_TRIVIA);
+        CstNode root = new CstNode.NonTerminal(0L, SPAN, "Mixed", List.of(token, error, terminal), NO_TRIVIA, NO_TRIVIA);
 
         var builtRoot = (IdCstNode.NonTerminal) freshBuilder().build(root);
 
@@ -100,7 +100,7 @@ final class IdCstNodeBuilderTest {
     void trivia_reference_identity_preserved() {
         var leading = List.<Trivia>of(new Trivia.Whitespace(SPAN_INNER, " "));
         var trailing = List.<Trivia>of(new Trivia.LineComment(SPAN_INNER, "// done"));
-        CstNode source = new CstNode.Terminal(SPAN, "Number", "1", leading, trailing);
+        CstNode source = new CstNode.Terminal(0L, SPAN, "Number", "1", leading, trailing);
 
         var built = (IdCstNode.Terminal) freshBuilder().build(source);
 
@@ -111,9 +111,9 @@ final class IdCstNodeBuilderTest {
     @Test
     @DisplayName("Two builds with independent counters yield equal trees (id excluded from equality)")
     void independent_builds_are_structurally_equal() {
-        var c1 = new CstNode.Terminal(SPAN_INNER, "Number", "1", NO_TRIVIA, NO_TRIVIA);
-        var c2 = new CstNode.Terminal(SPAN_INNER, "Number", "2", NO_TRIVIA, NO_TRIVIA);
-        CstNode source = new CstNode.NonTerminal(SPAN, "Expr", List.of(c1, c2), NO_TRIVIA, NO_TRIVIA);
+        var c1 = new CstNode.Terminal(0L, SPAN_INNER, "Number", "1", NO_TRIVIA, NO_TRIVIA);
+        var c2 = new CstNode.Terminal(0L, SPAN_INNER, "Number", "2", NO_TRIVIA, NO_TRIVIA);
+        CstNode source = new CstNode.NonTerminal(0L, SPAN, "Expr", List.of(c1, c2), NO_TRIVIA, NO_TRIVIA);
 
         var first = freshBuilder().build(source);
         var second = freshBuilder().build(source);

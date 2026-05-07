@@ -107,7 +107,7 @@ public final class StableIdNodeIndex {
         int expectedSize = countDescendants(root);
         var parents = new LinearProbingLongLongMap(Math.max(expectedSize, 4));
         indexChildren(root, parents);
-        return new StableIdNodeIndex(root, parents, -1, -1);
+        return new StableIdNodeIndex(root, parents, - 1, - 1);
     }
 
     /**
@@ -137,10 +137,8 @@ public final class StableIdNodeIndex {
         }
         var oldPivot = oldPath.get(oldPath.size() - 1);
         var newPivot = newPath.get(newPath.size() - 1);
-
         int putCount = 0;
         int removeCount = 0;
-
         // Step 1 — remove oldPivot's descendants (wholesale replaced subtree).
         // Note: we do NOT touch oldPath ancestors' entries — their ids are
         // reused on the new path, so the entries are still valid.
@@ -148,34 +146,29 @@ public final class StableIdNodeIndex {
         flattenDescendantsInto(oldPivot, oldPivotDescendants);
         for (var d : oldPivotDescendants) {
             parents.remove(d.id());
-            removeCount++;
+            removeCount++ ;
         }
-
         // Step 2 — remove the oldPivot's own up-pointer. The new pivot
         // typically has a fresh id (caller responsibility), so the old entry
         // is dead. (If the caller chose to reuse oldPivot.id() for the new
         // pivot, step 4 below will simply re-insert the same entry — still
         // correct.)
         parents.remove(oldPivot.id());
-        removeCount++;
-
+        removeCount++ ;
         // Step 3 — insert new pivot's subtree internal links.
         indexChildren(newPivot, parents);
         putCount += subtreeChildCount(newPivot);
-
         // Step 4 — wire the new pivot to its parent's stable id, unless the
         // pivot is itself the new root.
         if (newPath.size() >= 2) {
             var newPivotParent = newPath.get(newPath.size() - 2);
             parents.put(newPivot.id(), newPivotParent.id());
-            putCount++;
+            putCount++ ;
         }
-
         // Steps explicitly SKIPPED vs IdNodeIndex.applyIncremental:
         //   - removal of oldPath ancestors' entries (their ids are reused)
         //   - sibling rewire under each new ancestor (siblings already point
         //     to the correct stable id, unchanged across the splice).
-
         return new StableIdNodeIndex(newRoot, parents, putCount, removeCount);
     }
 
@@ -211,7 +204,6 @@ public final class StableIdNodeIndex {
     }
 
     // -- Helpers (mirror IdNodeIndex's static helpers) --
-
     private static int countDescendants(IdCstNode node) {
         int count = 0;
         if (node instanceof IdCstNode.NonTerminal nt) {

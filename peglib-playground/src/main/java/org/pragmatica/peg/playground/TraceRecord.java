@@ -1,5 +1,4 @@
 package org.pragmatica.peg.playground;
-
 /**
  * Single tracer event recorded by {@link ParseTracer} during a parse.
  * Events are append-only and form a chronological log of how the engine
@@ -20,7 +19,6 @@ public record TraceRecord(EventKind kind,
                           int offset,
                           long elapsedNanos,
                           String detail) {
-
     public enum EventKind {
         RULE_ENTER,
         RULE_SUCCESS,
@@ -37,10 +35,10 @@ public record TraceRecord(EventKind kind,
                                           int offset,
                                           long elapsedNanos,
                                           String detail) {
-        return new TraceRecord(kind,
-                               rule == null ? "" : rule,
-                               offset,
-                               elapsedNanos,
-                               detail == null ? "" : detail);
+        return new TraceRecord(kind, rule == null
+                                    ? ""
+                                    : rule, offset, elapsedNanos, detail == null
+                                                                 ? ""
+                                                                 : detail);
     }
 }
