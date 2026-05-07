@@ -42,8 +42,9 @@ final class BackReferenceFallbackTest {
     @DisplayName("Edit inside back-ref-bearing rule falls back to full reparse")
     void edit_triggers_full_reparse() {
         var parser = IncrementalParser.create(grammar());
-        var s0 = parser.initialize("<x>content</x>");
-        var s1 = s0.edit(3, 0, "ab");
+        var init = parser.initialize("<x>content</x>");
+        var s0 = init.session();
+        var s1 = s0.edit(init.cursor(), 3, 0, "ab").newSession();
         assertThat(s1.stats().fullReparseCount()).isEqualTo(1);
         // Parity still holds.
         var oracle = PegParser.fromGrammar(grammar()).fold(

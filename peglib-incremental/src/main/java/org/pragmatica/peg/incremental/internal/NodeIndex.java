@@ -221,6 +221,22 @@ public final class NodeIndex {
     }
 
     /**
+     * Resolve a stable {@link CstNode#id() id} to its current record reference
+     * in the post-edit tree. Returns {@link Option#none()} when the id is not
+     * known to this index — including the case where the id was valid in a
+     * predecessor index but its node was wholesale-replaced by an incremental
+     * splice (in which case the carrying record is gone with that splice).
+     *
+     * <p>0.5.0 (Lever D): used by {@link org.pragmatica.peg.incremental.Cursor}
+     * to convert its persistent {@code enclosingNodeId} back into a warm
+     * pointer for the boundary walk in
+     * {@link org.pragmatica.peg.incremental.internal.IncrementalSession}.
+     */
+    public Option<CstNode> nodeById(long id) {
+        return Option.option(nodesById.get(id));
+    }
+
+    /**
      * The parent of {@code node}, or empty {@link Option} when {@code node}
      * is the root (or not present in this index).
      */

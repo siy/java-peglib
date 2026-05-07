@@ -25,13 +25,9 @@ import org.pragmatica.peg.parser.ParserConfig;
  *       known to this grammar.</li>
  * </ul>
  *
- * <p>Sessions produced by {@link #initialize(String)} /
- * {@link #initialize(String, int)} and their descendants share these
- * resources. Thread-safe to share across threads: all state held here is
- * either immutable or uses concurrent collections.
- *
- * <p>v1 scope per {@code docs/incremental/SPEC.md} §9: CST-only, wholesale
- * packrat invalidation on every edit, no incremental action execution.
+ * <p>0.5.0 (Lever D): {@link #initialize(String, int)} returns an
+ * {@link InitialSession} bundling the Session and the initial {@link Cursor}.
+ * Cursor state is no longer carried inside the Session record — see SPEC §5.
  *
  * @since 0.3.1
  */
@@ -46,9 +42,7 @@ public interface IncrementalParser {
 
     /**
      * Create an incremental parser over {@code grammar} with a specific
-     * runtime parser configuration. The configuration's packrat /
-     * recovery / trivia flags are honoured for both full parses and
-     * incremental partial-parse calls.
+     * runtime parser configuration.
      */
     static IncrementalParser create(Grammar grammar, ParserConfig config) {
         return SessionFactory.sessionFactory(grammar, config);
@@ -56,15 +50,7 @@ public interface IncrementalParser {
 
     /**
      * Create an incremental parser with explicit control over the SPEC §5.4
-     * v2 trivia-only fast-path. When {@code triviaFastPathEnabled} is true,
-     * edits whose range fits inside a single trivia run skip the parser and
-     * rewrite the trivia in-place. The fast-path is correct only for
-     * grammars where in-trivia edits cannot change the tokenisation of
-     * adjacent tokens (simple grammars qualify; the Java 25 grammar does
-     * NOT — e.g. {@code >>} vs {@code > >}).
-     *
-     * <p>Default is {@code false} for safety; the structural reparse path
-     * always preserves correctness regardless of grammar shape.
+     * v2 trivia-only fast-path.
      *
      * @since 0.3.2
      */
@@ -73,17 +59,20 @@ public interface IncrementalParser {
     }
 
     /**
-     * Produce the initial {@link Session} over {@code buffer} with the
+     * Produce the initial {@link InitialSession} over {@code buffer} with the
      * cursor at offset 0.
      */
-    default Session initialize(String buffer) {
+    default InitialSession initialize(String buffer) {
         return initialize(buffer, 0);
     }
 
     /**
-     * Produce the initial {@link Session} over {@code buffer} with the
+     * Produce the initial {@link InitialSession} over {@code buffer} with the
      * cursor at {@code cursorOffset}. The cursor is clamped to
      * {@code [0, buffer.length()]}.
+     *
+     * <p>0.5.0 (Lever D): returns a paired {@code (Session, Cursor)} —
+     * cursor state lives outside the Session record.
      */
-    Session initialize(String buffer, int cursorOffset);
+    InitialSession initialize(String buffer, int cursorOffset);
 }

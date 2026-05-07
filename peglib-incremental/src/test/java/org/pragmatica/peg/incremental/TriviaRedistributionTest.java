@@ -43,10 +43,18 @@ final class TriviaRedistributionTest {
     }
 
     private static IncrementalParser parser() {
-        // 0.3.2 v2: trivia fast-path opt-in. Safe for this grammar because no
-        // adjacent-token tokenisation depends on intervening whitespace
-        // count (Word and Punct are character-class disjoint).
+        // 0.3.2 v2: trivia fast-path opt-in.
         return IncrementalParser.create(grammar(), ParserConfig.DEFAULT, true);
+    }
+
+    /**
+     * Apply a single edit to a freshly initialised session over {@code text}
+     * and return the post-edit Session. Lever D: takes the cursor from the
+     * InitialSession, threads it through the edit.
+     */
+    private static Session editFromInit(String text, int offset, int oldLen, String newText) {
+        var init = parser().initialize(text);
+        return init.session().edit(init.cursor(), offset, oldLen, newText).newSession();
     }
 
     private static void assertParity(Session session) {
@@ -66,17 +74,16 @@ final class TriviaRedistributionTest {
         @Test
         @DisplayName("Insert a single space inside an existing whitespace run")
         void insert_space_in_whitespace() {
-            var s = parser().initialize("let x  =  1;").edit(7, 0, " ");
+            var s = editFromInit("let x  =  1;", 7, 0, " ");
             assertParity(s);
             assertThat(s.text()).isEqualTo("let x   =  1;");
-            // Fast-path tag: stats.lastReparsedRule should be "<trivia>".
             assertThat(s.stats().lastReparsedRule()).isEqualTo("<trivia>");
         }
 
         @Test
         @DisplayName("Delete a space inside an existing whitespace run")
         void delete_space_in_whitespace() {
-            var s = parser().initialize("let x   =   1;").edit(7, 1, "");
+            var s = editFromInit("let x   =   1;", 7, 1, "");
             assertParity(s);
             assertThat(s.text()).isEqualTo("let x  =   1;");
             assertThat(s.stats().lastReparsedRule()).isEqualTo("<trivia>");
@@ -85,7 +92,7 @@ final class TriviaRedistributionTest {
         @Test
         @DisplayName("Replace whitespace run with different whitespace mixture")
         void replace_whitespace_with_whitespace() {
-            var s = parser().initialize("let x  =  1;").edit(6, 1, "\t");
+            var s = editFromInit("let x  =  1;", 6, 1, "\t");
             assertParity(s);
             assertThat(s.stats().lastReparsedRule()).isEqualTo("<trivia>");
         }
@@ -93,7 +100,7 @@ final class TriviaRedistributionTest {
         @Test
         @DisplayName("Insert a newline (still whitespace) into a whitespace run")
         void insert_newline_in_whitespace() {
-            var s = parser().initialize("let x = 1;\n let y = 2;").edit(11, 0, "\n");
+            var s = editFromInit("let x = 1;\n let y = 2;", 11, 0, "\n");
             assertParity(s);
             assertThat(s.stats().lastReparsedRule()).isEqualTo("<trivia>");
         }
@@ -101,11 +108,7 @@ final class TriviaRedistributionTest {
         @Test
         @DisplayName("Delete a single character from a multi-line whitespace run")
         void delete_blank_line_between_statements() {
-            // Whitespace tokenisation in 0.2.4 makes each char a separate
-            // trivia entry, so delete-of-a-single-whitespace-char fits the
-            // single-run fast-path; a multi-char delete spans entries and
-            // intentionally falls through to structural reparse.
-            var s = parser().initialize("let x = 1;\n\n\nlet y = 2;").edit(11, 1, "");
+            var s = editFromInit("let x = 1;\n\n\nlet y = 2;", 11, 1, "");
             assertParity(s);
             assertThat(s.text()).isEqualTo("let x = 1;\n\nlet y = 2;");
             assertThat(s.stats().lastReparsedRule()).isEqualTo("<trivia>");
@@ -119,21 +122,16 @@ final class TriviaRedistributionTest {
         @Test
         @DisplayName("Edit straddling whitespace + token: must NOT take fast-path")
         void edit_spans_trivia_and_token() {
-            var s = parser().initialize("let x = 1;").edit(5, 3, "y =");
+            var s = editFromInit("let x = 1;", 5, 3, "y =");
             assertParity(s);
-            // The edit overlaps the identifier 'x' so the trivia fast-path
-            // must decline; lastReparsedRule should be a real rule, not the
-            // trivia sentinel.
             assertThat(s.stats().lastReparsedRule()).isNotEqualTo("<trivia>");
         }
 
         @Test
         @DisplayName("Insert non-whitespace into a whitespace run: declines fast-path")
         void insert_non_whitespace_in_whitespace() {
-            var s = parser().initialize("let x  = 1;").edit(6, 0, "y");
+            var s = editFromInit("let x  = 1;", 6, 0, "y");
             assertParity(s);
-            // Inserting 'y' inside whitespace introduces a new identifier — the
-            // fast-path's same-class check rejects this; structural reparse runs.
             assertThat(s.stats().lastReparsedRule()).isNotEqualTo("<trivia>");
         }
     }
@@ -145,19 +143,21 @@ final class TriviaRedistributionTest {
         @Test
         @DisplayName("Sequential trivia deletes still produce parity at every step")
         void multiple_trivia_deletes() {
-            var session = parser().initialize("let x   =   1   ;");
-            session = session.edit(5, 1, "");
-            assertParity(session);
-            session = session.edit(7, 1, "");
-            assertParity(session);
-            session = session.edit(9, 1, "");
-            assertParity(session);
+            var init = parser().initialize("let x   =   1   ;");
+            var session = init.session();
+            var cursor = init.cursor();
+            var o1 = session.edit(cursor, 5, 1, "");
+            assertParity(o1.newSession());
+            var o2 = o1.newSession().edit(o1.newCursor(), 7, 1, "");
+            assertParity(o2.newSession());
+            var o3 = o2.newSession().edit(o2.newCursor(), 9, 1, "");
+            assertParity(o3.newSession());
         }
 
         @Test
         @DisplayName("Delete entire whitespace run between two tokens")
         void delete_whitespace_entirely() {
-            var s = parser().initialize("let x = 1; let y = 2;").edit(10, 1, "");
+            var s = editFromInit("let x = 1; let y = 2;", 10, 1, "");
             assertParity(s);
             assertThat(s.text()).isEqualTo("let x = 1;let y = 2;");
         }
@@ -170,23 +170,22 @@ final class TriviaRedistributionTest {
         @Test
         @DisplayName("Insert trivia between two tokens that previously had no whitespace")
         void insert_trivia_between_adjacent_tokens() {
-            // No whitespace between '1' and ';' originally — inserting a space
-            // there does NOT lie inside an existing trivia run, so the
-            // fast-path declines and structural reparse runs. Parity must hold.
-            var s = parser().initialize("let x=1;").edit(7, 0, " ");
+            var s = editFromInit("let x=1;", 7, 0, " ");
             assertParity(s);
         }
 
         @Test
         @DisplayName("Repeated trivia inserts sustain parity at every step")
         void repeated_trivia_inserts() {
-            var session = parser().initialize("let x = 1; let y = 2;");
-            session = session.edit(5, 0, " ");
-            assertParity(session);
-            session = session.edit(7, 0, " ");
-            assertParity(session);
-            session = session.edit(11, 0, "\n");
-            assertParity(session);
+            var init = parser().initialize("let x = 1; let y = 2;");
+            var session = init.session();
+            var cursor = init.cursor();
+            var o1 = session.edit(cursor, 5, 0, " ");
+            assertParity(o1.newSession());
+            var o2 = o1.newSession().edit(o1.newCursor(), 7, 0, " ");
+            assertParity(o2.newSession());
+            var o3 = o2.newSession().edit(o2.newCursor(), 11, 0, "\n");
+            assertParity(o3.newSession());
         }
     }
 }

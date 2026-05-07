@@ -7,11 +7,20 @@
  *       turns a {@link org.pragmatica.peg.grammar.Grammar} into an incremental
  *       parser.</li>
  *   <li>{@link org.pragmatica.peg.incremental.Session} — immutable per-buffer
- *       state; every {@code edit(...)} / {@code moveCursor(...)} call returns a
- *       new {@code Session} sharing untouched CST subtrees with its predecessor.</li>
+ *       state ({@code text}, {@code root}, {@code index}, {@code stats}).
+ *       Every {@code edit(...)} / {@code reparseAll(...)} call returns a new
+ *       Session sharing untouched CST subtrees with its predecessor.</li>
+ *   <li>{@link org.pragmatica.peg.incremental.Cursor} — 0.5.0 (Lever D):
+ *       editor-style cursor, split out of {@code Session}; carries an offset
+ *       and the stable id of its enclosing CST node so cursor moves don't
+ *       allocate a Session.</li>
  *   <li>{@link org.pragmatica.peg.incremental.Edit} — record describing a single
  *       splice over the current buffer ({@code offset}, {@code oldLen},
  *       {@code newText}).</li>
+ *   <li>{@link org.pragmatica.peg.incremental.EditOutcome} /
+ *       {@link org.pragmatica.peg.incremental.ReparseOutcome} /
+ *       {@link org.pragmatica.peg.incremental.InitialSession} — paired
+ *       {@code (Session, Cursor)} return shapes from edit / reparse / initialize.</li>
  *   <li>{@link org.pragmatica.peg.incremental.Stats} — per-session bookkeeping
  *       exposed for diagnostics / JMH.</li>
  * </ul>

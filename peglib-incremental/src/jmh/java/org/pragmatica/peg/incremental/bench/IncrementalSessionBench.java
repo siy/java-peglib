@@ -1,7 +1,9 @@
 package org.pragmatica.peg.incremental.bench;
 
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.incremental.Cursor;
 import org.pragmatica.peg.incremental.Edit;
+import org.pragmatica.peg.incremental.EditOutcome;
 import org.pragmatica.peg.incremental.IncrementalParser;
 import org.pragmatica.peg.incremental.Session;
 
@@ -166,7 +168,9 @@ public final class IncrementalSessionBench {
                                            String fixtureSource,
                                            List<ClassifiedEdit> plan,
                                            boolean moveCursor) {
-        var session = parser.initialize(fixtureSource, 0);
+        var init = parser.initialize(fixtureSource, 0);
+        Session session = init.session();
+        Cursor cursor = init.cursor();
         int prevFallbacks = session.stats()
                                    .fullReparseCount();
         var out = new Measurement[plan.size()];
@@ -192,17 +196,22 @@ public final class IncrementalSessionBench {
                                          0);
                 continue;
             }
+            // Lever D: cursor moves are pure (no Session allocation). For Regime B
+            // we move the cursor BEFORE timing — but the move is now a 16-byte
+            // record alloc, so include or exclude makes no measurable difference;
+            // we keep the move inside the timed window for fidelity to the prior
+            // bench shape.
             long t0 = System.nanoTime();
-            Session next = moveCursor
-                           ? session.moveCursor(edit.offset())
-                                    .edit(edit)
-                           : session.edit(edit);
+            Cursor editCursor = moveCursor
+                                ? cursor.moveTo(edit.offset(), session.index())
+                                : cursor;
+            EditOutcome outcome = session.edit(editCursor, edit);
             long t1 = System.nanoTime();
             long latencyNs = t1 - t0;
+            Session next = outcome.newSession();
             // Post-edit validation: if the parser rejected the new buffer, Session.edit
             // returns a degraded session whose parseSuccessful() is false. Treat the
-            // edit as INVALIDATED, keep the previous session, and exclude the latency
-            // sample from the timing buckets (mirrors the prior pre-validation skip).
+            // edit as INVALIDATED, keep the previous session and cursor.
             if (!next.parseSuccessful()) {
                 out[i] = new Measurement(ce.cls(),
                                          - 1L,
@@ -233,19 +242,23 @@ public final class IncrementalSessionBench {
                                      stats.lastReparsedRule(),
                                      stats.lastReparsedNodeCount());
             session = next;
+            cursor = outcome.newCursor();
         }
         return out;
     }
 
     private static void warmJit(IncrementalParser parser, String fixtureSource) {
-        var s = parser.initialize(fixtureSource, fixtureSource.length() / 2);
+        var init = parser.initialize(fixtureSource, fixtureSource.length() / 2);
+        Session s = init.session();
+        Cursor c = init.cursor();
         for (int i = 0; i < 20; i++) {
             int off = (i * 37 + 100) % s.text()
                                        .length();
-            // Post-migration: edit never throws on parse failure; degraded sessions
-            // are harmless during JIT warmup so we don't bother inspecting parseSuccessful().
-            s = s.moveCursor(off)
-                 .edit(new Edit(off, 0, "x"));
+            // Post-migration: edit never throws on parse failure.
+            c = c.moveTo(off, s.index());
+            var outcome = s.edit(c, new Edit(off, 0, "x"));
+            s = outcome.newSession();
+            c = outcome.newCursor();
         }
     }
 

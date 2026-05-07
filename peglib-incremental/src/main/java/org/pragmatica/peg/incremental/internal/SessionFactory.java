@@ -4,7 +4,9 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.peg.PegParser;
 import org.pragmatica.peg.action.RuleId;
 import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.incremental.Cursor;
 import org.pragmatica.peg.incremental.IncrementalParser;
+import org.pragmatica.peg.incremental.InitialSession;
 import org.pragmatica.peg.incremental.Session;
 import org.pragmatica.peg.incremental.SessionError;
 import org.pragmatica.peg.parser.Parser;
@@ -100,7 +102,7 @@ public final class SessionFactory implements IncrementalParser {
     }
 
     @Override
-    public Session initialize(String buffer, int cursorOffset) {
+    public InitialSession initialize(String buffer, int cursorOffset) {
         if (buffer == null) {
             throw new IllegalArgumentException("buffer must not be null");
         }
@@ -114,9 +116,12 @@ public final class SessionFactory implements IncrementalParser {
         // degraded Session per Path A: caller's contract on initialize is
         // non-Result, so wrap the failure in a CstNode.Error root and surface
         // it through Session#parseSuccessful()/lastParseError().
-        return parseFull(buffer, idGen)
-        .fold(cause -> IncrementalSession.degradedInitial(this, buffer, clampedCursor, idGen, (SessionError) cause),
-              root -> IncrementalSession.initial(this, buffer, clampedCursor, root, idGen));
+        // 0.5.0 (Lever D): return Session paired with an initial Cursor.
+        IncrementalSession session = parseFull(buffer, idGen)
+        .fold(cause -> IncrementalSession.degradedInitial(this, buffer, idGen, (SessionError) cause),
+              root -> IncrementalSession.initial(this, buffer, root, idGen));
+        var cursor = Cursor.at(clampedCursor, session.index());
+        return new InitialSession(session, cursor);
     }
 
     Grammar grammar() {

@@ -14,6 +14,7 @@ import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.incremental.Cursor;
 import org.pragmatica.peg.incremental.Edit;
 import org.pragmatica.peg.incremental.IncrementalParser;
 import org.pragmatica.peg.incremental.Session;
@@ -78,6 +79,7 @@ public class IncrementalBenchmark {
 
     // For per-edit variants: a warm session at trial level, edited at invocation level.
     private Session warmSession;
+    private Cursor warmCursor;
     // Saved predecessor for undoRestore.
     private Session savedSession;
     // Edit configuration per variant.
@@ -96,7 +98,9 @@ public class IncrementalBenchmark {
             g -> g);
         parser = IncrementalParser.create(grammar);
 
-        warmSession = parser.initialize(fixtureSource, fixtureSource.length() / 2);
+        var init = parser.initialize(fixtureSource, fixtureSource.length() / 2);
+        warmSession = init.session();
+        warmCursor = init.cursor();
         savedSession = warmSession;
 
         // Pick edit offsets that land in the file's body (not in the
@@ -128,10 +132,10 @@ public class IncrementalBenchmark {
     public Object run() {
         return switch (variant) {
             case "initialize" -> parser.initialize(fixtureSource, 0);
-            case "singleCharEdit" -> warmSession.edit(new Edit(singleCharOffset, 0, "x"));
-            case "wordEdit" -> warmSession.edit(new Edit(wordOffset, 0, wordReplacement));
-            case "lineEdit" -> warmSession.edit(new Edit(lineOffset, 0, lineInsertion));
-            case "fullReparse" -> warmSession.reparseAll();
+            case "singleCharEdit" -> warmSession.edit(warmCursor, new Edit(singleCharOffset, 0, "x"));
+            case "wordEdit" -> warmSession.edit(warmCursor, new Edit(wordOffset, 0, wordReplacement));
+            case "lineEdit" -> warmSession.edit(warmCursor, new Edit(lineOffset, 0, lineInsertion));
+            case "fullReparse" -> warmSession.reparseAll(warmCursor);
             case "undoRestore" -> savedSession;
             default -> throw new IllegalArgumentException("Unknown variant: " + variant);
         };
