@@ -272,25 +272,38 @@ Regen via:
 
 **Phase 0 spike landed GO on 2026-05-07.** All three GO/NO-GO gates green; Phase 1 (production migration of Lever A) is the next-session entry. Read `docs/incremental/PHASE-0-RESULTS.md` for the full verdict + bench numbers (38–67× speedup confirmed) before starting.
 
-State of `release-0.5.0` branch (5 commits past `1619604` chore — local only, not pushed):
+State of `release-0.5.0` branch (8 commits past `1619604` chore — local only, not pushed):
 
 - `d00eaa1` Phase 0a — `IdGenerator` + `LongLongMap` foundation
 - `f0696a1` Phase 0b — sandbox `IdCstNode` + `IdCstNodeBuilder`
 - `849b4ba` Phase 0c — sandbox `IdNodeIndex` with O(splicedSize+depth) incremental update
 - `9b55253` Phase 0d.1 — `IdTreeSplicer` + identity-invariant + trivia-edit gates
-- `a2dd8ac` Phase 0d.2 — JMH `Phase0SpikeBench` + results note
+- `a2dd8ac` Phase 0d.2 — JMH `Phase0SpikeBench` + results note (38-67× balanced-tree)
+- `a8c6efe` Phase 0e — GO verdict doc + CHANGELOG entry
+- `8f844eb` Path A prove-out — SpanIndex / offset decoupling (RED, 1.10-1.29×)
+- `8b27dd6` Path D prove-out — stable-id ancestor preservation (GREEN, 96-604×)
 
-All work additive in `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/experimental/` and the parallel test/jmh directories. 897-test production surface untouched throughout. Local incremental count: 154 (was 100, +54 sandbox tests). 699 core unchanged.
+All work additive in `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/experimental/` and the parallel test/jmh directories. 897-test production surface untouched throughout. Local incremental count: 190 (was 100, +90 sandbox tests). 699 core unchanged.
 
-### Phase 1 — production Lever A migration (next session)
+### Phase 1 — production migration (path D, next session)
 
-Per spec §6 Phase 1 (~1 week elapsed): migrate production `CstNode` to ID-bearing variants, switch `NodeIndex` from `IdentityHashMap` to `LongLongMap`. Three concrete items surfaced by Phase 0 (per `PHASE-0-RESULTS.md` §"Notes for Phase 1") that Phase 1 should address:
+The Phase 1 prove-out (`docs/incremental/PHASE-1-PROVE-OUT.md`) discovered that the spec §2 algorithm degrades to O(N) on flat trees (e.g., a method body with 1000 statements). Path A (offset decoupling) was prove-out RED — 1.10-1.29× speedup, far short of the 5× gate. **Path D (stable-id ancestor preservation) is GREEN** — 96× at 1000 nodes, 604× at 10000 nodes, with absolute time *flat* across N (~25-40 ns) confirming genuine O(δ) scaling.
 
-1. **Cross-parse record sharing** — `IdCstNodeBuilder` re-assigns fresh IDs every conversion. The 0.5.0 perf depends on `TreeSplicer.spliceAndShift` being the source of identity-shared trees, not the parser. Phase 1 task #1: confirm `TreeSplicer.spliceAndShift` preserves sibling identity (spec §8 Q3 second sentence). Fix it if not.
-2. **`applyIncremental` mutate-in-place semantics** — sandbox API invalidates the receiver. Production needs to choose: copy-on-write via `LongLongMap.copy()` (cheap — primitive arrays vs IdentityHashMap entries) or persistent map. Decision affects `IncrementalSession`'s API shape.
-3. **Worst-case splices not benched** — spike measures depth-3, small-pivot. Class-body-scale rewrites need a separate bench.
+The fix is small: when `TreeSplicer.spliceAndShift` builds new ancestor records, reuse `oldAncestor.id()` instead of allocating a fresh one. Then `applyIncremental` skips the redundant ancestor rewiring (steps 1 and 3 of spec §2 disappear — only oldPivot's descendants and newPivot's subtree need touching).
 
-After Phase 1 lands and IncrementalParityTest stays green at 22×100, proceed to Phase 2 (Lever B top-down pivot — should dissolve the §6.2 lever-1 puzzle into a 30-line method per spec §3).
+**Critical:** splicer + index migrate as a unit. The bench's middle column (`stableIdNoOpt` = stable splicer + original `applyIncremental`) matches productionStyle within noise. The optimized `applyIncremental` that *trusts* ID stability is what realizes the gain.
+
+Phase 1 sub-phases (per `PHASE-1-PROVE-OUT.md` §"Phase 1 production migration plan"):
+1. **1.2** — add `long id` field to production `CstNode` variants; override equals/hashCode to exclude id (spec §7 R1). Migrate hundreds of pattern-match call sites across all 5 modules.
+2. **1.3** — thread `IdGenerator` through `PegEngine` + `ParserGenerator` emission templates.
+3. **1.4** — modify `TreeSplicer.spliceAndShift` to reuse ancestor IDs (one-line behavioral change).
+4. **1.5** — switch `NodeIndex` from `IdentityHashMap` to `LongLongMap`.
+5. **1.6** — replace `IncrementalSession.applyIncremental` with Path D's optimized algorithm (step 1 and step 3 deleted).
+6. **1.7** — verify parity (897 + IncrementalParityTest 22×100) + bench against 0.4.3 baseline on the 1900-LOC fixture.
+
+**Estimated 3-5 days focused engineering.** Smaller than the spec's original 1-week estimate because Path A is shelved and Path D is a much smaller change.
+
+After Phase 1 lands, proceed to Phase 2 (Lever B top-down pivot — should dissolve the §6.2 lever-1 puzzle into a 30-line method per spec §3).
 
 ### Items now superseded
 
