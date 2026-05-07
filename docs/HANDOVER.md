@@ -270,50 +270,70 @@ Regen via:
 
 ## 11. Recommended next session
 
-**Phase 1 production migration of Path D landed on 2026-05-07.** Median 1.9× faster than 0.4.3, p95 35% better, frame-budget hit rate +4.4pp. p99/max regressed on large-pivot edits — accepted trade vs Path A's much-larger-scope refactor. Read `docs/incremental/PHASE-1-RESULTS.md` for the full verdict + bench numbers + caveats before starting Phase 2.
+**Phase 1 production migration of Path D + Lever D Cursor split landed on 2026-05-07.** Bench harness fixed; parseFull migrated to Result; sandbox cleaned up; Lever B investigated and deferred.
 
-State of `release-0.5.0` branch (15 commits past `1619604` chore — local only, not pushed):
+Headline numbers vs 0.4.3 baseline (`IncrementalSessionBench`, 1900-LOC fixture, Regime B cursor-moved-to-edit):
 
-**Phase 0 — spike (sandbox):**
-- `d00eaa1` 0a — `IdGenerator` + `LongLongMap` foundation
-- `f0696a1` 0b — sandbox `IdCstNode` + `IdCstNodeBuilder`
-- `849b4ba` 0c — sandbox `IdNodeIndex` with O(splicedSize+depth) incremental update
-- `9b55253` 0d.1 — `IdTreeSplicer` + identity-invariant + trivia-edit gates
-- `a2dd8ac` 0d.2 — JMH `Phase0SpikeBench` + results note (38-67× balanced)
-- `a8c6efe` 0e — GO verdict doc + CHANGELOG entry
+| Metric | 0.4.3 | 0.5.0 (current branch) | Change |
+|---|---:|---:|---:|
+| Median | 10.8 ms | **5.0 ms** | **-54% (2.2× faster)** |
+| p95 | 22.4 ms | **11.2 ms** | **-50%** |
+| p99 | 53.3 ms | 90.5 ms | +70% (large-pivot tail, deferred) |
+| % under 16 ms | 91.5% | **96.5%** | **+5 pp** |
+| Exceptions in bench log | n/a | **0** | clean signal |
+
+State of `release-0.5.0` branch (20 commits past `1619604` chore — local only, **not pushed**):
+
+**Phase 0 — spike (sandbox; later deleted in cleanup):**
+- `d00eaa1` 0a / `f0696a1` 0b / `849b4ba` 0c / `9b55253` 0d.1 / `a2dd8ac` 0d.2 / `a8c6efe` 0e GO verdict
 
 **Phase 1 — prove-out + production migration:**
-- `8f844eb` Path A prove-out — SpanIndex / offset decoupling (RED, 1.10-1.29×)
-- `8b27dd6` Path D prove-out — stable-id ancestor preservation (GREEN, 96-604×)
-- `4043ddc` docs — phase 1 prove-out summary
-- `2443779` 1.2 — production CstNode gains long id (BREAKING)
-- `39e11f9` 1.5/1.6 — NodeIndex LongLongMap + Path D applyIncremental + tombstone fix
-- `65a719f` 1.7 — refresh nodesById after shiftAll + bench exception diagnostics
+- `8f844eb` Path A prove-out (SpanIndex / offset decoupling — RED, 1.10-1.29×)
+- `8b27dd6` Path D prove-out (stable-id ancestor preservation — GREEN, 96-604×)
+- `4043ddc` docs prove-out summary
+- `2443779` 1.2 production CstNode gains long id (BREAKING)
+- `39e11f9` 1.5/1.6 NodeIndex LongLongMap + Path D applyIncremental + tombstone fix
+- `65a719f` 1.7 refresh nodesById after shiftAll
+- `43baaf8` Phase 1 results doc
 
-Tests: 993 green (699 core + 196 incremental + 66 formatter + 5 maven-plugin + 27 playground). IncrementalParityTest 22×100 green throughout. 0 skipped, 0 failures, 0 errors.
+**Phase 2 attempted, rolled back:**
+- `e038e4f` Lever B "strict literal-prefix" cost 4× perf — wiring rolled back, SafePivotAnalyzer + smallestEnclosing kept dormant
 
-### Phase 2 — Lever B top-down pivot search (next session)
+**Bench + JBCT cleanup:**
+- `0ea98af` bench post-edit validation (0 exceptions, 41% faster)
+- `4ad5824` parseFull → Result + Session.parseSuccessful() (no more thrown exceptions on parse failure)
 
-Per spec §3 — should dissolve the §6.2 lever-1 puzzle into a 30-line method now that Phase 1's stable IDs make descent-from-root cheap (O(depth × branching) via id-keyed `nodesById` lookups instead of O(N) tree walks).
+**Sandbox + Lever D:**
+- `5275d86` sandbox cleanup (-5463 LOC, 31 files removed)
+- `4f06046` Lever D Cursor extracted from Session record (p99 -53%, frame budget +1.1pp)
 
-Two concrete motivators from Phase 1.7's bench data (per `PHASE-1-RESULTS.md` §"Bench caveats"):
+Tests: 922 green (699 core + 125 incremental + 66 formatter + 5 maven-plugin + 27 playground). IncrementalParityTest + IncrementalTriviaParityTest green throughout.
 
-1. **Cursor-aware regime asymmetry, 57 edits.** Regime A (cursor-pinned) reports 622 successful edits; Regime B (cursor-moved-to-edit) reports 565. The 57-edit gap likely reflects cases where the warm-pointer pivot search picks a slightly different (less safe) pivot in Regime B. Lever B's top-down descent + safe-pivot heuristic should dissolve this.
+### Lever B status — blocked on trivia attribution
 
-2. **Large-pivot p99 tail.** The p99/max regression (138 ms / 391 ms vs 0.4.3's 53 ms / 99 ms) localizes to edits where the boundary algorithm chose a 2k-7k-node interior pivot. `TreeSplicer.shiftAll` then deep-copies all right-of-edit descendants. Lever B's smarter pivot selection should pick smaller pivots more often, reducing the tail.
+Two empirical iterations (Phase 2 strict literal-prefix; Lever B v2 boundary-touch walk-up) both fail `IncrementalTriviaParityTest`. Root cause: trivia attribution is **context-sensitive** — when an edit lands at a trivia/non-trivia seam, in-isolation reparse attaches trivia differently than full reparse. Walking up doesn't fix internal seams.
 
-Phase 2 deliverables (per spec §6 Phase 2, ~3 days):
-- `IncrementalSession.findBoundaryCandidate` replaced with top-down descent from root using `NodeIndex.nodesById` (O(depth × branching))
-- Safe-pivot detection added to grammar analysis (rules whose `parseRuleAt` provably matches full reparse — rules starting with unambiguous terminals like Block `{`, Stmt mixed delim)
-- `BackReferenceFallbackTest.edit_triggers_full_reparse` — currently passes via warm-pointer cursor-spine accident; verify it still passes via the descent + safe-pivot exclusion
-- IncrementalParityTest stays green at 22×100
-- Re-run IncrementalSessionBench; gate on Regime B success count reaching parity with Regime A AND p99 falling below 100 ms
+Lever B retry must wait for **trivia attribution rework** — likely comparable scope to Lever C. SafePivotAnalyzer + NodeIndex.smallestEnclosing live as dormant infrastructure.
 
-### Bench harness improvement (high priority alongside Phase 2)
+The 57-edit cursor-asymmetry (Regime A 622 vs Regime B 571 applied) survived Lever D — confirms it's a pivot-selection issue, not a Session-storage issue. Will dissolve when Lever B retries.
 
-`IncrementalSessionBench` produces edit sequences that occasionally corrupt buffer syntax over time. 398 of 435 Regime B exceptions in Phase 1.7 are the same syntax error from a recurring corruption (per `PHASE-1-RESULTS.md` §"Bench caveats" item 1). Phase 2 should:
-- Gate edit application on parse validity before committing the edit to the bench's cumulative buffer
-- Or, treat fall-through-to-fallback as a soft outcome (record but don't count as skipped)
+### Recommended next moves (in priority order)
+
+1. **Push the branch + tag 0.5.0-alpha** — bookmark this work as a public marker. The branch is shippable: median 2.2× faster than 0.4.3, frame budget 96.5%, 0 exceptions, clean API.
+
+2. **Lever C — IR-based interpreter/generator unification** (spec §4, ~1-2 weeks). Two extraction options:
+   - **α full**: new `peglib-rt` module, both PegEngine + ParserGenerator migrate. Generated parsers gain a peglib-rt dependency (50KB jar).
+   - **β phased**: `ParseRuntime` extracted inside peglib-core first, PegEngine refactored to delegate (~3-4 days, low risk). Generator migration as second pass.
+
+   Eliminates the "every fix paid twice" pattern (interpreter + emission templates duplicate algorithm). Reduces 7,440 LOC across PegEngine + ParserGenerator to ~1,700.
+
+3. **Trivia attribution rework** — context-independent attachment (always-left or always-right). Unblocks Lever B retry. Comparable scope to Lever C. Could be combined.
+
+4. **Lever B retry** — after trivia rework. The literal-prefix gate may not be needed; lighter check suffices.
+
+5. **Phase 5 release** — migration guide, CHANGELOG cleanup, 0.5.0 tag.
+
+### Items now superseded
 
 ### Items now superseded
 
@@ -325,7 +345,7 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — see prio
 
 ---
 
-**Last updated:** 2026-05-07, after Phase 1 production migration landed. Path D's stable-id-ancestor architecture is in place and validated against the 0.4.3 baseline. Branch is local-only at 15 commits past chore; recommend pushing as a public Phase 1 marker before Phase 2 work begins.
+**Last updated:** 2026-05-07, after Phase 1 production migration + Lever D Cursor split + bench/JBCT cleanup. Lever B blocked on trivia attribution rework. Branch is local-only at 20 commits past chore (last `4f06046`); recommend pushing as 0.5.0-alpha marker before Lever C work begins.
 
 ### Items now superseded
 

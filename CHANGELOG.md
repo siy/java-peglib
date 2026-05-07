@@ -45,7 +45,32 @@ Median + p95 + frame-budget hit rate clearly improved. p99/max regressed for lar
 
 See [`docs/incremental/PHASE-1-RESULTS.md`](docs/incremental/PHASE-1-RESULTS.md) for full sub-phase summary and bench caveats.
 
-Phase 2 (Lever B top-down pivot search) is the next-session entry point.
+### Phase 2 attempted, rolled back; bench + JBCT cleanup; Lever D Cursor split (2026-05-07)
+
+**Lever B (top-down pivot)** — investigated and deferred. Two empirical iterations both fail `IncrementalTriviaParityTest`:
+- "Strict literal-prefix safe-pivot" (per spec §3): correctness-sound but cost 4× perf — only ~30/133 Java25 rules admitted, forcing walk-up to Block/RecordBody pivots.
+- "Boundary-touch walk-up": pivot's internal child boundaries still produce trivia divergence.
+
+Root cause: trivia attribution is context-sensitive — Lever B retry blocked on trivia attribution refactor. `SafePivotAnalyzer` + `NodeIndex.smallestEnclosing` preserved as dormant infrastructure. Phase 2 wiring rolled back; Phase 1.7 algorithm restored.
+
+**Bench harness** — `IncrementalSessionBench` now validates each edit post-application; if the resulting buffer is syntactically invalid, the bench rolls back the session and skips the edit. Eliminates the 746-exception buffer-corruption tail that polluted prior bench logs. 41% faster wallclock.
+
+**JBCT cleanup** — `SessionFactory.parseFull` now returns `Result<Session>` instead of throwing `IllegalStateException`. New `SessionError` sealed Cause type. Public `Session.edit` always returns a Session; parse failures surface via new `Session.parseSuccessful()` instead of exceptional control flow. Bench's dead try/catch removed. Aligns with project JBCT mandate (Result for failure-return, no exceptions in business logic).
+
+**Sandbox cleanup** — Phase 0/1 prove-out code (the `experimental/` package + 5 sandbox JMH benches) removed. Production has equivalents (`IdGenerator` in `peglib-core/tree`, `LongLongMap` in `peglib-incremental/internal`). -5463 LOC across 31 files. Git history preserves the journey.
+
+**Lever D — Cursor/Session split** (per spec §5). Cursor state (offset + enclosingNodeId) extracted from `IncrementalSession` record into a new public `Cursor` record. New `EditOutcome(Session, Cursor)` and `ReparseOutcome(Session, Cursor)` records returned by `edit` / `reparseAll`. `Cursor.moveTo(int newOffset, NodeIndex index)` is pure — no Session allocation. `InitialSession(Session, Cursor)` returned by `IncrementalParser.initialize`. Cursor uses Phase 1's stable `long enclosingNodeId` so it survives session churn.
+
+Bench post-Lever-D vs Phase 1.7 baseline (Regime B):
+
+| Metric | Phase 1.7 | Post-Lever-D |
+|---|---:|---:|
+| Median | 5.5 ms | **5.0 ms** (-9%) |
+| p95 | 14.6 ms | **11.2 ms** (-23%) |
+| p99 | 192.7 ms | **90.5 ms** (-53%) |
+| % under 16 ms | 95.4% | **96.5%** (+1.1 pp) |
+
+Lever C (peglib-rt IR unification per spec §4) is the next-session entry point.
 
 ## [0.4.3] - 2026-05-06
 
