@@ -248,6 +248,66 @@ public final class NodeIndex {
     }
 
     /**
+     * Phase 2 (v0.5.0) — Lever B: top-down descent to the smallest node whose
+     * span <em>strictly contains</em> the half-open edit range
+     * {@code [editStart, editEnd]} in the pre-edit buffer.
+     *
+     * <p>Replaces the warm-pointer walk-up from
+     * {@link IncrementalSession#findBoundaryCandidate} for incremental boundary
+     * selection. With Phase 1's stable IDs and id-keyed {@code nodesById},
+     * descent-from-root is O(depth × branching) — a few microseconds even on
+     * tens-of-thousands-of-node trees. Top-down is also REGIME-INSENSITIVE: a
+     * cursor pinned at offset 0 picks the same pivot as one moved to the edit
+     * site, eliminating Phase 1.7's Regime A/B asymmetry.
+     *
+     * <p>Algorithm: start at root; at each level look for the (single) child
+     * whose span strictly contains the edit range; descend if found, stop if
+     * not. The stopping point is either:
+     * <ul>
+     *   <li>a leaf (Terminal/Token/Error) entirely containing the edit, or</li>
+     *   <li>an interior node whose children straddle the edit boundary (no
+     *       single child contains it). That node is the correct pivot — the
+     *       smallest <em>structural</em> region affected.</li>
+     * </ul>
+     *
+     * <p>Boundary semantics match {@link #contains(CstNode, int)}: offsets are
+     * inclusive on both ends. A zero-length insertion at offset X is treated
+     * as inside any node whose {@code start <= X <= end}.
+     *
+     * <p>Returns {@link Option#none()} when the root itself does not contain
+     * {@code [editStart, editEnd]} (e.g., append past EOF). Callers handle
+     * the empty case by falling back to a full reparse.
+     */
+    public Option<CstNode> smallestEnclosing(int editStart, int editEnd) {
+        if (root == null) {
+            return Option.none();
+        }
+        var rootSpan = root.span();
+        if (rootSpan.startOffset() > editStart || rootSpan.endOffset() < editEnd) {
+            return Option.none();
+        }
+        var current = root;
+        while (current instanceof CstNode.NonTerminal nt) {
+            var next = pickStrictlyContainingChild(nt, editStart, editEnd);
+            if (next == null) {
+                break;
+            }
+            current = next;
+        }
+        return Option.some(current);
+    }
+
+    private static CstNode pickStrictlyContainingChild(CstNode.NonTerminal nt, int editStart, int editEnd) {
+        for (var child : nt.children()) {
+            var span = child.span();
+            if (span.startOffset() <= editStart && editEnd <= span.endOffset()) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Climb from {@code start} up through parents until a node containing
      * {@code offset} is found, then descend to the smallest containing
      * descendant. Matches SPEC §5.2 "cheap walk from current enclosingNode".

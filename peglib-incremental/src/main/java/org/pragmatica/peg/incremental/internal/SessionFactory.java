@@ -35,6 +35,7 @@ public final class SessionFactory implements IncrementalParser {
     private final ParserConfig config;
     private final Parser parser;
     private final Set<String> fallbackRules;
+    private final Set<String> safePivotRules;
     private final RuleIdRegistry registry;
     private final boolean triviaFastPathEnabled;
 
@@ -42,11 +43,13 @@ public final class SessionFactory implements IncrementalParser {
                            ParserConfig config,
                            Parser parser,
                            Set<String> fallbackRules,
+                           Set<String> safePivotRules,
                            boolean triviaFastPathEnabled) {
         this.grammar = grammar;
         this.config = config;
         this.parser = parser;
         this.fallbackRules = fallbackRules;
+        this.safePivotRules = safePivotRules;
         this.registry = new RuleIdRegistry();
         this.triviaFastPathEnabled = triviaFastPathEnabled;
     }
@@ -90,7 +93,8 @@ public final class SessionFactory implements IncrementalParser {
                                     },
                                     p -> p);
         var fallback = BackReferenceScan.unsafeRules(grammar);
-        return new SessionFactory(grammar, config, parser, fallback, triviaFastPathEnabled);
+        var safePivots = SafePivotAnalyzer.safePivotRules(grammar);
+        return new SessionFactory(grammar, config, parser, fallback, safePivots, triviaFastPathEnabled);
     }
 
     @Override
@@ -122,6 +126,17 @@ public final class SessionFactory implements IncrementalParser {
 
     Set<String> fallbackRules() {
         return fallbackRules;
+    }
+
+    /**
+     * Phase 2 (v0.5.0) — Lever B: rule names that are safe to use as
+     * incremental {@code parseRuleAt} pivots. See
+     * {@link SafePivotAnalyzer} for the criterion. The set is computed once
+     * per factory and reused for the lifetime of every {@link Session} this
+     * factory produces.
+     */
+    Set<String> safePivotRules() {
+        return safePivotRules;
     }
 
     RuleIdRegistry registry() {
