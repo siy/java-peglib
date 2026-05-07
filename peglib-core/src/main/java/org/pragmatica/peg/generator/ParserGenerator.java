@@ -273,140 +273,6 @@ public final class ParserGenerator {
                 }
 
             """);
-        emitLongObjectMap(sb);
-    }
-
-    /**
-     * Phase 1.7 (E): emit the primitive long-keyed open-addressing hash map used for
-     * the per-parse packrat cache and growing-seeds map. Replaces HashMap&lt;Long, V&gt;,
-     * eliminating Long autoboxing on every cache.get/put/remove and the HashMap.Node
-     * allocations dominating post-A+D allocation profiles. Sentinel Long.MIN_VALUE
-     * marks an empty slot. Power-of-two capacity, linear probing, 0.5 load factor.
-     */
-    private void emitLongObjectMap(StringBuilder sb) {
-        sb.append("""
-                // === Primitive long-keyed map (Phase 1.7 / E) ===
-
-                @SuppressWarnings("unchecked")
-                private static final class LongObjectMap<V> {
-                    private static final long EMPTY = Long.MIN_VALUE;
-                    private long[] keys;
-                    private Object[] values;
-                    private int size;
-                    private int mask;
-                    private int threshold;
-
-                    LongObjectMap(int initialCapacity) {
-                        int cap = 1;
-                        while (cap < initialCapacity) cap <<= 1;
-                        if (cap < 8) cap = 8;
-                        this.keys = new long[cap];
-                        java.util.Arrays.fill(this.keys, EMPTY);
-                        this.values = new Object[cap];
-                        this.mask = cap - 1;
-                        this.threshold = cap >>> 1;
-                        this.size = 0;
-                    }
-
-                    private static int mix(long key) {
-                        long h = key;
-                        h ^= h >>> 33;
-                        h *= 0xff51afd7ed558ccdL;
-                        h ^= h >>> 33;
-                        return (int) h;
-                    }
-
-                    V get(long key) {
-                        if (key == EMPTY) return null;
-                        long[] ks = keys;
-                        int idx = mix(key) & mask;
-                        while (true) {
-                            long k = ks[idx];
-                            if (k == EMPTY) return null;
-                            if (k == key) return (V) values[idx];
-                            idx = (idx + 1) & mask;
-                        }
-                    }
-
-                    void put(long key, V value) {
-                        if (key == EMPTY) return;
-                        long[] ks = keys;
-                        Object[] vs = values;
-                        int idx = mix(key) & mask;
-                        while (true) {
-                            long k = ks[idx];
-                            if (k == EMPTY) {
-                                ks[idx] = key;
-                                vs[idx] = value;
-                                size++;
-                                if (size >= threshold) resize();
-                                return;
-                            }
-                            if (k == key) {
-                                vs[idx] = value;
-                                return;
-                            }
-                            idx = (idx + 1) & mask;
-                        }
-                    }
-
-                    void remove(long key) {
-                        if (key == EMPTY) return;
-                        long[] ks = keys;
-                        Object[] vs = values;
-                        int idx = mix(key) & mask;
-                        while (true) {
-                            long k = ks[idx];
-                            if (k == EMPTY) return;
-                            if (k == key) {
-                                ks[idx] = EMPTY;
-                                vs[idx] = null;
-                                size--;
-                                // Backward-shift deletion to preserve probe chains
-                                int next = (idx + 1) & mask;
-                                while (ks[next] != EMPTY) {
-                                    long nk = ks[next];
-                                    int desired = mix(nk) & mask;
-                                    if (((next - desired) & mask) > ((next - idx) & mask)) {
-                                        ks[idx] = nk;
-                                        vs[idx] = vs[next];
-                                        ks[next] = EMPTY;
-                                        vs[next] = null;
-                                        idx = next;
-                                    }
-                                    next = (next + 1) & mask;
-                                }
-                                return;
-                            }
-                            idx = (idx + 1) & mask;
-                        }
-                    }
-
-                    private void resize() {
-                        long[] oldKeys = keys;
-                        Object[] oldValues = values;
-                        int newCap = oldKeys.length << 1;
-                        long[] newKeys = new long[newCap];
-                        java.util.Arrays.fill(newKeys, EMPTY);
-                        Object[] newValues = new Object[newCap];
-                        int newMask = newCap - 1;
-                        for (int i = 0; i < oldKeys.length; i++) {
-                            long k = oldKeys[i];
-                            if (k != EMPTY) {
-                                int idx = mix(k) & newMask;
-                                while (newKeys[idx] != EMPTY) idx = (idx + 1) & newMask;
-                                newKeys[idx] = k;
-                                newValues[idx] = oldValues[i];
-                            }
-                        }
-                        this.keys = newKeys;
-                        this.values = newValues;
-                        this.mask = newMask;
-                        this.threshold = newCap >>> 1;
-                    }
-                }
-
-            """);
     }
 
     private void generateParseContext(StringBuilder sb) {
@@ -417,8 +283,7 @@ public final class ParserGenerator {
                 private int pos;
                 private int line;
                 private int column;
-                // Phase 1.7 (E): primitive long-keyed map — no Long autoboxing on packrat path.
-                private LongObjectMap<ParseResult> cache;
+                private Map<Long, ParseResult> cache;
                 private Map<String, String> captures;
                 private boolean packratEnabled = true;
                 private int furthestPos;
@@ -440,7 +305,7 @@ public final class ParserGenerator {
                     this.pos = 0;
                     this.line = 1;
                     this.column = 1;
-                    this.cache = packratEnabled ? new LongObjectMap<>(64) : null;
+                    this.cache = packratEnabled ? new HashMap<>() : null;
                     this.captures = new HashMap<>();
                     this.furthestPos = 0;
                     this.furthestLine = 1;
@@ -1709,7 +1574,6 @@ public final class ParserGenerator {
         sb.append("public final class ")
           .append(className)
           .append(" {\n\n");
-        emitLongObjectMap(sb);
     }
 
     private void generateRuleIdInterface(StringBuilder sb) {
@@ -2246,14 +2110,13 @@ public final class ParserGenerator {
                 private int pos;
                 private int line;
                 private int column;
-                // Phase 1.7 (E): primitive long-keyed maps — no Long autoboxing on packrat path.
-                private LongObjectMap<CstParseResult> cache;
+                private Map<Long, CstParseResult> cache;
                 // 0.2.9: in-flight growing seeds for direct left-recursive rules.
                 // Keyed by the same (ruleId, position) encoding as cache. When an
                 // entry is present, a Warth seed-and-grow loop is active for that
                 // rule at that position and self-recursive calls should return the
                 // current seed instead of re-entering the body.
-                private LongObjectMap<CstParseResult> growingSeeds;
+                private Map<Long, CstParseResult> growingSeeds;
                 private Map<String, String> captures;
                 private int tokenBoundaryDepth;
                 private boolean skippingWhitespace;
@@ -2394,8 +2257,8 @@ public final class ParserGenerator {
                     this.pos = 0;
                     this.line = 1;
                     this.column = 1;
-                    this.cache = packratEnabled ? new LongObjectMap<>(64) : null;
-                    this.growingSeeds = new LongObjectMap<>(8);
+                    this.cache = packratEnabled ? new HashMap<>() : null;
+                    this.growingSeeds = new HashMap<>();
                     this.captures = new HashMap<>();
                     this.tokenBoundaryDepth = 0;
             """);
