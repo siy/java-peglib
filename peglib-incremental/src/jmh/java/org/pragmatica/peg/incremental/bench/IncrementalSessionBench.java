@@ -9,7 +9,10 @@ import org.pragmatica.peg.incremental.Session;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -110,16 +113,54 @@ public final class IncrementalSessionBench {
         // not interpreter cost. We do a small throwaway session.
         warmJit(parser, fixtureSource);
 
-        var regimeB = runRegime(parser, fixtureSource, plan, /*moveCursor=*/true);
-        var regimeA = runRegime(parser, fixtureSource, plan, /*moveCursor=*/false);
+        var regimeBExc = new ArrayList<ExcReport>();
+        var regimeAExc = new ArrayList<ExcReport>();
+        var regimeB = runRegime(parser, fixtureSource, plan, /*moveCursor=*/true, regimeBExc);
+        var regimeA = runRegime(parser, fixtureSource, plan, /*moveCursor=*/false, regimeAExc);
 
         printReport(fixtureSource, regimeB, regimeA);
+        System.out.println();
+        System.out.println("=== EXCEPTION DIAGNOSTICS ===");
+        printExceptionSummary("Regime B (cursor-moved)", regimeBExc);
+        System.out.println();
+        printExceptionSummary("Regime A (cursor-pinned)", regimeAExc);
+    }
+
+    private record ExcReport(int editIndex, int offset, int oldLen, int newLen, String klass, String message, String topFrame, String fullStack) {}
+
+    private static void printExceptionSummary(String label, List<ExcReport> exceptions) {
+        System.out.printf("%s: %d exceptions caught%n", label, exceptions.size());
+        if (exceptions.isEmpty()) {
+            return;
+        }
+        // Group by class+message+topFrame
+        var grouped = new LinkedHashMap<String, List<ExcReport>>();
+        for (var e : exceptions) {
+            String key = e.klass() + " | " + e.message() + " | " + e.topFrame();
+            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(e);
+        }
+        // Sort by frequency
+        var entries = new ArrayList<>(grouped.entrySet());
+        entries.sort((a, b) -> Integer.compare(b.getValue().size(), a.getValue().size()));
+        System.out.println("Distinct exception groups:");
+        for (var e : entries) {
+            System.out.printf("  [%d edits] %s%n", e.getValue().size(), e.getKey());
+        }
+        // Print full stack of dominant
+        if (!entries.isEmpty()) {
+            var dom = entries.get(0).getValue().get(0);
+            System.out.println();
+            System.out.println("Dominant exception full stack (first occurrence):");
+            System.out.printf("  edit#%d offset=%d oldLen=%d newLen=%d%n", dom.editIndex(), dom.offset(), dom.oldLen(), dom.newLen());
+            System.out.println(dom.fullStack());
+        }
     }
 
     // -------- Regime driver ----------------------------------------------------------------
 
     private static Measurement[] runRegime(
-            IncrementalParser parser, String fixtureSource, List<ClassifiedEdit> plan, boolean moveCursor) {
+            IncrementalParser parser, String fixtureSource, List<ClassifiedEdit> plan, boolean moveCursor,
+            List<ExcReport> excOut) {
         var session = parser.initialize(fixtureSource, 0);
         int prevFallbacks = session.stats().fullReparseCount();
         var out = new Measurement[plan.size()];
@@ -155,6 +196,26 @@ public final class IncrementalSessionBench {
             } catch (RuntimeException ex) {
                 out[i] = new Measurement(ce.cls(), -1L, false, true,
                     edit.offset(), edit.oldLen(), edit.newText().length(), "", 0);
+                if (excOut != null) {
+                    var sb = new StringBuilder();
+                    var trace = ex.getStackTrace();
+                    int n = Math.min(10, trace.length);
+                    for (int k = 0; k < n; k++) {
+                        sb.append("    at ").append(trace[k]).append('\n');
+                    }
+                    if (ex.getCause() != null) {
+                        sb.append("  Caused by: ").append(ex.getCause().getClass().getName())
+                          .append(": ").append(ex.getCause().getMessage()).append('\n');
+                        var ctrace = ex.getCause().getStackTrace();
+                        int cn = Math.min(5, ctrace.length);
+                        for (int k = 0; k < cn; k++) {
+                            sb.append("      at ").append(ctrace[k]).append('\n');
+                        }
+                    }
+                    String topFrame = trace.length > 0 ? trace[0].toString() : "<no-frame>";
+                    excOut.add(new ExcReport(i, edit.offset(), edit.oldLen(), edit.newText().length(),
+                        ex.getClass().getName(), String.valueOf(ex.getMessage()), topFrame, sb.toString()));
+                }
             }
         }
         return out;

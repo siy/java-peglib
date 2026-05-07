@@ -154,7 +154,65 @@ public final class NodeIndex {
         for (var ancestor : newPath) {
             nodesById.put(ancestor.id(), ancestor);
         }
+        // Step 6 — refresh nodesById for right-of-edit subtrees that
+        // {@link TreeSplicer#shiftAll} deep-copied. Those subtrees keep every
+        // node's stable id (so the parents-map entries remain valid) but the
+        // RECORDS are fresh — they carry post-edit (shifted) spans. Without
+        // this refresh, {@link #nodesById} keeps mapping the stable id to the
+        // pre-edit record with the OLD span. Subsequent boundary walks that
+        // resolve a parent via {@code nodesById.get(parentId)} would then see
+        // a stale span and pick the wrong pivot — exactly what causes
+        // {@code tryIncrementalReparse} to fall through to full reparse on
+        // edits that touch a right-of-edit subtree (regression seen between
+        // Phase 1.2 and Phase 1.6 in {@code IncrementalSessionBench}).
+        //
+        // Cost: bounded by the number of right-of-edit subtree NODES under
+        // each spine ancestor — i.e., the post-edit shifted region. For the
+        // typical edit (small pivot, modest right tail) this stays
+        // proportional to {@code O(rightOfEditNodeCount)}. The previous
+        // {@link #build}-on-every-edit baseline traversed the WHOLE tree, so
+        // this is still strictly cheaper.
+        for (int i = 0; i + 1 < newPath.size(); i++) {
+            refreshShiftedChildrenOf(newPath.get(i), newPath.get(i + 1), nodesById);
+        }
         return new NodeIndex(newRoot, parents, nodesById);
+    }
+
+    /**
+     * Refresh {@link #nodesById} entries for every right-of-edit child of
+     * {@code spineAncestor} except {@code spineChild}. {@code spineChild} is
+     * the next ancestor on the new spine — already refreshed by step 5 of
+     * {@link #applyIncremental}; descending into it would also touch the
+     * newPivot subtree which is already indexed by step 3. Left-of-edit
+     * children are kept by reference (not rebuilt) so their nodesById
+     * entries remain valid.
+     */
+    private static void refreshShiftedChildrenOf(CstNode spineAncestor,
+                                                 CstNode spineChild,
+                                                 Map<Long, CstNode> nodesById) {
+        if (! (spineAncestor instanceof CstNode.NonTerminal nt)) {
+            return;
+        }
+        for (var child : nt.children()) {
+            if (child == spineChild) {
+                continue;
+            }
+            // Whether {@link TreeSplicer} kept this child by reference (left
+            // of edit) or deep-copied it via {@link TreeSplicer#shiftAll} (at
+            // or after edit), refreshing the nodesById entry to point at the
+            // current record is always correct: same id, equal-or-shifted
+            // span. Walk the subtree to refresh descendants likewise.
+            refreshAllNodesById(child, nodesById);
+        }
+    }
+
+    private static void refreshAllNodesById(CstNode node, Map<Long, CstNode> nodesById) {
+        nodesById.put(node.id(), node);
+        if (node instanceof CstNode.NonTerminal nt) {
+            for (var child : nt.children()) {
+                refreshAllNodesById(child, nodesById);
+            }
+        }
     }
 
     /** Root of the CST this index was built over. */
