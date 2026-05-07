@@ -172,30 +172,25 @@ public record Diagnostic(
           .append(message)
           .append("\n");
         // Location: --> filename:line:column
-        var loc = span.start();
         sb.append("  --> ");
         if (filename != null) {
             sb.append(filename)
               .append(":");
         }
-        sb.append(loc.line())
+        sb.append(span.startLine())
           .append(":")
-          .append(loc.column())
+          .append(span.startColumn())
           .append("\n");
         // Find all lines we need to display
-        int minLine = span.start()
-                          .line();
-        int maxLine = span.end()
-                          .line();
+        int minLine = span.startLine();
+        int maxLine = span.endLine();
         for (var label : labels) {
             minLine = Math.min(minLine,
                                label.span()
-                                    .start()
-                                    .line());
+                                    .startLine());
             maxLine = Math.max(maxLine,
                                label.span()
-                                    .end()
-                                    .line());
+                                    .endLine());
         }
         // Calculate gutter width
         int gutterWidth = String.valueOf(maxLine)
@@ -238,9 +233,7 @@ public record Diagnostic(
     private List<Label> getLabelsOnLine(int lineNum) {
         var result = new java.util.ArrayList<Label>();
         // Check if primary span covers this line
-        if (span.start()
-                .line() <= lineNum && span.end()
-                                          .line() >= lineNum) {
+        if (span.startLine() <= lineNum && span.endLine() >= lineNum) {
             // Add implicit primary label if no explicit labels
             if (labels.isEmpty()) {
                 result.add(Label.primary(span, ""));
@@ -249,10 +242,8 @@ public record Diagnostic(
         // Add explicit labels on this line
         for (var label : labels) {
             if (label.span()
-                     .start()
-                     .line() <= lineNum && label.span()
-                                                .end()
-                                                .line() >= lineNum) {
+                     .startLine() <= lineNum && label.span()
+                                                     .endLine() >= lineNum) {
                 result.add(label);
             }
         }
@@ -265,26 +256,20 @@ public record Diagnostic(
         // Sort labels by start column
         var sorted = lineLabels.stream()
                                .sorted((a, b) -> Integer.compare(a.span()
-                                                                  .start()
-                                                                  .column(),
+                                                                  .startColumn(),
                                                                  b.span()
-                                                                  .start()
-                                                                  .column()))
+                                                                  .startColumn()))
                                .toList();
         for (var label : sorted) {
             int startCol = label.span()
-                                .start()
-                                .line() == lineNum
+                                .startLine() == lineNum
                            ? label.span()
-                                  .start()
-                                  .column()
+                                  .startColumn()
                            : 1;
             int endCol = label.span()
-                              .end()
-                              .line() == lineNum
+                              .endLine() == lineNum
                          ? label.span()
-                                .end()
-                                .column()
+                                .endColumn()
                          : lineContent.length() + 1;
             // Pad to start
             while (currentCol < startCol) {
@@ -313,7 +298,11 @@ public record Diagnostic(
      * Simple single-line format for quick display.
      */
     public String formatSimple() {
-        var loc = span.start();
-        return String.format("%s:%d:%d: %s: %s", "input", loc.line(), loc.column(), severity.display(), message);
+        return String.format("%s:%d:%d: %s: %s",
+                             "input",
+                             span.startLine(),
+                             span.startColumn(),
+                             severity.display(),
+                             message);
     }
 }

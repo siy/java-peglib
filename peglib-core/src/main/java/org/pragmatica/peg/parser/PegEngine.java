@@ -624,10 +624,7 @@ public final class PegEngine implements Parser {
                 ctx.enterRecovery();
                 var skippedSpan = ctx.skipToRecoveryPoint();
                 if (skippedSpan.length() > 0) {
-                    var skippedText = input.substring(skippedSpan.start()
-                                                                 .offset(),
-                                                      skippedSpan.end()
-                                                                 .offset());
+                    var skippedText = input.substring(skippedSpan.startOffset(), skippedSpan.endOffset());
                     var errorNode = new CstNode.Error(
                     ctx.idGen()
                        .next(),
@@ -658,7 +655,12 @@ public final class PegEngine implements Parser {
                                      .span();
             var lastSpan = fragments.get(fragments.size() - 1)
                                     .span();
-            var fullSpan = SourceSpan.sourceSpan(firstSpan.start(), lastSpan.end());
+            var fullSpan = new SourceSpan(firstSpan.startLine(),
+                                          firstSpan.startColumn(),
+                                          firstSpan.startOffset(),
+                                          lastSpan.endLine(),
+                                          lastSpan.endColumn(),
+                                          lastSpan.endOffset());
             rootNode = Option.some(new CstNode.NonTerminal(
             ctx.idGen()
                .next(),

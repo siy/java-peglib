@@ -1,7 +1,6 @@
 package org.pragmatica.peg.incremental.internal;
 
 import org.pragmatica.peg.tree.CstNode;
-import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
 import org.pragmatica.peg.tree.Trivia;
 
@@ -136,11 +135,11 @@ public final class TreeSplicer {
                                                           int delta,
                                                           int editEnd) {
         var oldSpan = ancestor.span();
-        var oldEnd = oldSpan.end();
-        var newEnd = oldEnd.offset() >= editEnd
-                     ? new SourceLocation(oldEnd.line(), oldEnd.column(), oldEnd.offset() + delta)
-                     : oldEnd;
-        var newSpan = SourceSpan.sourceSpan(oldSpan.start(), newEnd);
+        int newEndOffset = oldSpan.endOffset() >= editEnd
+                           ? oldSpan.endOffset() + delta
+                           : oldSpan.endOffset();
+        var newSpan = new SourceSpan(oldSpan.startLine(), oldSpan.startColumn(), oldSpan.startOffset(),
+                                     oldSpan.endLine(), oldSpan.endColumn(), newEndOffset);
         return new CstNode.NonTerminal(
         ancestor.id(),
         newSpan,
@@ -205,11 +204,8 @@ public final class TreeSplicer {
     }
 
     private static SourceSpan shiftSpan(SourceSpan span, int delta) {
-        return SourceSpan.sourceSpan(shiftLoc(span.start(), delta), shiftLoc(span.end(), delta));
-    }
-
-    private static SourceLocation shiftLoc(SourceLocation loc, int delta) {
-        return new SourceLocation(loc.line(), loc.column(), loc.offset() + delta);
+        return new SourceSpan(span.startLine(), span.startColumn(), span.startOffset() + delta,
+                              span.endLine(), span.endColumn(), span.endOffset() + delta);
     }
 
     private static List<Trivia> shiftTrivia(List<Trivia> trivia, int delta, int editEnd) {

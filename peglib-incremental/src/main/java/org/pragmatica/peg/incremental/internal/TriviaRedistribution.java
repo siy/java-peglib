@@ -2,7 +2,6 @@ package org.pragmatica.peg.incremental.internal;
 
 import org.pragmatica.peg.incremental.Edit;
 import org.pragmatica.peg.tree.CstNode;
-import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
 import org.pragmatica.peg.tree.Trivia;
 
@@ -423,12 +422,9 @@ public final class TriviaRedistribution {
         // compatibility), the owner's span stays put.
         SourceSpan ownerSpan;
         if (match.kind() == Owner.LEADING && delta != 0) {
-            ownerSpan = SourceSpan.sourceSpan(shiftLoc(owner.span()
-                                                            .start(),
-                                                       delta),
-                                              shiftLoc(owner.span()
-                                                            .end(),
-                                                       delta));
+            var os = owner.span();
+            ownerSpan = new SourceSpan(os.startLine(), os.startColumn(), os.startOffset() + delta,
+                                       os.endLine(), os.endColumn(), os.endOffset() + delta);
         }else {
             ownerSpan = owner.span();
         }
@@ -497,16 +493,9 @@ public final class TriviaRedistribution {
         int relEnd = relStart + edit.oldLen();
         var oldText = trivia.text();
         var rebuilt = oldText.substring(0, relStart) + newText + oldText.substring(relEnd);
-        var newSpan = SourceSpan.sourceSpan(
-        trivia.span()
-              .start(),
-        new SourceLocation(
-        trivia.span()
-              .endLine(),
-        trivia.span()
-              .endColumn(),
-        trivia.span()
-              .endOffset() + edit.delta()));
+        var ts = trivia.span();
+        var newSpan = new SourceSpan(ts.startLine(), ts.startColumn(), ts.startOffset(),
+                                     ts.endLine(), ts.endColumn(), ts.endOffset() + edit.delta());
         return switch (trivia) {
             case Trivia.Whitespace _ -> new Trivia.Whitespace(newSpan, rebuilt);
             case Trivia.LineComment _ -> new Trivia.LineComment(newSpan, rebuilt);
@@ -519,13 +508,10 @@ public final class TriviaRedistribution {
         if (delta == 0) {
             return span;
         }
-        var start = span.startOffset() >= editEnd
-                    ? shiftLoc(span.start(), delta)
-                    : span.start();
-        var end = span.endOffset() >= editEnd
-                  ? shiftLoc(span.end(), delta)
-                  : span.end();
-        return SourceSpan.sourceSpan(start, end);
+        int newStartOffset = span.startOffset() >= editEnd ? span.startOffset() + delta : span.startOffset();
+        int newEndOffset = span.endOffset() >= editEnd ? span.endOffset() + delta : span.endOffset();
+        return new SourceSpan(span.startLine(), span.startColumn(), newStartOffset,
+                              span.endLine(), span.endColumn(), newEndOffset);
     }
 
     private static List<Trivia> shiftTriviaListAfter(List<Trivia> trivia, int delta, int editEnd) {
@@ -554,12 +540,9 @@ public final class TriviaRedistribution {
         if (delta == 0) {
             return trivia;
         }
-        var newSpan = SourceSpan.sourceSpan(shiftLoc(trivia.span()
-                                                           .start(),
-                                                     delta),
-                                            shiftLoc(trivia.span()
-                                                           .end(),
-                                                     delta));
+        var s = trivia.span();
+        var newSpan = new SourceSpan(s.startLine(), s.startColumn(), s.startOffset() + delta,
+                                     s.endLine(), s.endColumn(), s.endOffset() + delta);
         return switch (trivia) {
             case Trivia.Whitespace w -> new Trivia.Whitespace(newSpan, w.text());
             case Trivia.LineComment l -> new Trivia.LineComment(newSpan, l.text());
@@ -572,10 +555,6 @@ public final class TriviaRedistribution {
             return node;
         }
         return TreeSplicer.shiftAll(node, delta);
-    }
-
-    private static SourceLocation shiftLoc(SourceLocation loc, int delta) {
-        return new SourceLocation(loc.line(), loc.column(), loc.offset() + delta);
     }
 
     // ---- internal records ------------------------------------------------

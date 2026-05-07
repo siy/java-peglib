@@ -1942,12 +1942,11 @@ public final class ParserGenerator {
                         sb.append(": ").append(message).append("\\n");
 
                         // Location: --> filename:line:column
-                        var loc = span.start();
                         sb.append("  --> ");
                         if (filename != null) {
                             sb.append(filename).append(":");
                         }
-                        sb.append(loc.line()).append(":").append(loc.column()).append("\\n");
+                        sb.append(span.startLine()).append(":").append(span.startColumn()).append("\\n");
 
                         // Find all lines we need to display
                         int minLine = span.startLine();
@@ -2041,9 +2040,8 @@ public final class ParserGenerator {
                     }
 
                     public String formatSimple() {
-                        var loc = span.start();
                         return String.format("%s:%d:%d: %s: %s",
-                            "input", loc.line(), loc.column(), severity.display(), message);
+                            "input", span.startLine(), span.startColumn(), severity.display(), message);
                     }
                 }
 
@@ -2650,7 +2648,8 @@ public final class ParserGenerator {
                             // Unexpected trailing input - use furthest failure position for error
                             var errorLoc = %s;
                             var skippedSpan = skipToRecoveryPoint();
-                            var errorSpan = SourceSpan.sourceSpan(errorLoc, skippedSpan.end());
+                            var errorSpan = new SourceSpan(errorLoc.line(), errorLoc.column(), errorLoc.offset(),
+                                                           skippedSpan.endLine(), skippedSpan.endColumn(), skippedSpan.endOffset());
                             addDiagnostic("unexpected input", errorSpan, "expected end of input");
 
                             // Attach error node to result

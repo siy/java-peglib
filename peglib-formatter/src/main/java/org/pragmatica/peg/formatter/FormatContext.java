@@ -47,12 +47,8 @@ public record FormatContext(CstNode node,
     /** The source text covered by the current node (excluding trivia). */
     public String nodeText() {
         var span = node.span();
-        int start = Math.max(0,
-                             span.start()
-                                 .offset());
-        int end = Math.min(source.length(),
-                           span.end()
-                               .offset());
+        int start = Math.max(0, span.startOffset());
+        int end = Math.min(source.length(), span.endOffset());
         if (start >= end) {
             return "";
         }

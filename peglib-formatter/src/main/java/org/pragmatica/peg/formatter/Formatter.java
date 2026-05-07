@@ -247,12 +247,8 @@ public final class Formatter {
                 // case of rules whose CST is essentially a single literal match.
                 if (childDocs.isEmpty() && !source.isEmpty()) {
                     var span = nt.span();
-                    int start = Math.max(0,
-                                         span.start()
-                                             .offset());
-                    int end = Math.min(source.length(),
-                                       span.end()
-                                           .offset());
+                    int start = Math.max(0, span.startOffset());
+                    int end = Math.min(source.length(), span.endOffset());
                     if (start < end) {
                         yield Docs.text(source.substring(start, end));
                     }
