@@ -1,10 +1,12 @@
 package org.pragmatica.peg.incremental.internal;
 
+import org.pragmatica.lang.Result;
 import org.pragmatica.peg.PegParser;
 import org.pragmatica.peg.action.RuleId;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.incremental.IncrementalParser;
 import org.pragmatica.peg.incremental.Session;
+import org.pragmatica.peg.incremental.SessionError;
 import org.pragmatica.peg.parser.Parser;
 import org.pragmatica.peg.parser.ParserConfig;
 import org.pragmatica.peg.parser.PegEngine;
@@ -108,8 +110,13 @@ public final class SessionFactory implements IncrementalParser {
         // it through every reparse so node IDs stay stable across edits. This is
         // the precondition for Path D's optimized NodeIndex.applyIncremental.
         var idGen = new IdGenerator.PerSessionCounter();
-        CstNode root = parseFull(buffer, idGen);
-        return IncrementalSession.initial(this, buffer, clampedCursor, root, idGen);
+        // 0.5.0 — parseFull returns Result<CstNode>. On failure synthesise a
+        // degraded Session per Path A: caller's contract on initialize is
+        // non-Result, so wrap the failure in a CstNode.Error root and surface
+        // it through Session#parseSuccessful()/lastParseError().
+        return parseFull(buffer, idGen)
+        .fold(cause -> IncrementalSession.degradedInitial(this, buffer, clampedCursor, idGen, (SessionError) cause),
+              root -> IncrementalSession.initial(this, buffer, clampedCursor, root, idGen));
     }
 
     Grammar grammar() {
@@ -148,40 +155,35 @@ public final class SessionFactory implements IncrementalParser {
     }
 
     /**
-     * Full-parse the buffer via the backing {@link Parser}. Surfaces errors
-     * as {@link IllegalStateException} — v1 treats an unparseable full
-     * buffer as a programmer-level failure; recovery-aware callers should
-     * configure {@link ParserConfig} with {@link
-     * org.pragmatica.peg.error.RecoveryStrategy#ADVANCED} and read
-     * diagnostics from the resulting tree's {@link CstNode.Error} nodes.
-     */
-    CstNode parseFull(String buffer) {
-        return parser.parseCst(buffer)
-                     .fold(cause -> {
-                               throw new IllegalStateException("full parse failed: " + cause.message());
-                           },
-                           node -> node);
-    }
-
-    /**
      * Phase 1.5 (v0.5.0): Session-aware full-parse that uses the supplied
      * {@link IdGenerator}. Routes through {@link PegEngine}'s id-aware overload
      * so node IDs come from the Session's counter rather than a fresh per-call
-     * one. Surfaces errors identically to {@link #parseFull(String)}.
+     * one.
+     *
+     * <p>0.5.0 — failures surface as {@link Result#failure(org.pragmatica.lang.Cause)}
+     * carrying a {@link SessionError} variant rather than the pre-0.5.0
+     * {@link IllegalStateException}. Callers in {@link IncrementalSession}
+     * propagate Result through {@code fallback}/{@code reparseAll}; the public
+     * {@link Session} surface synthesises a degraded Session on failure so the
+     * exception never escapes (Path A — see {@link SessionError}).
+     *
+     * <p>Recovery-aware callers should configure {@link ParserConfig} with
+     * {@link org.pragmatica.peg.error.RecoveryStrategy#ADVANCED} and read
+     * diagnostics from the resulting tree's {@link CstNode.Error} nodes — that
+     * path produces a successful Result with embedded error nodes rather than
+     * a Result.failure.
      */
-    CstNode parseFull(String buffer, IdGenerator idGen) {
+    Result<CstNode> parseFull(String buffer, IdGenerator idGen) {
         var startRule = grammar.effectiveStartRule();
         if (startRule.isEmpty()) {
-            throw new IllegalStateException("full parse failed: No start rule defined in grammar");
+            return new SessionError.NoStartRule().result();
         }
         var engine = (PegEngine) parser;
         return engine.parseCst(buffer,
                                startRule.unwrap()
                                         .name(),
                                idGen)
-                     .fold(cause -> {
-                               throw new IllegalStateException("full parse failed: " + cause.message());
-                           },
-                           node -> node);
+                     .fold(cause -> new SessionError.ParseFailed(cause.message()).result(),
+                           Result::success);
     }
 }

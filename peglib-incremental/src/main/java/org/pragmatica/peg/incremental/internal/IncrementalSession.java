@@ -1,12 +1,16 @@
 package org.pragmatica.peg.incremental.internal;
 
 import org.pragmatica.lang.Option;
+import org.pragmatica.lang.Result;
 import org.pragmatica.peg.incremental.Edit;
 import org.pragmatica.peg.incremental.Session;
+import org.pragmatica.peg.incremental.SessionError;
 import org.pragmatica.peg.incremental.Stats;
 import org.pragmatica.peg.parser.PegEngine;
 import org.pragmatica.peg.tree.CstNode;
 import org.pragmatica.peg.tree.IdGenerator;
+import org.pragmatica.peg.tree.SourceLocation;
+import org.pragmatica.peg.tree.SourceSpan;
 
 import java.util.List;
 
@@ -41,7 +45,8 @@ record IncrementalSession(
  CstNode enclosingNode,
  NodeIndex index,
  IdGenerator idGen,
- Stats stats) implements Session {
+ Stats stats,
+ Option<SessionError> lastError) implements Session {
     /** Build the initial session after a fresh full parse. */
     static IncrementalSession initial(SessionFactory factory,
                                       String text,
@@ -51,7 +56,60 @@ record IncrementalSession(
         var index = NodeIndex.build(root);
         var enclosing = index.smallestContaining(cursor)
                              .or(root);
-        return new IncrementalSession(factory, text, root, cursor, enclosing, index, idGen, Stats.INITIAL);
+        return new IncrementalSession(factory, text, root, cursor, enclosing, index, idGen, Stats.INITIAL, Option.none());
+    }
+
+    /**
+     * 0.5.0 (Path A) — synthesise a degraded initial session for the case
+     * where {@link SessionFactory#parseFull(String, IdGenerator)} fails on
+     * {@link SessionFactory#initialize(String, int)}. The resulting session
+     * has a single {@link CstNode.Error} root carrying the rejected buffer
+     * and an {@link Option#some(Object) Option.some(error)} for
+     * {@link Session#lastParseError()}. Stats start at {@code INITIAL}; no
+     * fallback count is incremented because the failure was on the very first
+     * parse, not on a fallback from incremental reparse.
+     */
+    static IncrementalSession degradedInitial(SessionFactory factory,
+                                              String text,
+                                              int cursor,
+                                              IdGenerator idGen,
+                                              SessionError error) {
+        var root = degradedRoot(text, idGen, error);
+        var index = NodeIndex.build(root);
+        var enclosing = index.smallestContaining(cursor)
+                             .or(root);
+        return new IncrementalSession(factory,
+                                      text,
+                                      root,
+                                      cursor,
+                                      enclosing,
+                                      index,
+                                      idGen,
+                                      Stats.INITIAL,
+                                      Option.some(error));
+    }
+
+    /**
+     * Build the single-{@link CstNode.Error}-root that represents a degraded
+     * Session per Path A. The error span covers the entire buffer; the
+     * {@code skippedText} is the rejected buffer; {@code expected} is the
+     * {@link SessionError#message()}. Trivia lists are empty.
+     */
+    private static CstNode degradedRoot(String text, IdGenerator idGen, SessionError error) {
+        var start = SourceLocation.START;
+        var end = SourceLocation.sourceLocation(1, 1 + text.length(), text.length());
+        var span = SourceSpan.sourceSpan(start, end);
+        return new CstNode.Error(idGen.next(), span, text, error.message(), List.of(), List.of());
+    }
+
+    @Override
+    public boolean parseSuccessful() {
+        return lastError.isEmpty();
+    }
+
+    @Override
+    public Option<String> lastParseError() {
+        return lastError.map(SessionError::message);
     }
 
     @Override
@@ -98,7 +156,8 @@ record IncrementalSession(
                                               nextEnclosing,
                                               nextIndex,
                                               idGen,
-                                              nextStats);
+                                              nextStats,
+                                              Option.none());
             }
         }
         // Try incremental reparse next.
@@ -106,8 +165,11 @@ record IncrementalSession(
         if (incremental.isPresent()) {
             return applyIncremental(incremental.unwrap(), newText, newCursor, t0);
         }
-        // Fall back to a full reparse.
-        return fallback(newText, newCursor, t0);
+        // Fall back to a full reparse. 0.5.0 (Path A): on parse failure,
+        // synthesise a degraded Session — never throw.
+        return fallback(newText, newCursor, t0)
+        .fold(cause -> degradedFallback(newText, newCursor, t0, (SessionError) cause),
+              session -> session);
     }
 
     @Override
@@ -119,13 +181,21 @@ record IncrementalSession(
         }
         var newEnclosing = index.smallestContainingFrom(enclosingNode, clamped)
                                 .or(root);
-        return new IncrementalSession(factory, text, root, clamped, newEnclosing, index, idGen, stats);
+        return new IncrementalSession(factory, text, root, clamped, newEnclosing, index, idGen, stats, lastError);
     }
 
     @Override
     public Session reparseAll() {
         long t0 = System.nanoTime();
-        var fresh = factory.parseFull(text, idGen);
+        // 0.5.0 (Path A): reparseAll is the diagnostic escape hatch. On parse
+        // failure synthesise a degraded Session rather than throw — preserves
+        // the public non-Result contract; callers inspect parseSuccessful().
+        return factory.parseFull(text, idGen)
+                      .fold(cause -> degradedReparseAll(t0, (SessionError) cause),
+                            fresh -> reparseAllSuccess(fresh, t0));
+    }
+
+    private Session reparseAllSuccess(CstNode fresh, long t0) {
         var freshIndex = NodeIndex.build(fresh);
         var enclosing = freshIndex.smallestContaining(cursor)
                                   .or(fresh);
@@ -136,11 +206,45 @@ record IncrementalSession(
         NodeIndex.flatten(fresh)
                  .size(),
         System.nanoTime() - t0);
-        return new IncrementalSession(factory, text, fresh, cursor, enclosing, freshIndex, idGen, nextStats);
+        return new IncrementalSession(factory, text, fresh, cursor, enclosing, freshIndex, idGen, nextStats, Option.none());
     }
 
-    private Session fallback(String newText, int newCursor, long t0) {
-        var fresh = factory.parseFull(newText, idGen);
+    private Session degradedReparseAll(long t0, SessionError error) {
+        var fresh = degradedRoot(text, idGen, error);
+        var freshIndex = NodeIndex.build(fresh);
+        var enclosing = freshIndex.smallestContaining(cursor)
+                                  .or(fresh);
+        var nextStats = new Stats(
+        stats.reparseCount() + 1,
+        stats.fullReparseCount() + 1,
+        "<root>",
+        NodeIndex.flatten(fresh)
+                 .size(),
+        System.nanoTime() - t0);
+        return new IncrementalSession(factory,
+                                      text,
+                                      fresh,
+                                      cursor,
+                                      enclosing,
+                                      freshIndex,
+                                      idGen,
+                                      nextStats,
+                                      Option.some(error));
+    }
+
+    /**
+     * 0.5.0 — full-reparse fallback now returns {@code Result<Session>}.
+     * Parse success yields a healthy Session; parse failure is propagated as
+     * a {@link SessionError} {@link Result#failure(org.pragmatica.lang.Cause) failure}
+     * for the caller in {@link #edit(Edit)} to materialise as a degraded
+     * Session per Path A.
+     */
+    private Result<Session> fallback(String newText, int newCursor, long t0) {
+        return factory.parseFull(newText, idGen)
+                      .map(fresh -> fallbackSuccess(fresh, newText, newCursor, t0));
+    }
+
+    private Session fallbackSuccess(CstNode fresh, String newText, int newCursor, long t0) {
         var freshIndex = NodeIndex.build(fresh);
         var enclosing = freshIndex.smallestContaining(newCursor)
                                   .or(fresh);
@@ -151,7 +255,44 @@ record IncrementalSession(
         NodeIndex.flatten(fresh)
                  .size(),
         System.nanoTime() - t0);
-        return new IncrementalSession(factory, newText, fresh, newCursor, enclosing, freshIndex, idGen, nextStats);
+        return new IncrementalSession(factory,
+                                      newText,
+                                      fresh,
+                                      newCursor,
+                                      enclosing,
+                                      freshIndex,
+                                      idGen,
+                                      nextStats,
+                                      Option.none());
+    }
+
+    /**
+     * 0.5.0 (Path A) — synthesise the degraded Session for the {@code edit}
+     * fallback path. Mirrors {@link #fallbackSuccess} but with a
+     * single-{@link CstNode.Error}-root tree and {@code Option.some(error)}
+     * recorded in {@link #lastError}.
+     */
+    private Session degradedFallback(String newText, int newCursor, long t0, SessionError error) {
+        var fresh = degradedRoot(newText, idGen, error);
+        var freshIndex = NodeIndex.build(fresh);
+        var enclosing = freshIndex.smallestContaining(newCursor)
+                                  .or(fresh);
+        var nextStats = new Stats(
+        stats.reparseCount() + 1,
+        stats.fullReparseCount() + 1,
+        "<root>",
+        NodeIndex.flatten(fresh)
+                 .size(),
+        System.nanoTime() - t0);
+        return new IncrementalSession(factory,
+                                      newText,
+                                      fresh,
+                                      newCursor,
+                                      enclosing,
+                                      freshIndex,
+                                      idGen,
+                                      nextStats,
+                                      Option.some(error));
     }
 
     /**
@@ -196,7 +337,17 @@ record IncrementalSession(
         }
         var nextEnclosing = nextIndex.smallestContaining(newCursor)
                                      .or(normalized);
-        return new IncrementalSession(factory, newText, normalized, newCursor, nextEnclosing, nextIndex, idGen, nextStats);
+        // Successful incremental reparse — never carries a parse-error flag;
+        // the splice already validated against the rule's expected end offset.
+        return new IncrementalSession(factory,
+                                      newText,
+                                      normalized,
+                                      newCursor,
+                                      nextEnclosing,
+                                      nextIndex,
+                                      idGen,
+                                      nextStats,
+                                      Option.none());
     }
 
     /**

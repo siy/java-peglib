@@ -1,18 +1,13 @@
 package org.pragmatica.peg.incremental.bench;
 
-import org.pragmatica.peg.PegParser;
-import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 import org.pragmatica.peg.incremental.Edit;
 import org.pragmatica.peg.incremental.IncrementalParser;
 import org.pragmatica.peg.incremental.Session;
-import org.pragmatica.peg.parser.Parser;
-import org.pragmatica.peg.parser.ParserConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Random;
 
@@ -95,17 +90,15 @@ public final class IncrementalSessionBench {
      * <ul>
      *   <li>{@code APPLIED} — edit ran and was accepted (post-edit buffer parses).</li>
      *   <li>{@code OUT_OF_BOUNDS} — edit offsets exceeded current buffer; not attempted.</li>
-     *   <li>{@code INVALIDATED} — pre-edit validation found the prospective buffer
-     *       unparseable; edit skipped, session reference unchanged.</li>
-     *   <li>{@code EXCEPTION} — {@code session.edit} itself threw (should be
-     *       unreachable post-validation, kept as safety net).</li>
+     *   <li>{@code INVALIDATED} — post-edit {@link Session#parseSuccessful()} returned
+     *       {@code false}; the random-edit generator produced a syntactically invalid
+     *       mutation. Session reference is rolled back to the pre-edit value.</li>
      * </ul>
      */
     private enum SkipReason {
         APPLIED,
         OUT_OF_BOUNDS,
-        INVALIDATED,
-        EXCEPTION
+        INVALIDATED
     }
 
     /** Per-edit measurement record. {@code -1} latency means the edit was skipped. */
@@ -129,14 +122,6 @@ public final class IncrementalSessionBench {
                                          },
                                          g -> g);
         var parser = IncrementalParser.create(grammar);
-        // Validator parser: same grammar, same config — used for post-edit
-        // full-parse validation so the bench's session never advances onto a
-        // syntactically invalid buffer. See class doc and Step 6 plan.
-        var validator = PegParser.fromGrammar(grammar, ParserConfig.DEFAULT)
-                                 .fold(cause -> {
-                                           throw new IllegalStateException("validator parser construction failed: " + cause.message());
-                                       },
-                                       p -> p);
         // Generate the edit plan once. The same plan drives both regimes so
         // the comparison is apples-to-apples.
         var plan = generateEditPlan(fixtureSource, EDIT_COUNT, RNG_SEED);
@@ -144,71 +129,43 @@ public final class IncrementalSessionBench {
         // not interpreter cost. We do a small throwaway session.
         warmJit(parser, fixtureSource);
         long t0 = System.nanoTime();
-        var regimeBExc = new ArrayList<ExcReport>();
-        var regimeAExc = new ArrayList<ExcReport>();
-        var regimeB = runRegime(parser, validator, fixtureSource, plan, true, regimeBExc);
-        var regimeA = runRegime(parser, validator, fixtureSource, plan, false, regimeAExc);
+        var regimeB = runRegime(parser, fixtureSource, plan, true);
+        var regimeA = runRegime(parser, fixtureSource, plan, false);
         long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
-        System.out.println("Validation: post-edit full-parse on every accepted edit (~+2x bench wallclock vs unvalidated)");
+        System.out.println("Validation: post-edit Session.parseSuccessful() check; rejected buffers roll back the session reference.");
         System.out.println();
         printReport(fixtureSource, regimeB, regimeA);
         System.out.println();
         System.out.println("=== POST-EDIT VALIDATION SUMMARY ===");
-        printRegimeSkipSummary("Regime B (cursor-moved)", regimeB, regimeBExc);
-        printRegimeSkipSummary("Regime A (cursor-pinned)", regimeA, regimeAExc);
+        printRegimeSkipSummary("Regime B (cursor-moved)", regimeB);
+        printRegimeSkipSummary("Regime A (cursor-pinned)", regimeA);
         System.out.printf("Total wallclock (both regimes): %d ms%n", elapsedMs);
     }
 
-    private record ExcReport(int editIndex,
-                             int offset,
-                             int oldLen,
-                             int newLen,
-                             String klass,
-                             String message,
-                             String topFrame) {}
-
-    private static void printRegimeSkipSummary(String label, Measurement[] ms, List<ExcReport> exceptions) {
-        long applied = 0, oob = 0, invalidated = 0, exc = 0;
+    private static void printRegimeSkipSummary(String label, Measurement[] ms) {
+        long applied = 0, oob = 0, invalidated = 0;
         for (var m : ms) {
             switch (m.skipReason()) {
                 case APPLIED -> applied++;
                 case OUT_OF_BOUNDS -> oob++;
                 case INVALIDATED -> invalidated++;
-                case EXCEPTION -> exc++;
             }
         }
-        System.out.printf("%s: %d applied, %d invalidated, %d out-of-bounds, %d exceptions%n",
+        System.out.printf("%s: %d applied, %d invalidated, %d out-of-bounds%n",
                           label,
                           applied,
                           invalidated,
-                          oob,
-                          exc);
-        if (!exceptions.isEmpty()) {
-            // Group by class+message+topFrame; show only the dominant entry.
-            var grouped = new LinkedHashMap<String, Integer>();
-            for (var e : exceptions) {
-                String key = e.klass() + " | " + e.message() + " | " + e.topFrame();
-                grouped.merge(key, 1, Integer::sum);
-            }
-            String dominantKey = null;
-            int dominantCount = 0;
-            for (var entry : grouped.entrySet()) {
-                if (entry.getValue() > dominantCount) {
-                    dominantCount = entry.getValue();
-                    dominantKey = entry.getKey();
-                }
-            }
-            System.out.printf("  dominant exception (%d/%d): %s%n", dominantCount, exceptions.size(), dominantKey);
-        }
+                          oob);
     }
 
     // -------- Regime driver ----------------------------------------------------------------
+    // Post-migration: Session.edit always returns a Session; parse failures surface via
+    // parseSuccessful() rather than exceptions, so the bench observes them post-edit
+    // and rolls the session reference back instead of swallowing a thrown RuntimeException.
     private static Measurement[] runRegime(IncrementalParser parser,
-                                           Parser validator,
                                            String fixtureSource,
                                            List<ClassifiedEdit> plan,
-                                           boolean moveCursor,
-                                           List<ExcReport> excOut) {
+                                           boolean moveCursor) {
         var session = parser.initialize(fixtureSource, 0);
         int prevFallbacks = session.stats()
                                    .fullReparseCount();
@@ -235,16 +192,18 @@ public final class IncrementalSessionBench {
                                          0);
                 continue;
             }
-            // PRE-edit validation: apply the edit to the text in isolation
-            // (no parser involvement) and full-parse the result. If parsing
-            // fails, the random-edit generator produced a syntactically
-            // invalid mutation (stray quote, unbalanced brace, etc.). Skip
-            // the edit so session.edit never sees an invalid buffer — that
-            // path's parseFull would throw IllegalStateException. Validation
-            // runs OUTSIDE the timed region. See Step 6 plan.
-            String prospectiveText = applyEditToText(currentText, edit);
-            if (validator.parseCst(prospectiveText)
-                         .isFailure()) {
+            long t0 = System.nanoTime();
+            Session next = moveCursor
+                           ? session.moveCursor(edit.offset())
+                                    .edit(edit)
+                           : session.edit(edit);
+            long t1 = System.nanoTime();
+            long latencyNs = t1 - t0;
+            // Post-edit validation: if the parser rejected the new buffer, Session.edit
+            // returns a degraded session whose parseSuccessful() is false. Treat the
+            // edit as INVALIDATED, keep the previous session, and exclude the latency
+            // sample from the timing buckets (mirrors the prior pre-validation skip).
+            if (!next.parseSuccessful()) {
                 out[i] = new Measurement(ce.cls(),
                                          - 1L,
                                          false,
@@ -256,33 +215,6 @@ public final class IncrementalSessionBench {
                                              .length(),
                                          "",
                                          0);
-                continue;
-            }
-            Session next;
-            long latencyNs;
-            try{
-                long t0 = System.nanoTime();
-                if (moveCursor) {
-                    next = session.moveCursor(edit.offset())
-                                  .edit(edit);
-                } else {
-                    next = session.edit(edit);
-                }
-                long t1 = System.nanoTime();
-                latencyNs = t1 - t0;
-            } catch (RuntimeException ex) {
-                out[i] = new Measurement(ce.cls(),
-                                         - 1L,
-                                         false,
-                                         true,
-                                         SkipReason.EXCEPTION,
-                                         edit.offset(),
-                                         edit.oldLen(),
-                                         edit.newText()
-                                             .length(),
-                                         "",
-                                         0);
-                recordException(excOut, i, edit, ex);
                 continue;
             }
             var stats = next.stats();
@@ -305,49 +237,15 @@ public final class IncrementalSessionBench {
         return out;
     }
 
-    /**
-     * Apply {@code edit} to {@code text} as a pure string transform — used
-     * for pre-edit validation. Mirrors the buffer mutation that
-     * {@code IncrementalSession.applyEdit} performs internally.
-     */
-    private static String applyEditToText(String text, Edit edit) {
-        var sb = new StringBuilder(text.length() + edit.delta());
-        sb.append(text, 0, edit.offset());
-        sb.append(edit.newText());
-        sb.append(text,
-                  edit.offset() + edit.oldLen(),
-                  text.length());
-        return sb.toString();
-    }
-
-    private static void recordException(List<ExcReport> excOut, int i, Edit edit, RuntimeException ex) {
-        if (excOut == null) {
-            return;
-        }
-        var trace = ex.getStackTrace();
-        String topFrame = trace.length > 0
-                          ? trace[0].toString()
-                          : "<no-frame>";
-        excOut.add(new ExcReport(i,
-                                 edit.offset(),
-                                 edit.oldLen(),
-                                 edit.newText()
-                                     .length(),
-                                 ex.getClass()
-                                   .getName(),
-                                 String.valueOf(ex.getMessage()),
-                                 topFrame));
-    }
-
     private static void warmJit(IncrementalParser parser, String fixtureSource) {
         var s = parser.initialize(fixtureSource, fixtureSource.length() / 2);
         for (int i = 0; i < 20; i++) {
             int off = (i * 37 + 100) % s.text()
                                        .length();
-            try{
-                s = s.moveCursor(off)
-                     .edit(new Edit(off, 0, "x"));
-            } catch (RuntimeException ignored) {}
+            // Post-migration: edit never throws on parse failure; degraded sessions
+            // are harmless during JIT warmup so we don't bother inspecting parseSuccessful().
+            s = s.moveCursor(off)
+                 .edit(new Edit(off, 0, "x"));
         }
     }
 

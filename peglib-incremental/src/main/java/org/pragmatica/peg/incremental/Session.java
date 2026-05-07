@@ -1,5 +1,6 @@
 package org.pragmatica.peg.incremental;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.peg.tree.CstNode;
 
 /**
@@ -73,4 +74,36 @@ public interface Session {
      * is incremented by one.
      */
     Session reparseAll();
+
+    /**
+     * 0.5.0 (Path A) — {@code true} when the most recent full parse (or the
+     * splice-and-validate of an incremental reparse) produced a structurally
+     * valid CST; {@code false} when {@link #edit(Edit)} or {@link #reparseAll()}
+     * fell through to the degraded-Session synthesis path because the backing
+     * parser rejected the buffer.
+     *
+     * <p>Default: {@code true}. The package-private degraded session produced
+     * by {@code SessionFactory} on parse failure overrides this to surface the
+     * failure without resorting to exceptional control flow.
+     *
+     * <p>Editor-style callers that need to distinguish "edit applied to a
+     * valid buffer" from "edit applied to a buffer the grammar rejects"
+     * inspect this flag (and {@link #lastParseError()} for the cause message).
+     * Callers that don't care continue to use {@link #root()} and
+     * {@link #text()} as before — the degraded session still has a non-null
+     * root and text, just a single {@link CstNode.Error} root carrying the
+     * rejected buffer.
+     */
+    default boolean parseSuccessful() {
+        return true;
+    }
+
+    /**
+     * 0.5.0 (Path A) — when {@link #parseSuccessful()} is {@code false}, the
+     * {@link SessionError} returned by the most recent full parse, expressed
+     * via its {@link SessionError#message()}. Empty otherwise.
+     */
+    default Option<String> lastParseError() {
+        return Option.none();
+    }
 }
