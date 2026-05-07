@@ -270,40 +270,62 @@ Regen via:
 
 ## 11. Recommended next session
 
-**Phase 0 spike landed GO on 2026-05-07.** All three GO/NO-GO gates green; Phase 1 (production migration of Lever A) is the next-session entry. Read `docs/incremental/PHASE-0-RESULTS.md` for the full verdict + bench numbers (38–67× speedup confirmed) before starting.
+**Phase 1 production migration of Path D landed on 2026-05-07.** Median 1.9× faster than 0.4.3, p95 35% better, frame-budget hit rate +4.4pp. p99/max regressed on large-pivot edits — accepted trade vs Path A's much-larger-scope refactor. Read `docs/incremental/PHASE-1-RESULTS.md` for the full verdict + bench numbers + caveats before starting Phase 2.
 
-State of `release-0.5.0` branch (8 commits past `1619604` chore — local only, not pushed):
+State of `release-0.5.0` branch (15 commits past `1619604` chore — local only, not pushed):
 
-- `d00eaa1` Phase 0a — `IdGenerator` + `LongLongMap` foundation
-- `f0696a1` Phase 0b — sandbox `IdCstNode` + `IdCstNodeBuilder`
-- `849b4ba` Phase 0c — sandbox `IdNodeIndex` with O(splicedSize+depth) incremental update
-- `9b55253` Phase 0d.1 — `IdTreeSplicer` + identity-invariant + trivia-edit gates
-- `a2dd8ac` Phase 0d.2 — JMH `Phase0SpikeBench` + results note (38-67× balanced-tree)
-- `a8c6efe` Phase 0e — GO verdict doc + CHANGELOG entry
+**Phase 0 — spike (sandbox):**
+- `d00eaa1` 0a — `IdGenerator` + `LongLongMap` foundation
+- `f0696a1` 0b — sandbox `IdCstNode` + `IdCstNodeBuilder`
+- `849b4ba` 0c — sandbox `IdNodeIndex` with O(splicedSize+depth) incremental update
+- `9b55253` 0d.1 — `IdTreeSplicer` + identity-invariant + trivia-edit gates
+- `a2dd8ac` 0d.2 — JMH `Phase0SpikeBench` + results note (38-67× balanced)
+- `a8c6efe` 0e — GO verdict doc + CHANGELOG entry
+
+**Phase 1 — prove-out + production migration:**
 - `8f844eb` Path A prove-out — SpanIndex / offset decoupling (RED, 1.10-1.29×)
 - `8b27dd6` Path D prove-out — stable-id ancestor preservation (GREEN, 96-604×)
+- `4043ddc` docs — phase 1 prove-out summary
+- `2443779` 1.2 — production CstNode gains long id (BREAKING)
+- `39e11f9` 1.5/1.6 — NodeIndex LongLongMap + Path D applyIncremental + tombstone fix
+- `65a719f` 1.7 — refresh nodesById after shiftAll + bench exception diagnostics
 
-All work additive in `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/experimental/` and the parallel test/jmh directories. 897-test production surface untouched throughout. Local incremental count: 190 (was 100, +90 sandbox tests). 699 core unchanged.
+Tests: 993 green (699 core + 196 incremental + 66 formatter + 5 maven-plugin + 27 playground). IncrementalParityTest 22×100 green throughout. 0 skipped, 0 failures, 0 errors.
 
-### Phase 1 — production migration (path D, next session)
+### Phase 2 — Lever B top-down pivot search (next session)
 
-The Phase 1 prove-out (`docs/incremental/PHASE-1-PROVE-OUT.md`) discovered that the spec §2 algorithm degrades to O(N) on flat trees (e.g., a method body with 1000 statements). Path A (offset decoupling) was prove-out RED — 1.10-1.29× speedup, far short of the 5× gate. **Path D (stable-id ancestor preservation) is GREEN** — 96× at 1000 nodes, 604× at 10000 nodes, with absolute time *flat* across N (~25-40 ns) confirming genuine O(δ) scaling.
+Per spec §3 — should dissolve the §6.2 lever-1 puzzle into a 30-line method now that Phase 1's stable IDs make descent-from-root cheap (O(depth × branching) via id-keyed `nodesById` lookups instead of O(N) tree walks).
 
-The fix is small: when `TreeSplicer.spliceAndShift` builds new ancestor records, reuse `oldAncestor.id()` instead of allocating a fresh one. Then `applyIncremental` skips the redundant ancestor rewiring (steps 1 and 3 of spec §2 disappear — only oldPivot's descendants and newPivot's subtree need touching).
+Two concrete motivators from Phase 1.7's bench data (per `PHASE-1-RESULTS.md` §"Bench caveats"):
 
-**Critical:** splicer + index migrate as a unit. The bench's middle column (`stableIdNoOpt` = stable splicer + original `applyIncremental`) matches productionStyle within noise. The optimized `applyIncremental` that *trusts* ID stability is what realizes the gain.
+1. **Cursor-aware regime asymmetry, 57 edits.** Regime A (cursor-pinned) reports 622 successful edits; Regime B (cursor-moved-to-edit) reports 565. The 57-edit gap likely reflects cases where the warm-pointer pivot search picks a slightly different (less safe) pivot in Regime B. Lever B's top-down descent + safe-pivot heuristic should dissolve this.
 
-Phase 1 sub-phases (per `PHASE-1-PROVE-OUT.md` §"Phase 1 production migration plan"):
-1. **1.2** — add `long id` field to production `CstNode` variants; override equals/hashCode to exclude id (spec §7 R1). Migrate hundreds of pattern-match call sites across all 5 modules.
-2. **1.3** — thread `IdGenerator` through `PegEngine` + `ParserGenerator` emission templates.
-3. **1.4** — modify `TreeSplicer.spliceAndShift` to reuse ancestor IDs (one-line behavioral change).
-4. **1.5** — switch `NodeIndex` from `IdentityHashMap` to `LongLongMap`.
-5. **1.6** — replace `IncrementalSession.applyIncremental` with Path D's optimized algorithm (step 1 and step 3 deleted).
-6. **1.7** — verify parity (897 + IncrementalParityTest 22×100) + bench against 0.4.3 baseline on the 1900-LOC fixture.
+2. **Large-pivot p99 tail.** The p99/max regression (138 ms / 391 ms vs 0.4.3's 53 ms / 99 ms) localizes to edits where the boundary algorithm chose a 2k-7k-node interior pivot. `TreeSplicer.shiftAll` then deep-copies all right-of-edit descendants. Lever B's smarter pivot selection should pick smaller pivots more often, reducing the tail.
 
-**Estimated 3-5 days focused engineering.** Smaller than the spec's original 1-week estimate because Path A is shelved and Path D is a much smaller change.
+Phase 2 deliverables (per spec §6 Phase 2, ~3 days):
+- `IncrementalSession.findBoundaryCandidate` replaced with top-down descent from root using `NodeIndex.nodesById` (O(depth × branching))
+- Safe-pivot detection added to grammar analysis (rules whose `parseRuleAt` provably matches full reparse — rules starting with unambiguous terminals like Block `{`, Stmt mixed delim)
+- `BackReferenceFallbackTest.edit_triggers_full_reparse` — currently passes via warm-pointer cursor-spine accident; verify it still passes via the descent + safe-pivot exclusion
+- IncrementalParityTest stays green at 22×100
+- Re-run IncrementalSessionBench; gate on Regime B success count reaching parity with Regime A AND p99 falling below 100 ms
 
-After Phase 1 lands, proceed to Phase 2 (Lever B top-down pivot — should dissolve the §6.2 lever-1 puzzle into a 30-line method per spec §3).
+### Bench harness improvement (high priority alongside Phase 2)
+
+`IncrementalSessionBench` produces edit sequences that occasionally corrupt buffer syntax over time. 398 of 435 Regime B exceptions in Phase 1.7 are the same syntax error from a recurring corruption (per `PHASE-1-RESULTS.md` §"Bench caveats" item 1). Phase 2 should:
+- Gate edit application on parse validity before committing the edit to the bench's cumulative buffer
+- Or, treat fall-through-to-fallback as a soft outcome (record but don't count as skipped)
+
+### Items now superseded
+
+§6.2 lever-1 puzzle — fully resolved by Path D's algorithm + stable IDs. The historical "lever-1 cursor-overshoot fix needs 5-10 days of correctness analysis" is replaced by the Phase 0/1 work. The latent bug in `tryIncrementalReparse` (only checks pivot for `fallbackRules` membership, not ancestors) is still present and should be addressed in Phase 2 alongside the pivot algorithm rework.
+
+§6.4 unsafe-generator work — out of scope. The 0.5.0 design doesn't need it.
+
+Do NOT pursue further allocation reduction in the 0.4.x interpreter — see prior HANDOVER guidance.
+
+---
+
+**Last updated:** 2026-05-07, after Phase 1 production migration landed. Path D's stable-id-ancestor architecture is in place and validated against the 0.4.3 baseline. Branch is local-only at 15 commits past chore; recommend pushing as a public Phase 1 marker before Phase 2 work begins.
 
 ### Items now superseded
 

@@ -17,7 +17,35 @@ Sandbox prototype of Lever A (stable IDs + LongLongMap NodeIndex) lands additive
 - **Trivia-bearing edits** — calculator grammar with `%whitespace` + comments, three representative edits, incremental update equivalent to full rebuild (spec §8 Q4 gate).
 - **Perf** — JMH bench: 38× speedup at 100 nodes, 47× at 1000, 67× at 10000. Well above the 5× gate threshold; consistent with spec §2's projected 300× per-edit reduction. See [`docs/bench-results/phase0-spike-results.md`](docs/bench-results/phase0-spike-results.md) and [`docs/incremental/PHASE-0-RESULTS.md`](docs/incremental/PHASE-0-RESULTS.md).
 
-Phases 1–5 (production migration of all 5 modules) is the next-session entry point.
+### Phase 1 prove-out (2026-05-07)
+
+Path A (offset decoupling from records) — RED. 1.10-1.29× speedup on flat-tree mid-buffer edits; not worth the cross-cutting refactor. See [`docs/bench-results/phase1-spanindex-results.md`](docs/bench-results/phase1-spanindex-results.md).
+
+Path D (stable-id ancestor preservation) — GREEN. **96-604× speedup** on flat-tree mid-buffer edits with absolute time flat across N (~25-40 ns), confirming genuine O(δ) scaling. The fix: TreeSplicer reuses old ancestor IDs across splices; applyIncremental skips ancestor-rewiring as a result. See [`docs/bench-results/path-d-results.md`](docs/bench-results/path-d-results.md) and [`docs/incremental/PHASE-1-PROVE-OUT.md`](docs/incremental/PHASE-1-PROVE-OUT.md).
+
+### Phase 1 production migration (2026-05-07)
+
+**BREAKING.** `CstNode` records gain `long id` as the first record component on all four variants (`Terminal`, `NonTerminal`, `Token`, `Error`). `equals`/`hashCode` overridden to exclude `id` per spec §7 R1 — structural equality preserved (`RoundTripTest` baselines unaffected). New `org.pragmatica.peg.tree.IdGenerator` interface + `PerSessionCounter` impl; threaded through `ParsingContext`, `PegEngine`, `ParserGenerator` emission templates. Generated parsers now contain inline `IdGenerator` (preserves the v0.4.2 standalone-parser invariant — no FQCN dep on peglib runtime).
+
+`NodeIndex` internals switch from `IdentityHashMap` to `LongLongMap` (hand-rolled linear-probing, promoted from sandbox to `internal/`). Includes a tombstone-saturation fix: resize triggers on `size + tombstones > threshold`; same-capacity rehash drains tombstones without growing the table.
+
+`IncrementalSession.applyIncremental` adopts Path D's optimized algorithm (steps 1 and 3 from spec §2 deleted because ancestor IDs are stable). Step 6 added: refresh `nodesById` for right-of-edit subtrees that `TreeSplicer.shiftAll` deep-copies — those subtrees retain stable IDs but their records carry post-edit shifted spans, so the lookup map needs a refresh to avoid stale-span pivot errors.
+
+Bench numbers vs 0.4.3 baseline on the 1900-LOC Java fixture (Regime B, cursor-moved-to-edit, same RNG seed `0xBEEFCAFE`):
+
+| Metric | 0.4.3 | 0.5.0 (post-1.7) | Change |
+|---|---:|---:|---:|
+| Median | 10.8 ms | 5.6 ms | **-48% (1.9× faster)** |
+| p95 | 22.4 ms | 14.6 ms | **-35%** |
+| p99 | 53.3 ms | 138.8 ms | +160% (large-pivot tail) |
+| Max | 98.6 ms | 390.8 ms | +297% (large-pivot tail) |
+| % under 16 ms | 91.5% | 95.9% | **+4.4 pp** |
+
+Median + p95 + frame-budget hit rate clearly improved. p99/max regressed for large-pivot edits where `TreeSplicer.shiftAll` deep-copies thousands of right-of-edit records — an accepted trade vs Path A's much-larger-scope refactor. Pivot-selection improvements (spec Lever B) deferred to Phase 2.
+
+See [`docs/incremental/PHASE-1-RESULTS.md`](docs/incremental/PHASE-1-RESULTS.md) for full sub-phase summary and bench caveats.
+
+Phase 2 (Lever B top-down pivot search) is the next-session entry point.
 
 ## [0.4.3] - 2026-05-06
 
