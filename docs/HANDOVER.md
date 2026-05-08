@@ -322,24 +322,93 @@ DFA generalization (whitespace + NumLit): neutral — low-volume rules don't pay
 
 **Pattern:** high-volume single-target wins (A, F, selective packrat, Identifier fast-path) deliver big. Broad generalizations don't.
 
-### Next session: Move B — mutable parse-state singleton
+### Move B — attempted and abandoned 2026-05-08
 
-The last big tractable allocation lever. Targets 5,264 CstParseResult per self-host parse. **Detailed spec at [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md)** with:
+The mutable parse-state singleton arc was attempted in this session: 5 incremental commits landed (`88c15f3` foundation → `a86fa97` parse_<rule>→boolean → `23ba500` match helpers → `98f4c11` combinators → `ed95951` predicates/capture/cut/TB), then **policy-driven rollback to `v0.5.0-candidate`**. Branch state preserved.
 
-- 4-6 incremental commit plan (each parity-gated)
-- Specific blockers from prior decline (LR seed-and-grow, packrat aliasing, ~80 emission sites, cross-call read discipline)
-- Risk register + decision gates per commit
-- Validation procedure per commit
-- Reference numbers + B target (≤ 20 ms reference / ~2× of javac)
+**Why it failed (well-supported by 5 bench data points):** modern JIT was already scalar-replacing the per-call `CstParseResult` records (raw-nullable fields + immediate-consume call sites are textbook escape-analysis fodder). Replacing them with a heap-bound singleton **defeated** that optimization. Allocation rate dropped (-12.8% cumulative — short of the §9 15% gate) **but wallclock regressed monotonically** (+11.0% cumulative). The trajectory was clear by commit 5: pushing further would have hurt more.
 
-**Key constraint:** prior agent declined B as too large for one autonomous pass and proposed multi-commit incremental delivery. Honor this — don't try to land B in a single agent run. Each commit lands green or reverts.
+| Stage | Wallclock (ms/op) | Alloc (MB/op) |
+|---|---:|---:|
+| Baseline (this session start) | 22.6 | 75.6 |
+| Commit 3 | 23.97 | 72.1 |
+| Commit 4 | 24.71 | 66.3 |
+| Commit 5 | 25.09 | 65.96 |
 
-### Other tractable next moves (post-B)
+**Full post-mortem with hypothesis, ruled-out moves, and reoriented optimization directions: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11.**
 
-- **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. ~5-15% on char-class-heavy paths.
-- **Lever B retry** (incremental engine) — gated on trivia attribution rework. SafePivotAnalyzer + NodeIndex.smallestEnclosing live as dormant infrastructure for the eventual retry.
-- **Trivia attribution rework** — context-independent attachment. Unblocks Lever B; comparable scope to Lever C.
-- **Lever C — IR unification** (spec §4) — multi-week. Eliminates "every fix paid twice" pattern between PegEngine and ParserGenerator emission templates. Reduces 7,440 LOC to ~1,700.
+The 5 commits are in reflog (`git reflog show release-0.5.0`) for ~30 days if forensic inspection is needed. Don't re-attempt; new info has retired the approach.
+
+### Reoriented next moves (post-Move-B reassessment)
+
+The Move B failure tells us **allocation rate is no longer a productive target** in the throughput engine. The engine is now allocation-optimized to the point where further alloc reduction has negative ROI on wallclock. Future wins live elsewhere:
+
+- **Profile-driven wallclock work** (NEW, highest-ROI suggestion) — `async-profiler` in CPU mode + flame graphs on the reference fixture. Identify the actual hot CPU work post-Tier-1, target that directly. The Move B failure proved alloc-rate metrics can be misleading; CPU samples are the trustworthy signal now. **EXECUTED THIS SESSION — see "Post-rollback profile-driven optimization arc" below for outcomes.**
+- **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. **Reassess with care** — same risk class as Move B. Bench wallclock first to confirm range-comparison isn't already JIT-optimized via SIMD/code-motion. Potential ~5-15% on char-class-heavy paths IF measurably hot.
+- **Lever B retry** (incremental engine) — gated on trivia attribution rework. SafePivotAnalyzer + NodeIndex.smallestEnclosing live as dormant infrastructure for the eventual retry. Independent of allocation patterns; unaffected by Move B finding.
+- **Trivia attribution rework** — context-independent attachment. Unblocks Lever B; comparable scope to Lever C. Independent of allocation; unaffected by Move B finding.
+- **Lever C — IR unification** (spec §4) — multi-week. Eliminates "every fix paid twice" pattern between PegEngine and ParserGenerator emission templates. Reduces 7,440 LOC to ~1,700. Maintainability + complexity reduction primary value, not raw perf.
+
+### Post-rollback profile-driven optimization arc (this session, 2026-05-08)
+
+After Move B was abandoned and rolled back to `v0.5.0-candidate` (`e849b63`), a profile-driven optimization arc executed in the same session. Two profile passes (CPU + alloc × reference + selfhost via async-profiler) identified specific candidates; each candidate landed under a strict bench gate (>3% wallclock OR >5% alloc → ship; >1% wallclock regression → reset).
+
+**Branch now at `38b6a8e`** — 2 commits past `v0.5.0-candidate`:
+
+| Commit | Direction | Reference Δ | Selfhost Δ |
+|---|---|---|---|
+| `4763251` | trivia snapshot via int size (eliminates `List.copyOf` per backtrack) | **-12.1% wallclock / -6.4% alloc** | **-8.2% wallclock / -7.5% alloc** |
+| `38b6a8e` | matchCharClassCst ASCII char interning pool (eliminates `String.valueOf(c)` per match) | **-3.95% wallclock / -3.76% alloc** | **-4.59% wallclock / -1.38% alloc** |
+
+**Cumulative (from `v0.5.0-candidate` baseline, this machine, this session):**
+
+| Fixture | v0.5.0-candidate | After 38b6a8e | Δ wallclock | Δ alloc |
+|---|---:|---:|---:|---:|
+| Reference (1900 LOC) | 22.66 ms / 75.55 MB | **19.12 ms / 68.02 MB** | **-15.6%** | **-10.0%** |
+| Selfhost (37k LOC) | 937 ms / 2.04 GB | **832 ms / 1.85 GB** | **-11.2%** | **-9.3%** |
+
+**Reference fixture is now under 20 ms — the original Move B wallclock target, achieved without singleton mutation.**
+
+### Lesson taxonomy from this session's optimization arc
+
+7 candidates attempted post-rollback. 2 ships, 5 resets. Pattern that emerged:
+
+| Pattern | Result | Reason |
+|---|---|---|
+| Replace `List.copyOf` (varargs / array copy) with primitive int snapshot | **WIN** | JIT cannot elide bulk array copies — real alloc cost eliminated |
+| Replace per-call `String.valueOf(c)` with interned ASCII pool | **WIN** | JIT allocates fresh String per call; no escape-analysis path |
+| Replace `String.contains` quadratic scan with `LinkedHashSet` dedup | RESET | JIT inlines String.contains efficiently; call-overhead-dominated |
+| Replace `HashMap<Long,_>` with custom open-addressed long-keyed map | RESET | JDK HashMap per-op faster than custom; per-op latency tax exceeds alloc savings |
+| Provide `HashMap` initial-capacity hint from input size | RESET | Over-sizing hurts cache locality more than it saves resize cost |
+| Convert `Token` record → mutable class with text cache (lazy substring) | RESET | Records are JIT-scalar-replaceable; mutable class with cache field defeats EA |
+| Defer `SourceLocation` construction in trackFailure to parse-end | RESET | SourceLocation is a record; JIT readily stack-allocates / dead-code-eliminates |
+
+**Refined principle:** allocation share in a profile is NOT predictive of wallclock improvement when JIT escape analysis already handles the alloc. Successful patterns target allocations the JIT cannot elide:
+- Bulk array copies (`Arrays.copyOf`, `ArrayList.toArray`)
+- Per-call freshly-allocated objects with no scalar replacement path (e.g. `String.valueOf(c)` materializes a fresh char[] backing)
+
+Failed patterns target allocations the JIT already optimizes:
+- Records (compact, scalar-replaceable, value-class-like)
+- Immediately-consumed objects in a single method's scope
+- JDK collection internals (HashMap is heavily JIT-optimized)
+- Mutable shared state on `this` (defeats EA — Move B's lesson)
+
+### What's now also ruled out (this session)
+
+- Per-call `CstParseResult` elimination via singleton (Move B — confirmed; rolled back)
+- `String.contains` micro-optimization in trackFailure
+- Custom long-keyed packrat cache map
+- HashMap initial-capacity sizing hints
+- Lazy Token text materialization (record→class transition)
+- Lazy SourceLocation construction in trackFailure
+
+### What's still viable
+
+- **Char-class bit-packing** — REASSESS WITH CARE per same risk class. Bench wallclock first.
+- **Lever B retry** (incremental engine) — independent of allocation patterns
+- **Trivia attribution rework** — independent
+- **Lever C IR unification** — multi-week, maintainability-first
+- **Re-profile post-`38b6a8e`** — the profile has shifted again; new candidates may emerge or the profile may be flat (no clear next move). Run a third profile pass if pursuing further wallclock work.
 
 ### Items superseded by this session's work
 
@@ -348,6 +417,8 @@ The last big tractable allocation lever. Targets 5,264 CstParseResult per self-h
 
 Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guidance still holds.
 
+**Updated post-Move-B (2026-05-08):** Do NOT pursue further allocation reduction in the **generated parser** either. The Move B failure proved alloc-rate is no longer a productive target — JIT escape analysis is already doing aggressive scalar replacement on per-call records. Future perf work should be CPU-profile-driven, not alloc-profile-driven.
+
 ---
 
-**Last updated:** 2026-05-08, end of throughput engine Tier 1 arc + DFA fast-path spike. Branch at `fd278fe`, pushed to origin with tag `v0.5.0-candidate`. Next-session entry point: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) for Move B (mutable parse-state singleton).
+**Last updated:** 2026-05-08, end of profile-driven optimization arc (post-Move-B rollback). Branch `release-0.5.0` at `38b6a8e` — 2 commits past `v0.5.0-candidate` (`e849b63`). peglib-core 705 tests green (includes 6 smoke tests from the 2 shipped commits — CandidateTwoSmokeTest 3, CandidateFourSmokeTest 3); full reactor green via `mvn install`. Cumulative wins this session: -15.6% reference wallclock / -11.2% selfhost wallclock. Reference now under 20 ms. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: re-profile post-`38b6a8e` if pursuing further wallclock; otherwise pivot to trivia attribution rework / Lever B retry / Lever C IR unification.

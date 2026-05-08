@@ -272,4 +272,66 @@ If B falls short:
 
 ---
 
-**Last updated:** 2026-05-08, end of throughput engine Tier 1 arc, before B attempt.
+## 11. Post-mortem — Move B attempted, abandoned 2026-05-08
+
+Five commits landed (`88c15f3` … `ed95951`) before policy-driven rollback. Hard-reset to `v0.5.0-candidate` (`e849b63`) — branch state preserved as if Move B never happened. The 5 commits remain in reflog for ~30 days if forensic detail is needed.
+
+### Bench trajectory (reference fixture, `-i 5 -wi 3 -prof gc`)
+
+| Stage | Wallclock (ms/op) | Alloc (MB/op) | Δ wallclock vs orig | Δ alloc vs orig |
+|---|---:|---:|---:|---:|
+| Original baseline (`fd278fe`) | 22.6 | 75.6 | — | — |
+| Commit 1 (foundation, no behavior change) | not benched | not benched | (expected ≈ 0) | (expected ≈ 0) |
+| Commit 2 (parse_<rule> → boolean) | not benched | not benched | unknown | unknown |
+| Commit 3 (match helpers) | 23.97 | 72.1 | **+6.0%** | -4.6% |
+| Commit 4 (combinators) | 24.71 | 66.3 | **+9.3%** | -12.3% |
+| Commit 5 (predicates/capture/cut/TB) | 25.09 | 65.96 | **+11.0%** | -12.8% |
+
+Wallclock regressed **monotonically** with each migration; allocation dropped **monotonically but with diminishing returns**. By commit 5 the Δ-per-commit had flatlined: +0.38 ms wallclock, -0.34 MB alloc. The §9 gate (≥ 15% allocation drop) was not reached and the trajectory said it would not reach it.
+
+### Hypothesis (well-supported by the data)
+
+JIT escape analysis was already scalar-replacing the per-call `CstParseResult` records on the hot path. The records had:
+- Raw nullable fields (Spike A removed Option boxing, leaving primitives + nullable refs)
+- Local-scope construction in each parse method
+- Immediate consume at call site (no cross-method handoff via stable references)
+- No escape into fields/threads/exceptions
+
+These are textbook scalar-replacement targets. The "allocation" the JMH `gc.alloc.rate.norm` profiler reported was overstated relative to actual heap pressure — the JVM was decomposing each record into stack-allocated primitives.
+
+The singleton replacement:
+- Field on `this` (heap-bound, cannot be scalarized)
+- Field stores/loads cross method boundaries (defeats some inlining and code-motion)
+- Source-level aliasing forces the compiler to assume mutation visibility (defeats further reordering)
+
+Net effect: GC sees fewer survivor objects (alloc-rate metric drops) **but** wallclock regresses because the optimized hot path is now slower per call.
+
+### What this means for future optimization (peglib and elsewhere)
+
+1. **Allocation rate ≠ optimization opportunity.** Short-lived records on hot paths may already be near-zero-cost via scalar replacement. JMH's `-prof gc` alloc-rate is a useful diagnostic, not a target.
+2. **Bench wallclock first, alloc second.** A move that drops alloc but regresses wallclock is a loss.
+3. **Profile via CPU sampling, not alloc sampling, when looking for actual hot work.** `async-profiler` in `cpu` mode + flame graphs.
+4. **Singleton-mutable-state patterns from C/C++ codebases do NOT translate.** They beat C++'s allocator overhead because C++ has no escape analysis. Java's JIT does that work for you on short-lived records.
+
+### What's now ruled out
+
+- **Move B itself** (per-call `CstParseResult` elimination via singleton). Definitively abandoned.
+- By extension: any "share a mutable state object on `this`" pattern targeting short-lived per-call records in the generated parser. Apply skepticism.
+
+### What's still viable (reassessed)
+
+- **Char-class bit-packing** (spec §10 future moves) — REASSESS WITH CARE. Same risk class: char-by-char comparison may already be JIT-optimized. Profile wallclock first; verify there's a measurable hot-path win before attempting.
+- **Lever B retry (incremental engine)** — gated on trivia attribution rework. Independent of allocation patterns; still viable.
+- **Trivia attribution rework** — context-independent attachment. Independent; still viable. Comparable scope to Lever C.
+- **Lever C — IR unification** (spec §4) — multi-week. Maintainability + complexity reduction primary value, not raw perf. Still viable.
+- **Profile-driven wallclock optimization** — `async-profiler` CPU mode, identify actual hot CPU work, target THAT. Probably the highest-ROI next direction.
+
+### What got preserved
+
+- The HANDOVER + this spec at `e849b63` document the experiment for posterity.
+- `v0.5.0-candidate` tag at `e849b63` is the shippable 0.5.0 state.
+- The 5 Move B commits remain in reflog (`git reflog show release-0.5.0`) for ~30 days.
+
+---
+
+**Last updated:** 2026-05-08, end of Move B (abandoned). Successor work: see HANDOVER §11.
