@@ -103,6 +103,67 @@ public final class ParserGenerator {
     /** Lazily-computed grammar-wide FIRST sets for §7.1F dispatch. */
     private ChoiceDispatchAnalyzer.FirstSets firstSets;
 
+    // ============================================================
+    // Phase G2: Sequence chunking (split long Sequence bodies into
+    // per-chunk helper methods to keep emitted methods under the
+    // HotSpot FreqInlineSize threshold; companion to Phase G's
+    // per-alternative helper extraction).
+    // ============================================================
+    /** Phase G2 thresholds — see {@link #shouldChunkSequence(Expression.Sequence)}. */
+    private static final int SEQ_CHUNK_ELEMENT_THRESHOLD = 4;
+    private static final int SEQ_CHUNK_BYTE_THRESHOLD = 1200;
+
+    /** Phase G2: maximum cumulative element-weight packed into a single chunk
+     *  before a new chunk is started. Bounds chunk-method bytecode size. */
+    private static final int SEQ_CHUNK_MAX_WEIGHT = 1200;
+
+    /** Phase G2: maximum elements per chunk (cap regardless of weight). */
+    private static final int SEQ_CHUNK_MAX_ELEMENTS = 3;
+
+    /**
+     * Phase G2: per-rule-emission list of chunk-helper method bodies that need
+     * to be emitted at class scope. Each helper has its OWN StringBuilder so
+     * that nested chunked Sequences (a chunk helper containing a chunked
+     * sub-Sequence) don't interleave bodies — the outer helper finishes its
+     * own buffer while inner helpers occupy separate sibling buffers. All
+     * buffers are appended to {@code sb} in insertion order at rule-emission
+     * end by {@link #generateCstRuleMethods(StringBuilder)}.
+     */
+    private java.util.List<StringBuilder> pendingChunkHelpers;
+
+    /**
+     * Phase G2: counter assigning unique sequence ids within the currently-
+     * emitting rule — used to name {@code parse_<rule>_seq<N>_chunk<L>} helpers.
+     */
+    private int currentRuleSequenceCounter;
+
+    /**
+     * Phase G2: name of the rule currently being emitted (sanitized form used
+     * in helper method names). Set by {@link #generateCstRuleMethods} around
+     * each rule's emission.
+     */
+    private String currentRuleName;
+
+    /**
+     * Phase G2: rule-id constant name for the currently-emitting rule. Chunk
+     * helpers re-declare {@code __ruleName} locally to make in-scope what the
+     * inner emissions reference (TokenBoundary, ZeroOrMore wrap-as-NonTerminal).
+     */
+    private String currentRuleIdConst;
+
+    // ============================================================
+    // Phase H: nested-Choice extraction (extracts heavy Choices that
+    // appear inside Sequence/repetition contexts into per-rule helper
+    // methods). Companion to Phase G (top-level rule Choice extraction)
+    // and Phase G2 (Sequence chunking).
+    // ============================================================
+    /** Phase H: per-rule unique counter for nested Choice helpers. */
+    private int currentRuleChoiceCounter;
+
+    /** Phase H thresholds — extract a nested Choice when EITHER applies. */
+    private static final int NESTED_CHOICE_ALT_THRESHOLD = 8;
+    private static final int NESTED_CHOICE_BYTE_THRESHOLD = 2500;
+
     /** Phase 1F: lazy FIRST set computation (per-generator, single pass over grammar). */
     private ChoiceDispatchAnalyzer.FirstSets firstSets() {
         if (firstSets == null) {
@@ -2814,7 +2875,21 @@ public final class ParserGenerator {
         sb.append("    // === Rule Parsing Methods ===\n\n");
         int ruleId = 0;
         for (var rule : grammar.rules()) {
+            // Phase G2: per-rule chunk-helper context. Reset before each rule so chunk ids
+            // restart and the buffer list is empty; flush deferred helpers (declared at
+            // class scope) after the rule's primary method emission completes.
+            pendingChunkHelpers = new java.util.ArrayList<>();
+            currentRuleSequenceCounter = 0;
+            currentRuleChoiceCounter = 0;
+            currentRuleName = sanitize(rule.name());
+            currentRuleIdConst = toConstantName(rule.name());
             generateCstRuleMethod(sb, rule, ruleId++ );
+            for (var helper : pendingChunkHelpers) {
+                sb.append(helper);
+            }
+            pendingChunkHelpers = null;
+            currentRuleName = null;
+            currentRuleIdConst = null;
         }
     }
 
@@ -3634,6 +3709,786 @@ public final class ParserGenerator {
         sb.append("    }\n\n");
     }
 
+    // ============================================================
+    // Phase G2: Sequence chunking
+    // ============================================================
+    /**
+     * Phase G2: Emit a CST {@link Expression.Sequence} body, splitting into
+     * per-chunk helper methods when the sequence is large enough to benefit.
+     *
+     * <p>Chunking criteria (see {@link #shouldChunkSequence(Expression.Sequence)}):
+     * <ul>
+     *   <li>Element count exceeds {@link #SEQ_CHUNK_ELEMENT_THRESHOLD}, OR</li>
+     *   <li>Estimated emitted-byte weight exceeds {@link #SEQ_CHUNK_BYTE_THRESHOLD}.</li>
+     * </ul>
+     *
+     * <p>When chunking, the dispatcher emitted in-place captures sequence-entry
+     * state (pos/line/column/pending/children-snapshot) and calls each chunk
+     * helper in order. Each helper takes that state as parameters; on element
+     * failure within the helper, the helper performs the same per-element
+     * rollback as the inline emission and returns the failure result.
+     *
+     * <p>PEG semantics:
+     * <ul>
+     *   <li>Sequence atomicity — failure of any element rolls back to sequence
+     *       entry. Each chunk's element-failure handler restores location +
+     *       pending + children to the sequence-start snapshot.</li>
+     *   <li>Cut propagation — once an element succeeds that is a {@code Cut},
+     *       subsequent failures convert to cut-failure. Cut state is propagated
+     *       across chunks <i>statically</i>: chunk N's emission knows whether
+     *       any prior-chunk element was a cut, and within the chunk a runtime
+     *       boolean tracks cuts that occur in-chunk. The chunk's failure-handler
+     *       decision uses {@code priorChunkCut || localCut} per element.</li>
+     * </ul>
+     *
+     * <p>When chunking is not triggered, this method emits the original byte-
+     * identical inline body so the existing parity tests stay green.
+     */
+    private void emitCstSequenceMaybeChunked(StringBuilder sb,
+                                             Expression.Sequence seq,
+                                             String resultVar,
+                                             int indent,
+                                             boolean addToChildren,
+                                             int[] counter,
+                                             boolean inWhitespaceRule,
+                                             int id) {
+        if (pendingChunkHelpers != null && currentRuleName != null && shouldChunkSequence(seq)) {
+            emitCstSequenceChunkedDispatcher(sb, seq, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
+            return;
+        }
+        emitCstSequenceInline(sb, seq, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
+    }
+
+    /**
+     * Phase G2: chunking heuristic. Triggered when either the element count
+     * exceeds {@link #SEQ_CHUNK_ELEMENT_THRESHOLD} or the estimated emitted-byte
+     * weight exceeds {@link #SEQ_CHUNK_BYTE_THRESHOLD}. The byte estimate is
+     * a rough proxy summed via {@link #estimateExpressionWeight(Expression)};
+     * it doesn't need to be exact — it's a pre-filter to keep small Sequences
+     * byte-identical to the pre-G2 emission.
+     */
+    private static boolean shouldChunkSequence(Expression.Sequence seq) {
+        var elements = seq.elements();
+        if (elements.size() > SEQ_CHUNK_ELEMENT_THRESHOLD) {
+            return true;
+        }
+        int weight = 0;
+        for (var elem : elements) {
+            weight += estimateExpressionWeight(elem);
+            if (weight > SEQ_CHUNK_BYTE_THRESHOLD) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Phase G2: pack elements into chunks. Each chunk takes elements until either
+     * the cumulative weight exceeds {@link #SEQ_CHUNK_MAX_WEIGHT} or the count
+     * reaches {@link #SEQ_CHUNK_MAX_ELEMENTS}. A single heavy element (weight ≥
+     * {@code SEQ_CHUNK_MAX_WEIGHT}) gets its own chunk. Returns a list of
+     * {@code [startInclusive, endExclusive]} pairs.
+     */
+    private static java.util.List<int[] > computeChunkBounds(java.util.List<Expression> elements) {
+        var bounds = new java.util.ArrayList<int[] >();
+        int n = elements.size();
+        int i = 0;
+        while (i < n) {
+            int start = i;
+            int weight = 0;
+            int count = 0;
+            while (i < n && count < SEQ_CHUNK_MAX_ELEMENTS) {
+                int w = estimateExpressionWeight(elements.get(i));
+                // Heavy element: emit it as its own chunk (or end the current chunk
+                // here if we already have elements buffered).
+                if (count > 0 && weight + w > SEQ_CHUNK_MAX_WEIGHT) {
+                    break;
+                }
+                weight += w;
+                count++ ;
+                i++ ;
+                if (weight > SEQ_CHUNK_MAX_WEIGHT) {
+                    break;
+                }
+            }
+            bounds.add(new int[]{start, i});
+        }
+        return bounds;
+    }
+
+    /**
+     * Phase G2: rough byte-weight estimate of an Expression's emitted code.
+     * Tuned against observed emissions; the absolute scale doesn't matter — only
+     * the ranking does (so the pre-filter doesn't chunk trivially small sequences).
+     */
+    private static int estimateExpressionWeight(Expression expr) {
+        return switch (expr) {
+            case Expression.Literal lit -> 80 + lit.text()
+                                                  .length() * 2;
+            case Expression.CharClass ignored -> 120;
+            case Expression.Any ignored -> 60;
+            case Expression.Reference ignored -> 60;
+            case Expression.Cut ignored -> 20;
+            case Expression.BackReference ignored -> 80;
+            case Expression.Dictionary ignored -> 200;
+            case Expression.TokenBoundary tb -> 200 + estimateExpressionWeight(tb.expression());
+            case Expression.Ignore ig -> 60 + estimateExpressionWeight(ig.expression());
+            case Expression.Capture cap -> 80 + estimateExpressionWeight(cap.expression());
+            case Expression.CaptureScope cs -> 80 + estimateExpressionWeight(cs.expression());
+            case Expression.Group grp -> estimateExpressionWeight(grp.expression());
+            case Expression.And and -> 200 + estimateExpressionWeight(and.expression());
+            case Expression.Not not -> 200 + estimateExpressionWeight(not.expression());
+            case Expression.Optional opt -> 250 + estimateExpressionWeight(opt.expression());
+            case Expression.ZeroOrMore zom -> 350 + estimateExpressionWeight(zom.expression());
+            case Expression.OneOrMore oom -> 400 + estimateExpressionWeight(oom.expression());
+            case Expression.Repetition rep -> 400 + estimateExpressionWeight(rep.expression());
+            case Expression.Sequence sub -> {
+                int w = 100;
+                for (var e : sub.elements()) {
+                    w += 200 + estimateExpressionWeight(e);
+                }
+                yield w;
+            }
+            case Expression.Choice choice -> {
+                int w = 200;
+                for (var alt : choice.alternatives()) {
+                    w += 250 + estimateExpressionWeight(alt);
+                }
+                yield w;
+            }
+        };
+    }
+
+    /**
+     * Phase G2: emit the dispatcher portion of a chunked Sequence (in-place,
+     * inside the calling method's body). The dispatcher captures sequence-entry
+     * state, then calls each chunk helper sequentially, short-circuiting on
+     * non-success. Helper method bodies are appended to {@link #pendingChunkHelpers}
+     * for later flush at class scope.
+     */
+    private void emitCstSequenceChunkedDispatcher(StringBuilder sb,
+                                                  Expression.Sequence seq,
+                                                  String resultVar,
+                                                  int indent,
+                                                  boolean addToChildren,
+                                                  int[] counter,
+                                                  boolean inWhitespaceRule,
+                                                  int id) {
+        var pad = "    ".repeat(indent);
+        var seqStartPos = "seqStartPos" + id;
+        var seqStartLine = "seqStartLine" + id;
+        var seqStartColumn = "seqStartColumn" + id;
+        var seqPending = "seqPending" + id;
+        var seqChildren = "seqChildren" + id;
+        var elements = seq.elements();
+        int seqOrdinal = currentRuleSequenceCounter++ ;
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(null, \"\");\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartPos)
+          .append(" = pos;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartLine)
+          .append(" = line;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartColumn)
+          .append(" = column;\n");
+        sb.append(pad)
+          .append("List<Trivia> ")
+          .append(seqPending)
+          .append(" = savePendingLeading();\n");
+        if (addToChildren) {
+            sb.append(pad)
+              .append("var ")
+              .append(seqChildren)
+              .append(" = new ArrayList<>(children);\n");
+        }
+        // Walk elements grouped into chunks. Each chunk packs elements until either
+        // SEQ_CHUNK_MAX_ELEMENTS is reached OR cumulative weight exceeds
+        // SEQ_CHUNK_MAX_WEIGHT (whichever comes first). A single very heavy element
+        // always gets its own chunk (so it doesn't drag in additional elements).
+        var chunkBounds = computeChunkBounds(elements);
+        boolean priorCut = false;
+        int chunkIndex = 0;
+        for (int chunkIdx = 0; chunkIdx < chunkBounds.size(); chunkIdx++ ) {
+            int start = chunkBounds.get(chunkIdx) [0];
+            int end = chunkBounds.get(chunkIdx) [1];
+            // Emit dispatcher call to this chunk.
+            String chunkMethod = "parse_" + currentRuleName + "_seq" + seqOrdinal + "_chunk" + chunkIndex;
+            if (chunkIndex == 0) {
+                sb.append(pad)
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(chunkMethod)
+                  .append("(");
+            }else {
+                sb.append(pad)
+                  .append("if (")
+                  .append(resultVar)
+                  .append(".isSuccess()) ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(chunkMethod)
+                  .append("(");
+            }
+            // Args: children (if addToChildren), seqStartPos, seqStartLine, seqStartColumn, seqPending,
+            //       seqChildren (if addToChildren).
+            if (addToChildren) {
+                sb.append("children, ");
+            }
+            sb.append(seqStartPos)
+              .append(", ")
+              .append(seqStartLine)
+              .append(", ")
+              .append(seqStartColumn)
+              .append(", ")
+              .append(seqPending);
+            if (addToChildren) {
+                sb.append(", ")
+                  .append(seqChildren);
+            }
+            sb.append(");\n");
+            // Emit the chunk helper method (deferred to pendingChunkHelpers — class-scope sibling).
+            emitCstSequenceChunkHelper(seq,
+                                       elements,
+                                       start,
+                                       end,
+                                       seqOrdinal,
+                                       chunkIndex,
+                                       priorCut,
+                                       addToChildren,
+                                       inWhitespaceRule);
+            // Update priorCut for next chunk (any Cut element in this chunk implies cut is set
+            // statically at next-chunk entry).
+            for (int i = start; i < end; i++ ) {
+                if (elements.get(i) instanceof Expression.Cut) {
+                    priorCut = true;
+                    break;
+                }
+            }
+            chunkIndex++ ;
+        }
+        // After all chunks: success epilogue (matches inline emission's trailing `if isSuccess` block).
+        sb.append(pad)
+          .append("if (")
+          .append(resultVar)
+          .append(".isSuccess()) {\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(null, substring(")
+          .append(seqStartPos)
+          .append(", pos));\n");
+        sb.append(pad)
+          .append("}\n");
+    }
+
+    /**
+     * Phase G2: append a chunk helper method body to {@link #pendingChunkHelpers}.
+     * The helper takes sequence-entry state and runs its element subset with the
+     * same per-element rollback shape as the inline emission. Static {@code priorCut}
+     * encodes whether any earlier-chunk element was a Cut (so failures in this chunk
+     * convert to cut-failures even before any in-chunk Cut runs).
+     */
+    private void emitCstSequenceChunkHelper(Expression.Sequence seq,
+                                            java.util.List<Expression> elements,
+                                            int start,
+                                            int end,
+                                            int seqOrdinal,
+                                            int chunkIndex,
+                                            boolean priorCut,
+                                            boolean addToChildren,
+                                            boolean inWhitespaceRule) {
+        // Each chunk helper writes to its OWN StringBuilder so nested chunked Sequences
+        // (chunk helper containing a chunked sub-Sequence) don't have their bodies
+        // interleaved. The list is flushed in insertion order; helpers appear as
+        // sibling class-level methods.
+        var sb = new StringBuilder();
+        pendingChunkHelpers.add(sb);
+        String methodName = "parse_" + currentRuleName + "_seq" + seqOrdinal + "_chunk" + chunkIndex;
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("(");
+        if (addToChildren) {
+            sb.append("ArrayList<CstNode> children, ");
+        }
+        sb.append("int seqStartPos, int seqStartLine, int seqStartColumn, List<Trivia> seqPending");
+        if (addToChildren) {
+            sb.append(", ArrayList<CstNode> seqChildren");
+        }
+        sb.append(") {\n");
+        // Helper-local __ruleName so inner emissions referencing it (TokenBoundary, ZeroOrMore
+        // wrap-as-NonTerminal sites) compile. Mirrors Phase G alt helper convention.
+        sb.append("        var __ruleName = ")
+          .append(currentRuleIdConst)
+          .append(";\n");
+        // Helper-local sequence result variable. Initialized to success so the per-element
+        // `if (result.isSuccess())` short-circuit works correctly within the chunk.
+        sb.append("        CstParseResult result = CstParseResult.successNoLoc(null, \"\");\n");
+        // In-chunk cut tracking: starts at the static priorCut value, may flip to true
+        // mid-chunk when a Cut element is encountered.
+        sb.append("        boolean cut = ")
+          .append(priorCut)
+          .append(";\n");
+        // Helper-local counter for sub-emission unique-name suffixes; restarting at 0 is safe
+        // since the helper's variable names are scoped to this method.
+        var counter = new int[]{0};
+        int indent = 2;
+        var pad = "    ".repeat(indent);
+        for (int i = start; i < end; i++ ) {
+            var elem = elements.get(i);
+            sb.append(pad)
+              .append("if (result.isSuccess()) {\n");
+            if (!inWhitespaceRule && !isPredicate(elem)) {
+                sb.append(pad)
+                  .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+            }
+            // Element-local result variable name. The leading `chunkIdx_` prefix is just
+            // a unique-name disambiguator across elements within the chunk.
+            int globalElemIdx = i;
+            var elemVar = "elem_" + globalElemIdx;
+            generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
+            // Cut-failure propagation.
+            sb.append(pad)
+              .append("    if (")
+              .append(elemVar)
+              .append(".isCutFailure()) {\n");
+            sb.append(pad)
+              .append("        restoreLocationRaw(seqStartPos, seqStartLine, seqStartColumn);\n");
+            sb.append(pad)
+              .append("        restorePendingLeading(seqPending);\n");
+            if (addToChildren) {
+                sb.append(pad)
+                  .append("        children.clear();\n");
+                sb.append(pad)
+                  .append("        children.addAll(seqChildren);\n");
+            }
+            sb.append(pad)
+              .append("        result = ")
+              .append(elemVar)
+              .append(";\n");
+            sb.append(pad)
+              .append("    } else if (")
+              .append(elemVar)
+              .append(".isFailure()) {\n");
+            sb.append(pad)
+              .append("        restoreLocationRaw(seqStartPos, seqStartLine, seqStartColumn);\n");
+            sb.append(pad)
+              .append("        restorePendingLeading(seqPending);\n");
+            if (addToChildren) {
+                sb.append(pad)
+                  .append("        children.clear();\n");
+                sb.append(pad)
+                  .append("        children.addAll(seqChildren);\n");
+            }
+            sb.append(pad)
+              .append("        result = cut ? ")
+              .append(elemVar)
+              .append(".asCutFailure() : ")
+              .append(elemVar)
+              .append(";\n");
+            sb.append(pad)
+              .append("    }\n");
+            sb.append(pad)
+              .append("}\n");
+            if (elem instanceof Expression.Cut) {
+                sb.append(pad)
+                  .append("cut = true;\n");
+            }
+        }
+        sb.append("        return result;\n");
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * Phase G2: byte-identical inline CST Sequence emission (the original code,
+     * preserved for small sequences so existing parity tests stay green).
+     */
+    private void emitCstSequenceInline(StringBuilder sb,
+                                       Expression.Sequence seq,
+                                       String resultVar,
+                                       int indent,
+                                       boolean addToChildren,
+                                       int[] counter,
+                                       boolean inWhitespaceRule,
+                                       int id) {
+        var pad = "    ".repeat(indent);
+        var seqStartPos = "seqStartPos" + id;
+        var seqStartLine = "seqStartLine" + id;
+        var seqStartColumn = "seqStartColumn" + id;
+        var seqPending = "seqPending" + id;
+        var seqChildren = "seqChildren" + id;
+        var cutVar = "cut" + id;
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(null, \"\");\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartPos)
+          .append(" = pos;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartLine)
+          .append(" = line;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartColumn)
+          .append(" = column;\n");
+        sb.append(pad)
+          .append("List<Trivia> ")
+          .append(seqPending)
+          .append(" = savePendingLeading();\n");
+        if (addToChildren) {
+            sb.append(pad)
+              .append("var ")
+              .append(seqChildren)
+              .append(" = new ArrayList<>(children);\n");
+        }
+        sb.append(pad)
+          .append("boolean ")
+          .append(cutVar)
+          .append(" = false;\n");
+        int i = 0;
+        for (var elem : seq.elements()) {
+            sb.append(pad)
+              .append("if (")
+              .append(resultVar)
+              .append(".isSuccess()) {\n");
+            if (!inWhitespaceRule && !isPredicate(elem)) {
+                sb.append(pad)
+                  .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+            }
+            var elemVar = "elem" + id + "_" + i;
+            generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
+            sb.append(pad)
+              .append("    if (")
+              .append(elemVar)
+              .append(".isCutFailure()) {\n");
+            sb.append(pad)
+              .append("        restoreLocationRaw(")
+              .append(seqStartPos)
+              .append(", ")
+              .append(seqStartLine)
+              .append(", ")
+              .append(seqStartColumn)
+              .append(");\n");
+            sb.append(pad)
+              .append("        restorePendingLeading(")
+              .append(seqPending)
+              .append(");\n");
+            if (addToChildren) {
+                sb.append(pad)
+                  .append("        children.clear();\n");
+                sb.append(pad)
+                  .append("        children.addAll(")
+                  .append(seqChildren)
+                  .append(");\n");
+            }
+            sb.append(pad)
+              .append("        ")
+              .append(resultVar)
+              .append(" = ")
+              .append(elemVar)
+              .append(";\n");
+            sb.append(pad)
+              .append("    } else if (")
+              .append(elemVar)
+              .append(".isFailure()) {\n");
+            sb.append(pad)
+              .append("        restoreLocationRaw(")
+              .append(seqStartPos)
+              .append(", ")
+              .append(seqStartLine)
+              .append(", ")
+              .append(seqStartColumn)
+              .append(");\n");
+            sb.append(pad)
+              .append("        restorePendingLeading(")
+              .append(seqPending)
+              .append(");\n");
+            if (addToChildren) {
+                sb.append(pad)
+                  .append("        children.clear();\n");
+                sb.append(pad)
+                  .append("        children.addAll(")
+                  .append(seqChildren)
+                  .append(");\n");
+            }
+            sb.append(pad)
+              .append("        ")
+              .append(resultVar)
+              .append(" = ")
+              .append(cutVar)
+              .append(" ? ")
+              .append(elemVar)
+              .append(".asCutFailure() : ")
+              .append(elemVar)
+              .append(";\n");
+            sb.append(pad)
+              .append("    }\n");
+            sb.append(pad)
+              .append("}\n");
+            if (elem instanceof Expression.Cut) {
+                sb.append(pad)
+                  .append(cutVar)
+                  .append(" = true;\n");
+            }
+            i++ ;
+        }
+        sb.append(pad)
+          .append("if (")
+          .append(resultVar)
+          .append(".isSuccess()) {\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(null, substring(")
+          .append(seqStartPos)
+          .append(", pos));\n");
+        sb.append(pad)
+          .append("}\n");
+    }
+
+    // ============================================================
+    // Phase H: nested-Choice extraction
+    // ============================================================
+    /**
+     * Phase H: emit a CST {@link Expression.Choice} body, optionally extracting
+     * heavy nested Choices into per-rule helper methods. When the Choice exceeds
+     * either the alt-count or estimated-byte threshold, the inline emission is
+     * deferred to a sibling helper {@code parse_<rule>_choice<N>} and the call
+     * site emits a thin "var resultVar = helper(children)" call.
+     *
+     * <p>Helper signature contract: takes the ambient {@code children} list
+     * (when {@code addToChildren} is true) so any in-Choice additions survive
+     * across the helper boundary. Returns the result of the inline Choice
+     * emission, including the "all alts failed" epilogue. Caller binds it to
+     * {@code resultVar} unchanged.
+     *
+     * <p>PEG semantics preserved — the helper body is the SAME inline emission
+     * that {@link #emitCstChoiceInline} would produce; only its lexical home
+     * moves. Cut-failure conversion, whitespace handling, and the "one of
+     * alternatives" failure all happen identically.
+     *
+     * <p>When extraction is not triggered (small Choice OR no per-rule chunk
+     * helper context — e.g. inside an ad-hoc emit path that didn't set up
+     * {@link #pendingChunkHelpers}), the inline emission runs directly.
+     */
+    private void emitCstChoiceMaybeExtracted(StringBuilder sb,
+                                             Expression.Choice choice,
+                                             String resultVar,
+                                             int indent,
+                                             boolean addToChildren,
+                                             int[] counter,
+                                             boolean inWhitespaceRule,
+                                             int id) {
+        if (pendingChunkHelpers != null && currentRuleName != null && shouldExtractNestedChoice(choice)) {
+            emitCstChoiceExtractedDispatcher(sb, choice, resultVar, indent, addToChildren, inWhitespaceRule);
+            return;
+        }
+        emitCstChoiceInline(sb, choice, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
+    }
+
+    /**
+     * Phase H: extraction heuristic. Trigger when the Choice has at least
+     * {@link #NESTED_CHOICE_ALT_THRESHOLD} alternatives OR its estimated emitted-byte
+     * weight exceeds {@link #NESTED_CHOICE_BYTE_THRESHOLD}. Pre-filter; the byte
+     * estimate is rough and only needs to rank correctly relative to small-Choice
+     * cases that should remain inline.
+     */
+    private static boolean shouldExtractNestedChoice(Expression.Choice choice) {
+        if (choice.alternatives()
+                  .size() >= NESTED_CHOICE_ALT_THRESHOLD) {
+            return true;
+        }
+        return estimateExpressionWeight(choice) >= NESTED_CHOICE_BYTE_THRESHOLD;
+    }
+
+    /**
+     * Phase H: emit the dispatcher portion of an extracted Choice (in-place,
+     * inside the calling method's body). The dispatcher emits a single helper
+     * call; the helper body is appended to {@link #pendingChunkHelpers} for
+     * later flush at class scope.
+     */
+    private void emitCstChoiceExtractedDispatcher(StringBuilder sb,
+                                                  Expression.Choice choice,
+                                                  String resultVar,
+                                                  int indent,
+                                                  boolean addToChildren,
+                                                  boolean inWhitespaceRule) {
+        var pad = "    ".repeat(indent);
+        int choiceOrdinal = currentRuleChoiceCounter++ ;
+        String helperName = "parse_" + currentRuleName + "_choice" + choiceOrdinal;
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(" = ")
+          .append(helperName)
+          .append("(");
+        if (addToChildren) {
+            sb.append("children");
+        }
+        sb.append(");\n");
+        emitCstChoiceExtractedHelper(choice, choiceOrdinal, addToChildren, inWhitespaceRule);
+    }
+
+    /**
+     * Phase H: append a Choice helper method body to {@link #pendingChunkHelpers}.
+     * The helper takes {@code children} (when applicable), declares helper-local
+     * {@code __ruleName} and a fresh emission counter starting at 0, then runs the
+     * standard inline Choice emission against an internal result variable, and
+     * returns it. Mirrors the chunk-helper convention from Phase G2 so nested
+     * Choice extractions inside chunk helpers (or vice-versa) compose correctly.
+     */
+    private void emitCstChoiceExtractedHelper(Expression.Choice choice,
+                                              int choiceOrdinal,
+                                              boolean addToChildren,
+                                              boolean inWhitespaceRule) {
+        // Each Choice helper writes to its OWN StringBuilder so nested extractions
+        // (helper containing another extracted Choice or chunked Sequence) don't
+        // interleave bodies. The list is flushed in insertion order; helpers appear
+        // as sibling class-level methods.
+        var sb = new StringBuilder();
+        pendingChunkHelpers.add(sb);
+        String methodName = "parse_" + currentRuleName + "_choice" + choiceOrdinal;
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("(");
+        if (addToChildren) {
+            sb.append("ArrayList<CstNode> children");
+        }
+        sb.append(") {\n");
+        // Helper-local __ruleName so inner emissions referencing it (TokenBoundary,
+        // ZeroOrMore wrap-as-NonTerminal sites) compile after extraction. Mirrors
+        // Phase G alt-helper and Phase G2 chunk-helper conventions.
+        sb.append("        var __ruleName = ")
+          .append(currentRuleIdConst)
+          .append(";\n");
+        // Run the standard inline Choice emission. Counter is local to this helper
+        // (restarting at 0 is safe — variable names are scoped to this method body).
+        var counter = new int[]{0};
+        int innerId = counter[0]++ ;
+        emitCstChoiceInline(sb, choice, "result", 2, addToChildren, counter, inWhitespaceRule, innerId);
+        sb.append("        return result;\n");
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * Phase H: byte-identical inline CST Choice emission (the original code,
+     * preserved so existing parity tests stay green when extraction is not
+     * triggered, and reused by the helper body when extraction IS triggered).
+     */
+    private void emitCstChoiceInline(StringBuilder sb,
+                                     Expression.Choice choice,
+                                     String resultVar,
+                                     int indent,
+                                     boolean addToChildren,
+                                     int[] counter,
+                                     boolean inWhitespaceRule,
+                                     int id) {
+        var pad = "    ".repeat(indent);
+        // Phase 1.7 (D): inline int captures — Choice restore is hot under
+        // backtracking. The base name is reused across helpers; suffixes
+        // Pos/Line/Column denote the 3 inline ints.
+        var choiceStart = "choiceStart" + id;
+        // §7.2: the child-state variable is either a pre-cloned ArrayList
+        // (legacy path, flag off) or an int size mark (optimized path, flag on).
+        // Emitted identifier differs so byte-identical output is preserved when
+        // the flag is off.
+        var childrenState = config.markResetChildren()
+                            ? "childrenMark" + id
+                            : "savedChildren" + id;
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(" = null;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(choiceStart)
+          .append("Pos = pos;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(choiceStart)
+          .append("Line = line;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(choiceStart)
+          .append("Column = column;\n");
+        // Snapshot pending-leading so failed alternatives can be rolled
+        // back — captured trivia inside one alt must not leak forward
+        // into sibling alternatives.
+        sb.append(pad)
+          .append("List<Trivia> choicePending")
+          .append(id)
+          .append(" = savePendingLeading();\n");
+        // Don't skip whitespace here - let alternatives capture trivia themselves
+        emitChildrenSave(sb, pad, childrenState, addToChildren);
+        // Phase 1F: try extended FIRST-set classification first (covers Reference,
+        // CharClass, mixed choices). Falls back to legacy literal-only classifier when
+        // the extended path can't dispatch any alt.
+        var classifiedF = config.choiceDispatch()
+                          ? ChoiceDispatchAnalyzer.classify(choice, firstSets())
+                          : java.util.Optional.<ChoiceDispatchAnalyzer.Classified>empty();
+        if (classifiedF.isPresent()) {
+            var c = classifiedF.get();
+            var buckets = ChoiceDispatchAnalyzer.bucketsForClassified(c);
+            emitCstChoiceDispatchF(sb,
+                                   buckets,
+                                   c.defaults(),
+                                   id,
+                                   indent,
+                                   addToChildren,
+                                   counter,
+                                   inWhitespaceRule,
+                                   resultVar,
+                                   choiceStart,
+                                   childrenState);
+        }else {
+            int i = 0;
+            for (var alt : choice.alternatives()) {
+                emitCstChoiceAlt(sb,
+                                 alt,
+                                 id,
+                                 i,
+                                 indent,
+                                 addToChildren,
+                                 counter,
+                                 inWhitespaceRule,
+                                 resultVar,
+                                 choiceStart,
+                                 childrenState,
+                                 pad);
+                i++ ;
+            }
+            for (int j = 0; j < choice.alternatives()
+                                      .size(); j++ ) {
+                sb.append(pad)
+                  .append("}\n");
+            }
+        }
+        sb.append(pad)
+          .append("if (")
+          .append(resultVar)
+          .append(" == null) {\n");
+        emitChildrenRestore(sb, pad + "    ", childrenState, addToChildren);
+        sb.append(pad)
+          .append("    restorePendingLeading(choicePending")
+          .append(id)
+          .append(");\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = CstParseResult.failure(\"one of alternatives\");\n");
+        sb.append(pad)
+          .append("}\n");
+    }
+
     private boolean isTokenRule(Expression expr) {
         return switch (expr) {
             case Expression.TokenBoundary tb -> true;
@@ -3907,248 +4762,10 @@ public final class ParserGenerator {
                 }
             }
             case Expression.Sequence seq -> {
-                // Phase 1.7 (D): inline int captures — sequence is the most common
-                // emission, every restore here was allocating a SourceLocation.
-                var seqStartPos = "seqStartPos" + id;
-                var seqStartLine = "seqStartLine" + id;
-                var seqStartColumn = "seqStartColumn" + id;
-                var seqPending = "seqPending" + id;
-                var seqChildren = "seqChildren" + id;
-                var cutVar = "cut" + id;
-                sb.append(pad)
-                  .append("CstParseResult ")
-                  .append(resultVar)
-                  .append(" = CstParseResult.successNoLoc(null, \"\");\n");
-                sb.append(pad)
-                  .append("int ")
-                  .append(seqStartPos)
-                  .append(" = pos;\n");
-                sb.append(pad)
-                  .append("int ")
-                  .append(seqStartLine)
-                  .append(" = line;\n");
-                sb.append(pad)
-                  .append("int ")
-                  .append(seqStartColumn)
-                  .append(" = column;\n");
-                // Snapshot pending-leading so any between-element trivia appended
-                // inside this sequence can be rolled back on failure.
-                sb.append(pad)
-                  .append("List<Trivia> ")
-                  .append(seqPending)
-                  .append(" = savePendingLeading();\n");
-                // 0.3.5 (Bug C''): snapshot children so any partial additions by a
-                // failing later element are rolled back along with location/pending.
-                if (addToChildren) {
-                    sb.append(pad)
-                      .append("var ")
-                      .append(seqChildren)
-                      .append(" = new ArrayList<>(children);\n");
-                }
-                sb.append(pad)
-                  .append("boolean ")
-                  .append(cutVar)
-                  .append(" = false;\n");
-                int i = 0;
-                for (var elem : seq.elements()) {
-                    sb.append(pad)
-                      .append("if (")
-                      .append(resultVar)
-                      .append(".isSuccess()) {\n");
-                    // Skip whitespace before non-predicate elements (matching interpreter behavior);
-                    // captured trivia is appended to the pending-leading buffer so the following
-                    // element claims it.
-                    if (!inWhitespaceRule && !isPredicate(elem)) {
-                        sb.append(pad)
-                          .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
-                    }
-                    var elemVar = "elem" + id + "_" + i;
-                    generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
-                    // Check for cut failure propagation first
-                    sb.append(pad)
-                      .append("    if (")
-                      .append(elemVar)
-                      .append(".isCutFailure()) {\n");
-                    sb.append(pad)
-                      .append("        restoreLocationRaw(")
-                      .append(seqStartPos)
-                      .append(", ")
-                      .append(seqStartLine)
-                      .append(", ")
-                      .append(seqStartColumn)
-                      .append(");\n");
-                    sb.append(pad)
-                      .append("        restorePendingLeading(")
-                      .append(seqPending)
-                      .append(");\n");
-                    if (addToChildren) {
-                        sb.append(pad)
-                          .append("        children.clear();\n");
-                        sb.append(pad)
-                          .append("        children.addAll(")
-                          .append(seqChildren)
-                          .append(");\n");
-                    }
-                    sb.append(pad)
-                      .append("        ")
-                      .append(resultVar)
-                      .append(" = ")
-                      .append(elemVar)
-                      .append(";\n");
-                    sb.append(pad)
-                      .append("    } else if (")
-                      .append(elemVar)
-                      .append(".isFailure()) {\n");
-                    sb.append(pad)
-                      .append("        restoreLocationRaw(")
-                      .append(seqStartPos)
-                      .append(", ")
-                      .append(seqStartLine)
-                      .append(", ")
-                      .append(seqStartColumn)
-                      .append(");\n");
-                    sb.append(pad)
-                      .append("        restorePendingLeading(")
-                      .append(seqPending)
-                      .append(");\n");
-                    if (addToChildren) {
-                        sb.append(pad)
-                          .append("        children.clear();\n");
-                        sb.append(pad)
-                          .append("        children.addAll(")
-                          .append(seqChildren)
-                          .append(");\n");
-                    }
-                    sb.append(pad)
-                      .append("        ")
-                      .append(resultVar)
-                      .append(" = ")
-                      .append(cutVar)
-                      .append(" ? ")
-                      .append(elemVar)
-                      .append(".asCutFailure() : ")
-                      .append(elemVar)
-                      .append(";\n");
-                    sb.append(pad)
-                      .append("    }\n");
-                    sb.append(pad)
-                      .append("}\n");
-                    // Track if this element was a cut
-                    if (elem instanceof Expression.Cut) {
-                        sb.append(pad)
-                          .append(cutVar)
-                          .append(" = true;\n");
-                    }
-                    i++ ;
-                }
-                sb.append(pad)
-                  .append("if (")
-                  .append(resultVar)
-                  .append(".isSuccess()) {\n");
-                sb.append(pad)
-                  .append("    ")
-                  .append(resultVar)
-                  .append(" = CstParseResult.successNoLoc(null, substring(")
-                  .append(seqStartPos)
-                  .append(", pos));\n");
-                sb.append(pad)
-                  .append("}\n");
+                emitCstSequenceMaybeChunked(sb, seq, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
             }
             case Expression.Choice choice -> {
-                // Phase 1.7 (D): inline int captures — Choice restore is hot under
-                // backtracking. The base name is reused across helpers; suffixes
-                // Pos/Line/Column denote the 3 inline ints.
-                var choiceStart = "choiceStart" + id;
-                // §7.2: the child-state variable is either a pre-cloned ArrayList
-                // (legacy path, flag off) or an int size mark (optimized path, flag on).
-                // Emitted identifier differs so byte-identical output is preserved when
-                // the flag is off.
-                var childrenState = config.markResetChildren()
-                                    ? "childrenMark" + id
-                                    : "savedChildren" + id;
-                sb.append(pad)
-                  .append("CstParseResult ")
-                  .append(resultVar)
-                  .append(" = null;\n");
-                sb.append(pad)
-                  .append("int ")
-                  .append(choiceStart)
-                  .append("Pos = pos;\n");
-                sb.append(pad)
-                  .append("int ")
-                  .append(choiceStart)
-                  .append("Line = line;\n");
-                sb.append(pad)
-                  .append("int ")
-                  .append(choiceStart)
-                  .append("Column = column;\n");
-                // Snapshot pending-leading so failed alternatives can be rolled
-                // back — captured trivia inside one alt must not leak forward
-                // into sibling alternatives.
-                sb.append(pad)
-                  .append("List<Trivia> choicePending")
-                  .append(id)
-                  .append(" = savePendingLeading();\n");
-                // Don't skip whitespace here - let alternatives capture trivia themselves
-                emitChildrenSave(sb, pad, childrenState, addToChildren);
-                // Phase 1F: try extended FIRST-set classification first (covers Reference,
-                // CharClass, mixed choices). Falls back to legacy literal-only classifier when
-                // the extended path can't dispatch any alt.
-                var classifiedF = config.choiceDispatch()
-                                  ? ChoiceDispatchAnalyzer.classify(choice, firstSets())
-                                  : java.util.Optional.<ChoiceDispatchAnalyzer.Classified>empty();
-                if (classifiedF.isPresent()) {
-                    var c = classifiedF.get();
-                    var buckets = ChoiceDispatchAnalyzer.bucketsForClassified(c);
-                    emitCstChoiceDispatchF(sb,
-                                           buckets,
-                                           c.defaults(),
-                                           id,
-                                           indent,
-                                           addToChildren,
-                                           counter,
-                                           inWhitespaceRule,
-                                           resultVar,
-                                           choiceStart,
-                                           childrenState);
-                }else {
-                    int i = 0;
-                    for (var alt : choice.alternatives()) {
-                        emitCstChoiceAlt(sb,
-                                         alt,
-                                         id,
-                                         i,
-                                         indent,
-                                         addToChildren,
-                                         counter,
-                                         inWhitespaceRule,
-                                         resultVar,
-                                         choiceStart,
-                                         childrenState,
-                                         pad);
-                        i++ ;
-                    }
-                    for (int j = 0; j < choice.alternatives()
-                                              .size(); j++ ) {
-                        sb.append(pad)
-                          .append("}\n");
-                    }
-                }
-                sb.append(pad)
-                  .append("if (")
-                  .append(resultVar)
-                  .append(" == null) {\n");
-                emitChildrenRestore(sb, pad + "    ", childrenState, addToChildren);
-                sb.append(pad)
-                  .append("    restorePendingLeading(choicePending")
-                  .append(id)
-                  .append(");\n");
-                sb.append(pad)
-                  .append("    ")
-                  .append(resultVar)
-                  .append(" = CstParseResult.failure(\"one of alternatives\");\n");
-                sb.append(pad)
-                  .append("}\n");
+                emitCstChoiceMaybeExtracted(sb, choice, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
             }
             case Expression.ZeroOrMore zom -> {
                 // Phase 1.7 (D): inline int captures — no SourceLocation per iteration.
