@@ -270,89 +270,84 @@ Regen via:
 
 ## 11. Recommended next session
 
-**Phase 1 production migration of Path D + Lever D Cursor split landed on 2026-05-07.** Bench harness fixed; parseFull migrated to Result; sandbox cleaned up; Lever B investigated and deferred.
+**Branch pushed at `fd278fe`. Tag `v0.5.0-candidate` at HEAD.** 922 tests green. The full 0.5.0 arc shipped this session: incremental engine (Phase 1 Path D + Lever D Cursor split) + throughput engine (Tier 1 partial: A, D, F, G, G2+H, selective packrat, DFA fast-path).
 
-Headline numbers vs 0.4.3 baseline (`IncrementalSessionBench`, 1900-LOC fixture, Regime B cursor-moved-to-edit):
+### Headline cumulative numbers
 
-| Metric | 0.4.3 | 0.5.0 (current branch) | Change |
+**Incremental engine** (`IncrementalSessionBench`, Regime B cursor-moved-to-edit, 1900-LOC fixture):
+
+| Metric | 0.4.3 | 0.5.0 | Δ |
 |---|---:|---:|---:|
-| Median | 10.8 ms | **5.0 ms** | **-54% (2.2× faster)** |
+| Median | 10.8 ms | **5.0 ms** | **-54%** |
 | p95 | 22.4 ms | **11.2 ms** | **-50%** |
-| p99 | 53.3 ms | 90.5 ms | +70% (large-pivot tail, deferred) |
-| % under 16 ms | 91.5% | **96.5%** | **+5 pp** |
-| Exceptions in bench log | n/a | **0** | clean signal |
+| p99 | 53.3 ms | 90.5 ms | +70% (large-pivot tail) |
+| % under 16ms | 91.5% | **96.5%** | **+5pp** |
 
-State of `release-0.5.0` branch (20 commits past `1619604` chore — local only, **not pushed**):
+**Throughput engine** (`Java25ParseBenchmark`, variant `phase1_allStructural_mutableResult_autoSkipPackrat`):
 
-**Phase 0 — spike (sandbox; later deleted in cleanup):**
-- `d00eaa1` 0a / `f0696a1` 0b / `849b4ba` 0c / `9b55253` 0d.1 / `a2dd8ac` 0d.2 / `a8c6efe` 0e GO verdict
+| Fixture | Original | 0.5.0 | Δ vs original | vs javac |
+|---|---:|---:|---:|---:|
+| Reference (1900 LOC) | 76.2 ms / 150 MB | **22.6 ms / 75.6 MB** | **-70% wallclock, -50% bytes** | 2.5× of javac (9 ms) |
+| Self-host (37k LOC) | OOM | **956 ms / 2.04 GB** | from impossible to 1 sec | n/a |
+| GC time (reference) | 2,844 ms | 354 ms | **-87%** | — |
 
-**Phase 1 — prove-out + production migration:**
-- `8f844eb` Path A prove-out (SpanIndex / offset decoupling — RED, 1.10-1.29×)
-- `8b27dd6` Path D prove-out (stable-id ancestor preservation — GREEN, 96-604×)
-- `4043ddc` docs prove-out summary
-- `2443779` 1.2 production CstNode gains long id (BREAKING)
-- `39e11f9` 1.5/1.6 NodeIndex LongLongMap + Path D applyIncremental + tombstone fix
-- `65a719f` 1.7 refresh nodesById after shiftAll
-- `43baaf8` Phase 1 results doc
+### Branch state at `fd278fe` — 40 commits past `1619604` chore
 
-**Phase 2 attempted, rolled back:**
-- `e038e4f` Lever B "strict literal-prefix" cost 4× perf — wiring rolled back, SafePivotAnalyzer + smallestEnclosing kept dormant
+**Phase 0 — sandbox spike (later cleaned up):** `d00eaa1` … `a8c6efe`
+**Phase 1 — incremental engine production:** `8f844eb` Path A RED → `8b27dd6` Path D GREEN → `2443779` CstNode long id → `39e11f9` NodeIndex LongLongMap + Path D applyIncremental → `65a719f` nodesById refresh → `43baaf8` results doc
+**Phase 2 attempted, rolled back:** `e038e4f` Lever B literal-prefix cost 4× — reverted
+**Bench/JBCT cleanup:** `0ea98af` bench post-edit validation → `4ad5824` parseFull→Result
+**Sandbox cleanup + Lever D:** `5275d86` -5463 LOC → `4f06046` Cursor split (p99 -53%)
+**Throughput engine Tier 1:**
+- `0ed2dcd` A spike — Option boxing eliminated (`mutableParseResult` flag)
+- `fedc389` A coverage extension — wallclock -12% vs original
+- `478b89b` D production sweep (cleanup)
+- `5b2b6a1` D emission templates — `inlineLocations` default-on
+- `2ad2674` E packrat int-keyed → reverted at `8f844eb`-style sequence
+- `8f844eb`-equivalent: `9e9414a` E revert (regressed self-host 22%)
+- `2a8cefc` self-host bench fixture added
+- `7fdd5e8` D2 — eliminate remaining location() callers
+- `dd1f150` F — FIRST-set Choice dispatch (62/64 choices, -20% both fixtures)
+- `eec8ba3` G — JBCT-style method splits (parse_Stmt 27k→3k)
+- `59be764` G2+H — Sequence chunks + nested Choice extraction (-5/-8%)
+- `ca2dcfe` Selective packrat auto-detect (**biggest single win: -38% reference, -14% self-host**)
+- `0ea0765` DFA fast-path Identifier-shape rules (-10% reference)
+- `fd278fe` Tier 1 results + DFA javac comparison + CHANGELOG
 
-**Bench + JBCT cleanup:**
-- `0ea98af` bench post-edit validation (0 exceptions, 41% faster)
-- `4ad5824` parseFull → Result + Session.parseSuccessful() (no more thrown exceptions on parse failure)
+### What's reverted (and why — pattern)
 
-**Sandbox + Lever D:**
-- `5275d86` sandbox cleanup (-5463 LOC, 31 files removed)
-- `4f06046` Lever D Cursor extracted from Session record (p99 -53%, frame budget +1.1pp)
+E (int-keyed packrat): regressed self-host 22% — linear probing scales badly at large load factors.
+H2 (recursive nested-Choice per-alt): +4-7% slower — call overhead exceeded JIT inline benefit.
+DFA generalization (whitespace + NumLit): neutral — low-volume rules don't pay off.
 
-Tests: 922 green (699 core + 125 incremental + 66 formatter + 5 maven-plugin + 27 playground). IncrementalParityTest + IncrementalTriviaParityTest green throughout.
+**Pattern:** high-volume single-target wins (A, F, selective packrat, Identifier fast-path) deliver big. Broad generalizations don't.
 
-### Lever B status — blocked on trivia attribution
+### Next session: Move B — mutable parse-state singleton
 
-Two empirical iterations (Phase 2 strict literal-prefix; Lever B v2 boundary-touch walk-up) both fail `IncrementalTriviaParityTest`. Root cause: trivia attribution is **context-sensitive** — when an edit lands at a trivia/non-trivia seam, in-isolation reparse attaches trivia differently than full reparse. Walking up doesn't fix internal seams.
+The last big tractable allocation lever. Targets 5,264 CstParseResult per self-host parse. **Detailed spec at [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md)** with:
 
-Lever B retry must wait for **trivia attribution rework** — likely comparable scope to Lever C. SafePivotAnalyzer + NodeIndex.smallestEnclosing live as dormant infrastructure.
+- 4-6 incremental commit plan (each parity-gated)
+- Specific blockers from prior decline (LR seed-and-grow, packrat aliasing, ~80 emission sites, cross-call read discipline)
+- Risk register + decision gates per commit
+- Validation procedure per commit
+- Reference numbers + B target (≤ 20 ms reference / ~2× of javac)
 
-The 57-edit cursor-asymmetry (Regime A 622 vs Regime B 571 applied) survived Lever D — confirms it's a pivot-selection issue, not a Session-storage issue. Will dissolve when Lever B retries.
+**Key constraint:** prior agent declined B as too large for one autonomous pass and proposed multi-commit incremental delivery. Honor this — don't try to land B in a single agent run. Each commit lands green or reverts.
 
-### Recommended next moves (in priority order)
+### Other tractable next moves (post-B)
 
-1. **Push the branch + tag 0.5.0-alpha** — bookmark this work as a public marker. The branch is shippable: median 2.2× faster than 0.4.3, frame budget 96.5%, 0 exceptions, clean API.
+- **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. ~5-15% on char-class-heavy paths.
+- **Lever B retry** (incremental engine) — gated on trivia attribution rework. SafePivotAnalyzer + NodeIndex.smallestEnclosing live as dormant infrastructure for the eventual retry.
+- **Trivia attribution rework** — context-independent attachment. Unblocks Lever B; comparable scope to Lever C.
+- **Lever C — IR unification** (spec §4) — multi-week. Eliminates "every fix paid twice" pattern between PegEngine and ParserGenerator emission templates. Reduces 7,440 LOC to ~1,700.
 
-2. **Lever C — IR-based interpreter/generator unification** (spec §4, ~1-2 weeks). Two extraction options:
-   - **α full**: new `peglib-rt` module, both PegEngine + ParserGenerator migrate. Generated parsers gain a peglib-rt dependency (50KB jar).
-   - **β phased**: `ParseRuntime` extracted inside peglib-core first, PegEngine refactored to delegate (~3-4 days, low risk). Generator migration as second pass.
+### Items superseded by this session's work
 
-   Eliminates the "every fix paid twice" pattern (interpreter + emission templates duplicate algorithm). Reduces 7,440 LOC across PegEngine + ParserGenerator to ~1,700.
+- §6.2 lever-1 puzzle: dissolved by Path D's stable-id algorithm.
+- §6.4 unsafe-generator work: out of scope; 0.5.0 design doesn't need it.
 
-3. **Trivia attribution rework** — context-independent attachment (always-left or always-right). Unblocks Lever B retry. Comparable scope to Lever C. Could be combined.
-
-4. **Lever B retry** — after trivia rework. The literal-prefix gate may not be needed; lighter check suffices.
-
-5. **Phase 5 release** — migration guide, CHANGELOG cleanup, 0.5.0 tag.
-
-### Items now superseded
-
-### Items now superseded
-
-§6.2 lever-1 puzzle — fully resolved by Path D's algorithm + stable IDs. The historical "lever-1 cursor-overshoot fix needs 5-10 days of correctness analysis" is replaced by the Phase 0/1 work. The latent bug in `tryIncrementalReparse` (only checks pivot for `fallbackRules` membership, not ancestors) is still present and should be addressed in Phase 2 alongside the pivot algorithm rework.
-
-§6.4 unsafe-generator work — out of scope. The 0.5.0 design doesn't need it.
-
-Do NOT pursue further allocation reduction in the 0.4.x interpreter — see prior HANDOVER guidance.
-
----
-
-**Last updated:** 2026-05-07, after Phase 1 production migration + Lever D Cursor split + bench/JBCT cleanup. Lever B blocked on trivia attribution rework. Branch is local-only at 20 commits past chore (last `4f06046`); recommend pushing as 0.5.0-alpha marker before Lever C work begins.
-
-### Items now superseded
-
-§6.2 lever-1 puzzle and §6.4 unsafe-generator work are both dissolved by the 0.5.0 design. Do NOT attempt lever 1 as a 0.4.x patch.
-
-Do NOT pursue further allocation reduction in the 0.4.x interpreter without the architectural change — the SourceLocation interning probe and ParseResult.Failure singleton probe both confirmed bytes-allocated metrics don't translate to wall-time wins under the current data structure.
+Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guidance still holds.
 
 ---
 
-**Last updated:** 2026-05-07, after Phase 0 spike GO verdict. Previous update: 2026-05-03 post-failed-lever-1 forensics. Handover spans the 0.3.5 → 0.4.3 arc + the 0.5.0 Phase 0 spike completion.
+**Last updated:** 2026-05-08, end of throughput engine Tier 1 arc + DFA fast-path spike. Branch at `fd278fe`, pushed to origin with tag `v0.5.0-candidate`. Next-session entry point: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) for Move B (mutable parse-state singleton).
