@@ -50,7 +50,8 @@ class Phase2SelectivePackratEmptySetParityTest {
         /* inlineLocations        */ false,
         /* selectivePackrat       */ true,
         /* packratSkipRules       */ Set.of(),
-        /* mutableParseResult     */ false
+        /* mutableParseResult     */ false,
+        /* tokenFastPath          */ true
     );
 
     static Stream<Path> corpusFiles() throws IOException {

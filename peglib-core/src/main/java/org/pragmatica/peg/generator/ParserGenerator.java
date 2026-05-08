@@ -4540,6 +4540,425 @@ public final class ParserGenerator {
         };
     }
 
+    // ============================================================
+    // Phase 1.9 (DFA spike) — token fast-path detection & emission.
+    //
+    // When a TokenBoundary wraps a Sequence(CharClass, ZeroOrMore(CharClass))
+    // (with optional Group wrappers), and both classes are pure ASCII range
+    // descriptors (no \\u/\\x escapes outside ASCII, not case-insensitive),
+    // emit a tight inline scanner instead of going through matchCharClassCst.
+    //
+    // Identifier-shaped rules in real grammars (e.g. Java25's
+    //   Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
+    // ) are extremely high-volume; the framework loop costs many cycles per
+    // character (failure cache, trackFailure, advance, build a Terminal node
+    // per character, ZeroOrMore quantifier overhead). This fast-path skips
+    // all of that and emits a plain `while (i < end && isCont(c)) i++;`
+    // ============================================================
+    private static Expression unwrapGroup(Expression e) {
+        while (e instanceof Expression.Group g) {
+            e = g.expression();
+        }
+        return e;
+    }
+
+    private boolean isFastPathTokenBoundary(Expression.TokenBoundary tb) {
+        var inner = unwrapGroup(tb.expression());
+        if (! (inner instanceof Expression.Sequence seq)) {
+            return false;
+        }
+        var elements = seq.elements();
+        if (elements.size() != 2) {
+            return false;
+        }
+        var first = unwrapGroup(elements.get(0));
+        var second = unwrapGroup(elements.get(1));
+        if (! (first instanceof Expression.CharClass startCls)) {
+            return false;
+        }
+        if (! (second instanceof Expression.ZeroOrMore zom)) {
+            return false;
+        }
+        var contInner = unwrapGroup(zom.expression());
+        if (! (contInner instanceof Expression.CharClass contCls)) {
+            return false;
+        }
+        // Conservatively reject case-insensitive and negated classes — the slow
+        // path's matchesPattern handles them, but our gen-time decoder is
+        // ASCII/range-only.
+        if (startCls.caseInsensitive() || contCls.caseInsensitive()) {
+            return false;
+        }
+        if (startCls.negated() || contCls.negated()) {
+            return false;
+        }
+        return decodeAsciiCharClass(startCls.pattern()) != null && decodeAsciiCharClass(contCls.pattern()) != null;
+    }
+
+    /**
+     * Decode a CharClass pattern (the raw text between [ and ]) into a list of
+     * inclusive ASCII ranges. Returns null when the pattern uses any feature
+     * the fast path doesn't handle (non-ASCII chars, \\u/\\x escapes that
+     * resolve outside ASCII).
+     *
+     * <p>Mirrors the runtime {@code matchesPattern} parsing rules: {@code \\}
+     * escapes ({@code n,r,t,\\,],-}), single chars, and {@code c1-c2} ranges.
+     * Non-ASCII (>= 128) characters and outside-ASCII unicode/hex escapes
+     * disqualify the pattern.
+     */
+    /** Inclusive ASCII range used by the fast-path char-class decoder. */
+    private record AsciiRange(int lo, int hi) {}
+
+    private java.util.List<AsciiRange> decodeAsciiCharClass(String pattern) {
+        var ranges = new java.util.ArrayList<AsciiRange>();
+        int i = 0;
+        int len = pattern.length();
+        while (i < len) {
+            int decodedStart;
+            int consumed;
+            int next = decodePatternChar(pattern, i, len);
+            if (next < 0) {
+                return null;
+            }
+            decodedStart = next & 0xFF;
+            consumed = next>>> 8;
+            if (decodedStart > 127) {
+                return null;
+            }
+            int rangeMid = i + consumed;
+            if (rangeMid < len && pattern.charAt(rangeMid) == '-' && rangeMid + 1 < len) {
+                int next2 = decodePatternChar(pattern, rangeMid + 1, len);
+                if (next2 < 0) {
+                    return null;
+                }
+                int decodedEnd = next2 & 0xFF;
+                int endConsumed = next2>>> 8;
+                if (decodedEnd > 127) {
+                    return null;
+                }
+                ranges.add(new AsciiRange(decodedStart, decodedEnd));
+                i = rangeMid + 1 + endConsumed;
+            }else {
+                ranges.add(new AsciiRange(decodedStart, decodedStart));
+                i = rangeMid;
+            }
+        }
+        if (ranges.isEmpty()) {
+            return null;
+        }
+        return ranges;
+    }
+
+    /**
+     * Decode a single character from a CharClass pattern at offset {@code i}.
+     * Returns a packed int: low byte = decoded char value (0-127 for ASCII,
+     * else the caller should reject), high bits = consumed length. Returns
+     * a negative value to signal failure (malformed escape, non-ASCII unicode
+     * escape).
+     */
+    private int decodePatternChar(String pattern, int i, int len) {
+        char c = pattern.charAt(i);
+        if (c != '\\' || i + 1 >= len) {
+            return (c & 0xFF) | (1<< 8);
+        }
+        char esc = pattern.charAt(i + 1);
+        return switch (esc) {
+            case'n' -> ('\n' & 0xFF) | (2<< 8);
+            case'r' -> ('\r' & 0xFF) | (2<< 8);
+            case't' -> ('\t' & 0xFF) | (2<< 8);
+            case'\\' -> ('\\' & 0xFF) | (2<< 8);
+            case']' -> (']' & 0xFF) | (2<< 8);
+            case'-' -> ('-' & 0xFF) | (2<< 8);
+            case'x' -> decodeHexEscape(pattern, i + 2, 2, len, 4);
+            case'u' -> decodeHexEscape(pattern, i + 2, 4, len, 6);
+            default -> (esc & 0xFF) | (2<< 8);
+        };
+    }
+
+    private int decodeHexEscape(String pattern, int hexStart, int hexDigits, int len, int totalConsumed) {
+        if (hexStart + hexDigits > len) {
+            return - 1;
+        }
+        try{
+            int value = Integer.parseInt(pattern.substring(hexStart, hexStart + hexDigits), 16);
+            if (value < 0 || value > 255) {
+                return - 1;
+            }
+            return (value & 0xFF) | (totalConsumed<< 8);
+        } catch (NumberFormatException nfe) {
+            return - 1;
+        }
+    }
+
+    /**
+     * Build a Java boolean expression that tests whether {@code varName} (a
+     * char) is in the supplied ASCII range set. Single-element ranges become
+     * {@code v == 'x'}; multi-element ranges become {@code v >= 'a' && v <= 'z'}.
+     */
+    private String charClassExpr(String varName, java.util.List<AsciiRange> ranges) {
+        var sb = new StringBuilder();
+        for (int idx = 0; idx < ranges.size(); idx++ ) {
+            if (idx > 0) sb.append(" || ");
+            var r = ranges.get(idx);
+            if (r.lo() == r.hi()) {
+                sb.append("(")
+                  .append(varName)
+                  .append(" == ")
+                  .append(asciiLiteral(r.lo()))
+                  .append(")");
+            }else {
+                sb.append("(")
+                  .append(varName)
+                  .append(" >= ")
+                  .append(asciiLiteral(r.lo()))
+                  .append(" && ")
+                  .append(varName)
+                  .append(" <= ")
+                  .append(asciiLiteral(r.hi()))
+                  .append(")");
+            }
+        }
+        return sb.toString();
+    }
+
+    private String asciiLiteral(int v) {
+        // Always emit numeric for safety (no quoting issues with $, ', etc.).
+        return "(char) " + v;
+    }
+
+    private void emitCstFastPathTokenBoundary(StringBuilder sb,
+                                              Expression.TokenBoundary tb,
+                                              String resultVar,
+                                              int indent,
+                                              boolean addToChildren,
+                                              int id,
+                                              boolean inWhitespaceRule) {
+        var pad = "        ".substring(0, Math.min(8, indent * 4)) + (indent > 2
+                                                                      ? " ".repeat((indent - 2) * 4)
+                                                                      : "");
+        // Use the canonical 4-space indent matching neighbouring emissions.
+        pad = " ".repeat(indent * 4);
+        var inner = unwrapGroup(tb.expression());
+        var seq = (Expression.Sequence) inner;
+        var startCls = (Expression.CharClass) unwrapGroup(seq.elements()
+                                                             .get(0));
+        var contCls = (Expression.CharClass) unwrapGroup(((Expression.ZeroOrMore) unwrapGroup(seq.elements()
+                                                                                                 .get(1))).expression());
+        var startRanges = decodeAsciiCharClass(startCls.pattern());
+        var contRanges = decodeAsciiCharClass(contCls.pattern());
+        var tbStartPos = "tbStartPos" + id;
+        var tbStartLine = "tbStartLine" + id;
+        var tbStartColumn = "tbStartColumn" + id;
+        var fpEnd = "fpEnd" + id;
+        var fpInput = "fpInput" + id;
+        var fpFirst = "fpFirst" + id;
+        sb.append(pad)
+          .append("int ")
+          .append(tbStartPos)
+          .append(" = pos;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(tbStartLine)
+          .append(" = line;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(tbStartColumn)
+          .append(" = column;\n");
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(";\n");
+        // Bounds + first-char test: the rule body's first CharClass must match,
+        // mirroring matchCharClassCst's isAtEnd / matches semantics. On miss
+        // we set a failure result identical in shape to the slow path's failure
+        // (no trivia/state mutation).
+        sb.append(pad)
+          .append("if (pos >= input.length()) {\n");
+        sb.append(pad)
+          .append("    trackFailure(\"[")
+          .append(escape(startCls.pattern()))
+          .append("]\");\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = CstParseResult.failure(\"character class\");\n");
+        sb.append(pad)
+          .append("} else {\n");
+        sb.append(pad)
+          .append("    String ")
+          .append(fpInput)
+          .append(" = input;\n");
+        sb.append(pad)
+          .append("    char ")
+          .append(fpFirst)
+          .append(" = ")
+          .append(fpInput)
+          .append(".charAt(pos);\n");
+        sb.append(pad)
+          .append("    if (!(")
+          .append(charClassExpr(fpFirst, startRanges))
+          .append(")) {\n");
+        sb.append(pad)
+          .append("        trackFailure(\"[")
+          .append(escape(startCls.pattern()))
+          .append("]\");\n");
+        sb.append(pad)
+          .append("        ")
+          .append(resultVar)
+          .append(" = CstParseResult.failure(\"character class\");\n");
+        sb.append(pad)
+          .append("    } else {\n");
+        // Tight scanner: advance through start char + zero-or-more cont chars.
+        // line/column update mirrors advance(): newline → line++, column=1, else column++.
+        // We update line/column in the loop only if any of the ranges include
+        // '\n' / '\r'; otherwise we can skip the per-char branching. For
+        // Identifier this is the common case.
+        boolean startCanCrLf = rangesContainNewlineOrCr(startRanges);
+        boolean contCanCrLf = rangesContainNewlineOrCr(contRanges);
+        sb.append(pad)
+          .append("        int ")
+          .append(fpEnd)
+          .append(" = pos + 1;\n");
+        sb.append(pad)
+          .append("        int fpLine")
+          .append(id)
+          .append(" = line;\n");
+        sb.append(pad)
+          .append("        int fpCol")
+          .append(id)
+          .append(" = column + 1;\n");
+        if (startCanCrLf) {
+            sb.append(pad)
+              .append("        if (")
+              .append(fpFirst)
+              .append(" == '\\n') { fpLine")
+              .append(id)
+              .append("++; fpCol")
+              .append(id)
+              .append(" = 1; }\n");
+        }
+        sb.append(pad)
+          .append("        int fpLen")
+          .append(id)
+          .append(" = ")
+          .append(fpInput)
+          .append(".length();\n");
+        sb.append(pad)
+          .append("        while (")
+          .append(fpEnd)
+          .append(" < fpLen")
+          .append(id)
+          .append(") {\n");
+        sb.append(pad)
+          .append("            char fpC")
+          .append(id)
+          .append(" = ")
+          .append(fpInput)
+          .append(".charAt(")
+          .append(fpEnd)
+          .append(");\n");
+        sb.append(pad)
+          .append("            if (!(")
+          .append(charClassExpr("fpC" + id, contRanges))
+          .append(")) break;\n");
+        sb.append(pad)
+          .append("            ")
+          .append(fpEnd)
+          .append("++;\n");
+        if (contCanCrLf) {
+            sb.append(pad)
+              .append("            if (fpC")
+              .append(id)
+              .append(" == '\\n') { fpLine")
+              .append(id)
+              .append("++; fpCol")
+              .append(id)
+              .append(" = 1; } else { fpCol")
+              .append(id)
+              .append("++; }\n");
+        }else {
+            sb.append(pad)
+              .append("            fpCol")
+              .append(id)
+              .append("++;\n");
+        }
+        sb.append(pad)
+          .append("        }\n");
+        // Commit position state and build the Token node identical to the
+        // slow-path tbNode shape (id, span, ruleName, text, leading, trailing).
+        sb.append(pad)
+          .append("        pos = ")
+          .append(fpEnd)
+          .append(";\n");
+        sb.append(pad)
+          .append("        line = fpLine")
+          .append(id)
+          .append(";\n");
+        sb.append(pad)
+          .append("        column = fpCol")
+          .append(id)
+          .append(";\n");
+        sb.append(pad)
+          .append("        var tbText")
+          .append(id)
+          .append(" = ")
+          .append(fpInput)
+          .append(".substring(")
+          .append(tbStartPos)
+          .append(", ")
+          .append(fpEnd)
+          .append(");\n");
+        sb.append(pad)
+          .append("        var tbSpan")
+          .append(id)
+          .append(" = new SourceSpan(")
+          .append(tbStartLine)
+          .append(", ")
+          .append(tbStartColumn)
+          .append(", ")
+          .append(tbStartPos)
+          .append(", line, column, pos);\n");
+        var tokenRuleId = inWhitespaceRule
+                          ? "RULE_PEG_TOKEN"
+                          : "__ruleName";
+        sb.append(pad)
+          .append("        var tbNode")
+          .append(id)
+          .append(" = new CstNode.Token(idGen.next(), tbSpan")
+          .append(id)
+          .append(", ")
+          .append(tokenRuleId)
+          .append(", tbText")
+          .append(id)
+          .append(", takePendingLeading(), List.of());\n");
+        if (addToChildren) {
+            sb.append(pad)
+              .append("        children.add(tbNode")
+              .append(id)
+              .append(");\n");
+        }
+        sb.append(pad)
+          .append("        ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(tbNode")
+          .append(id)
+          .append(", tbText")
+          .append(id)
+          .append(");\n");
+        sb.append(pad)
+          .append("    }\n");
+        sb.append(pad)
+          .append("}\n");
+    }
+
+    private boolean rangesContainNewlineOrCr(java.util.List<AsciiRange> ranges) {
+        for (var r : ranges) {
+            if (r.lo() <= '\n' && '\n' <= r.hi()) return true;
+            if (r.lo() <= '\r' && '\r' <= r.hi()) return true;
+        }
+        return false;
+    }
+
     private boolean isPredicate(Expression expr) {
         return switch (expr) {
             case Expression.And ignored -> true;
@@ -5654,6 +6073,17 @@ public final class ParserGenerator {
                   .append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.successNoLoc(null, \"\");\n");
             }
             case Expression.TokenBoundary tb -> {
+                // Phase 1.9 (DFA spike): fast-path detection for token-shaped rules
+                // — emit a tight inline character scanner instead of the framework's
+                // matchCharClassCst loop. Triggered only when (a) the flag is on,
+                // (b) the inner expression is Sequence(CharClass, ZeroOrMore(CharClass))
+                // (with optional Group wrappers), and (c) both classes are pure ASCII
+                // (non-case-insensitive, no escapes that escape ASCII). Failures fall
+                // through to the slow path identically.
+                if (config.tokenFastPath() && isFastPathTokenBoundary(tb)) {
+                    emitCstFastPathTokenBoundary(sb, tb, resultVar, indent, addToChildren, id, inWhitespaceRule);
+                    break;
+                }
                 // Phase 1.7 (D): inline int captures — avoid SourceLocation per token.
                 var tbStartPos = "tbStartPos" + id;
                 var tbStartLine = "tbStartLine" + id;

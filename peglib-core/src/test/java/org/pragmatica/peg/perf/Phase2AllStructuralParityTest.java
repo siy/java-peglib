@@ -50,7 +50,8 @@ class Phase2AllStructuralParityTest {
         /* inlineLocations        */ true,
         /* selectivePackrat       */ false,
         /* packratSkipRules       */ Set.of(),
-        /* mutableParseResult     */ false
+        /* mutableParseResult     */ false,
+        /* tokenFastPath          */ true
     );
 
     static Stream<Path> corpusFiles() throws IOException {

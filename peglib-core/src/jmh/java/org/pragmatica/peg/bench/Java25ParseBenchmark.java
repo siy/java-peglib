@@ -169,6 +169,10 @@ public class Java25ParseBenchmark {
             // Phase 1.8: structural+mutableResult variant with selectivePackrat=ON and empty
             // packratSkipRules — triggers auto-detection in PackratAnalyzer (LR rules excluded).
             case "phase1_allStructural_mutableResult_autoSkipPackrat" -> withStructural(true, true, true, true, Set.of(), true);
+            // Phase 1.9 (DFA spike): structural + autoSkipPackrat WITHOUT tokenFastPath — A/B baseline.
+            case "phase1_allStructural_mutableResult_autoSkipPackrat_noFastPath" -> withStructural(true, true, true, true, Set.of(), true, false);
+            // Phase 1.9 (DFA spike): structural + autoSkipPackrat WITH tokenFastPath — A/B variant.
+            case "phase1_allStructural_mutableResult_autoSkipPackrat_fastPath" -> withStructural(true, true, true, true, Set.of(), true, true);
             default -> throw new IllegalArgumentException("Unknown variant: " + variant);
         };
     }
@@ -190,7 +194,8 @@ public class Java25ParseBenchmark {
                 false,                      // inlineLocations
                 false,                      // selectivePackrat
                 Set.of(),                   // packratSkipRules
-                false);                     // mutableParseResult
+                false,                      // mutableParseResult
+                false);                     // tokenFastPath
     }
 
     /**
@@ -211,6 +216,16 @@ public class Java25ParseBenchmark {
                                                boolean selectivePackrat,
                                                Set<String> packratSkipRules,
                                                boolean mutableParseResult) {
+        return withStructural(choiceDispatch, markResetChildren, inlineLocations, selectivePackrat, packratSkipRules, mutableParseResult, true);
+    }
+
+    private static ParserConfig withStructural(boolean choiceDispatch,
+                                               boolean markResetChildren,
+                                               boolean inlineLocations,
+                                               boolean selectivePackrat,
+                                               Set<String> packratSkipRules,
+                                               boolean mutableParseResult,
+                                               boolean tokenFastPath) {
         return new ParserConfig(
                 true,                       // packratEnabled
                 RecoveryStrategy.BASIC,
@@ -226,7 +241,8 @@ public class Java25ParseBenchmark {
                 inlineLocations,
                 selectivePackrat,
                 Set.copyOf(packratSkipRules),
-                mutableParseResult);
+                mutableParseResult,
+                tokenFastPath);             // phase 1.9 (DFA spike)
     }
 
     static String loadResource(String resourcePath) throws Exception {

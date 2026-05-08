@@ -44,7 +44,8 @@ class Phase2ChoiceDispatchParityTest {
         /* inlineLocations        */ false,
         /* selectivePackrat       */ false,
         /* packratSkipRules       */ Set.of(),
-        /* mutableParseResult     */ false
+        /* mutableParseResult     */ false,
+        /* tokenFastPath          */ true
     );
 
     static Stream<Path> corpusFiles() throws IOException {
