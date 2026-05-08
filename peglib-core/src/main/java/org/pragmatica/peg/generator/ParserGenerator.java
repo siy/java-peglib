@@ -2832,6 +2832,15 @@ public final class ParserGenerator {
             generateCstRuleBodyMethod(sb, rule, ruleId);
             return;
         }
+        // Phase G: when the rule expression is a top-level Choice, emit each
+        // alternative as a private helper method (Leaf pattern). The rule body
+        // becomes a thin dispatcher (potentially using FIRST-set switch). This
+        // keeps every emitted method small enough for HotSpot's FreqInlineSize
+        // (325 bytes) and lets C2 inline the per-alt helpers.
+        if (rule.expression() instanceof Expression.Choice topChoice) {
+            emitCstChoiceRule(sb, rule, ruleId, topChoice);
+            return;
+        }
         // §7.4 selective packrat: when the flag is on AND this rule's (unsanitized) name is in
         // the skip-set, omit the cache lookup and cache put within this rule method. The cache
         // field itself and its use by other rules are preserved. When either the flag is off
@@ -3233,6 +3242,395 @@ public final class ParserGenerator {
           .append(", endLoc);\n");
         sb.append("        }\n");
         sb.append("        return result;\n");
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * Phase G: emit a rule whose top-level expression is a {@link Expression.Choice}
+     * with each alternative split into its own private helper method. The rule body
+     * becomes a thin dispatcher; helpers carry all per-alt parsing logic. This
+     * shrinks every emitted method below HotSpot's FreqInlineSize (325 bytes) and
+     * lets C2 inline through the dispatcher.
+     *
+     * <p>Helper signature contract: each helper takes the ambient {@code children}
+     * list (so adds/removes are visible to the caller's epilogue) plus the snapshot
+     * state captured at choice entry (start pos/line/col, pendingLeading snapshot,
+     * children-state). The helper restores children to the snapshot at entry,
+     * runs the alternative's body, and on regular failure restores pos/line/col
+     * + pendingLeading. On cut-failure it returns the cut-failure unchanged so the
+     * dispatcher can convert it to a regular failure for sibling-skipping.
+     *
+     * <p>PEG semantics preserved: cut inside an alt converts to regular failure at
+     * the choice level (matches inline emission). FIRST-set dispatch falls through
+     * to the default tail when no dispatched alt succeeds.
+     */
+    private void emitCstChoiceRule(StringBuilder sb, Rule rule, int ruleId, Expression.Choice choice) {
+        var methodName = "parse_" + sanitize(rule.name());
+        var ruleName = rule.name();
+        boolean inlineLocations = config.inlineLocations();
+        boolean skipCache = config.selectivePackrat() && config.packratSkipRules()
+                                                               .contains(ruleName);
+        var ruleIdConst = toConstantName(ruleName);
+        // === Rule body (dispatcher) ===
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("() {\n");
+        if (inlineLocations) {
+            sb.append("        int startOffset = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
+        }else {
+            sb.append("        var startLoc = location();\n");
+        }
+        sb.append("        \n");
+        if (!skipCache) {
+            sb.append("        long key = cacheKey(")
+              .append(ruleId)
+              .append(", ")
+              .append(inlineLocations
+                      ? "startOffset"
+                      : "startLoc.offset()")
+              .append(");\n");
+            sb.append("        if (cache != null) {\n");
+            sb.append("            var cached = cache.get(key);\n");
+            sb.append("            if (cached != null) {\n");
+            sb.append("                if (cached.isSuccess()) {\n");
+            sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+            sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+            sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
+            sb.append("                    var hitEndLoc = ")
+              .append(endLocationUnwrap("cached"))
+              .append(";\n");
+            sb.append("                    restoreLocation(hitEndLoc);\n");
+            sb.append("                    var hitNode = attachLeadingTrivia(")
+              .append(nodeUnwrap("cached"))
+              .append(", hitLeading);\n");
+            sb.append("                    return CstParseResult.success(hitNode, ")
+              .append(textOrEmpty("cached"))
+              .append(", hitEndLoc);\n");
+            sb.append("                }\n");
+            sb.append("                return cached;\n");
+            sb.append("            }\n");
+            sb.append("        }\n");
+            sb.append("        \n");
+        }
+        sb.append("        var carriedLeading = takePendingLeading();\n");
+        sb.append("        var localLeadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+        sb.append("        var leadingTrivia = concatTrivia(carriedLeading, localLeadingTrivia);\n");
+        sb.append("        var children = new ArrayList<CstNode>();\n");
+        sb.append("        var __ruleName = ")
+          .append(ruleIdConst)
+          .append(";\n");
+        sb.append("        \n");
+        boolean emitRecoverHooks = errorReporting == ErrorReporting.ADVANCED && rule.hasRecover();
+        if (emitRecoverHooks) {
+            sb.append("        pushRecoveryOverride(\"")
+              .append(escape(rule.recover()
+                                 .unwrap()))
+              .append("\");\n");
+        }
+        // Choice-entry snapshot state (shared across helper calls).
+        sb.append("        CstParseResult result = null;\n");
+        sb.append("        int choiceStart0Pos = pos;\n");
+        sb.append("        int choiceStart0Line = line;\n");
+        sb.append("        int choiceStart0Column = column;\n");
+        sb.append("        List<Trivia> choicePending0 = savePendingLeading();\n");
+        var childrenStateName = config.markResetChildren()
+                                ? "childrenMark0"
+                                : "savedChildren0";
+        if (config.markResetChildren()) {
+            sb.append("        int ")
+              .append(childrenStateName)
+              .append(" = children.size();\n");
+        }else {
+            sb.append("        var ")
+              .append(childrenStateName)
+              .append(" = new ArrayList<>(children);\n");
+        }
+        // Dispatcher: FIRST-set switch (when classifiable) or PEG-order chain.
+        var classifiedF = config.choiceDispatch()
+                          ? ChoiceDispatchAnalyzer.classify(choice, firstSets())
+                          : java.util.Optional.<ChoiceDispatchAnalyzer.Classified>empty();
+        if (classifiedF.isPresent()) {
+            var c = classifiedF.get();
+            var buckets = ChoiceDispatchAnalyzer.bucketsForClassified(c);
+            emitChoiceRuleDispatcherF(sb, rule, buckets, c.defaults(), childrenStateName);
+        }else {
+            emitChoiceRuleDispatcherPeg(sb, rule, choice, childrenStateName);
+        }
+        // All-alts-failed epilogue: synthesize a "one of alternatives" failure if
+        // no helper produced a result. This matches the inline emission's tail.
+        sb.append("        if (result == null) {\n");
+        if (config.markResetChildren()) {
+            sb.append("            if (children.size() > ")
+              .append(childrenStateName)
+              .append(") {\n");
+            sb.append("                children.subList(")
+              .append(childrenStateName)
+              .append(", children.size()).clear();\n");
+            sb.append("            }\n");
+        }else {
+            sb.append("            children.clear();\n");
+            sb.append("            children.addAll(")
+              .append(childrenStateName)
+              .append(");\n");
+        }
+        sb.append("            restorePendingLeading(choicePending0);\n");
+        sb.append("            result = CstParseResult.failure(\"one of alternatives\");\n");
+        sb.append("        }\n");
+        sb.append("        \n");
+        if (emitRecoverHooks) {
+            sb.append("        if (!result.isSuccess()) {\n");
+            sb.append("            recordFailureRecoveryOverride(\"")
+              .append(escape(rule.recover()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("        }\n");
+            sb.append("        popRecoveryOverride();\n");
+        }
+        sb.append("        CstParseResult finalResult;\n");
+        sb.append("        CstParseResult cacheableResult;\n");
+        sb.append("        if (result.isSuccess()) {\n");
+        if (emitRecoverHooks) {
+            sb.append("            clearPendingRecoveryOverride();\n");
+        }
+        sb.append("            var endLoc = location();\n");
+        if (inlineLocations) {
+            sb.append("            var span = new SourceSpan(startLine, startColumn, startOffset, endLoc.line(), endLoc.column(), endLoc.offset());\n");
+        }else {
+            sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
+        }
+        sb.append("            var pendingAtExit = takePendingLeading();\n");
+        sb.append("            var cacheNode = wrapWithRuleName(result, children, span, ")
+          .append(ruleIdConst)
+          .append(", List.<Trivia>of());\n");
+        sb.append("            var node = wrapWithRuleName(result, children, span, ")
+          .append(ruleIdConst)
+          .append(", leadingTrivia);\n");
+        sb.append("            if (!pendingAtExit.isEmpty()) {\n");
+        sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
+        sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
+        sb.append("            }\n");
+        sb.append("            cacheableResult = CstParseResult.success(cacheNode, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
+        sb.append("            finalResult = CstParseResult.success(node, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
+        sb.append("        } else {\n");
+        if (inlineLocations) {
+            sb.append("            this.pos = startOffset;\n");
+            sb.append("            this.line = startLine;\n");
+            sb.append("            this.column = startColumn;\n");
+        }else {
+            sb.append("            restoreLocation(startLoc);\n");
+        }
+        sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        if (rule.hasErrorMessage()) {
+            sb.append("            finalResult = CstParseResult.failure(\"")
+              .append(escape(rule.errorMessage()
+                                 .unwrap()))
+              .append("\");\n");
+        }else if (rule.hasExpected()) {
+            sb.append("            trackFailure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("            finalResult = CstParseResult.failure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
+        }else {
+            sb.append("            finalResult = result;\n");
+        }
+        sb.append("            cacheableResult = finalResult;\n");
+        sb.append("        }\n");
+        sb.append("        \n");
+        if (!skipCache) {
+            sb.append("        if (cache != null) cache.put(key, cacheableResult);\n");
+        }
+        sb.append("        return finalResult;\n");
+        sb.append("    }\n\n");
+        // === Per-alternative helper methods ===
+        for (int i = 0; i < choice.alternatives()
+                                  .size(); i++ ) {
+            emitCstChoiceAltHelper(sb,
+                                   rule,
+                                   choice.alternatives()
+                                         .get(i),
+                                   i);
+        }
+    }
+
+    /**
+     * Phase G: emit dispatcher body using FIRST-set classification. Each {@code case}
+     * in the switch calls the helpers for the dispatched alternatives in PEG order;
+     * after a case body, falls through to the defaults tail. The {@code default:}
+     * branch runs the defaults tail directly.
+     */
+    private void emitChoiceRuleDispatcherF(StringBuilder sb,
+                                           Rule rule,
+                                           java.util.List<ChoiceDispatchAnalyzer.DispatchBucket> buckets,
+                                           java.util.List<ChoiceDispatchAnalyzer.AltEntry> defaults,
+                                           String childrenStateName) {
+        sb.append("        if (pos < input.length()) {\n");
+        sb.append("            char dispatchChar0 = input.charAt(pos);\n");
+        sb.append("            switch (dispatchChar0) {\n");
+        for (var bucket : buckets) {
+            for (var c : bucket.chars()) {
+                sb.append("                case ")
+                  .append(literalChar(c))
+                  .append(":\n");
+            }
+            sb.append("                {\n");
+            emitHelperCallChain(sb, rule, bucket.alts(), childrenStateName, "                    ");
+            sb.append("                    break;\n");
+            sb.append("                }\n");
+        }
+        sb.append("            }\n");
+        sb.append("        }\n");
+        if (!defaults.isEmpty()) {
+            sb.append("        if (result == null || (!result.isSuccess() && !result.isCutFailure())) {\n");
+            // Restore pos for defaults tail (a dispatched alt may have advanced pos before failing).
+            sb.append("            this.pos = choiceStart0Pos;\n");
+            sb.append("            this.line = choiceStart0Line;\n");
+            sb.append("            this.column = choiceStart0Column;\n");
+            sb.append("            restorePendingLeading(choicePending0);\n");
+            sb.append("            result = null;\n");
+            emitHelperCallChain(sb, rule, defaults, childrenStateName, "            ");
+            sb.append("        }\n");
+        }
+    }
+
+    /**
+     * Phase G: emit dispatcher body as a PEG-order chain of helper calls (no
+     * FIRST-set classification). Each helper is tried in original grammar order.
+     */
+    private void emitChoiceRuleDispatcherPeg(StringBuilder sb,
+                                             Rule rule,
+                                             Expression.Choice choice,
+                                             String childrenStateName) {
+        var entries = new java.util.ArrayList<ChoiceDispatchAnalyzer.AltEntry>();
+        for (int i = 0; i < choice.alternatives()
+                                  .size(); i++ ) {
+            entries.add(new ChoiceDispatchAnalyzer.AltEntry(i,
+                                                            choice.alternatives()
+                                                                  .get(i),
+                                                            null));
+        }
+        emitHelperCallChain(sb, rule, entries, childrenStateName, "        ");
+    }
+
+    /**
+     * Emit a chain of helper calls for the given alternatives. The first call
+     * is unconditional; subsequent calls are guarded by {@code !isSuccess() && !isCutFailure()}.
+     * After every call, cut-failure is converted to regular failure (siblings of THIS choice
+     * are skipped via the guard, but enclosing choices see a regular failure).
+     */
+    private void emitHelperCallChain(StringBuilder sb,
+                                     Rule rule,
+                                     java.util.List<ChoiceDispatchAnalyzer.AltEntry> alts,
+                                     String childrenStateName,
+                                     String pad) {
+        var methodBase = "parse_" + sanitize(rule.name()) + "_alt";
+        for (int k = 0; k < alts.size(); k++ ) {
+            var entry = alts.get(k);
+            int origIndex = entry.originalIndex();
+            if (k == 0) {
+                sb.append(pad)
+                  .append("result = ")
+                  .append(methodBase)
+                  .append(origIndex)
+                  .append("(children, choiceStart0Pos, choiceStart0Line, choiceStart0Column, choicePending0, ")
+                  .append(childrenStateName)
+                  .append(");\n");
+            }else {
+                sb.append(pad)
+                  .append("if (!result.isSuccess() && !result.isCutFailure()) {\n");
+                sb.append(pad)
+                  .append("    result = ")
+                  .append(methodBase)
+                  .append(origIndex)
+                  .append("(children, choiceStart0Pos, choiceStart0Line, choiceStart0Column, choicePending0, ")
+                  .append(childrenStateName)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("}\n");
+            }
+        }
+        // Cut-failure conversion: cut commits to choice-failure; siblings won't be tried (guarded
+        // above), but enclosing constructs see a regular failure.
+        sb.append(pad)
+          .append("if (result != null && result.isCutFailure()) result = result.asRegularFailure();\n");
+    }
+
+    /**
+     * Emit a single per-alternative helper method. The helper takes {@code children}
+     * (passed by reference from the caller's local list) plus the choice-entry
+     * snapshot state. On entry it restores children to the snapshot (clearing any
+     * residue from a previously-failed alt). It then runs the alternative's body
+     * via {@link #generateCstExpressionCode}. On success it returns the result.
+     * On regular failure it restores pos/line/col + pendingLeading and returns
+     * the failure. On cut-failure it returns the cut-failure unchanged for the
+     * dispatcher to convert.
+     */
+    private void emitCstChoiceAltHelper(StringBuilder sb, Rule rule, Expression alt, int origIndex) {
+        var methodName = "parse_" + sanitize(rule.name()) + "_alt" + origIndex;
+        var altVar = "alt0_" + origIndex;
+        var ruleIdConst = toConstantName(rule.name());
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("(ArrayList<CstNode> children, int choiceStartPos, int choiceStartLine, int choiceStartColumn, List<Trivia> choicePending, ");
+        if (config.markResetChildren()) {
+            sb.append("int childrenState");
+        }else {
+            sb.append("ArrayList<CstNode> childrenState");
+        }
+        sb.append(") {\n");
+        // Helper-local __ruleName: scoped to this method body so emission templates
+        // that reference __ruleName (TokenBoundary, ZeroOrMore, OneOrMore, Repetition
+        // wrap-as-NonTerminal sites) compile after extraction from the parent rule.
+        sb.append("        var __ruleName = ")
+          .append(ruleIdConst)
+          .append(";\n");
+        // Restore children to snapshot at entry (clears residue from previous failed alt).
+        if (config.markResetChildren()) {
+            sb.append("        if (children.size() > childrenState) {\n");
+            sb.append("            children.subList(childrenState, children.size()).clear();\n");
+            sb.append("        }\n");
+        }else {
+            sb.append("        children.clear();\n");
+            sb.append("        children.addAll(childrenState);\n");
+        }
+        // Run alternative body. Counter is local to this helper (restarting at 0
+        // is safe — variable names are scoped to this method).
+        var counter = new int[]{0};
+        // The helper-local result variable name must match what generateCstExpressionCode
+        // emits for the alt expression. We use the standard pattern alt0_<origIndex>.
+        generateCstExpressionCode(sb, alt, altVar, 2, true, counter, false);
+        sb.append("        if (")
+          .append(altVar)
+          .append(".isSuccess()) {\n");
+        sb.append("            return ")
+          .append(altVar)
+          .append(";\n");
+        sb.append("        }\n");
+        // Cut-failure: return as-is so dispatcher can convert.
+        sb.append("        if (")
+          .append(altVar)
+          .append(".isCutFailure()) {\n");
+        sb.append("            return ")
+          .append(altVar)
+          .append(";\n");
+        sb.append("        }\n");
+        // Regular failure: restore pos/line/col + pendingLeading; return failure.
+        sb.append("        this.pos = choiceStartPos;\n");
+        sb.append("        this.line = choiceStartLine;\n");
+        sb.append("        this.column = choiceStartColumn;\n");
+        sb.append("        restorePendingLeading(choicePending);\n");
+        sb.append("        return ")
+          .append(altVar)
+          .append(";\n");
         sb.append("    }\n\n");
     }
 
