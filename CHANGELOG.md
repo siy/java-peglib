@@ -72,6 +72,39 @@ Bench post-Lever-D vs Phase 1.7 baseline (Regime B):
 
 Lever C (peglib-rt IR unification per spec §4) is the next-session entry point.
 
+### Throughput engine — Tier 1 perf arc (2026-05-07 → 2026-05-08)
+
+Branding: parser generator output is now the **throughput engine** (full-reparse speed) — distinct from the **incremental engine** (interactive editing). Different optimization targets, different code shapes, no shared code. See [`docs/incremental/THROUGHPUT-ENGINE-TIER1.md`](docs/incremental/THROUGHPUT-ENGINE-TIER1.md) for the spec; [`docs/bench-results/throughput-tier1-results.md`](docs/bench-results/throughput-tier1-results.md) and [`docs/bench-results/generator-profile-baseline.md`](docs/bench-results/generator-profile-baseline.md) for the data.
+
+**Bench fixtures:** Java25ParseBenchmark now has TWO fixtures — `reference` (1900-LOC FactoryClassGenerator.java) and `selfhost` (the Java25 generated parser parsing its OWN 37k-line generated source — pre-Tier-1 OOM'd; now 1 second). Self-host stress test caught E's silent regression that the small bench missed.
+
+**Cumulative bench (Regime: full reparse, JDK 25, JMH 1.37, variant `phase1_allStructural_mutableResult_autoSkipPackrat`):**
+
+| Fixture | Original | Now | Δ |
+|---|---:|---:|---:|
+| Reference (1900 LOC) | 76.2 ms / 150 MB | **25.1 ms / 82.9 MB** | **-67% wallclock, -45% bytes** |
+| Self-host (37k LOC) | OOM | **1035 ms / 2.19 GB** | from impossible to 1 sec |
+| Reference gc.count | 205 | 50 | -75% |
+| Reference gc.time | 2,844 ms | 354 ms | -87% |
+
+**Moves shipped:**
+- **A** — opt-in `mutableParseResult` ParserConfig flag. Emits a mutable `CstParseResult` class with raw nullable fields (no `Option<Object> value` / `Option<String> expected` wrappers) + raw-nullable `furthestFailure` / `furthestExpected` / `pendingFailureRecoveryOverride`. Eliminates 6,088 Option$Some allocation samples per parse → 0.
+- **D** — `inlineLocations` flag default-on. Emitted CST construction uses `new SourceSpan(line, col, off, endLine, endCol, endOff)` directly instead of `SourceSpan.sourceSpan(new SourceLocation(...), new SourceLocation(...))`. Two passes: production sweep (cleanup, -63 LOC) + emission templates (the win).
+- **D follow-up** — eliminated remaining `location()` callers in emission. SourceLocation samples 3,318 → ~600.
+- **F (first-set Choice dispatch)** — extended `ChoiceDispatchAnalyzer` from literal-only to full transitive FIRST-set computation. CharClass + Reference (recursive) + mixed dispatch. 19/64 → 62/64 of Java25's choices now dispatch via `switch (text.charAt(pos))` instead of speculative PEG-ordered evaluation. -20% wallclock on both fixtures.
+- **G (JBCT-style method splitting)** — top-level rule Choices extract each alt to `parse_<Rule>_alt<N>(Rule rule)` helper methods; new `Rule` record (static singletons, zero allocation) holds rule metadata. parse_Stmt 27,783 → <3,000 bytes. Most parse methods now JIT-inlinable.
+- **G2 + H** — Sequence chunking + nested Choice extraction. Same pattern applied recursively.
+- **Selective packrat auto-detection** — `selectivePackrat=true` is now default; `PackratAnalyzer.autoSkipPackratRules(grammar)` derives the skip-set automatically. Leaf-like and single-call-site rules bypass cache. Biggest single win: -38% reference / -14% self-host wallclock; -75% gc.count.
+
+**Move that did NOT ship:**
+- **E (packrat as `int[]`-keyed open-addressing map)** — clean on small bench, but **+22% regression on self-host stress test**. Linear probing scales badly at the load factors the 37k-LOC fixture stresses. Reverted. Lesson informed adding self-host as the second JMH fixture.
+- **H2 (recursive per-alt extraction in nested Choices)** — bytecode size dropped further but +4-7% wallclock regression. C2 was already inlining post-H; further splitting traded inline-friendly bytecode for call-overhead. Reverted.
+
+**Items deferred:**
+- **B (mutable parse-state singleton)** — biggest remaining allocation lever (5,264 CstParseResult on self-host). Requires incremental delivery (left-recursive seed-and-grow snapshotting, packrat aliasing); 4-6 commit work.
+- **DFA lexer for token rules** — biggest individual potential gain (2-3× on lex-heavy paths); 2-3 weeks architectural lift.
+- **ASCII whitespace fast path**, **char-class bit-packing** — tactical micro-opts, ~3-15% potential each.
+
 ## [0.4.3] - 2026-05-06
 
 Performance — interactive editing focus. 19% faster median, 26% faster p95 on the IncrementalBenchmark editing-session suite. **One breaking change**: SourceSpan record components changed from two SourceLocations to six ints (see migration note).
