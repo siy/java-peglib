@@ -105,10 +105,49 @@ Branding: parser generator output is now the **throughput engine** (full-reparse
 **vs javac comparison:** at the time of writing, peglib's throughput engine parses the 1900-LOC reference fixture in 22.6 ms (vs javac 9 ms = 2.5× of javac) with strictly more output (lossless CST + trivia for formatter+linter use cases). javac produces AST without trivia.
 
 **Items deferred:**
-- **B (mutable parse-state singleton)** — biggest remaining allocation lever (5,264 CstParseResult on self-host). Requires incremental delivery (left-recursive seed-and-grow snapshotting, packrat aliasing); 4-6 commit work.
 - **Generalized DFA lexer** — extend the spike pattern to `OneOrMore<CharClass>` (whitespace) and mixed Literal+CharClass (NumLit). Each generalization compounds with the Identifier win.
 - **ASCII whitespace fast path** — folded into generalized DFA above.
-- **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. Tactical, ~5-15% on char-class-heavy paths.
+- **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. Tactical, ~5-15% on char-class-heavy paths. **Reassess with care after Move B finding (below) — same risk class.**
+
+### Move B attempted, abandoned + post-rollback profile-driven optimization arc (2026-05-08)
+
+Move B (mutable parse-state singleton) was attempted across 5 incremental commits, then rolled back when bench data contradicted the hypothesis. A profile-driven optimization arc on the rolled-back baseline shipped 2 wallclock wins. Full session post-mortem with quantitative data: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11 + [`docs/HANDOVER.md`](docs/HANDOVER.md) §11.
+
+**Move B failure (5 commits rolled back):**
+
+Replacing per-call `CstParseResult` allocation with a heap-bound singleton + boolean returns regressed wallclock monotonically while allocation dropped:
+
+| Stage | Wallclock (ms) | Alloc (MB) | Δ wallclock vs original | Δ alloc vs original |
+|---|---:|---:|---:|---:|
+| Original baseline | 22.6 | 75.6 | — | — |
+| Commit 3 (match helpers) | 23.97 | 72.1 | +6.0% | -4.6% |
+| Commit 4 (combinators) | 24.71 | 66.3 | +9.3% | -12.3% |
+| Commit 5 (predicates/capture/cut/TB) | 25.09 | 66.0 | +11.0% | -12.8% |
+
+**Why:** modern JIT escape analysis was already scalar-replacing the per-call records (raw-nullable fields + immediate consume = textbook EA fodder). The singleton replacement defeated that optimization — heap-bound field, can't be scalarized, source-level aliasing forces the compiler to assume mutation visibility. Net: GC sees fewer survivor objects (alloc-rate metric drops), but optimized hot path is slower per call. Definitively abandoned.
+
+**Post-rollback wins (2 commits past `v0.5.0-candidate`):**
+
+- **Trivia snapshot via int size** (`4763251`) — replaced `List.copyOf(pendingLeadingTrivia)` snapshot + `clear()+addAll()` restore with primitive `int size` snapshot + `subList(snap, size).clear()` restore. Profile evidence: 6.0% reference CPU + 15.4% reference alloc in `Arrays.copyOf` (top alloc caller). Pattern: structural alloc elimination on hot path; JIT cannot elide bulk array copies. **-12.1% reference / -8.2% selfhost wallclock; -6.4% / -7.5% alloc.**
+- **ASCII char interning pool** (`38b6a8e`) — eliminated `String.valueOf(c)` per match in `matchCharClassCst` + `matchAnyCst` via pre-computed `ASCII_CHAR_STRINGS[128]` static field. Profile evidence: 5.8% of total reference allocs from per-match fresh 1-char Strings. Pattern: per-call fresh String alloc with no JIT scalar-replacement path. **-3.95% reference / -4.59% selfhost wallclock; -3.76% / -1.38% alloc.**
+
+**Cumulative session wins (from `v0.5.0-candidate` baseline):**
+
+| Fixture | v0.5.0-candidate | After 38b6a8e | Δ wallclock | Δ alloc |
+|---|---:|---:|---:|---:|
+| Reference (1900 LOC) | 22.66 ms / 75.55 MB | **19.12 ms / 68.02 MB** | **-15.6%** | **-10.0%** |
+| Selfhost (37k LOC) | 937 ms / 2.04 GB | **832 ms / 1.85 GB** | **-11.2%** | **-9.3%** |
+
+**Reference fixture is now under 20 ms** — original Move B target (~2× of javac territory) achieved without singleton mutation.
+
+**Resets that did NOT ship (5 candidates evaluated under strict bench gate):**
+- **trackFailure dedup via LinkedHashSet** — predicted -6.4% wallclock; reality flat. Lesson: JIT inlines `String.contains` efficiently when the scanned buffer is small; the profile share was call-overhead-dominated.
+- **Primitive long-keyed packrat cache** (replace HashMap) — predicted -12.5% CPU; reality selfhost +24.5% wallclock regression. Lesson: JDK HashMap chaining is per-op faster than custom open-addressing + SplitMix64 finalizer; replacing it cost more in latency than was saved in alloc.
+- **HashMap initial-capacity hint** from input size — reality reference +3.9% / selfhost +5.3% regression. Lesson: over-sizing hurts cache locality more than it saves resize cost. JDK HashMap's growth schedule is well-tuned.
+- **Lazy Token text materialization** (record→class with cache) — reality selfhost +10% regression. Lesson: Java records are JIT-scalar-replaceable in a way mutable classes (even with single cache field) are not. Same family of lesson as Move B.
+- **Lazy SourceLocation in trackFailure** — reality flat on both fixtures. Lesson: SourceLocation is a record; JIT readily stack-allocates / dead-code-eliminates around hot-path early returns. Allocation share in profile is NOT predictive of wallclock improvement when JIT/EA already handles the alloc cleanly.
+
+**Refined optimization principle:** target allocations the JIT cannot elide (bulk array copies, per-call fresh objects with no scalar-replacement path). Avoid optimizing patterns the JIT already handles (records, immediately-consumed objects, JDK collection internals, mutable shared state on `this`).
 
 ## [0.4.3] - 2026-05-06
 
