@@ -1746,6 +1746,14 @@ public final class ParserGenerator {
         sb.append("    private static final RuleId.PegCharClass RULE_PEG_CHAR_CLASS = new RuleId.PegCharClass();\n");
         sb.append("    private static final RuleId.PegAny RULE_PEG_ANY = new RuleId.PegAny();\n");
         sb.append("    private static final RuleId.PegToken RULE_PEG_TOKEN = new RuleId.PegToken();\n");
+        // Candidate #4: ASCII single-char String pool — eliminates String.valueOf(c) alloc
+        // per match in matchCharClassCst / matchAnyCst on the hot path. ~3 KB total at class load.
+        sb.append("    private static final String[] ASCII_CHAR_STRINGS = new String[128];\n");
+        sb.append("    static {\n");
+        sb.append("        for (int __i = 0; __i < 128; __i++) {\n");
+        sb.append("            ASCII_CHAR_STRINGS[__i] = String.valueOf((char) __i);\n");
+        sb.append("        }\n");
+        sb.append("    }\n");
         sb.append("\n");
     }
 
@@ -7183,7 +7191,8 @@ public final class ParserGenerator {
             sb.append("        }\n");
         }
         sb.append("        advance();\n");
-        sb.append("        var text = String.valueOf(c);\n");
+        // Candidate #4: ASCII pool eliminates fresh 1-char String alloc per match.
+        sb.append("        var text = c < 128 ? ASCII_CHAR_STRINGS[c] : String.valueOf(c);\n");
         // Phase 1.7 (D2): primitive-int span; successNoLoc result.
         sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
@@ -7216,7 +7225,8 @@ public final class ParserGenerator {
         sb.append("        int startLine = line;\n");
         sb.append("        int startColumn = column;\n");
         sb.append("        char c = advance();\n");
-        sb.append("        var text = String.valueOf(c);\n");
+        // Candidate #4: ASCII pool eliminates fresh 1-char String alloc per match.
+        sb.append("        var text = c < 128 ? ASCII_CHAR_STRINGS[c] : String.valueOf(c);\n");
         // Phase 1.7 (D2): primitive-int span; successNoLoc result.
         sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
         sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");
