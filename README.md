@@ -453,13 +453,31 @@ public sealed interface CstNode {
 
 ## Performance
 
+### Throughput engine (generator) — 0.5.0-candidate
+
+The parser generator output is now branded the **throughput engine** (full-reparse speed) and is distinct from the **incremental engine** (PegEngine + IncrementalSession, optimized for interactive editing). Different optimization targets, different code shapes, no shared code.
+
+Cumulative arc on the 1,900-LOC reference fixture (`FactoryClassGenerator.java.txt`, JMH 1.37 avgT, JDK 25, Apple Silicon, variant `phase1_allStructural_mutableResult_autoSkipPackrat`):
+
+| Stage | Wallclock | Allocation | vs original |
+|---|---:|---:|---:|
+| Pre-Tier-1 baseline | 76.2 ms | 150 MB | — |
+| Post Tier 1 (A + D + F + G + G2/H + selective packrat + DFA Identifier) | 22.6 ms | 75.6 MB | -70% wallclock, -50% bytes |
+| Post-rollback wins (trivia int snapshot, ASCII char interning) | **19.12 ms** | **68.02 MB** | **-75% wallclock, -55% bytes** |
+
+A 37k-LOC self-host stress fixture (the Java25 generated parser parsing its own generated source) lands at **832 ms / 1.85 GB** — pre-Tier-1 it OOM'd. vs javac comparison: peglib parses the reference fixture in ~2× of javac wallclock with strictly more output (lossless CST + trivia for formatter and linter use cases).
+
+See [`docs/incremental/THROUGHPUT-ENGINE-TIER1.md`](docs/incremental/THROUGHPUT-ENGINE-TIER1.md) and [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md) for the full session post-mortem (including 5 reset attempts banked as lessons), and [`CHANGELOG.md`](CHANGELOG.md#050---2026-05-06) for the per-move detail.
+
+### Incremental engine (interactive editing) — 0.5.0-candidate
+
+`peglib-incremental`'s `IncrementalSession` provides cursor-anchored single-edit reparsing. Phase 1 of the 0.5.0 architectural rework (stable node IDs + `LongLongMap` NodeIndex + Path D ancestor-preservation algorithm) ships **1.9× faster median (10.8 ms → 5.6 ms)** and **96.5% of edits within the 16 ms frame budget** vs the 0.4.3 baseline. Lever D (Cursor/Session split) layers on a further -9% median / -53% p99. See [`docs/incremental/PHASE-1-RESULTS.md`](docs/incremental/PHASE-1-RESULTS.md).
+
 ### Interpreter (PegEngine) — 0.4.1
 
-On the same 1,900-LOC Java 25 fixture, the interpreter (`PegParser.fromGrammar(...).parseCst(...)`) is **3.88× faster in 0.4.1** than 0.4.0 (281 ms → 72.4 ms; JMH 1.37 avgT, JDK 25.0.2, Apple Silicon). Incremental cursor-far edits (`peglib-incremental`) drop from 322 ms to 107 ms (3.0×). Three flame-graph-driven changes: HashMap rule-lookup cache, singleton `ParseMode` constants, `LinkedHashSet` dedup for the furthest-failure expected-set. See [`docs/bench-results/post-0.4.0/`](docs/bench-results/post-0.4.0/) for raw JMH + JFR data.
+On the same 1,900-LOC Java 25 fixture, the interpreter (`PegParser.fromGrammar(...).parseCst(...)`) is **3.88× faster in 0.4.1** than 0.4.0 (281 ms → 72.4 ms). Three flame-graph-driven changes: HashMap rule-lookup cache, singleton `ParseMode` constants, `LinkedHashSet` dedup for the furthest-failure expected-set. See [`docs/bench-results/post-0.4.0/`](docs/bench-results/post-0.4.0/) for raw JMH + JFR data.
 
-### Generated parsers — 0.2.2
-
-The generated CST parser emits tuned helper variants driven by generator-time flags in `ParserConfig`. On the same fixture, the all-flags `phase1` variant runs at ~76 ms (4.7× over the pre-0.2.2 baseline; raw data in [`docs/bench-results/`](docs/bench-results/)).
+### Generator-time perf flags (0.2.2 origin, evolved through 0.5.0)
 
 Flags (all consumed at generation time — no runtime branching in the emitted parser):
 
@@ -471,12 +489,14 @@ Flags (all consumed at generation time — no runtime branching in the emitted p
 | `bulkAdvanceLiteral` | 1 | on | Bulk `pos`/`column` update for no-newline literals |
 | `skipWhitespaceFastPath` | 1 | on | First-char precheck derived from `%whitespace` rule |
 | `reuseEndLocation` | 1 | on | Reuse end-position `SourceLocation` across span + result |
-| `choiceDispatch` | 2 | on | `switch(input.charAt(pos))` dispatch for literal-prefixed Choice |
+| `choiceDispatch` | 2 | on | First-set `switch(input.charAt(pos))` dispatch for Choice (extended in 0.5.0 to CharClass + Reference + mixed) |
+| `inlineLocations` | 2 | on (since 0.5.0) | Inline int locals at rule entry instead of SourceLocation |
+| `selectivePackrat` | 2 | on (since 0.5.0) | Skip packrat cache for rules in `packratSkipRules`; auto-derives skip-set when empty via `PackratAnalyzer.autoSkipPackratRules(grammar)` |
+| `tokenFastPath` | 2 | on (since 0.5.0) | DFA fast-path scanner for token-shaped rules (`< CharClass + ZeroOrMore<CharClass> >`) |
 | `markResetChildren` | 2 | off | Replace children clone+clear+addAll with mark-and-trim |
-| `inlineLocations` | 2 | off | Inline int locals at rule entry instead of SourceLocation |
-| `selectivePackrat` | 2 | off | Skip packrat cache for rules in `packratSkipRules` |
+| `mutableParseResult` | 2 | off (opt-in) | Emit mutable `CstParseResult` with raw nullable fields — eliminates Option boxing |
 
-The three default-off flags can be flipped on per-project via a custom `ParserConfig`. See [`docs/PERF-FLAGS.md`](docs/PERF-FLAGS.md) for the per-flag reference and guidance on when to flip, [`docs/PERF-REWORK-SPEC.md`](docs/PERF-REWORK-SPEC.md) for the underlying design, and [`docs/bench-results/java25-parse.json`](docs/bench-results/java25-parse.json) for raw JMH data.
+Default-off flags can be flipped on per-project via a custom `ParserConfig`. See [`docs/PERF-FLAGS.md`](docs/PERF-FLAGS.md) for the per-flag reference and guidance on when to flip, [`docs/PERF-REWORK-SPEC.md`](docs/PERF-REWORK-SPEC.md) for the underlying design, and [`docs/bench-results/java25-parse.json`](docs/bench-results/java25-parse.json) for raw JMH data.
 
 To reproduce benchmarks:
 
@@ -505,6 +525,8 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md). Highlights since the 0.2.x line:
 
 | Version | Date | What |
 |---|---|---|
+| **0.5.0** | 2026-05-08 (candidate) | **Throughput engine** rebrand + Tier 1 perf arc — reference fixture **76.2 ms → 19.12 ms** (-75%) and self-host (37k LOC) **OOM → 832 ms**. Incremental engine Phase 1: stable node IDs + LongLongMap NodeIndex + Path D ancestor-preservation — **1.9× faster median** for cursor-aware edits. **BREAKING:** `CstNode` records gain `long id` as the first record component (equals/hashCode exclude id). New `Cursor` value type split out from `Session`. |
+| **0.4.3** | 2026-05-06 | Interactive editing perf: -19% median, -26% p95. **BREAKING:** `SourceSpan` now stores int triples instead of `SourceLocation` refs. |
 | **0.4.2** | 2026-05-05 | Generated parsers now truly standalone — emit zero peglib FQCN references in their source. Drop them into a project with no peglib runtime and they compile. |
 | **0.4.1** | 2026-05-04 | **3.88× interpreter speedup** + 3.0× incremental cursor-far edit. Three flame-graph-driven fixes; no API change. |
 | **0.4.0** | 2026-05-03 | **Breaking** — API consolidation. Multi-module split (`peglib`, `peglib-incremental`, `peglib-formatter`, `peglib-maven-plugin`, `peglib-playground`). Consistent factory naming. Result-typed pipelines at every boundary. Parse-don't-validate `Grammar`. Immutable `FormatterConfig` record. Migration notes in CHANGELOG. |

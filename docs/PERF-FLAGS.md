@@ -1,10 +1,15 @@
 # Performance Flags Reference
 
-Peglib's `ParserConfig` carries ten boolean performance flags consumed at
+Peglib's `ParserConfig` carries twelve boolean performance flags consumed at
 **generator time**. They select which helper variant `ParserGenerator`
 emits; they do **not** produce runtime `if (flag)` branches in the
 generated output. A given `(grammar, ParserConfig)` pair produces
 deterministic, byte-identical Java source.
+
+> **0.5.0 update:** `inlineLocations`, `selectivePackrat`, and `tokenFastPath`
+> are now default `true`. `mutableParseResult` was added as an opt-in flag
+> (default `false`) — see [`THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md)
+> for why the singleton-mutation extension on top of it was abandoned.
 
 For the design rationale behind each flag — including the patches
 originally prototyped and the measured wins — see
@@ -46,10 +51,12 @@ any regression can be bisected to a single flag.
 
 | Flag | Default | Optimization |
 |---|---|---|
-| `choiceDispatch` | `true` | For `Choice` whose alternatives are all literal-prefixed, emit a `switch (input.charAt(pos))` dispatch that narrows to the subset of alternatives starting with the current char. Falls through to the general backtracking chain for alternatives without a fixed prefix. **Default flipped on in 0.2.2 based on a 2.49× measured speedup over the phase-1 baseline.** |
+| `choiceDispatch` | `true` | First-set `switch (input.charAt(pos))` dispatch for Choice. Originally literal-prefix only (0.2.2); **extended in 0.5.0** to full transitive FIRST-set computation covering CharClass + Reference (recursive) + mixed dispatch. On Java25, 62/64 of choices now dispatch via switch. **-20% wallclock on both fixtures vs phase-1 baseline.** |
 | `markResetChildren` | `false` | Replace `children` clone + `clear` + `addAll` in `Choice` with mark-and-trim (`children.subList(mark, size()).clear()`). O(1) mark; O(delta) reset. No statistically significant individual win on the reference JVM. |
-| `inlineLocations` | `false` | Introduce per-rule `int startOffset` / `startLine` / `startColumn` locals and materialize `SourceLocation` only at span boundaries. No statistically significant individual win on the reference JVM. |
-| `selectivePackrat` | `false` | Skip packrat cache for rules listed in `packratSkipRules`. Marginal combo win (~5%) sits inside measurement noise on the reference workload. Callers must supply `packratSkipRules` or the flag is a no-op. |
+| `inlineLocations` | `true` (since 0.5.0) | Per-rule `int startOffset` / `startLine` / `startColumn` locals; materialize `SourceLocation` only at span boundaries. Default flipped on in 0.5.0 after the emission-template sweep that eliminated SourceLocation/SourceSpan allocations on the rule-entry path. |
+| `selectivePackrat` | `true` (since 0.5.0) | Skip packrat cache for rules listed in `packratSkipRules`. **0.5.0 semantics:** when `packratSkipRules` is empty, the generator auto-derives the skip-set via `PackratAnalyzer.autoSkipPackratRules(grammar)` — leaf-like rules and single-call-site rules without quantifiers bypass the cache; left-recursive rules are excluded. Pass a non-empty explicit set to override. **Biggest single win in the 0.5.0 throughput-engine arc: -38% reference / -14% self-host wallclock; -75% gc.count.** |
+| `tokenFastPath` | `true` (since 0.5.0) | DFA fast-path scanner for token-shaped rules: detects `< CharClass + ZeroOrMore<CharClass> >` (Identifier-shape) and emits a tight inline scanner with pre-computed ASCII bitmasks instead of going through `matchCharClass` per character. **-9.8% reference / -7.6% self-host wallclock.** |
+| `mutableParseResult` | `false` (opt-in) | Emits a mutable `CstParseResult` class with raw nullable fields (no `Option<Object> value` / `Option<String> expected` wrappers) plus raw-nullable `furthestFailure` / `furthestExpected` / `pendingFailureRecoveryOverride`. Eliminates Option boxing on every result construction. The Move B extension that replaced per-call records with a heap-bound singleton was attempted and abandoned; see [`THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) for the post-mortem. |
 
 ### `packratSkipRules`
 
@@ -62,7 +69,9 @@ output. Default: `Set.of()`.
 
 ## When to flip defaults
 
-All three default-off flags live behind a custom `ParserConfig`:
+As of 0.5.0 most optimizations default on. The two remaining default-off /
+opt-in flags (`markResetChildren`, `mutableParseResult`) live behind a custom
+`ParserConfig`:
 
 ```java
 var config = new ParserConfig(
@@ -71,10 +80,12 @@ var config = new ParserConfig(
     true,                         // captureTrivia
     true, true, true, true, true, true,  // phase-1 (keep on)
     true,                         // choiceDispatch (keep on)
-    true,                         // markResetChildren (flip on)
-    true,                         // inlineLocations (flip on)
-    true,                         // selectivePackrat (flip on)
-    Set.of("Identifier", "QualifiedName", "Type"));  // skip set
+    true,                         // markResetChildren (flip on if measured)
+    true,                         // inlineLocations (default on since 0.5.0)
+    true,                         // selectivePackrat (default on since 0.5.0)
+    Set.of(),                     // packratSkipRules — leave empty to auto-derive
+    true,                         // mutableParseResult (opt-in; -8.5% wallclock per Move A spike)
+    true);                        // tokenFastPath (default on since 0.5.0)
 
 Result<String> source = PegParser.generateCstParser(
     grammarText, "com.example", "MyParser",
@@ -83,13 +94,20 @@ Result<String> source = PegParser.generateCstParser(
 
 Guidance:
 
-- **`markResetChildren` / `inlineLocations`** — try on grammars with many
-  alternatives per choice or with span-heavy rules. Re-benchmark against
-  your workload; the reference fixture shows no individual win.
-- **`selectivePackrat`** — gather per-rule cache hit ratios first
-  (`PackratStatsProbe` at `src/jmh/java/org/pragmatica/peg/bench/PackratStatsProbe.java`).
-  Rules with `hits/puts < 0.1` are candidates. Only sound for rules
-  that are not left-recursive.
+- **`markResetChildren`** — try on grammars with many alternatives per choice
+  or with span-heavy rules. Re-benchmark against your workload; the reference
+  fixture shows no individual win. Still default off.
+- **`selectivePackrat`** — defaults on with auto-derivation. To override the
+  auto-derived skip-set, pass an explicit non-empty `packratSkipRules`.
+  Gather per-rule cache hit ratios with `PackratStatsProbe` at
+  `peglib-core/src/jmh/java/org/pragmatica/peg/bench/PackratStatsProbe.java`
+  if you want to compare. Rules with `hits/puts < 0.1` are candidates. Only
+  sound for rules that are not left-recursive.
+- **`mutableParseResult`** — opt-in for users targeting the throughput engine's
+  full perf envelope. Eliminates Option boxing on every parse-method result.
+  The Move B singleton extension on top of this flag was attempted and
+  abandoned (modern JIT escape analysis already scalar-replaces the per-call
+  records); see [`THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md).
 
 ## Measured reference numbers
 

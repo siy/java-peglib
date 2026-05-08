@@ -215,8 +215,8 @@ Input `clss` produces a diagnostic with note `help: did you mean 'class'?`.
 
 Multiple `%suggest` directives are permitted; their vocabularies combine.
 Vocabularies are precomputed once per `ParsingContext` and do not change
-between parse attempts (this matters for the planned incremental parser
-in 0.3.1, which forwards the dictionary across reparses without
+between parse attempts (this matters for the incremental parser introduced
+in 0.3.0–0.3.2, which forwards the dictionary across reparses without
 recomputation).
 
 If no `%suggest` directive is declared, no suggestion logic runs and
@@ -251,7 +251,7 @@ Each finding has a stable tag for tooling integration. The full catalog:
 | `grammar.nullable-rule` | INFO / WARNING | Rule can match the empty string. Promoted to WARNING when the rule is on a direct left-recursive path (infinite-loop risk) |
 | `grammar.duplicate-literal` | ERROR | Literal repeated verbatim within the same `Choice` |
 | `grammar.whitespace-cycle` | ERROR | `%whitespace` expression transitively references itself |
-| `grammar.has-backreference` | INFO | Rule uses `$name` back-reference — forward-compat note: incremental parsing (planned for 0.3.1) falls back to full reparse on such rules |
+| `grammar.has-backreference` | INFO | Rule uses `$name` back-reference — forward-compat note: incremental parsing (since 0.3.2) falls back to full reparse on such rules |
 
 The ambiguous-choice check is conservative: it flags only choices where
 *every* alternative has a fixed literal prefix. Rule-reference-prefixed or
