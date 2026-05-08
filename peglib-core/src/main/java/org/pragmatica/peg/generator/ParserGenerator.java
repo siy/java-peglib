@@ -3447,7 +3447,7 @@ public final class ParserGenerator {
         sb.append("        int choiceStart0Pos = pos;\n");
         sb.append("        int choiceStart0Line = line;\n");
         sb.append("        int choiceStart0Column = column;\n");
-        sb.append("        List<Trivia> choicePending0 = savePendingLeading();\n");
+        sb.append("        int choicePending0 = savePendingLeading();\n");
         var childrenStateName = config.markResetChildren()
                                 ? "childrenMark0"
                                 : "savedChildren0";
@@ -3693,7 +3693,7 @@ public final class ParserGenerator {
         var ruleIdConst = toConstantName(rule.name());
         sb.append("    private CstParseResult ")
           .append(methodName)
-          .append("(ArrayList<CstNode> children, int choiceStartPos, int choiceStartLine, int choiceStartColumn, List<Trivia> choicePending, ");
+          .append("(ArrayList<CstNode> children, int choiceStartPos, int choiceStartLine, int choiceStartColumn, int choicePending, ");
         if (config.markResetChildren()) {
             sb.append("int childrenState");
         }else {
@@ -3937,7 +3937,7 @@ public final class ParserGenerator {
           .append(seqStartColumn)
           .append(" = column;\n");
         sb.append(pad)
-          .append("List<Trivia> ")
+          .append("int ")
           .append(seqPending)
           .append(" = savePendingLeading();\n");
         if (addToChildren) {
@@ -4055,7 +4055,7 @@ public final class ParserGenerator {
         if (addToChildren) {
             sb.append("ArrayList<CstNode> children, ");
         }
-        sb.append("int seqStartPos, int seqStartLine, int seqStartColumn, List<Trivia> seqPending");
+        sb.append("int seqStartPos, int seqStartLine, int seqStartColumn, int seqPending");
         if (addToChildren) {
             sb.append(", ArrayList<CstNode> seqChildren");
         }
@@ -4179,7 +4179,7 @@ public final class ParserGenerator {
           .append(seqStartColumn)
           .append(" = column;\n");
         sb.append(pad)
-          .append("List<Trivia> ")
+          .append("int ")
           .append(seqPending)
           .append(" = savePendingLeading();\n");
         if (addToChildren) {
@@ -4462,7 +4462,7 @@ public final class ParserGenerator {
         // back — captured trivia inside one alt must not leak forward
         // into sibling alternatives.
         sb.append(pad)
-          .append("List<Trivia> choicePending")
+          .append("int choicePending")
           .append(id)
           .append(" = savePendingLeading();\n");
         // Don't skip whitespace here - let alternatives capture trivia themselves
@@ -5274,7 +5274,7 @@ public final class ParserGenerator {
                   .append(beforeColumn)
                   .append(" = column;\n");
                 sb.append(pad)
-                  .append("    List<Trivia> zomIterPending")
+                  .append("    int zomIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -5426,7 +5426,7 @@ public final class ParserGenerator {
                       .append("children.clear();\n");
                 }
                 sb.append(pad)
-                  .append("List<Trivia> oomEntryPending")
+                  .append("int oomEntryPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 generateCstExpressionCode(sb,
@@ -5483,7 +5483,7 @@ public final class ParserGenerator {
                   .append(beforeColumn)
                   .append(" = column;\n");
                 sb.append(pad)
-                  .append("        List<Trivia> oomIterPending")
+                  .append("        int oomIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -5616,7 +5616,7 @@ public final class ParserGenerator {
                   .append(optStartColumn)
                   .append(" = column;\n");
                 sb.append(pad)
-                  .append("List<Trivia> optPending")
+                  .append("int optPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 // Save parent children before inner expression
@@ -5793,7 +5793,7 @@ public final class ParserGenerator {
                   .append(beforeColumn)
                   .append(" = column;\n");
                 sb.append(pad)
-                  .append("    List<Trivia> repIterPending")
+                  .append("    int repIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -5975,7 +5975,7 @@ public final class ParserGenerator {
                   .append(andStartColumn)
                   .append(" = column;\n");
                 sb.append(pad)
-                  .append("List<Trivia> andPending")
+                  .append("int andPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (addToChildren) {
@@ -6035,7 +6035,7 @@ public final class ParserGenerator {
                   .append(notStartColumn)
                   .append(" = column;\n");
                 sb.append(pad)
-                  .append("List<Trivia> notPending")
+                  .append("int notPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (addToChildren) {
@@ -6757,13 +6757,14 @@ public final class ParserGenerator {
                     return snapshot;
                 }
 
-                private List<Trivia> savePendingLeading() {
-                    return List.copyOf(pendingLeadingTrivia);
+                private int savePendingLeading() {
+                    return pendingLeadingTrivia.size();
                 }
 
-                private void restorePendingLeading(List<Trivia> snapshot) {
-                    pendingLeadingTrivia.clear();
-                    pendingLeadingTrivia.addAll(snapshot);
+                private void restorePendingLeading(int snapshot) {
+                    if (pendingLeadingTrivia.size() > snapshot) {
+                        pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size()).clear();
+                    }
                 }
 
                 private List<Trivia> concatTrivia(List<Trivia> first, List<Trivia> second) {
