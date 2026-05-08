@@ -165,13 +165,13 @@ Bench numbers (Regime B, cursor-moved-to-edit, 1900-LOC fixture):
 
 Trigger ID `trig_01HhXqsGeHfRoWNNnqM7TLod`, fires **2026-05-08T14:00:00Z**. Runs JMH + async-profiler against the post-0.3.6 baseline, captures flame graphs, posts results as a comment on the open release-0.3.6 PR or as a new issue. View at https://claude.ai/code/routines/trig_01HhXqsGeHfRoWNNnqM7TLod
 
-The agent will report which Tier (per `docs/incremental/V2.5-SPIKE.md` § "Alternative levers") the next bottleneck lives in.
+The agent will report which Tier (per `docs/archive/V2.5-SPIKE.md` § "Alternative levers") the next bottleneck lives in.
 
 **Important context:** the agent assumes 0.3.6 contains the lever 1 fix, which it doesn't. The agent may report numbers worse than the spike's projected 5-15ms (because lever 1 is still not landed). The agent's logic still works as a baseline-capture — just interpret the results in light of "lever 1 not yet shipped."
 
 ### 6.2 Lever 1 — incremental perf (DEFERRED — deeper than the spike claimed)
 
-**Status:** the spike doc's "zero correctness risk" claim is **retracted**. See `docs/incremental/V2.5-SPIKE.md` "Addendum (post-0.4.0)" for the retraction. Two failed attempts on this lever:
+**Status:** the spike doc's "zero correctness risk" claim is **retracted**. See `docs/archive/V2.5-SPIKE.md` "Addendum (post-0.4.0)" for the retraction. Two failed attempts on this lever:
 
 | Attempt | Approach | Failures | Stash |
 |---|---|---|---|
@@ -286,7 +286,7 @@ Regen via:
 ### Bench
 - `peglib-core/src/jmh/java/org/pragmatica/peg/bench/Java25ParseBenchmark.java`
 - `peglib-incremental/src/jmh/java/org/pragmatica/peg/incremental/bench/IncrementalBenchmark.java`
-- `docs/incremental/V2.5-SPIKE.md` — **read this before any incremental perf work**
+- `docs/archive/V2.5-SPIKE.md` — **read this before any incremental perf work** (archived; lever-1 superseded by 0.5.0 architecture)
 
 ## 9. Things that are easy to get wrong
 
@@ -303,28 +303,167 @@ Regen via:
 
 ## 10. Where to find historical context
 
-- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — the plan that drove the 0.3.5→0.4.0 arc, marked complete through Phase 8.
+- *(deleted 0.5.0-candidate cleanup)* `docs/RELEASE-PLAN-0.3.5-0.4.0.md` was the plan that drove the 0.3.5→0.4.0 arc. Marked complete through Phase 8 before removal; recover from git history if needed.
 - `docs/AUDIT-REPORTS/CONSOLIDATED-BACKLOG.md` — the audit findings that drove 0.3.4 cleanup. Most P3 items shipped in 0.4.0.
-- `docs/PERF-REWORK-SPEC.md` — the 0.2.2 perf rework spec; historical.
-- `docs/incremental/SPEC.md` — the 0.3.0-0.3.2 incremental spec. v2 shipped, v2.5 NO-GO'd by spike.
-- `docs/incremental/V2.5-SPIKE.md` — the v2.5 NO-GO + lever-1 design + post-0.4.0 retraction. Lever-1 superseded by 0.5.0 architecture.
-- `docs/incremental/UNSAFE-GENERATOR-SPIKE.md` — the post-0.4.0 unsafe-generator design + status. Infrastructure landed (5 commits in `release-0.4.2` history); behavior conversion deferred to 0.5.0.
+- `docs/archive/PERF-REWORK-SPEC.md` — the 0.2.2 perf rework spec; archived/historical.
+- `docs/archive/SPEC-incremental-original.md` — the 0.3.0-0.3.2 incremental spec (archived). v2 shipped, v2.5 NO-GO'd by spike.
+- `docs/archive/V2.5-SPIKE.md` — the v2.5 NO-GO + lever-1 design + post-0.4.0 retraction (archived). Lever-1 superseded by 0.5.0 architecture.
+- `docs/archive/UNSAFE-GENERATOR-SPIKE.md` — the post-0.4.0 unsafe-generator design + status (archived). Infrastructure landed (5 commits in `release-0.4.2` history); behavior conversion deferred to 0.5.0.
+- `docs/archive/PHASE-0-RESULTS.md`, `docs/archive/PHASE-1-PROVE-OUT.md` — interim 0.5.0 phase results (archived); final state in `docs/incremental/PHASE-1-RESULTS.md`.
 - `docs/incremental/ARCHITECTURE-0.5.0.md` — **forward-looking** architectural spec for the 0.5.0 incremental-native rework. Read this before touching incremental perf or correctness.
 - `docs/bench-results/` — committed JMH JSON from each perf-touching release.
 
 ## 11. Recommended next session
 
-The 0.4.x perf arc is complete (281 ms → 10.8 ms median, 26× from baseline; 0.4.3 ships at p99 ≈ 53 ms with 91.5% of edits under the 16 ms frame budget). Further per-edit-cost reductions are gated on architectural change, not algorithmic tweaks.
+**Branch pushed at `fd278fe`. Tag `v0.5.0-candidate` at HEAD.** 922 tests green. The full 0.5.0 arc shipped this session: incremental engine (Phase 1 Path D + Lever D Cursor split) + throughput engine (Tier 1 partial: A, D, F, G, G2+H, selective packrat, DFA fast-path).
 
-1. **Read `docs/incremental/ARCHITECTURE-0.5.0.md` first** — the spec that supersedes the §6.2 lever-1 puzzle and §6.4 unsafe-generator work. Both items dissolve into the proposed 0.5.0 design.
-2. **Phase 0 prototype** (per spec §6) — Lever A (stable node IDs + `LongLongMap` NodeIndex) on the calculator grammar end-to-end. ~1 week. GO/NO-GO gate on whether incremental NodeIndex update materially beats the 0.4.3 baseline on synthetic edits.
-3. **If GO:** execute Phases 1–5 over 4–5 weeks. Levers B (top-down pivot), C (`peglib-rt` interpreter/generator unification), D (Cursor split). Single major-version bump at 0.5.0.
-4. **If NO-GO:** revisit individual levers tactically; the spec stays as a future reference; ship 0.4.x patches as needed for downstream bugs.
+### Headline cumulative numbers
 
-Do NOT attempt lever 1 as a 0.4.x patch — both attempts proved the data structure forbids it. The 5-10 day correctness estimate in §6.2 is what's required to make it work *without* the architectural change; the spec proposes a path that makes lever-1 a 30-line method instead.
+**Incremental engine** (`IncrementalSessionBench`, Regime B cursor-moved-to-edit, 1900-LOC fixture):
 
-Do NOT pursue further allocation reduction in the 0.4.x interpreter without the architectural change — the SourceLocation interning probe and ParseResult.Failure singleton probe both confirmed bytes-allocated metrics don't translate to wall-time wins under the current data structure (HashMap.Node entries promote and dominate). The structural SourceSpan refactor that DID ship in 0.4.3 was the exception because it eliminated long-lived refs from CstNodes.
+| Metric | 0.4.3 | 0.5.0 | Δ |
+|---|---:|---:|---:|
+| Median | 10.8 ms | **5.0 ms** | **-54%** |
+| p95 | 22.4 ms | **11.2 ms** | **-50%** |
+| p99 | 53.3 ms | 90.5 ms | +70% (large-pivot tail) |
+| % under 16ms | 91.5% | **96.5%** | **+5pp** |
+
+**Throughput engine** (`Java25ParseBenchmark`, variant `phase1_allStructural_mutableResult_autoSkipPackrat`):
+
+| Fixture | Original | 0.5.0 | Δ vs original | vs javac |
+|---|---:|---:|---:|---:|
+| Reference (1900 LOC) | 76.2 ms / 150 MB | **22.6 ms / 75.6 MB** | **-70% wallclock, -50% bytes** | 2.5× of javac (9 ms) |
+| Self-host (37k LOC) | OOM | **956 ms / 2.04 GB** | from impossible to 1 sec | n/a |
+| GC time (reference) | 2,844 ms | 354 ms | **-87%** | — |
+
+### Branch state at `fd278fe` — 40 commits past `1619604` chore
+
+**Phase 0 — sandbox spike (later cleaned up):** `d00eaa1` … `a8c6efe`
+**Phase 1 — incremental engine production:** `8f844eb` Path A RED → `8b27dd6` Path D GREEN → `2443779` CstNode long id → `39e11f9` NodeIndex LongLongMap + Path D applyIncremental → `65a719f` nodesById refresh → `43baaf8` results doc
+**Phase 2 attempted, rolled back:** `e038e4f` Lever B literal-prefix cost 4× — reverted
+**Bench/JBCT cleanup:** `0ea98af` bench post-edit validation → `4ad5824` parseFull→Result
+**Sandbox cleanup + Lever D:** `5275d86` -5463 LOC → `4f06046` Cursor split (p99 -53%)
+**Throughput engine Tier 1:**
+- `0ed2dcd` A spike — Option boxing eliminated (`mutableParseResult` flag)
+- `fedc389` A coverage extension — wallclock -12% vs original
+- `478b89b` D production sweep (cleanup)
+- `5b2b6a1` D emission templates — `inlineLocations` default-on
+- `2ad2674` E packrat int-keyed → reverted at `8f844eb`-style sequence
+- `8f844eb`-equivalent: `9e9414a` E revert (regressed self-host 22%)
+- `2a8cefc` self-host bench fixture added
+- `7fdd5e8` D2 — eliminate remaining location() callers
+- `dd1f150` F — FIRST-set Choice dispatch (62/64 choices, -20% both fixtures)
+- `eec8ba3` G — JBCT-style method splits (parse_Stmt 27k→3k)
+- `59be764` G2+H — Sequence chunks + nested Choice extraction (-5/-8%)
+- `ca2dcfe` Selective packrat auto-detect (**biggest single win: -38% reference, -14% self-host**)
+- `0ea0765` DFA fast-path Identifier-shape rules (-10% reference)
+- `fd278fe` Tier 1 results + DFA javac comparison + CHANGELOG
+
+### What's reverted (and why — pattern)
+
+E (int-keyed packrat): regressed self-host 22% — linear probing scales badly at large load factors.
+H2 (recursive nested-Choice per-alt): +4-7% slower — call overhead exceeded JIT inline benefit.
+DFA generalization (whitespace + NumLit): neutral — low-volume rules don't pay off.
+
+**Pattern:** high-volume single-target wins (A, F, selective packrat, Identifier fast-path) deliver big. Broad generalizations don't.
+
+### Move B — attempted and abandoned 2026-05-08
+
+The mutable parse-state singleton arc was attempted in this session: 5 incremental commits landed (`88c15f3` foundation → `a86fa97` parse_<rule>→boolean → `23ba500` match helpers → `98f4c11` combinators → `ed95951` predicates/capture/cut/TB), then **policy-driven rollback to `v0.5.0-candidate`**. Branch state preserved.
+
+**Why it failed (well-supported by 5 bench data points):** modern JIT was already scalar-replacing the per-call `CstParseResult` records (raw-nullable fields + immediate-consume call sites are textbook escape-analysis fodder). Replacing them with a heap-bound singleton **defeated** that optimization. Allocation rate dropped (-12.8% cumulative — short of the §9 15% gate) **but wallclock regressed monotonically** (+11.0% cumulative). The trajectory was clear by commit 5: pushing further would have hurt more.
+
+| Stage | Wallclock (ms/op) | Alloc (MB/op) |
+|---|---:|---:|
+| Baseline (this session start) | 22.6 | 75.6 |
+| Commit 3 | 23.97 | 72.1 |
+| Commit 4 | 24.71 | 66.3 |
+| Commit 5 | 25.09 | 65.96 |
+
+**Full post-mortem with hypothesis, ruled-out moves, and reoriented optimization directions: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11.**
+
+The 5 commits are in reflog (`git reflog show release-0.5.0`) for ~30 days if forensic inspection is needed. Don't re-attempt; new info has retired the approach.
+
+### Reoriented next moves (post-Move-B reassessment)
+
+The Move B failure tells us **allocation rate is no longer a productive target** in the throughput engine. The engine is now allocation-optimized to the point where further alloc reduction has negative ROI on wallclock. Future wins live elsewhere:
+
+- **Profile-driven wallclock work** (NEW, highest-ROI suggestion) — `async-profiler` in CPU mode + flame graphs on the reference fixture. Identify the actual hot CPU work post-Tier-1, target that directly. The Move B failure proved alloc-rate metrics can be misleading; CPU samples are the trustworthy signal now. **EXECUTED THIS SESSION — see "Post-rollback profile-driven optimization arc" below for outcomes.**
+- **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. **Reassess with care** — same risk class as Move B. Bench wallclock first to confirm range-comparison isn't already JIT-optimized via SIMD/code-motion. Potential ~5-15% on char-class-heavy paths IF measurably hot.
+- **Lever B retry** (incremental engine) — gated on trivia attribution rework. SafePivotAnalyzer + NodeIndex.smallestEnclosing live as dormant infrastructure for the eventual retry. Independent of allocation patterns; unaffected by Move B finding.
+- **Trivia attribution rework** — context-independent attachment. Unblocks Lever B; comparable scope to Lever C. Independent of allocation; unaffected by Move B finding.
+- **Lever C — IR unification** (spec §4) — multi-week. Eliminates "every fix paid twice" pattern between PegEngine and ParserGenerator emission templates. Reduces 7,440 LOC to ~1,700. Maintainability + complexity reduction primary value, not raw perf.
+
+### Post-rollback profile-driven optimization arc (this session, 2026-05-08)
+
+After Move B was abandoned and rolled back to `v0.5.0-candidate` (`e849b63`), a profile-driven optimization arc executed in the same session. Two profile passes (CPU + alloc × reference + selfhost via async-profiler) identified specific candidates; each candidate landed under a strict bench gate (>3% wallclock OR >5% alloc → ship; >1% wallclock regression → reset).
+
+**Branch now at `38b6a8e`** — 2 commits past `v0.5.0-candidate`:
+
+| Commit | Direction | Reference Δ | Selfhost Δ |
+|---|---|---|---|
+| `4763251` | trivia snapshot via int size (eliminates `List.copyOf` per backtrack) | **-12.1% wallclock / -6.4% alloc** | **-8.2% wallclock / -7.5% alloc** |
+| `38b6a8e` | matchCharClassCst ASCII char interning pool (eliminates `String.valueOf(c)` per match) | **-3.95% wallclock / -3.76% alloc** | **-4.59% wallclock / -1.38% alloc** |
+
+**Cumulative (from `v0.5.0-candidate` baseline, this machine, this session):**
+
+| Fixture | v0.5.0-candidate | After 38b6a8e | Δ wallclock | Δ alloc |
+|---|---:|---:|---:|---:|
+| Reference (1900 LOC) | 22.66 ms / 75.55 MB | **19.12 ms / 68.02 MB** | **-15.6%** | **-10.0%** |
+| Selfhost (37k LOC) | 937 ms / 2.04 GB | **832 ms / 1.85 GB** | **-11.2%** | **-9.3%** |
+
+**Reference fixture is now under 20 ms — the original Move B wallclock target, achieved without singleton mutation.**
+
+### Lesson taxonomy from this session's optimization arc
+
+7 candidates attempted post-rollback. 2 ships, 5 resets. Pattern that emerged:
+
+| Pattern | Result | Reason |
+|---|---|---|
+| Replace `List.copyOf` (varargs / array copy) with primitive int snapshot | **WIN** | JIT cannot elide bulk array copies — real alloc cost eliminated |
+| Replace per-call `String.valueOf(c)` with interned ASCII pool | **WIN** | JIT allocates fresh String per call; no escape-analysis path |
+| Replace `String.contains` quadratic scan with `LinkedHashSet` dedup | RESET | JIT inlines String.contains efficiently; call-overhead-dominated |
+| Replace `HashMap<Long,_>` with custom open-addressed long-keyed map | RESET | JDK HashMap per-op faster than custom; per-op latency tax exceeds alloc savings |
+| Provide `HashMap` initial-capacity hint from input size | RESET | Over-sizing hurts cache locality more than it saves resize cost |
+| Convert `Token` record → mutable class with text cache (lazy substring) | RESET | Records are JIT-scalar-replaceable; mutable class with cache field defeats EA |
+| Defer `SourceLocation` construction in trackFailure to parse-end | RESET | SourceLocation is a record; JIT readily stack-allocates / dead-code-eliminates |
+
+**Refined principle:** allocation share in a profile is NOT predictive of wallclock improvement when JIT escape analysis already handles the alloc. Successful patterns target allocations the JIT cannot elide:
+- Bulk array copies (`Arrays.copyOf`, `ArrayList.toArray`)
+- Per-call freshly-allocated objects with no scalar replacement path (e.g. `String.valueOf(c)` materializes a fresh char[] backing)
+
+Failed patterns target allocations the JIT already optimizes:
+- Records (compact, scalar-replaceable, value-class-like)
+- Immediately-consumed objects in a single method's scope
+- JDK collection internals (HashMap is heavily JIT-optimized)
+- Mutable shared state on `this` (defeats EA — Move B's lesson)
+
+### What's now also ruled out (this session)
+
+- Per-call `CstParseResult` elimination via singleton (Move B — confirmed; rolled back)
+- `String.contains` micro-optimization in trackFailure
+- Custom long-keyed packrat cache map
+- HashMap initial-capacity sizing hints
+- Lazy Token text materialization (record→class transition)
+- Lazy SourceLocation construction in trackFailure
+
+### What's still viable
+
+- **Char-class bit-packing** — REASSESS WITH CARE per same risk class. Bench wallclock first.
+- **Lever B retry** (incremental engine) — independent of allocation patterns
+- **Trivia attribution rework** — independent
+- **Lever C IR unification** — multi-week, maintainability-first
+- **Re-profile post-`38b6a8e`** — the profile has shifted again; new candidates may emerge or the profile may be flat (no clear next move). Run a third profile pass if pursuing further wallclock work.
+
+### Items superseded by this session's work
+
+- §6.2 lever-1 puzzle: dissolved by Path D's stable-id algorithm.
+- §6.4 unsafe-generator work: out of scope; 0.5.0 design doesn't need it.
+
+Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guidance still holds.
+
+**Updated post-Move-B (2026-05-08):** Do NOT pursue further allocation reduction in the **generated parser** either. The Move B failure proved alloc-rate is no longer a productive target — JIT escape analysis is already doing aggressive scalar replacement on per-call records. Future perf work should be CPU-profile-driven, not alloc-profile-driven.
 
 ---
 
-**Last updated:** 2026-05-03, after the post-0.4.0 lever-1 retry failed (31/100 parity regressions). Handover from the 0.3.5 → 0.4.0 arc, plus the failed-lever-1 forensics.
+**Last updated:** 2026-05-08, end of profile-driven optimization arc (post-Move-B rollback). Branch `release-0.5.0` at `38b6a8e` — 2 commits past `v0.5.0-candidate` (`e849b63`). peglib-core 705 tests green (includes 6 smoke tests from the 2 shipped commits — CandidateTwoSmokeTest 3, CandidateFourSmokeTest 3); full reactor green via `mvn install`. Cumulative wins this session: -15.6% reference wallclock / -11.2% selfhost wallclock. Reference now under 20 ms. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: re-profile post-`38b6a8e` if pursuing further wallclock; otherwise pivot to trivia attribution rework / Lever B retry / Lever C IR unification.

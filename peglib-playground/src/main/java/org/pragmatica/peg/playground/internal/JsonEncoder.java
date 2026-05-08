@@ -44,13 +44,13 @@ public final class JsonEncoder {
             case Trivia t -> writeTrivia(sb, t);
             case Diagnostic d -> writeDiagnostic(sb, d);
             case Stats s -> writeStats(sb, s);
-            case Map<?, ?> map -> writeObject(sb, map);
-            case List<?> list -> writeArray(sb, list);
+            case Map< ? , ? > map -> writeObject(sb, map);
+            case List< ? > list -> writeArray(sb, list);
             default -> writeString(sb, value.toString());
         }
     }
 
-    private static void writeObject(StringBuilder sb, Map<?, ?> map) {
+    private static void writeObject(StringBuilder sb, Map< ? , ? > map) {
         sb.append('{');
         boolean first = true;
         for (var entry : map.entrySet()) {
@@ -58,14 +58,15 @@ public final class JsonEncoder {
                 sb.append(',');
             }
             first = false;
-            writeString(sb, String.valueOf(entry.getKey()));
+            writeString(sb,
+                        String.valueOf(entry.getKey()));
             sb.append(':');
             write(sb, entry.getValue());
         }
         sb.append('}');
     }
 
-    private static void writeArray(StringBuilder sb, List<?> list) {
+    private static void writeArray(StringBuilder sb, List< ? > list) {
         sb.append('[');
         boolean first = true;
         for (var item : list) {
@@ -84,15 +85,25 @@ public final class JsonEncoder {
         writeString(sb, nodeKind(node));
         sb.append(",\"rule\":");
         writeString(sb, node.rule());
-        sb.append(",\"start\":").append(node.span().startOffset());
-        sb.append(",\"end\":").append(node.span().endOffset());
-        sb.append(",\"line\":").append(node.span().startLine());
-        sb.append(",\"column\":").append(node.span().startColumn());
-        if (!node.leadingTrivia().isEmpty()) {
+        sb.append(",\"start\":")
+          .append(node.span()
+                      .startOffset());
+        sb.append(",\"end\":")
+          .append(node.span()
+                      .endOffset());
+        sb.append(",\"line\":")
+          .append(node.span()
+                      .startLine());
+        sb.append(",\"column\":")
+          .append(node.span()
+                      .startColumn());
+        if (!node.leadingTrivia()
+                 .isEmpty()) {
             sb.append(",\"leadingTrivia\":");
             writeTriviaList(sb, node.leadingTrivia());
         }
-        if (!node.trailingTrivia().isEmpty()) {
+        if (!node.trailingTrivia()
+                 .isEmpty()) {
             sb.append(",\"trailingTrivia\":");
             writeTriviaList(sb, node.trailingTrivia());
         }
@@ -153,8 +164,12 @@ public final class JsonEncoder {
         sb.append('{');
         sb.append("\"kind\":");
         writeString(sb, ParseTracer.triviaKind(trivia));
-        sb.append(",\"start\":").append(trivia.span().startOffset());
-        sb.append(",\"end\":").append(trivia.span().endOffset());
+        sb.append(",\"start\":")
+          .append(trivia.span()
+                        .startOffset());
+        sb.append(",\"end\":")
+          .append(trivia.span()
+                        .endOffset());
         sb.append(",\"text\":");
         writeString(sb, trivia.text());
         sb.append('}');
@@ -163,18 +178,32 @@ public final class JsonEncoder {
     private static void writeDiagnostic(StringBuilder sb, Diagnostic diag) {
         sb.append('{');
         sb.append("\"severity\":");
-        writeString(sb, diag.severity().display());
+        writeString(sb,
+                    diag.severity()
+                        .display());
         sb.append(",\"message\":");
         writeString(sb, diag.message());
-        sb.append(",\"line\":").append(diag.span().startLine());
-        sb.append(",\"column\":").append(diag.span().startColumn());
-        sb.append(",\"start\":").append(diag.span().startOffset());
-        sb.append(",\"end\":").append(diag.span().endOffset());
-        if (diag.tag().isPresent()) {
+        sb.append(",\"line\":")
+          .append(diag.span()
+                      .startLine());
+        sb.append(",\"column\":")
+          .append(diag.span()
+                      .startColumn());
+        sb.append(",\"start\":")
+          .append(diag.span()
+                      .startOffset());
+        sb.append(",\"end\":")
+          .append(diag.span()
+                      .endOffset());
+        if (diag.tag()
+                .isPresent()) {
             sb.append(",\"tag\":");
-            writeString(sb, diag.tag().unwrap());
+            writeString(sb,
+                        diag.tag()
+                            .unwrap());
         }
-        if (!diag.notes().isEmpty()) {
+        if (!diag.notes()
+                 .isEmpty()) {
             sb.append(",\"notes\":[");
             boolean first = true;
             for (var note : diag.notes()) {
@@ -191,34 +220,43 @@ public final class JsonEncoder {
 
     private static void writeStats(StringBuilder sb, Stats stats) {
         sb.append('{');
-        sb.append("\"timeMicros\":").append(stats.timeMicros());
-        sb.append(",\"nodeCount\":").append(stats.nodeCount());
-        sb.append(",\"triviaCount\":").append(stats.triviaCount());
-        sb.append(",\"ruleEntries\":").append(stats.ruleEntries());
-        sb.append(",\"cacheHits\":").append(stats.cacheHits());
-        sb.append(",\"cacheMisses\":").append(stats.cacheMisses());
-        sb.append(",\"cachePuts\":").append(stats.cachePuts());
-        sb.append(",\"cutsFired\":").append(stats.cutsFired());
-        sb.append(",\"diagnosticCount\":").append(stats.diagnosticCount());
+        sb.append("\"timeMicros\":")
+          .append(stats.timeMicros());
+        sb.append(",\"nodeCount\":")
+          .append(stats.nodeCount());
+        sb.append(",\"triviaCount\":")
+          .append(stats.triviaCount());
+        sb.append(",\"ruleEntries\":")
+          .append(stats.ruleEntries());
+        sb.append(",\"cacheHits\":")
+          .append(stats.cacheHits());
+        sb.append(",\"cacheMisses\":")
+          .append(stats.cacheMisses());
+        sb.append(",\"cachePuts\":")
+          .append(stats.cachePuts());
+        sb.append(",\"cutsFired\":")
+          .append(stats.cutsFired());
+        sb.append(",\"diagnosticCount\":")
+          .append(stats.diagnosticCount());
         sb.append('}');
     }
 
     private static void writeString(StringBuilder sb, String s) {
         sb.append('"');
-        for (int i = 0; i < s.length(); i++) {
+        for (int i = 0; i < s.length(); i++ ) {
             char c = s.charAt(i);
             switch (c) {
-                case '"' -> sb.append("\\\"");
-                case '\\' -> sb.append("\\\\");
-                case '\n' -> sb.append("\\n");
-                case '\r' -> sb.append("\\r");
-                case '\t' -> sb.append("\\t");
-                case '\b' -> sb.append("\\b");
-                case '\f' -> sb.append("\\f");
+                case'"' -> sb.append("\\\"");
+                case'\\' -> sb.append("\\\\");
+                case'\n' -> sb.append("\\n");
+                case'\r' -> sb.append("\\r");
+                case'\t' -> sb.append("\\t");
+                case'\b' -> sb.append("\\b");
+                case'\f' -> sb.append("\\f");
                 default -> {
                     if (c < 0x20) {
                         sb.append(String.format("\\u%04x", (int) c));
-                    } else {
+                    }else {
                         sb.append(c);
                     }
                 }

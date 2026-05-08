@@ -1,8 +1,9 @@
 package org.pragmatica.peg.incremental.bench;
 
-import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.incremental.Cursor;
 import org.pragmatica.peg.incremental.Edit;
+import org.pragmatica.peg.incremental.EditOutcome;
 import org.pragmatica.peg.incremental.IncrementalParser;
 import org.pragmatica.peg.incremental.Session;
 
@@ -58,7 +59,6 @@ import java.util.Random;
  * @since 0.4.4
  */
 public final class IncrementalSessionBench {
-
     private static final String GRAMMAR_RESOURCE = "/java25.peg";
     private static final String FIXTURE_RESOURCE = "/perf-corpus/large/FactoryClassGenerator.java.txt";
 
@@ -68,7 +68,11 @@ public final class IncrementalSessionBench {
     private static final double FRAME_BUDGET_MS = 16.0;
 
     /** Edit shape, used for per-class bucketing in the report. */
-    private enum EditClass { SINGLE_CHAR, WORD, LINE, BLOCK;
+    private enum EditClass {
+        SINGLE_CHAR,
+        WORD,
+        LINE,
+        BLOCK;
         String label() {
             return switch (this) {
                 case SINGLE_CHAR -> "single-char";
@@ -82,46 +86,93 @@ public final class IncrementalSessionBench {
     /** A pre-classified edit, generated up-front so generation cost is excluded from timing. */
     private record ClassifiedEdit(Edit edit, EditClass cls) {}
 
+    /**
+     * Reason an edit was not counted as a normal applied measurement.
+     *
+     * <ul>
+     *   <li>{@code APPLIED} — edit ran and was accepted (post-edit buffer parses).</li>
+     *   <li>{@code OUT_OF_BOUNDS} — edit offsets exceeded current buffer; not attempted.</li>
+     *   <li>{@code INVALIDATED} — post-edit {@link Session#parseSuccessful()} returned
+     *       {@code false}; the random-edit generator produced a syntactically invalid
+     *       mutation. Session reference is rolled back to the pre-edit value.</li>
+     * </ul>
+     */
+    private enum SkipReason {
+        APPLIED,
+        OUT_OF_BOUNDS,
+        INVALIDATED
+    }
+
     /** Per-edit measurement record. {@code -1} latency means the edit was skipped. */
-    private record Measurement(
-        EditClass cls,
-        long latencyNs,
-        boolean wasFallback,
-        boolean skipped,
-        int editOffset,
-        int editOldLen,
-        int editNewLen,
-        String pivotRule,
-        int pivotNodeCount) {}
+    private record Measurement(EditClass cls,
+                               long latencyNs,
+                               boolean wasFallback,
+                               boolean skipped,
+                               SkipReason skipReason,
+                               int editOffset,
+                               int editOldLen,
+                               int editNewLen,
+                               String pivotRule,
+                               int pivotNodeCount) {}
 
     public static void main(String[] args) throws Exception {
         var grammarText = loadResource(GRAMMAR_RESOURCE);
         var fixtureSource = loadResource(FIXTURE_RESOURCE);
-        var grammar = GrammarParser.parse(grammarText).fold(
-            cause -> { throw new IllegalStateException("grammar parse failed: " + cause.message()); },
-            g -> g);
+        var grammar = GrammarParser.parse(grammarText)
+                                   .fold(cause -> {
+                                             throw new IllegalStateException("grammar parse failed: " + cause.message());
+                                         },
+                                         g -> g);
         var parser = IncrementalParser.create(grammar);
-
         // Generate the edit plan once. The same plan drives both regimes so
         // the comparison is apples-to-apples.
         var plan = generateEditPlan(fixtureSource, EDIT_COUNT, RNG_SEED);
-
         // Warm the JIT a bit so first-edit numbers reflect steady-state JIT,
         // not interpreter cost. We do a small throwaway session.
         warmJit(parser, fixtureSource);
-
-        var regimeB = runRegime(parser, fixtureSource, plan, /*moveCursor=*/true);
-        var regimeA = runRegime(parser, fixtureSource, plan, /*moveCursor=*/false);
-
+        long t0 = System.nanoTime();
+        var regimeB = runRegime(parser, fixtureSource, plan, true);
+        var regimeA = runRegime(parser, fixtureSource, plan, false);
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+        System.out.println("Validation: post-edit Session.parseSuccessful() check; rejected buffers roll back the session reference.");
+        System.out.println();
         printReport(fixtureSource, regimeB, regimeA);
+        System.out.println();
+        System.out.println("=== POST-EDIT VALIDATION SUMMARY ===");
+        printRegimeSkipSummary("Regime B (cursor-moved)", regimeB);
+        printRegimeSkipSummary("Regime A (cursor-pinned)", regimeA);
+        System.out.printf("Total wallclock (both regimes): %d ms%n", elapsedMs);
+    }
+
+    private static void printRegimeSkipSummary(String label, Measurement[] ms) {
+        long applied = 0, oob = 0, invalidated = 0;
+        for (var m : ms) {
+            switch (m.skipReason()) {
+                case APPLIED -> applied++;
+                case OUT_OF_BOUNDS -> oob++;
+                case INVALIDATED -> invalidated++;
+            }
+        }
+        System.out.printf("%s: %d applied, %d invalidated, %d out-of-bounds%n",
+                          label,
+                          applied,
+                          invalidated,
+                          oob);
     }
 
     // -------- Regime driver ----------------------------------------------------------------
-
-    private static Measurement[] runRegime(
-            IncrementalParser parser, String fixtureSource, List<ClassifiedEdit> plan, boolean moveCursor) {
-        var session = parser.initialize(fixtureSource, 0);
-        int prevFallbacks = session.stats().fullReparseCount();
+    // Post-migration: Session.edit always returns a Session; parse failures surface via
+    // parseSuccessful() rather than exceptions, so the bench observes them post-edit
+    // and rolls the session reference back instead of swallowing a thrown RuntimeException.
+    private static Measurement[] runRegime(IncrementalParser parser,
+                                           String fixtureSource,
+                                           List<ClassifiedEdit> plan,
+                                           boolean moveCursor) {
+        var init = parser.initialize(fixtureSource, 0);
+        Session session = init.session();
+        Cursor cursor = init.cursor();
+        int prevFallbacks = session.stats()
+                                   .fullReparseCount();
         var out = new Measurement[plan.size()];
         for (int i = 0; i < plan.size(); i++) {
             var ce = plan.get(i);
@@ -129,51 +180,89 @@ public final class IncrementalSessionBench {
             // Clamp the edit to the current buffer: the plan was generated against
             // the initial text, so by the time we replay against the live session
             // text the offsets and lengths may drift. Skip edits that cannot fit.
-            int textLen = session.text().length();
+            String currentText = session.text();
+            int textLen = currentText.length();
             if (edit.offset() > textLen || edit.offset() + edit.oldLen() > textLen) {
-                out[i] = new Measurement(ce.cls(), -1L, false, true,
-                    edit.offset(), edit.oldLen(), edit.newText().length(), "", 0);
+                out[i] = new Measurement(ce.cls(),
+                                         - 1L,
+                                         false,
+                                         true,
+                                         SkipReason.OUT_OF_BOUNDS,
+                                         edit.offset(),
+                                         edit.oldLen(),
+                                         edit.newText()
+                                             .length(),
+                                         "",
+                                         0);
                 continue;
             }
-            try {
-                long t0 = System.nanoTime();
-                Session next;
-                if (moveCursor) {
-                    next = session.moveCursor(edit.offset()).edit(edit);
-                } else {
-                    next = session.edit(edit);
-                }
-                long t1 = System.nanoTime();
-                var stats = next.stats();
-                int fallbacks = stats.fullReparseCount();
-                boolean wasFallback = fallbacks > prevFallbacks;
-                prevFallbacks = fallbacks;
-                out[i] = new Measurement(ce.cls(), t1 - t0, wasFallback, false,
-                    edit.offset(), edit.oldLen(), edit.newText().length(),
-                    stats.lastReparsedRule(), stats.lastReparsedNodeCount());
-                session = next;
-            } catch (RuntimeException ex) {
-                out[i] = new Measurement(ce.cls(), -1L, false, true,
-                    edit.offset(), edit.oldLen(), edit.newText().length(), "", 0);
+            // Lever D: cursor moves are pure (no Session allocation). For Regime B
+            // we move the cursor BEFORE timing — but the move is now a 16-byte
+            // record alloc, so include or exclude makes no measurable difference;
+            // we keep the move inside the timed window for fidelity to the prior
+            // bench shape.
+            long t0 = System.nanoTime();
+            Cursor editCursor = moveCursor
+                                ? cursor.moveTo(edit.offset(), session.index())
+                                : cursor;
+            EditOutcome outcome = session.edit(editCursor, edit);
+            long t1 = System.nanoTime();
+            long latencyNs = t1 - t0;
+            Session next = outcome.newSession();
+            // Post-edit validation: if the parser rejected the new buffer, Session.edit
+            // returns a degraded session whose parseSuccessful() is false. Treat the
+            // edit as INVALIDATED, keep the previous session and cursor.
+            if (!next.parseSuccessful()) {
+                out[i] = new Measurement(ce.cls(),
+                                         - 1L,
+                                         false,
+                                         true,
+                                         SkipReason.INVALIDATED,
+                                         edit.offset(),
+                                         edit.oldLen(),
+                                         edit.newText()
+                                             .length(),
+                                         "",
+                                         0);
+                continue;
             }
+            var stats = next.stats();
+            int fallbacks = stats.fullReparseCount();
+            boolean wasFallback = fallbacks > prevFallbacks;
+            prevFallbacks = fallbacks;
+            out[i] = new Measurement(ce.cls(),
+                                     latencyNs,
+                                     wasFallback,
+                                     false,
+                                     SkipReason.APPLIED,
+                                     edit.offset(),
+                                     edit.oldLen(),
+                                     edit.newText()
+                                         .length(),
+                                     stats.lastReparsedRule(),
+                                     stats.lastReparsedNodeCount());
+            session = next;
+            cursor = outcome.newCursor();
         }
         return out;
     }
 
     private static void warmJit(IncrementalParser parser, String fixtureSource) {
-        var s = parser.initialize(fixtureSource, fixtureSource.length() / 2);
+        var init = parser.initialize(fixtureSource, fixtureSource.length() / 2);
+        Session s = init.session();
+        Cursor c = init.cursor();
         for (int i = 0; i < 20; i++) {
-            int off = (i * 37 + 100) % s.text().length();
-            try {
-                s = s.moveCursor(off).edit(new Edit(off, 0, "x"));
-            } catch (RuntimeException ignored) {
-                // warm-up best-effort
-            }
+            int off = (i * 37 + 100) % s.text()
+                                       .length();
+            // Post-migration: edit never throws on parse failure.
+            c = c.moveTo(off, s.index());
+            var outcome = s.edit(c, new Edit(off, 0, "x"));
+            s = outcome.newSession();
+            c = outcome.newCursor();
         }
     }
 
     // -------- Edit plan generation ---------------------------------------------------------
-
     /**
      * Generate a deterministic edit plan against the initial fixture text.
      * Edit positions cluster near the previous edit (70% within ±100 chars,
@@ -260,7 +349,8 @@ public final class IncrementalSessionBench {
         var block = new StringBuilder();
         int lines = 2 + rng.nextInt(4);
         for (int i = 0; i < lines; i++) {
-            block.append(randomLine(rng)).append('\n');
+            block.append(randomLine(rng))
+                 .append('\n');
         }
         int safeOff = Math.min(off, textLen);
         return new ClassifiedEdit(new Edit(safeOff, 0, block.toString()), EditClass.BLOCK);
@@ -279,12 +369,7 @@ public final class IncrementalSessionBench {
         return ALNUM.charAt(rng.nextInt(ALNUM.length()));
     }
 
-    private static final String[] WORDS = {
-        "class", "interface", "enum", "void", "int", "String", "var", "public",
-        "private", "static", "final", "return", "new", "true", "false", "null",
-        "if", "else", "while", "for", "foo", "bar", "baz", "x", "y", "z",
-        "value", "name", "list", "map"
-    };
+    private static final String[] WORDS = {"class", "interface", "enum", "void", "int", "String", "var", "public", "private", "static", "final", "return", "new", "true", "false", "null", "if", "else", "while", "for", "foo", "bar", "baz", "x", "y", "z", "value", "name", "list", "map"};
 
     private static String randomWord(Random rng) {
         return WORDS[rng.nextInt(WORDS.length)];
@@ -295,15 +380,14 @@ public final class IncrementalSessionBench {
     }
 
     // -------- Reporting --------------------------------------------------------------------
-
     private static void printReport(String fixtureSource, Measurement[] regimeB, Measurement[] regimeA) {
         System.out.println("=== IncrementalSessionBench ===");
         int loc = countLines(fixtureSource);
         System.out.printf("Fixture: large/FactoryClassGenerator.java.txt (%d LOC, %d chars)%n",
-            loc, fixtureSource.length());
+                          loc,
+                          fixtureSource.length());
         System.out.printf("Edits: %d (RNG seed 0x%X)%n", EDIT_COUNT, RNG_SEED);
         System.out.println();
-
         System.out.println("REGIME B (cursor-moved-to-edit)");
         printRegime(regimeB);
         System.out.println();
@@ -329,42 +413,60 @@ public final class IncrementalSessionBench {
         }
         nonSkipped.sort((a, b) -> Long.compare(b.latencyNs(), a.latencyNs()));
         System.out.printf("  %-5s %-9s %-12s %-9s %-7s %-7s %-22s %-9s %s%n",
-            "rank", "latency", "class", "offset", "oldLen", "newLen", "pivotRule", "pivotNodes", "fallback");
+                          "rank",
+                          "latency",
+                          "class",
+                          "offset",
+                          "oldLen",
+                          "newLen",
+                          "pivotRule",
+                          "pivotNodes",
+                          "fallback");
         int n = Math.min(10, nonSkipped.size());
         for (int i = 0; i < n; i++) {
             var m = nonSkipped.get(i);
-            String pivot = m.pivotRule() == null || m.pivotRule().isEmpty() ? "-" : m.pivotRule();
+            String pivot = m.pivotRule() == null || m.pivotRule()
+                                                     .isEmpty()
+                           ? "-"
+                           : m.pivotRule();
             if (pivot.length() > 22) {
                 pivot = pivot.substring(0, 21) + "…";
             }
             System.out.printf("  %-5d %-9s %-12s %-9d %-7d %-7d %-22s %-9d %s%n",
-                i + 1,
-                fmtMs(m.latencyNs()),
-                m.cls().label(),
-                m.editOffset(),
-                m.editOldLen(),
-                m.editNewLen(),
-                pivot,
-                m.pivotNodeCount(),
-                m.wasFallback());
+                              i + 1,
+                              fmtMs(m.latencyNs()),
+                              m.cls()
+                               .label(),
+                              m.editOffset(),
+                              m.editOldLen(),
+                              m.editNewLen(),
+                              pivot,
+                              m.pivotNodeCount(),
+                              m.wasFallback());
         }
     }
 
     private static void printRegime(Measurement[] ms) {
         System.out.printf("  %-15s %-7s %-8s %-8s %-8s %-8s %s%n",
-            "Class", "Count", "Median", "p95", "p99", "Max", "Fallbacks");
+                          "Class",
+                          "Count",
+                          "Median",
+                          "p95",
+                          "p99",
+                          "Max",
+                          "Fallbacks");
         for (var cls : EditClass.values()) {
             printClassRow(cls.label(), filterByClass(ms, cls));
         }
         printClassRow("ALL", filterAll(ms));
-
         // Cold vs warm split (across all classes, all non-skipped edits)
         long[] cold = sliceLatencies(ms, 0, COLD_PREFIX);
         long[] warm = sliceLatencies(ms, COLD_PREFIX, ms.length);
         long underBudget = countUnderBudget(ms);
         long total = countNonSkipped(ms);
-        double underPct = total == 0 ? 0.0 : (100.0 * underBudget / total);
-
+        double underPct = total == 0
+                          ? 0.0
+                          : (100.0 * underBudget / total);
         System.out.println();
         System.out.printf("  Cold (first %d edits) median: %s%n", COLD_PREFIX, fmtMs(median(cold)));
         System.out.printf("  Warm (edits %d-%d) median:  %s%n", COLD_PREFIX + 1, ms.length, fmtMs(median(warm)));
@@ -376,18 +478,17 @@ public final class IncrementalSessionBench {
         long fallbacks = countFallbacks(ms);
         long count = latencies.length;
         if (count == 0) {
-            System.out.printf("  %-15s %-7d %-8s %-8s %-8s %-8s %d%n",
-                label, 0, "-", "-", "-", "-", fallbacks);
+            System.out.printf("  %-15s %-7d %-8s %-8s %-8s %-8s %d%n", label, 0, "-", "-", "-", "-", fallbacks);
             return;
         }
         System.out.printf("  %-15s %-7d %-8s %-8s %-8s %-8s %d%n",
-            label,
-            count,
-            fmtMs(median(latencies)),
-            fmtMs(percentile(latencies, 95)),
-            fmtMs(percentile(latencies, 99)),
-            fmtMs(max(latencies)),
-            fallbacks);
+                          label,
+                          count,
+                          fmtMs(median(latencies)),
+                          fmtMs(percentile(latencies, 95)),
+                          fmtMs(percentile(latencies, 99)),
+                          fmtMs(max(latencies)),
+                          fallbacks);
     }
 
     private static void printDelta(Measurement[] regimeB, Measurement[] regimeA) {
@@ -407,13 +508,13 @@ public final class IncrementalSessionBench {
         }
         double bMs = ns2ms(median(bl));
         double aMs = ns2ms(median(al));
-        String ratio = aMs <= 0 ? "-" : String.format("%.2fx", bMs / aMs);
-        System.out.printf("  %-15s %-12s %-12s %s%n",
-            label, fmtMs(median(bl)), fmtMs(median(al)), ratio);
+        String ratio = aMs <= 0
+                       ? "-"
+                       : String.format("%.2fx", bMs / aMs);
+        System.out.printf("  %-15s %-12s %-12s %s%n", label, fmtMs(median(bl)), fmtMs(median(al)), ratio);
     }
 
     // -------- Helpers ----------------------------------------------------------------------
-
     private static Measurement[] filterByClass(Measurement[] ms, EditClass cls) {
         var out = new ArrayList<Measurement>();
         for (var m : ms) {
@@ -461,7 +562,7 @@ public final class IncrementalSessionBench {
     }
 
     private static long countUnderBudget(Measurement[] ms) {
-        long budgetNs = (long) (FRAME_BUDGET_MS * 1_000_000.0);
+        long budgetNs = (long)(FRAME_BUDGET_MS * 1_000_000.0);
         long c = 0;
         for (var m : ms) {
             if (!m.skipped() && m.latencyNs() >= 0 && m.latencyNs() < budgetNs) {

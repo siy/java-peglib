@@ -1,5 +1,8 @@
 # UNSAFE-GENERATOR-SPIKE — boolean-returning + parser-state generator emission
 
+> **Status:** historical / archived 2026-05-08. Out-of-scope investigation.
+
+
 Branch: `release-0.4.2` · Status: design (Phase 1) · Author: investigation pass
 
 ---

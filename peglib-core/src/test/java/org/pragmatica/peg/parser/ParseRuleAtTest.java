@@ -150,6 +150,7 @@ class ParseRuleAtTest {
         @Test
         void partialParse_equalityAndHashCode() {
             CstNode node = new CstNode.Terminal(
+            0L,
             org.pragmatica.peg.tree.SourceSpan.sourceSpan(
             org.pragmatica.peg.tree.SourceLocation.sourceLocation(1, 1, 0),
             org.pragmatica.peg.tree.SourceLocation.sourceLocation(1, 3, 2)),

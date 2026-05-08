@@ -31,7 +31,6 @@ public record FormatterConfig(int defaultIndent,
                               int maxLineWidth,
                               TriviaPolicy triviaPolicy,
                               Map<String, FormatterRule> rules) {
-
     public FormatterConfig {
         if (defaultIndent < 0) {
             throw new IllegalArgumentException("defaultIndent must be >= 0");
@@ -71,7 +70,6 @@ public record FormatterConfig(int defaultIndent,
                           int maxLineWidth,
                           TriviaPolicy triviaPolicy,
                           Map<String, FormatterRule> rules) {
-
         public Builder {
             if (rules == null) {
                 throw new IllegalArgumentException("rules must not be null");

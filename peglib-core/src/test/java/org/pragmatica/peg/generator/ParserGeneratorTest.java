@@ -255,8 +255,8 @@ class ParserGeneratorTest {
 
         var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
-        // Should include Error node type for CST
-        assertThat(source).contains("record Error(SourceSpan span, String skippedText");
+        // Should include Error node type for CST (v0.5.0 Phase 1.2: long id is the first component)
+        assertThat(source).contains("record Error(long id, SourceSpan span, String skippedText");
     }
 
     @Test
@@ -303,8 +303,8 @@ class ParserGeneratorTest {
 
         var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
-        // CstNode.Error should be defined
-        assertThat(source).contains("record Error(SourceSpan span, String skippedText, String expected,");
+        // CstNode.Error should be defined (v0.5.0 Phase 1.2: long id is the first component)
+        assertThat(source).contains("record Error(long id, SourceSpan span, String skippedText, String expected,");
 
         // attachTrailingTrivia switch should handle Error case
         assertThat(source).contains("case CstNode.Error err -> new CstNode.Error(");
@@ -323,7 +323,7 @@ class ParserGeneratorTest {
         var source = result.onFailure(cause -> fail(cause.message())).unwrap();
 
         // CstNode.Error should NOT be defined in BASIC mode
-        assertFalse(source.contains("record Error(SourceSpan span, String skippedText"));
+        assertFalse(source.contains("record Error(long id, SourceSpan span, String skippedText"));
 
         // No Error case in switch
         assertFalse(source.contains("case CstNode.Error"));

@@ -104,7 +104,9 @@ final class IncrementalTriviaParityTest {
             return;
         }
 
-        Session session = incremental.initialize(initialText, 0);
+        var init = incremental.initialize(initialText, 0);
+        Session session = init.session();
+        Cursor cursor = init.cursor();
         long oracleHash = CstHash.cstHash(oracleInitial.unwrap());
         assertThat(CstHash.cstHash(session.root()))
             .as("initial parity for %s", file.getFileName())
@@ -116,15 +118,17 @@ final class IncrementalTriviaParityTest {
             if (edit == null) {
                 continue;
             }
-            Session next;
+            EditOutcome outcome;
             try {
-                next = session.edit(edit);
+                outcome = session.edit(cursor, edit);
             } catch (RuntimeException ex) {
                 continue;
             }
+            var next = outcome.newSession();
             var oracleResult = oracleParser.parseCst(next.text());
             if (oracleResult.isFailure()) {
                 session = next;
+                cursor = outcome.newCursor();
                 continue;
             }
             long expected = CstHash.cstHash(oracleResult.unwrap());
@@ -133,6 +137,7 @@ final class IncrementalTriviaParityTest {
                 .as("trivia-biased parity after edit %d in %s (edit=%s)", i, file.getFileName(), edit)
                 .isEqualTo(expected);
             session = next;
+            cursor = outcome.newCursor();
         }
     }
 

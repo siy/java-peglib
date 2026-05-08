@@ -60,7 +60,9 @@ public final class PackratStatsProbe {
                 true, true, true, true, true, true,  // phase-1 flags on
                 false, false, false,        // structural flags off
                 false,                      // selectivePackrat
-                Set.of());
+                Set.of(),                   // packratSkipRules
+                false,                      // mutableParseResult
+                true);                      // tokenFastPath
 
         var sourceResult = PegParser.generateCstParser(
                 grammarText, PACKAGE_NAME, CLASS_NAME, ErrorReporting.BASIC, config);

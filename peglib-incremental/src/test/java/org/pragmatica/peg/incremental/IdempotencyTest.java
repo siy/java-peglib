@@ -16,9 +16,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 final class IdempotencyTest {
 
-    // Permissive grammar: intermediate buffers stay parseable after a
-    // partial edit, so inverse-edit parity tests aren't forced through the
-    // full-reparse fallback by an unparseable intermediate.
     private static final String GRAMMAR = """
         Program <- Token*
         Token <- Word / Punct
@@ -37,47 +34,51 @@ final class IdempotencyTest {
     @Test
     @DisplayName("Insert then delete restores the CST hash")
     void insert_then_delete() {
-        var s0 = parser().initialize("let x = 1;");
+        var init = parser().initialize("let x = 1;");
+        var s0 = init.session();
         long hash0 = CstHash.cstHash(s0.root());
-        var s1 = s0.edit(9, 0, "42");
-        var s2 = s1.edit(9, 2, "");
-        assertThat(CstHash.cstHash(s2.root())).isEqualTo(hash0);
-        assertThat(s2.text()).isEqualTo(s0.text());
+        var o1 = s0.edit(init.cursor(), 9, 0, "42");
+        var o2 = o1.newSession().edit(o1.newCursor(), 9, 2, "");
+        assertThat(CstHash.cstHash(o2.newSession().root())).isEqualTo(hash0);
+        assertThat(o2.newSession().text()).isEqualTo(s0.text());
     }
 
     @Test
     @DisplayName("Delete then insert restores the CST hash")
     void delete_then_insert() {
-        var s0 = parser().initialize("let x = 123;");
+        var init = parser().initialize("let x = 123;");
+        var s0 = init.session();
         long hash0 = CstHash.cstHash(s0.root());
-        var s1 = s0.edit(8, 3, "");
-        var s2 = s1.edit(8, 0, "123");
-        assertThat(CstHash.cstHash(s2.root())).isEqualTo(hash0);
-        assertThat(s2.text()).isEqualTo(s0.text());
+        var o1 = s0.edit(init.cursor(), 8, 3, "");
+        var o2 = o1.newSession().edit(o1.newCursor(), 8, 0, "123");
+        assertThat(CstHash.cstHash(o2.newSession().root())).isEqualTo(hash0);
+        assertThat(o2.newSession().text()).isEqualTo(s0.text());
     }
 
     @Test
     @DisplayName("Replace then restore via inverse replacement")
     void replace_then_restore() {
-        var s0 = parser().initialize("let x = 1; let y = 2;");
+        var init = parser().initialize("let x = 1; let y = 2;");
+        var s0 = init.session();
         long hash0 = CstHash.cstHash(s0.root());
-        var s1 = s0.edit(4, 1, "foo");
-        var s2 = s1.edit(4, 3, "x");
-        assertThat(CstHash.cstHash(s2.root())).isEqualTo(hash0);
+        var o1 = s0.edit(init.cursor(), 4, 1, "foo");
+        var o2 = o1.newSession().edit(o1.newCursor(), 4, 3, "x");
+        assertThat(CstHash.cstHash(o2.newSession().root())).isEqualTo(hash0);
     }
 
     @Test
     @DisplayName("Undo via saved session reference is O(1)")
     void undo_via_session_reference() {
-        var s0 = parser().initialize("let x = 1;");
-        var s1 = s0.edit(9, 0, "42");
+        var init = parser().initialize("let x = 1;");
+        var s0 = init.session();
+        var o1 = s0.edit(init.cursor(), 9, 0, "42");
         // Simulate undo: restore s0. Tree reference is unchanged.
         assertThat(s0.root()).isNotNull();
         assertThat(s0.text()).isEqualTo("let x = 1;");
-        assertThat(s1.text()).isEqualTo("let x = 142;");
-        // Re-edit from s0 works independently of s1.
-        var s2 = s0.edit(9, 0, "99");
-        assertThat(s2.text()).isEqualTo("let x = 199;");
+        assertThat(o1.newSession().text()).isEqualTo("let x = 142;");
+        // Re-edit from s0 works independently of o1.
+        var o2 = s0.edit(init.cursor(), 9, 0, "99");
+        assertThat(o2.newSession().text()).isEqualTo("let x = 199;");
     }
 
     @Test
@@ -85,9 +86,10 @@ final class IdempotencyTest {
     void session_forking() {
         var oracle = PegParser.fromGrammar(GRAMMAR).fold(
             cause -> { throw new IllegalStateException(cause.message()); }, p -> p);
-        var s0 = parser().initialize("let x = 1;");
-        var branchA = s0.edit(9, 0, "42");
-        var branchB = s0.edit(0, 0, "let z = 0; ");
+        var init = parser().initialize("let x = 1;");
+        var s0 = init.session();
+        var branchA = s0.edit(init.cursor(), 9, 0, "42").newSession();
+        var branchB = s0.edit(init.cursor(), 0, 0, "let z = 0; ").newSession();
         assertThat(CstHash.cstHash(branchA.root()))
             .isEqualTo(CstHash.cstHash(oracle.parseCst(branchA.text()).unwrap()));
         assertThat(CstHash.cstHash(branchB.root()))

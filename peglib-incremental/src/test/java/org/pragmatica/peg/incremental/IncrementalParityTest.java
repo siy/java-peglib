@@ -116,7 +116,9 @@ final class IncrementalParityTest {
             return;
         }
 
-        Session session = incremental.initialize(initialText, 0);
+        var init = incremental.initialize(initialText, 0);
+        Session session = init.session();
+        Cursor cursor = init.cursor();
         long oracleHash = CstHash.cstHash(oracleInitial.unwrap());
         assertThat(CstHash.cstHash(session.root()))
             .as("initial parity for %s", file.getFileName())
@@ -128,9 +130,9 @@ final class IncrementalParityTest {
             if (edit == null) {
                 continue;
             }
-            Session next;
+            EditOutcome outcome;
             try {
-                next = session.edit(edit);
+                outcome = session.edit(cursor, edit);
             } catch (RuntimeException ex) {
                 // Full-parse failure under the oracle typically points at the
                 // grammar rejecting an intermediate fuzzed buffer. Skip rather
@@ -138,6 +140,7 @@ final class IncrementalParityTest {
                 // robustness.
                 continue;
             }
+            var next = outcome.newSession();
             var oracleResult = oracleParser.parseCst(next.text());
             if (oracleResult.isFailure()) {
                 // Intermediate fuzz produced text the grammar rejects (e.g.,
@@ -148,6 +151,7 @@ final class IncrementalParityTest {
                 // that's a legitimate divergence: assert it does not happen
                 // by retaining the prior session.
                 session = next;
+                cursor = outcome.newCursor();
                 continue;
             }
             long expected = CstHash.cstHash(oracleResult.unwrap());
@@ -156,6 +160,7 @@ final class IncrementalParityTest {
                 .as("parity after edit %d in %s (edit=%s)", i, file.getFileName(), edit)
                 .isEqualTo(expected);
             session = next;
+            cursor = outcome.newCursor();
         }
     }
 

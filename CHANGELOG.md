@@ -5,6 +5,150 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-06
+
+_Work in progress — incremental-native architectural rework. See `docs/incremental/ARCHITECTURE-0.5.0.md`._
+
+### Phase 0 — spike GO verdict (2026-05-07)
+
+Sandbox prototype of Lever A (stable IDs + LongLongMap NodeIndex) lands additively in `peglib-incremental/src/main/java/org/pragmatica/peg/incremental/experimental/`. Existing 897-test suite untouched. Three GO/NO-GO gates green:
+
+- **Identity-preservation invariant** — `IdTreeSplicer` preserves sibling subtree reference equality through splices (spec §8 Q3 gate).
+- **Trivia-bearing edits** — calculator grammar with `%whitespace` + comments, three representative edits, incremental update equivalent to full rebuild (spec §8 Q4 gate).
+- **Perf** — JMH bench: 38× speedup at 100 nodes, 47× at 1000, 67× at 10000. Well above the 5× gate threshold; consistent with spec §2's projected 300× per-edit reduction. See [`docs/bench-results/phase0-spike-results.md`](docs/bench-results/phase0-spike-results.md) and [`docs/archive/PHASE-0-RESULTS.md`](docs/archive/PHASE-0-RESULTS.md).
+
+### Phase 1 prove-out (2026-05-07)
+
+Path A (offset decoupling from records) — RED. 1.10-1.29× speedup on flat-tree mid-buffer edits; not worth the cross-cutting refactor. See [`docs/bench-results/phase1-spanindex-results.md`](docs/bench-results/phase1-spanindex-results.md).
+
+Path D (stable-id ancestor preservation) — GREEN. **96-604× speedup** on flat-tree mid-buffer edits with absolute time flat across N (~25-40 ns), confirming genuine O(δ) scaling. The fix: TreeSplicer reuses old ancestor IDs across splices; applyIncremental skips ancestor-rewiring as a result. See [`docs/bench-results/path-d-results.md`](docs/bench-results/path-d-results.md) and [`docs/archive/PHASE-1-PROVE-OUT.md`](docs/archive/PHASE-1-PROVE-OUT.md).
+
+### Phase 1 production migration (2026-05-07)
+
+**BREAKING.** `CstNode` records gain `long id` as the first record component on all four variants (`Terminal`, `NonTerminal`, `Token`, `Error`). `equals`/`hashCode` overridden to exclude `id` per spec §7 R1 — structural equality preserved (`RoundTripTest` baselines unaffected). New `org.pragmatica.peg.tree.IdGenerator` interface + `PerSessionCounter` impl; threaded through `ParsingContext`, `PegEngine`, `ParserGenerator` emission templates. Generated parsers now contain inline `IdGenerator` (preserves the v0.4.2 standalone-parser invariant — no FQCN dep on peglib runtime).
+
+`NodeIndex` internals switch from `IdentityHashMap` to `LongLongMap` (hand-rolled linear-probing, promoted from sandbox to `internal/`). Includes a tombstone-saturation fix: resize triggers on `size + tombstones > threshold`; same-capacity rehash drains tombstones without growing the table.
+
+`IncrementalSession.applyIncremental` adopts Path D's optimized algorithm (steps 1 and 3 from spec §2 deleted because ancestor IDs are stable). Step 6 added: refresh `nodesById` for right-of-edit subtrees that `TreeSplicer.shiftAll` deep-copies — those subtrees retain stable IDs but their records carry post-edit shifted spans, so the lookup map needs a refresh to avoid stale-span pivot errors.
+
+Bench numbers vs 0.4.3 baseline on the 1900-LOC Java fixture (Regime B, cursor-moved-to-edit, same RNG seed `0xBEEFCAFE`):
+
+| Metric | 0.4.3 | 0.5.0 (post-1.7) | Change |
+|---|---:|---:|---:|
+| Median | 10.8 ms | 5.6 ms | **-48% (1.9× faster)** |
+| p95 | 22.4 ms | 14.6 ms | **-35%** |
+| p99 | 53.3 ms | 138.8 ms | +160% (large-pivot tail) |
+| Max | 98.6 ms | 390.8 ms | +297% (large-pivot tail) |
+| % under 16 ms | 91.5% | 95.9% | **+4.4 pp** |
+
+Median + p95 + frame-budget hit rate clearly improved. p99/max regressed for large-pivot edits where `TreeSplicer.shiftAll` deep-copies thousands of right-of-edit records — an accepted trade vs Path A's much-larger-scope refactor. Pivot-selection improvements (spec Lever B) deferred to Phase 2.
+
+See [`docs/incremental/PHASE-1-RESULTS.md`](docs/incremental/PHASE-1-RESULTS.md) for full sub-phase summary and bench caveats.
+
+### Phase 2 attempted, rolled back; bench + JBCT cleanup; Lever D Cursor split (2026-05-07)
+
+**Lever B (top-down pivot)** — investigated and deferred. Two empirical iterations both fail `IncrementalTriviaParityTest`:
+- "Strict literal-prefix safe-pivot" (per spec §3): correctness-sound but cost 4× perf — only ~30/133 Java25 rules admitted, forcing walk-up to Block/RecordBody pivots.
+- "Boundary-touch walk-up": pivot's internal child boundaries still produce trivia divergence.
+
+Root cause: trivia attribution is context-sensitive — Lever B retry blocked on trivia attribution refactor. `SafePivotAnalyzer` + `NodeIndex.smallestEnclosing` preserved as dormant infrastructure. Phase 2 wiring rolled back; Phase 1.7 algorithm restored.
+
+**Bench harness** — `IncrementalSessionBench` now validates each edit post-application; if the resulting buffer is syntactically invalid, the bench rolls back the session and skips the edit. Eliminates the 746-exception buffer-corruption tail that polluted prior bench logs. 41% faster wallclock.
+
+**JBCT cleanup** — `SessionFactory.parseFull` now returns `Result<Session>` instead of throwing `IllegalStateException`. New `SessionError` sealed Cause type. Public `Session.edit` always returns a Session; parse failures surface via new `Session.parseSuccessful()` instead of exceptional control flow. Bench's dead try/catch removed. Aligns with project JBCT mandate (Result for failure-return, no exceptions in business logic).
+
+**Sandbox cleanup** — Phase 0/1 prove-out code (the `experimental/` package + 5 sandbox JMH benches) removed. Production has equivalents (`IdGenerator` in `peglib-core/tree`, `LongLongMap` in `peglib-incremental/internal`). -5463 LOC across 31 files. Git history preserves the journey.
+
+**Lever D — Cursor/Session split** (per spec §5). Cursor state (offset + enclosingNodeId) extracted from `IncrementalSession` record into a new public `Cursor` record. New `EditOutcome(Session, Cursor)` and `ReparseOutcome(Session, Cursor)` records returned by `edit` / `reparseAll`. `Cursor.moveTo(int newOffset, NodeIndex index)` is pure — no Session allocation. `InitialSession(Session, Cursor)` returned by `IncrementalParser.initialize`. Cursor uses Phase 1's stable `long enclosingNodeId` so it survives session churn.
+
+Bench post-Lever-D vs Phase 1.7 baseline (Regime B):
+
+| Metric | Phase 1.7 | Post-Lever-D |
+|---|---:|---:|
+| Median | 5.5 ms | **5.0 ms** (-9%) |
+| p95 | 14.6 ms | **11.2 ms** (-23%) |
+| p99 | 192.7 ms | **90.5 ms** (-53%) |
+| % under 16 ms | 95.4% | **96.5%** (+1.1 pp) |
+
+Lever C (peglib-rt IR unification per spec §4) is the next-session entry point.
+
+### Throughput engine — Tier 1 perf arc (2026-05-07 → 2026-05-08)
+
+Branding: parser generator output is now the **throughput engine** (full-reparse speed) — distinct from the **incremental engine** (interactive editing). Different optimization targets, different code shapes, no shared code. See [`docs/incremental/THROUGHPUT-ENGINE-TIER1.md`](docs/incremental/THROUGHPUT-ENGINE-TIER1.md) for the spec; [`docs/bench-results/throughput-tier1-results.md`](docs/bench-results/throughput-tier1-results.md) and [`docs/bench-results/generator-profile-baseline.md`](docs/bench-results/generator-profile-baseline.md) for the data.
+
+**Bench fixtures:** Java25ParseBenchmark now has TWO fixtures — `reference` (1900-LOC FactoryClassGenerator.java) and `selfhost` (the Java25 generated parser parsing its OWN 37k-line generated source — pre-Tier-1 OOM'd; now 1 second). Self-host stress test caught E's silent regression that the small bench missed.
+
+**Cumulative bench (Regime: full reparse, JDK 25, JMH 1.37, variant `phase1_allStructural_mutableResult_autoSkipPackrat`):**
+
+| Fixture | Original | Now | Δ |
+|---|---:|---:|---:|
+| Reference (1900 LOC) | 76.2 ms / 150 MB | **25.1 ms / 82.9 MB** | **-67% wallclock, -45% bytes** |
+| Self-host (37k LOC) | OOM | **1035 ms / 2.19 GB** | from impossible to 1 sec |
+| Reference gc.count | 205 | 50 | -75% |
+| Reference gc.time | 2,844 ms | 354 ms | -87% |
+
+**Moves shipped:**
+- **A** — opt-in `mutableParseResult` ParserConfig flag. Emits a mutable `CstParseResult` class with raw nullable fields (no `Option<Object> value` / `Option<String> expected` wrappers) + raw-nullable `furthestFailure` / `furthestExpected` / `pendingFailureRecoveryOverride`. Eliminates 6,088 Option$Some allocation samples per parse → 0.
+- **D** — `inlineLocations` flag default-on. Emitted CST construction uses `new SourceSpan(line, col, off, endLine, endCol, endOff)` directly instead of `SourceSpan.sourceSpan(new SourceLocation(...), new SourceLocation(...))`. Two passes: production sweep (cleanup, -63 LOC) + emission templates (the win).
+- **D follow-up** — eliminated remaining `location()` callers in emission. SourceLocation samples 3,318 → ~600.
+- **F (first-set Choice dispatch)** — extended `ChoiceDispatchAnalyzer` from literal-only to full transitive FIRST-set computation. CharClass + Reference (recursive) + mixed dispatch. 19/64 → 62/64 of Java25's choices now dispatch via `switch (text.charAt(pos))` instead of speculative PEG-ordered evaluation. -20% wallclock on both fixtures.
+- **G (JBCT-style method splitting)** — top-level rule Choices extract each alt to `parse_<Rule>_alt<N>(Rule rule)` helper methods; new `Rule` record (static singletons, zero allocation) holds rule metadata. parse_Stmt 27,783 → <3,000 bytes. Most parse methods now JIT-inlinable.
+- **G2 + H** — Sequence chunking + nested Choice extraction. Same pattern applied recursively.
+- **Selective packrat auto-detection** — `selectivePackrat=true` is now default; `PackratAnalyzer.autoSkipPackratRules(grammar)` derives the skip-set automatically. Leaf-like and single-call-site rules bypass cache. Biggest single win: -38% reference / -14% self-host wallclock; -75% gc.count.
+
+**Move that did NOT ship:**
+- **E (packrat as `int[]`-keyed open-addressing map)** — clean on small bench, but **+22% regression on self-host stress test**. Linear probing scales badly at the load factors the 37k-LOC fixture stresses. Reverted. Lesson informed adding self-host as the second JMH fixture.
+- **H2 (recursive per-alt extraction in nested Choices)** — bytecode size dropped further but +4-7% wallclock regression. C2 was already inlining post-H; further splitting traded inline-friendly bytecode for call-overhead. Reverted.
+
+**+ DFA fast-path (token-shaped rules)** — `tokenFastPath` flag default-on. Detects rules whose body matches `< CharClass + ZeroOrMore<CharClass> >` (Identifier-shape) and emits a tight inline scanner using pre-computed ASCII bitmasks instead of going through the framework's `matchCharClass` per character. **-9.8% reference / -7.6% self-host wallclock**. On Java25 only `Identifier` matches the spike's pattern; generalizing to `OneOrMore<CharClass>` (whitespace) and mixed Literal+CharClass (NumLit) is the obvious next extension and would compound.
+
+**vs javac comparison:** at the time of writing, peglib's throughput engine parses the 1900-LOC reference fixture in 22.6 ms (vs javac 9 ms = 2.5× of javac) with strictly more output (lossless CST + trivia for formatter+linter use cases). javac produces AST without trivia.
+
+**Items deferred:**
+- **Generalized DFA lexer** — extend the spike pattern to `OneOrMore<CharClass>` (whitespace) and mixed Literal+CharClass (NumLit). Each generalization compounds with the Identifier win.
+- **ASCII whitespace fast path** — folded into generalized DFA above.
+- **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. Tactical, ~5-15% on char-class-heavy paths. **Reassess with care after Move B finding (below) — same risk class.**
+
+### Move B attempted, abandoned + post-rollback profile-driven optimization arc (2026-05-08)
+
+Move B (mutable parse-state singleton) was attempted across 5 incremental commits, then rolled back when bench data contradicted the hypothesis. A profile-driven optimization arc on the rolled-back baseline shipped 2 wallclock wins. Full session post-mortem with quantitative data: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11 + [`docs/HANDOVER.md`](docs/HANDOVER.md) §11.
+
+**Move B failure (5 commits rolled back):**
+
+Replacing per-call `CstParseResult` allocation with a heap-bound singleton + boolean returns regressed wallclock monotonically while allocation dropped:
+
+| Stage | Wallclock (ms) | Alloc (MB) | Δ wallclock vs original | Δ alloc vs original |
+|---|---:|---:|---:|---:|
+| Original baseline | 22.6 | 75.6 | — | — |
+| Commit 3 (match helpers) | 23.97 | 72.1 | +6.0% | -4.6% |
+| Commit 4 (combinators) | 24.71 | 66.3 | +9.3% | -12.3% |
+| Commit 5 (predicates/capture/cut/TB) | 25.09 | 66.0 | +11.0% | -12.8% |
+
+**Why:** modern JIT escape analysis was already scalar-replacing the per-call records (raw-nullable fields + immediate consume = textbook EA fodder). The singleton replacement defeated that optimization — heap-bound field, can't be scalarized, source-level aliasing forces the compiler to assume mutation visibility. Net: GC sees fewer survivor objects (alloc-rate metric drops), but optimized hot path is slower per call. Definitively abandoned.
+
+**Post-rollback wins (2 commits past `v0.5.0-candidate`):**
+
+- **Trivia snapshot via int size** (`4763251`) — replaced `List.copyOf(pendingLeadingTrivia)` snapshot + `clear()+addAll()` restore with primitive `int size` snapshot + `subList(snap, size).clear()` restore. Profile evidence: 6.0% reference CPU + 15.4% reference alloc in `Arrays.copyOf` (top alloc caller). Pattern: structural alloc elimination on hot path; JIT cannot elide bulk array copies. **-12.1% reference / -8.2% selfhost wallclock; -6.4% / -7.5% alloc.**
+- **ASCII char interning pool** (`38b6a8e`) — eliminated `String.valueOf(c)` per match in `matchCharClassCst` + `matchAnyCst` via pre-computed `ASCII_CHAR_STRINGS[128]` static field. Profile evidence: 5.8% of total reference allocs from per-match fresh 1-char Strings. Pattern: per-call fresh String alloc with no JIT scalar-replacement path. **-3.95% reference / -4.59% selfhost wallclock; -3.76% / -1.38% alloc.**
+
+**Cumulative session wins (from `v0.5.0-candidate` baseline):**
+
+| Fixture | v0.5.0-candidate | After 38b6a8e | Δ wallclock | Δ alloc |
+|---|---:|---:|---:|---:|
+| Reference (1900 LOC) | 22.66 ms / 75.55 MB | **19.12 ms / 68.02 MB** | **-15.6%** | **-10.0%** |
+| Selfhost (37k LOC) | 937 ms / 2.04 GB | **832 ms / 1.85 GB** | **-11.2%** | **-9.3%** |
+
+**Reference fixture is now under 20 ms** — original Move B target (~2× of javac territory) achieved without singleton mutation.
+
+**Resets that did NOT ship (5 candidates evaluated under strict bench gate):**
+- **trackFailure dedup via LinkedHashSet** — predicted -6.4% wallclock; reality flat. Lesson: JIT inlines `String.contains` efficiently when the scanned buffer is small; the profile share was call-overhead-dominated.
+- **Primitive long-keyed packrat cache** (replace HashMap) — predicted -12.5% CPU; reality selfhost +24.5% wallclock regression. Lesson: JDK HashMap chaining is per-op faster than custom open-addressing + SplitMix64 finalizer; replacing it cost more in latency than was saved in alloc.
+- **HashMap initial-capacity hint** from input size — reality reference +3.9% / selfhost +5.3% regression. Lesson: over-sizing hurts cache locality more than it saves resize cost. JDK HashMap's growth schedule is well-tuned.
+- **Lazy Token text materialization** (record→class with cache) — reality selfhost +10% regression. Lesson: Java records are JIT-scalar-replaceable in a way mutable classes (even with single cache field) are not. Same family of lesson as Move B.
+- **Lazy SourceLocation in trackFailure** — reality flat on both fixtures. Lesson: SourceLocation is a record; JIT readily stack-allocates / dead-code-eliminates around hot-path early returns. Allocation share in profile is NOT predictive of wallclock improvement when JIT/EA already handles the alloc cleanly.
+
+**Refined optimization principle:** target allocations the JIT cannot elide (bulk array copies, per-call fresh objects with no scalar-replacement path). Avoid optimizing patterns the JIT already handles (records, immediately-consumed objects, JDK collection internals, mutable shared state on `this`).
+
 ## [0.4.3] - 2026-05-06
 
 Performance — interactive editing focus. 19% faster median, 26% faster p95 on the IncrementalBenchmark editing-session suite. **One breaking change**: SourceSpan record components changed from two SourceLocations to six ints (see migration note).
@@ -78,7 +222,7 @@ The interpreter (PegEngine) is now FASTER than the generator's phase1 path becau
 ### Documentation
 
 - **HANDOVER §6.2 retraction.** The lever-1 incremental-perf "1-2 day fix" framing was wrong. Two failed attempts (12/100 and 31/100 parity regressions). Real fix needs 5-10 days of correctness analysis. Documented two latent bugs: (a) fallback-rule bypass — `tryIncrementalReparse` only checks the chosen pivot, not its ancestors; (b) `reparseAt`'s acceptance check proves length parity but not structural parity.
-- **`docs/incremental/V2.5-SPIKE.md` addendum.** Retracts the spike doc's "zero correctness risk" claim. Parity was never asserted in the spike's probe — only timing.
+- **`docs/archive/V2.5-SPIKE.md` addendum.** Retracts the spike doc's "zero correctness risk" claim. Parity was never asserted in the spike's probe — only timing.
 - **HANDOVER §6.4 correction.** Tier-1 perf flags (`inlineLocations`, `markResetChildren`, `selectivePackrat`) are generator-only. They do NOT speed up the interpreter path that `IncrementalParser` uses.
 
 ### Reverted
@@ -92,7 +236,7 @@ The interpreter (PegEngine) is now FASTER than the generator's phase1 path becau
 
 ## [0.4.0] - 2026-05-01
 
-API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap (the original 0.4.0 plan item; superseded by `docs/incremental/V2.5-SPIKE.md`'s NO-GO recommendation — the actual lever is pivot-selection, not cache invalidation).
+API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap (the original 0.4.0 plan item; superseded by `docs/archive/V2.5-SPIKE.md`'s NO-GO recommendation — the actual lever is pivot-selection, not cache invalidation).
 
 ### Changed (BREAKING)
 
@@ -162,7 +306,7 @@ Generator-side `%recover` per-rule overrides. Non-breaking.
 
 ### Known limitations
 
-- **Incremental parser `singleCharEdit` perf** is still ~325 ms/op on the 1,900-LOC fixture. `docs/incremental/V2.5-SPIKE.md` documents the diagnosis (the dominant cost is pivot overshoot in `findBoundaryCandidate`, not cache invalidation as v2.5 assumed) and a proposed "lever 1" fix (edit-anchored pivot selection). A naive lever-1 swap was attempted in 0.3.6 development but produced correctness regressions on `IncrementalParityTest` due to subtle interaction with `NodeIndex.contains`'s inclusive-boundary semantics — the smallestContaining lookup can return a node ending exactly at `editStart`, yielding a different pivot than the warm-pointer walk would. A correct fix needs careful boundary semantics work; deferred.
+- **Incremental parser `singleCharEdit` perf** is still ~325 ms/op on the 1,900-LOC fixture. `docs/archive/V2.5-SPIKE.md` documents the diagnosis (the dominant cost is pivot overshoot in `findBoundaryCandidate`, not cache invalidation as v2.5 assumed) and a proposed "lever 1" fix (edit-anchored pivot selection). A naive lever-1 swap was attempted in 0.3.6 development but produced correctness regressions on `IncrementalParityTest` due to subtle interaction with `NodeIndex.contains`'s inclusive-boundary semantics — the smallestContaining lookup can return a node ending exactly at `editStart`, yielding a different pivot than the warm-pointer walk would. A correct fix needs careful boundary semantics work; deferred.
 
 ## [0.3.5] - 2026-05-01
 
@@ -183,7 +327,7 @@ Trivia attribution correctness — full byte-equal round-trip on all 22 corpus f
 - **CST hash baseline regenerated for `large/FactoryClassGenerator.java.txt`.** The Bug C'' children-rollback fix removes a duplicate trailing comma child in enum-constant lists; that fixture's CST shape legitimately changes. Other 21 fixtures' baselines are unchanged. Committed as a separate baseline-shift commit alongside the Bug C'' fix. Anyone diffing 0.3.4 baselines against 0.3.5 will see the single-fixture shift; this is expected.
 - **`RoundTripTest` re-enabled.** All 22 corpus fixtures round-trip byte-equal via the generated parser. The `@Disabled` annotation and pointer comment in the test are removed.
 - `docs/TRIVIA-ATTRIBUTION.md` — updated to document the full Bug A/B/C/C'/C'' resolution.
-- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — Phase 1 marked complete; Bug C originally deferred to 0.3.6 was solved in 0.3.5 along with Bug C'/C''.
+- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — Phase 1 marked complete; Bug C originally deferred to 0.3.6 was solved in 0.3.5 along with Bug C'/C''. (File deleted in 0.5.0-candidate cleanup; recover from git history if needed.)
 
 ### Known limitations
 
@@ -318,7 +462,7 @@ Next lever: **v2.5 span-rewriting cache remap** (SPEC §5.4). Not part of this r
 
 ### Added
 
-- **`peglib-incremental` module — v1 implementation** per `docs/incremental/SPEC.md`. Cursor-anchored stateful parser that reparses only the subtree affected by an edit, falling back to full reparse when needed. Designed for editor-scale workflows (formatters on save, live diagnostics, LSP backends).
+- **`peglib-incremental` module — v1 implementation** per `docs/archive/SPEC-incremental-original.md`. Cursor-anchored stateful parser that reparses only the subtree affected by an edit, falling back to full reparse when needed. Designed for editor-scale workflows (formatters on save, live diagnostics, LSP backends).
 - Public API in `org.pragmatica.peg.incremental`:
   - `IncrementalParser.create(grammar)` / `create(grammar, config)` — factory.
   - `Session initialize(String buffer)` / `initialize(String buffer, int cursorOffset)` — immutable session.
@@ -378,7 +522,7 @@ Infrastructure-only minor-bump release. No new user-facing features beyond the `
 
 ### Added
 
-- `Parser#parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset)` — partial-parse entry point. Parses a specific rule against input starting at the given offset; returns `Result<PartialParse>` wrapping the resulting CST subtree and its end offset. Implemented by `PegEngine` (interpreter) and by generated parsers via an identity map keyed on the `RuleId` marker classes the generator has been emitting since 0.2.6. This is the API `peglib-incremental` (0.3.1) depends on per `docs/incremental/SPEC.md` §5.6.
+- `Parser#parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset)` — partial-parse entry point. Parses a specific rule against input starting at the given offset; returns `Result<PartialParse>` wrapping the resulting CST subtree and its end offset. Implemented by `PegEngine` (interpreter) and by generated parsers via an identity map keyed on the `RuleId` marker classes the generator has been emitting since 0.2.6. This is the API `peglib-incremental` (0.3.1) depends on per `docs/archive/SPEC-incremental-original.md` §5.6.
 - `org.pragmatica.peg.parser.PartialParse` record `(CstNode node, int endOffset)`.
 - `peglib-incremental` and `peglib-formatter` shell modules — empty placeholders with just a `package-info.java` each. Reservations for 0.3.1 and 0.3.3.
 - `docs/PARTIAL-PARSE.md` — `parseRuleAt` API reference.
@@ -638,7 +782,7 @@ Interpreter speedup is below the 1.5× plan target, reflecting the interpreter's
   - `bulkAdvanceLiteral` — on successful match of literal text with no `\n`, updates `pos` and `column` in bulk rather than looping `advance()` per char.
   - `skipWhitespaceFastPath` — emits a first-char precheck derived from the grammar's `%whitespace` rule (e.g. `' '`/`'\t'`/`'\r'`/`'\n'`/`'/'` for Java 25); returns `List.of()` immediately when current char can't start trivia.
   - `reuseEndLocation` — allocates end-position `SourceLocation` once per successful match instead of twice (span end + result endLocation).
-- Phase-2 flag defaults (set per measured win per PERF-REWORK-SPEC §12.6):
+- Phase-2 flag defaults (set per measured win per `docs/archive/PERF-REWORK-SPEC.md` §12.6):
   - `choiceDispatch` default **on** — measured 2.49× speedup over phase-1 baseline.
   - `markResetChildren`, `inlineLocations` default **off** — no statistically significant individual win on the reference JVM.
   - `selectivePackrat` default **off** — marginal combo win (~5%) sits inside measurement noise; callers opting in must also provide `packratSkipRules`.

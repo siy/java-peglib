@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.incremental.Cursor;
 import org.pragmatica.peg.incremental.Edit;
 import org.pragmatica.peg.incremental.IncrementalParser;
 import org.pragmatica.peg.incremental.Session;
@@ -15,6 +16,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@link IncrementalParser}: initialize a session over the initial buffer,
  * apply an {@link Edit} per user keystroke / batch, read the new tree and
  * stats off the returned {@link Session}.
+ *
+ * <p>0.5.0 (Lever D): cursor state is split out of the Session into the
+ * standalone {@link Cursor} record, and {@code edit(...)} returns a paired
+ * {@code (Session, Cursor)} {@link org.pragmatica.peg.incremental.EditOutcome}.
  */
 final class BasicEditorLoopExample {
 
@@ -33,24 +38,30 @@ final class BasicEditorLoopExample {
             cause -> { throw new IllegalStateException(cause.message()); },
             g -> g);
         IncrementalParser parser = IncrementalParser.create(grammar);
-        Session session = parser.initialize("let x = 1;", 0);
+        var init = parser.initialize("let x = 1;", 0);
+        Session session = init.session();
+        Cursor cursor = init.cursor();
         assertThat(session.root()).isNotNull();
         assertThat(session.text()).isEqualTo("let x = 1;");
 
         // User types ' 42' after the '1' (offset 9).
-        session = session.edit(new Edit(9, 0, "42"));
+        var o1 = session.edit(cursor, new Edit(9, 0, "42"));
+        session = o1.newSession();
+        cursor = o1.newCursor();
         assertThat(session.text()).isEqualTo("let x = 142;");
         assertThat(session.stats().reparseCount()).isEqualTo(1);
 
         // User pastes a whole new statement at the start.
-        session = session.edit(0, 0, "let y = 7; ");
+        var o2 = session.edit(cursor, 0, 0, "let y = 7; ");
+        session = o2.newSession();
+        cursor = o2.newCursor();
         assertThat(session.text()).isEqualTo("let y = 7; let x = 142;");
         assertThat(session.stats().reparseCount()).isEqualTo(2);
 
-        // User moves cursor — no reparse.
-        var before = session;
-        session = session.moveCursor(5);
-        assertThat(session.cursor()).isEqualTo(5);
-        assertThat(session.stats().reparseCount()).isEqualTo(before.stats().reparseCount());
+        // User moves cursor — no reparse, no Session allocation.
+        var beforeReparseCount = session.stats().reparseCount();
+        cursor = cursor.moveTo(5, session.index());
+        assertThat(cursor.offset()).isEqualTo(5);
+        assertThat(session.stats().reparseCount()).isEqualTo(beforeReparseCount);
     }
 }

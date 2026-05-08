@@ -21,10 +21,16 @@ import java.util.Set;
  * {@code skipWhitespaceFastPath}, {@code reuseEndLocation}) default to
  * {@code true} in {@link #DEFAULT} after corpus parity validation.
  * Phase 2 {@code choiceDispatch} defaults to {@code true} (2.49x speedup vs
- * phase-1 baseline on the reference workload); {@code markResetChildren},
- * {@code inlineLocations}, and {@code selectivePackrat} default to {@code false}
- * — no statistically significant individual win measured on the reference JVM
- * (see {@code docs/bench-results/java25-parse.json}).
+ * phase-1 baseline on the reference workload). Phase 1.7 (D)
+ * {@code inlineLocations} defaults to {@code true} after the emission-template
+ * sweep that eliminated SourceLocation/SourceSpan allocations on the
+ * rule-entry path. {@code markResetChildren} defaults to {@code false} — no
+ * statistically significant individual win measured on the reference JVM
+ * (see {@code docs/bench-results/java25-parse.json}). Phase 1.8:
+ * {@code selectivePackrat} defaults to {@code true}; when the caller leaves
+ * {@code packratSkipRules} empty, the generator auto-derives the skip-set
+ * from the grammar via {@code PackratAnalyzer.autoSkipPackratRules(grammar)}
+ * — leaf-like and single-call-site rules bypass the cache.
  *
  * <p><b>Scope:</b> {@code fastTrackFailure}, {@code literalFailureCache},
  * {@code charClassFailureCache}, {@code bulkAdvanceLiteral},
@@ -33,12 +39,12 @@ import java.util.Set;
  * The action-bearing non-CST emission path ({@code ParserGenerator#generate})
  * is unaffected by these flags.
  *
- * @param selectivePackrat when {@code true}, rules whose grammar name is listed
- *     in {@code packratSkipRules} are emitted without packrat cache lookups or
- *     stores at rule entry/exit. The cache field and its use by other rules are
- *     preserved; only the listed rules become cache-free. See
- *     {@code docs/PERF-REWORK-SPEC.md} §7.4. Default: {@code false}. When
- *     {@code false}, {@code packratSkipRules} is ignored and the emitted
+ * @param selectivePackrat when {@code true}, rules whose grammar name is in
+ *     the effective skip-set are emitted without packrat cache lookups or
+ *     stores at rule entry/exit. The cache field and its use by other rules
+ *     are preserved; only the listed rules become cache-free. See
+ *     {@code docs/PERF-REWORK-SPEC.md} §7.4. Default: {@code true} (Phase 1.8).
+ *     When {@code false}, {@code packratSkipRules} is ignored and the emitted
  *     output is byte-identical to a configuration with the flag off.
  * @param packratSkipRules unsanitized grammar rule names (matching
  *     {@code Rule#name()}) whose emitted CST method should skip the packrat
@@ -46,8 +52,14 @@ import java.util.Set;
  *     {@code true}. Treated as <b>immutable</b> by {@code ParserGenerator};
  *     callers constructing this set from a mutable source must wrap it with
  *     {@code Set.copyOf(...)} to prevent external mutation from changing
- *     generated output. Default: {@link Set#of()} (empty — flag, if enabled,
- *     is a no-op).
+ *     generated output. Default: {@link Set#of()}. Phase 1.8 semantics:
+ *     when this set is <b>empty</b> and {@code selectivePackrat} is on, the
+ *     generator auto-derives the skip-set from the grammar via
+ *     {@code PackratAnalyzer.autoSkipPackratRules(grammar)} — leaf-like rules
+ *     and single-call-site rules with no quantifiers bypass the cache;
+ *     left-recursive rules are excluded. Pass a non-empty explicit set to
+ *     override the auto-detection with caller-curated rule names (the
+ *     traditional 0.2.9 behaviour, retained verbatim for that case).
  */
 public record ParserConfig(
  boolean packratEnabled,
@@ -63,15 +75,33 @@ public record ParserConfig(
  boolean markResetChildren,
  boolean inlineLocations,
  boolean selectivePackrat,
- Set<String> packratSkipRules) {
+ Set<String> packratSkipRules,
+ boolean mutableParseResult,
+ boolean tokenFastPath) {
     public static final ParserConfig DEFAULT = new ParserConfig(
-    true, RecoveryStrategy.BASIC, true, true, true, true, true, true, true, true, false, false, false, Set.of());
+    true,
+    RecoveryStrategy.BASIC,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    false,
+    true,
+    true,
+    Set.of(),
+    false,
+    true);
 
     /**
      * Convenience factory for the three-field runtime configuration. Phase 1
-     * generator-time perf flags and phase-2 {@code choiceDispatch} default to
-     * {@code true}; remaining phase-2 flags default to {@code false}. Equivalent
-     * to {@link #DEFAULT} with the caller's three runtime fields substituted.
+     * generator-time perf flags, phase-2 {@code choiceDispatch}, and phase-1.8
+     * {@code selectivePackrat} default to {@code true}; remaining phase-2 flags
+     * default to {@code false}. Equivalent to {@link #DEFAULT} with the caller's
+     * three runtime fields substituted.
      */
     public static ParserConfig parserConfig(boolean packratEnabled,
                                             RecoveryStrategy recoveryStrategy,
@@ -88,8 +118,10 @@ public record ParserConfig(
         true,
         true,
         false,
+        true,
+        true,
+        Set.of(),
         false,
-        false,
-        Set.of());
+        true);
     }
 }

@@ -1,5 +1,4 @@
 package org.pragmatica.peg.incremental;
-
 /**
  * Per-session diagnostic counters.
  *
@@ -23,12 +22,11 @@ package org.pragmatica.peg.incremental;
  * @since 0.3.1
  */
 public record Stats(
-    int reparseCount,
-    int fullReparseCount,
-    String lastReparsedRule,
-    int lastReparsedNodeCount,
-    long lastReparseNanos
-) {
+ int reparseCount,
+ int fullReparseCount,
+ String lastReparsedRule,
+ int lastReparsedNodeCount,
+ long lastReparseNanos) {
     /** Fresh stats for a just-initialized session. */
     public static final Stats INITIAL = new Stats(0, 0, "", 0, 0L);
 

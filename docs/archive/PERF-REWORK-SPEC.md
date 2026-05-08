@@ -1,5 +1,8 @@
 # java-peglib performance rework — detailed spec
 
+> **Status:** historical / archived 2026-05-08. Executed in 0.2.2; superseded by THROUGHPUT-ENGINE-TIER1.md.
+
+
 **Target repo:** `java-peglib` (self-contained; no dependency on any other repo).
 **Status:** proposal / spec for an implementing agent. Not yet executed.
 **Scope:** optimizations to the PEG code generator (`ParserGenerator`) only.

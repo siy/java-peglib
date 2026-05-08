@@ -224,6 +224,6 @@ class ParsingContextTest {
 
     private static CstNode.Terminal createTerminal(String text) {
         var span = SourceSpan.sourceSpan(SourceLocation.sourceLocation(1, 1, 0), SourceLocation.sourceLocation(1, text.length() + 1, text.length()));
-        return new CstNode.Terminal(span, "Test", text, List.of(), List.of());
+        return new CstNode.Terminal(0L, span, "Test", text, List.of(), List.of());
     }
 }

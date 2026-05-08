@@ -27,7 +27,7 @@ No missing implementation, no stubs (`TODO`/`FIXME`/`UnsupportedOperationExcepti
 | `InterpreterBaselineGenerator` util | ✓ | ✓ | ✓ | Same test dir. |
 | `ParsingContext#bulkAdvanceNoNewline` | ✓ | ✓ | ✓ | Used in `parseLiteral`/`parseDictionary`. |
 | JMH `interpreter` benchmark variant | ✓ | ✓ | ✓ | `docs/bench-results/java25-parse-interpreter.json` present. |
-| PERF-REWORK-SPEC doc | ✓ | ✓ | n/a | `docs/PERF-REWORK-SPEC.md`. |
+| PERF-REWORK-SPEC doc | ✓ | ✓ | n/a | `docs/archive/PERF-REWORK-SPEC.md` (archived 2026-05-08). |
 
 ## 0.2.4 — Trivia attribution + grammar DSL directives
 
@@ -178,7 +178,7 @@ All three mojos have `@Mojo(name = ..., defaultPhase = ..., threadSafe = true)` 
 
 All 10 docs under `docs/` referenced by CHANGELOG entries are present:
 
-- `docs/PERF-REWORK-SPEC.md` (0.2.2/0.2.3)
+- `docs/archive/PERF-REWORK-SPEC.md` (0.2.2/0.2.3) — archived 2026-05-08
 - `docs/TRIVIA-ATTRIBUTION.md` (0.2.4)
 - `docs/GRAMMAR-DSL.md` (0.2.4 + 0.2.8)
 - `docs/PERF-FLAGS.md` (0.2.4)
@@ -186,7 +186,7 @@ All 10 docs under `docs/` referenced by CHANGELOG entries are present:
 - `docs/ERROR_RECOVERY.md` (expanded 0.2.4)
 - `docs/PLAYGROUND.md` (0.2.7)
 - `docs/PARTIAL-PARSE.md` (0.3.0)
-- `docs/incremental/SPEC.md` (0.3.1)
+- `docs/archive/SPEC-incremental-original.md` (0.3.1) — archived 2026-05-08
 - `docs/PRETTY-PRINTING.md` (0.3.3)
 
 Module READMEs:

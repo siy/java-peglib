@@ -7,6 +7,8 @@ import org.pragmatica.peg.grammar.analysis.ExpressionShape;
 import org.pragmatica.peg.grammar.analysis.FirstCharAnalysis;
 import org.pragmatica.peg.parser.ParserConfig;
 
+import java.util.Set;
+
 /**
  * Generates standalone parser source code from a Grammar.
  * The generated parser depends only on pragmatica-lite:core.
@@ -100,6 +102,89 @@ public final class ParserGenerator {
     private final ParserConfig config;
     private boolean inWhitespaceRuleGeneration;
 
+    /**
+     * Phase 1.8: effective set of rule names that bypass the packrat cache. When
+     * {@link ParserConfig#selectivePackrat()} is on AND the caller-supplied
+     * {@link ParserConfig#packratSkipRules()} is empty, this field is populated by
+     * {@link PackratAnalyzer#autoSkipPackratRules(Grammar)}. When the caller supplied an
+     * explicit non-empty skip set, that set is honoured verbatim (no auto augmentation).
+     * When {@code selectivePackrat} is off, this field is empty and the cache is consulted
+     * for every non-LR rule as before.
+     */
+    private final Set<String> effectivePackratSkipRules;
+
+    /** Lazily-computed grammar-wide FIRST sets for §7.1F dispatch. */
+    private ChoiceDispatchAnalyzer.FirstSets firstSets;
+
+    // ============================================================
+    // Phase G2: Sequence chunking (split long Sequence bodies into
+    // per-chunk helper methods to keep emitted methods under the
+    // HotSpot FreqInlineSize threshold; companion to Phase G's
+    // per-alternative helper extraction).
+    // ============================================================
+    /** Phase G2 thresholds — see {@link #shouldChunkSequence(Expression.Sequence)}. */
+    private static final int SEQ_CHUNK_ELEMENT_THRESHOLD = 4;
+    private static final int SEQ_CHUNK_BYTE_THRESHOLD = 1200;
+
+    /** Phase G2: maximum cumulative element-weight packed into a single chunk
+     *  before a new chunk is started. Bounds chunk-method bytecode size. */
+    private static final int SEQ_CHUNK_MAX_WEIGHT = 1200;
+
+    /** Phase G2: maximum elements per chunk (cap regardless of weight). */
+    private static final int SEQ_CHUNK_MAX_ELEMENTS = 3;
+
+    /**
+     * Phase G2: per-rule-emission list of chunk-helper method bodies that need
+     * to be emitted at class scope. Each helper has its OWN StringBuilder so
+     * that nested chunked Sequences (a chunk helper containing a chunked
+     * sub-Sequence) don't interleave bodies — the outer helper finishes its
+     * own buffer while inner helpers occupy separate sibling buffers. All
+     * buffers are appended to {@code sb} in insertion order at rule-emission
+     * end by {@link #generateCstRuleMethods(StringBuilder)}.
+     */
+    private java.util.List<StringBuilder> pendingChunkHelpers;
+
+    /**
+     * Phase G2: counter assigning unique sequence ids within the currently-
+     * emitting rule — used to name {@code parse_<rule>_seq<N>_chunk<L>} helpers.
+     */
+    private int currentRuleSequenceCounter;
+
+    /**
+     * Phase G2: name of the rule currently being emitted (sanitized form used
+     * in helper method names). Set by {@link #generateCstRuleMethods} around
+     * each rule's emission.
+     */
+    private String currentRuleName;
+
+    /**
+     * Phase G2: rule-id constant name for the currently-emitting rule. Chunk
+     * helpers re-declare {@code __ruleName} locally to make in-scope what the
+     * inner emissions reference (TokenBoundary, ZeroOrMore wrap-as-NonTerminal).
+     */
+    private String currentRuleIdConst;
+
+    // ============================================================
+    // Phase H: nested-Choice extraction (extracts heavy Choices that
+    // appear inside Sequence/repetition contexts into per-rule helper
+    // methods). Companion to Phase G (top-level rule Choice extraction)
+    // and Phase G2 (Sequence chunking).
+    // ============================================================
+    /** Phase H: per-rule unique counter for nested Choice helpers. */
+    private int currentRuleChoiceCounter;
+
+    /** Phase H thresholds — extract a nested Choice when EITHER applies. */
+    private static final int NESTED_CHOICE_ALT_THRESHOLD = 8;
+    private static final int NESTED_CHOICE_BYTE_THRESHOLD = 2500;
+
+    /** Phase 1F: lazy FIRST set computation (per-generator, single pass over grammar). */
+    private ChoiceDispatchAnalyzer.FirstSets firstSets() {
+        if (firstSets == null) {
+            firstSets = ChoiceDispatchAnalyzer.FirstSets.compute(grammar);
+        }
+        return firstSets;
+    }
+
     private ParserGenerator(Grammar grammar,
                             String packageName,
                             String className,
@@ -112,6 +197,31 @@ public final class ParserGenerator {
         this.errorReporting = errorReporting;
         this.config = config;
         this.inWhitespaceRuleGeneration = false;
+        this.effectivePackratSkipRules = computeEffectiveSkipRules(grammar, config);
+    }
+
+    /**
+     * Phase 1.8 (selective packrat auto-skip). Resolves {@link ParserConfig#packratSkipRules()}
+     * into the final skip-set used during emission.
+     *
+     * <ul>
+     *   <li>{@code selectivePackrat=false} → empty set (cache used for every non-LR rule).</li>
+     *   <li>{@code selectivePackrat=true} with non-empty {@code packratSkipRules} → the caller's
+     *       explicit set, verbatim (no auto-augmentation; honors the existing 0.2.9 contract).</li>
+     *   <li>{@code selectivePackrat=true} with empty {@code packratSkipRules} → the auto-detected
+     *       set from {@link PackratAnalyzer#autoSkipPackratRules(Grammar)}. Left-recursive rules
+     *       are excluded by the analyzer.</li>
+     * </ul>
+     */
+    private static Set<String> computeEffectiveSkipRules(Grammar grammar, ParserConfig config) {
+        if (!config.selectivePackrat()) {
+            return Set.of();
+        }
+        if (!config.packratSkipRules()
+                   .isEmpty()) {
+            return Set.copyOf(config.packratSkipRules());
+        }
+        return PackratAnalyzer.autoSkipPackratRules(grammar);
     }
 
     /**
@@ -136,6 +246,37 @@ public final class ParserGenerator {
                 "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules");
             }
         }
+    }
+
+    // === Spike A: emission helpers for raw-nullable vs Option CstParseResult ===
+    private String nodeUnwrap(String varName) {
+        return config.mutableParseResult()
+               ? varName + ".node"
+               : varName + ".node.unwrap()";
+    }
+
+    private String nodeIsPresent(String varName) {
+        return config.mutableParseResult()
+               ? varName + ".node != null"
+               : varName + ".node.isPresent()";
+    }
+
+    private String textOrEmpty(String varName) {
+        return config.mutableParseResult()
+               ? "(" + varName + ".text != null ? " + varName + ".text : \"\")"
+               : varName + ".text.or(\"\")";
+    }
+
+    private String endLocationUnwrap(String varName) {
+        return config.mutableParseResult()
+               ? varName + ".endLocation"
+               : varName + ".endLocation.unwrap()";
+    }
+
+    private String expectedUnwrap(String varName) {
+        return config.mutableParseResult()
+               ? varName + ".expected"
+               : varName + ".expected.unwrap()";
     }
 
     public static ParserGenerator parserGenerator(Grammar grammar, String packageName, String className) {
@@ -1605,6 +1746,14 @@ public final class ParserGenerator {
         sb.append("    private static final RuleId.PegCharClass RULE_PEG_CHAR_CLASS = new RuleId.PegCharClass();\n");
         sb.append("    private static final RuleId.PegAny RULE_PEG_ANY = new RuleId.PegAny();\n");
         sb.append("    private static final RuleId.PegToken RULE_PEG_TOKEN = new RuleId.PegToken();\n");
+        // Candidate #4: ASCII single-char String pool — eliminates String.valueOf(c) alloc
+        // per match in matchCharClassCst / matchAnyCst on the hot path. ~3 KB total at class load.
+        sb.append("    private static final String[] ASCII_CHAR_STRINGS = new String[128];\n");
+        sb.append("    static {\n");
+        sb.append("        for (int __i = 0; __i < 128; __i++) {\n");
+        sb.append("            ASCII_CHAR_STRINGS[__i] = String.valueOf((char) __i);\n");
+        sb.append("        }\n");
+        sb.append("    }\n");
         sb.append("\n");
     }
 
@@ -1704,27 +1853,97 @@ public final class ParserGenerator {
                     record BlockComment(SourceSpan span, String text) implements Trivia {}
                 }
 
+                /**
+                 * v0.5.0 Phase 1.2 (Lever A): per-parse stable-ID source for CST nodes.
+                 * IDs are unique within a parse-session lineage and excluded from
+                 * structural equality (see CstNode equals/hashCode).
+                 */
+                public sealed interface IdGenerator permits IdGenerator.PerSessionCounter {
+                    long next();
+
+                    final class PerSessionCounter implements IdGenerator {
+                        private long next = 0L;
+                        @Override public long next() { return next++; }
+                    }
+                }
+
                 public sealed interface CstNode {
+                    long id();
                     SourceSpan span();
                     RuleId rule();
                     List<Trivia> leadingTrivia();
                     List<Trivia> trailingTrivia();
 
-                    record Terminal(SourceSpan span, RuleId rule, String text,
-                                    List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
+                    record Terminal(long id, SourceSpan span, RuleId rule, String text,
+                                    List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        @Override
+                        public boolean equals(Object other) {
+                            return other instanceof Terminal that
+                                && java.util.Objects.equals(span, that.span)
+                                && java.util.Objects.equals(rule, that.rule)
+                                && java.util.Objects.equals(text, that.text)
+                                && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
+                                && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
+                        }
+                        @Override
+                        public int hashCode() {
+                            return java.util.Objects.hash(Terminal.class, span, rule, text, leadingTrivia, trailingTrivia);
+                        }
+                    }
 
-                    record NonTerminal(SourceSpan span, RuleId rule, List<CstNode> children,
-                                       List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
+                    record NonTerminal(long id, SourceSpan span, RuleId rule, List<CstNode> children,
+                                       List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        @Override
+                        public boolean equals(Object other) {
+                            return other instanceof NonTerminal that
+                                && java.util.Objects.equals(span, that.span)
+                                && java.util.Objects.equals(rule, that.rule)
+                                && java.util.Objects.equals(children, that.children)
+                                && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
+                                && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
+                        }
+                        @Override
+                        public int hashCode() {
+                            return java.util.Objects.hash(NonTerminal.class, span, rule, children, leadingTrivia, trailingTrivia);
+                        }
+                    }
 
-                    record Token(SourceSpan span, RuleId rule, String text,
-                                 List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {}
+                    record Token(long id, SourceSpan span, RuleId rule, String text,
+                                 List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        @Override
+                        public boolean equals(Object other) {
+                            return other instanceof Token that
+                                && java.util.Objects.equals(span, that.span)
+                                && java.util.Objects.equals(rule, that.rule)
+                                && java.util.Objects.equals(text, that.text)
+                                && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
+                                && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
+                        }
+                        @Override
+                        public int hashCode() {
+                            return java.util.Objects.hash(Token.class, span, rule, text, leadingTrivia, trailingTrivia);
+                        }
+                    }
             """);
         // Only add Error node type for ADVANCED mode (used in error recovery)
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
-                        record Error(SourceSpan span, String skippedText, String expected,
+                        record Error(long id, SourceSpan span, String skippedText, String expected,
                                      List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
                             @Override public RuleId rule() { return null; }
+                            @Override
+                            public boolean equals(Object other) {
+                                return other instanceof Error that
+                                    && java.util.Objects.equals(span, that.span)
+                                    && java.util.Objects.equals(skippedText, that.skippedText)
+                                    && java.util.Objects.equals(expected, that.expected)
+                                    && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
+                                    && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
+                            }
+                            @Override
+                            public int hashCode() {
+                                return java.util.Objects.hash(Error.class, span, skippedText, expected, leadingTrivia, trailingTrivia);
+                            }
                         }
                 """);
         }
@@ -1841,12 +2060,11 @@ public final class ParserGenerator {
                         sb.append(": ").append(message).append("\\n");
 
                         // Location: --> filename:line:column
-                        var loc = span.start();
                         sb.append("  --> ");
                         if (filename != null) {
                             sb.append(filename).append(":");
                         }
-                        sb.append(loc.line()).append(":").append(loc.column()).append("\\n");
+                        sb.append(span.startLine()).append(":").append(span.startColumn()).append("\\n");
 
                         // Find all lines we need to display
                         int minLine = span.startLine();
@@ -1940,9 +2158,8 @@ public final class ParserGenerator {
                     }
 
                     public String formatSimple() {
-                        var loc = span.start();
                         return String.format("%s:%d:%d: %s: %s",
-                            "input", loc.line(), loc.column(), severity.display(), message);
+                            "input", span.startLine(), span.startColumn(), severity.display(), message);
                     }
                 }
 
@@ -2022,13 +2239,33 @@ public final class ParserGenerator {
                 private int tokenBoundaryDepth;
                 private boolean skippingWhitespace;
                 private boolean packratEnabled = true;
-                private Option<SourceLocation> furthestFailure;
-                private Option<String> furthestExpected;
+            """);
+        if (config.mutableParseResult()) {
+            // A coverage extension: raw nullable for hot-path failure tracking.
+            // trackFailure() runs on every failed match (millions of times per
+            // parse on a large input); Option.some(loc)/Option.some(expected)
+            // dominated the residual Option$Some samples after the spike.
+            sb.append("""
+                    private SourceLocation furthestFailure;   // raw nullable
+                    private String furthestExpected;          // raw nullable
+                """);
+        }else {
+            sb.append("""
+                    private Option<SourceLocation> furthestFailure;
+                    private Option<String> furthestExpected;
+                """);
+        }
+        sb.append("""
 
                 // Pending leading trivia — trivia captured between sibling
                 // sequence elements that will attach to the following sibling's
                 // leadingTrivia. Backtracking combinators save/restore snapshots.
                 private final ArrayList<Trivia> pendingLeadingTrivia = new ArrayList<>();
+
+                // v0.5.0 Phase 1.2 (Lever A): per-parse stable-ID allocator.
+                // Reset on every init() so each parse session has its own
+                // monotonically increasing ID lineage starting from 0.
+                private IdGenerator idGen = new IdGenerator.PerSessionCounter();
 
                 /**
                  * Enable or disable packrat memoization.
@@ -2046,39 +2283,75 @@ public final class ParserGenerator {
             // before popping. skipToRecoveryPoint consults the pending field
             // first (the stack is unwound by the time recovery runs), then
             // the live stack, then the global default char-set.
-            sb.append("""
-                    private final ArrayDeque<String> recoveryOverrideStack = new ArrayDeque<>();
-                    private Option<String> pendingFailureRecoveryOverride = Option.none();
+            if (config.mutableParseResult()) {
+                sb.append("""
+                        private final ArrayDeque<String> recoveryOverrideStack = new ArrayDeque<>();
+                        private String pendingFailureRecoveryOverride;   // raw nullable
 
-                    private void pushRecoveryOverride(String terminator) {
-                        recoveryOverrideStack.push(terminator);
-                    }
-
-                    private void popRecoveryOverride() {
-                        if (!recoveryOverrideStack.isEmpty()) {
-                            recoveryOverrideStack.pop();
+                        private void pushRecoveryOverride(String terminator) {
+                            recoveryOverrideStack.push(terminator);
                         }
-                    }
 
-                    private void recordFailureRecoveryOverride(String terminator) {
-                        if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride.isEmpty()) {
-                            pendingFailureRecoveryOverride = Option.some(terminator);
+                        private void popRecoveryOverride() {
+                            if (!recoveryOverrideStack.isEmpty()) {
+                                recoveryOverrideStack.pop();
+                            }
                         }
-                    }
 
-                    private void clearPendingRecoveryOverride() {
-                        pendingFailureRecoveryOverride = Option.none();
-                    }
-
-                    private boolean matchesOverrideAt(String term) {
-                        if (remaining() < term.length()) return false;
-                        for (int i = 0; i < term.length(); i++) {
-                            if (peek(i) != term.charAt(i)) return false;
+                        private void recordFailureRecoveryOverride(String terminator) {
+                            if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride == null) {
+                                pendingFailureRecoveryOverride = terminator;
+                            }
                         }
-                        return true;
-                    }
 
-                """);
+                        private void clearPendingRecoveryOverride() {
+                            pendingFailureRecoveryOverride = null;
+                        }
+
+                        private boolean matchesOverrideAt(String term) {
+                            if (remaining() < term.length()) return false;
+                            for (int i = 0; i < term.length(); i++) {
+                                if (peek(i) != term.charAt(i)) return false;
+                            }
+                            return true;
+                        }
+
+                    """);
+            }else {
+                sb.append("""
+                        private final ArrayDeque<String> recoveryOverrideStack = new ArrayDeque<>();
+                        private Option<String> pendingFailureRecoveryOverride = Option.none();
+
+                        private void pushRecoveryOverride(String terminator) {
+                            recoveryOverrideStack.push(terminator);
+                        }
+
+                        private void popRecoveryOverride() {
+                            if (!recoveryOverrideStack.isEmpty()) {
+                                recoveryOverrideStack.pop();
+                            }
+                        }
+
+                        private void recordFailureRecoveryOverride(String terminator) {
+                            if (terminator != null && !terminator.isEmpty() && pendingFailureRecoveryOverride.isEmpty()) {
+                                pendingFailureRecoveryOverride = Option.some(terminator);
+                            }
+                        }
+
+                        private void clearPendingRecoveryOverride() {
+                            pendingFailureRecoveryOverride = Option.none();
+                        }
+
+                        private boolean matchesOverrideAt(String term) {
+                            if (remaining() < term.length()) return false;
+                            for (int i = 0; i < term.length(); i++) {
+                                if (peek(i) != term.charAt(i)) return false;
+                            }
+                            return true;
+                        }
+
+                    """);
+            }
         }
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
@@ -2106,16 +2379,36 @@ public final class ParserGenerator {
                     this.growingSeeds = new HashMap<>();
                     this.captures = new HashMap<>();
                     this.tokenBoundaryDepth = 0;
-                    this.furthestFailure = Option.none();
-                    this.furthestExpected = Option.none();
+            """);
+        if (config.mutableParseResult()) {
+            sb.append("""
+                        this.furthestFailure = null;
+                        this.furthestExpected = null;
+                """);
+        }else {
+            sb.append("""
+                        this.furthestFailure = Option.none();
+                        this.furthestExpected = Option.none();
+                """);
+        }
+        sb.append("""
                     this.pendingLeadingTrivia.clear();
+                    this.idGen = new IdGenerator.PerSessionCounter();
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("""
-                        this.diagnostics = new ArrayList<>();
-                        this.recoveryOverrideStack.clear();
-                        this.pendingFailureRecoveryOverride = Option.none();
-                """);
+            if (config.mutableParseResult()) {
+                sb.append("""
+                            this.diagnostics = new ArrayList<>();
+                            this.recoveryOverrideStack.clear();
+                            this.pendingFailureRecoveryOverride = null;
+                    """);
+            }else {
+                sb.append("""
+                            this.diagnostics = new ArrayList<>();
+                            this.recoveryOverrideStack.clear();
+                            this.pendingFailureRecoveryOverride = Option.none();
+                    """);
+            }
         }
         sb.append("""
                 }
@@ -2165,39 +2458,86 @@ public final class ParserGenerator {
                     this.column = loc.column();
                 }
 
+                // v0.5.0 phase 1.7 (D): raw-int location restore. Skips
+                // SourceLocation allocation in the hot path; called from emission
+                // sites that capture (pos,line,column) as int locals at entry.
+                private void restoreLocationRaw(int pos, int line, int column) {
+                    this.pos = pos;
+                    this.line = line;
+                    this.column = column;
+                }
+
             """);
         if (config.fastTrackFailure()) {
-            sb.append("""
-                    private void trackFailure(String expected) {
-                        if (!furthestFailure.isEmpty()) {
-                            int furthestOffset = furthestFailure.unwrap().offset();
-                            if (pos < furthestOffset) return;
-                            if (pos == furthestOffset) {
-                                String existing = furthestExpected.or("");
-                                if (existing.contains(expected)) return;
-                                furthestExpected = Option.some(
-                                    existing.isEmpty() ? expected : existing + " or " + expected);
-                                return;
+            if (config.mutableParseResult()) {
+                // A coverage extension: raw-nullable trackFailure — no Option boxing
+                // on the hot path. Equivalent semantics to the Option version.
+                sb.append("""
+                        private void trackFailure(String expected) {
+                            if (furthestFailure != null) {
+                                int furthestOffset = furthestFailure.offset();
+                                if (pos < furthestOffset) return;
+                                if (pos == furthestOffset) {
+                                    String existing = furthestExpected != null ? furthestExpected : "";
+                                    if (existing.contains(expected)) return;
+                                    furthestExpected = existing.isEmpty() ? expected : existing + " or " + expected;
+                                    return;
+                                }
+                            }
+                            furthestFailure = location();
+                            furthestExpected = expected;
+                        }
+
+                    """);
+            }else {
+                sb.append("""
+                        private void trackFailure(String expected) {
+                            if (!furthestFailure.isEmpty()) {
+                                int furthestOffset = furthestFailure.unwrap().offset();
+                                if (pos < furthestOffset) return;
+                                if (pos == furthestOffset) {
+                                    String existing = furthestExpected.or("");
+                                    if (existing.contains(expected)) return;
+                                    furthestExpected = Option.some(
+                                        existing.isEmpty() ? expected : existing + " or " + expected);
+                                    return;
+                                }
+                            }
+                            furthestFailure = Option.some(location());
+                            furthestExpected = Option.some(expected);
+                        }
+
+                    """);
+            }
+        }else {
+            if (config.mutableParseResult()) {
+                sb.append("""
+                        private void trackFailure(String expected) {
+                            var loc = location();
+                            if (furthestFailure == null || loc.offset() > furthestFailure.offset()) {
+                                furthestFailure = loc;
+                                furthestExpected = expected;
+                            } else if (loc.offset() == furthestFailure.offset() && !(furthestExpected != null ? furthestExpected : "").contains(expected)) {
+                                String existing = furthestExpected != null ? furthestExpected : "";
+                                furthestExpected = existing.isEmpty() ? expected : existing + " or " + expected;
                             }
                         }
-                        furthestFailure = Option.some(location());
-                        furthestExpected = Option.some(expected);
-                    }
 
-                """);
-        }else {
-            sb.append("""
-                    private void trackFailure(String expected) {
-                        var loc = location();
-                        if (furthestFailure.isEmpty() || loc.offset() > furthestFailure.unwrap().offset()) {
-                            furthestFailure = Option.some(loc);
-                            furthestExpected = Option.some(expected);
-                        } else if (loc.offset() == furthestFailure.unwrap().offset() && !furthestExpected.or("").contains(expected)) {
-                            furthestExpected = Option.some(furthestExpected.or("").isEmpty() ? expected : furthestExpected.or("") + " or " + expected);
+                    """);
+            }else {
+                sb.append("""
+                        private void trackFailure(String expected) {
+                            var loc = location();
+                            if (furthestFailure.isEmpty() || loc.offset() > furthestFailure.unwrap().offset()) {
+                                furthestFailure = Option.some(loc);
+                                furthestExpected = Option.some(expected);
+                            } else if (loc.offset() == furthestFailure.unwrap().offset() && !furthestExpected.or("").contains(expected)) {
+                                furthestExpected = Option.some(furthestExpected.or("").isEmpty() ? expected : furthestExpected.or("") + " or " + expected);
+                            }
                         }
-                    }
 
-                """);
+                    """);
+            }
         }
         if (errorReporting == ErrorReporting.ADVANCED) {
             // 0.3.6: stack-aware recovery — per-rule %recover overrides are
@@ -2207,33 +2547,63 @@ public final class ParserGenerator {
             // (the stack is unwound by the time recovery runs), then the
             // live stack, then the global default char-set. Mirrors
             // ParsingContext.skipToRecoveryPoint.
-            sb.append("""
-                    private SourceSpan skipToRecoveryPoint() {
-                        var start = location();
-                        String override = null;
-                        if (pendingFailureRecoveryOverride.isPresent()) {
-                            override = pendingFailureRecoveryOverride.unwrap();
-                            pendingFailureRecoveryOverride = Option.none();
-                        } else if (!recoveryOverrideStack.isEmpty()) {
-                            override = recoveryOverrideStack.peek();
-                        }
-                        if (override != null && !override.isEmpty()) {
-                            while (!isAtEnd() && !matchesOverrideAt(override)) {
+            if (config.mutableParseResult()) {
+                sb.append("""
+                        private SourceSpan skipToRecoveryPoint() {
+                            var start = location();
+                            String override = null;
+                            if (pendingFailureRecoveryOverride != null) {
+                                override = pendingFailureRecoveryOverride;
+                                pendingFailureRecoveryOverride = null;
+                            } else if (!recoveryOverrideStack.isEmpty()) {
+                                override = recoveryOverrideStack.peek();
+                            }
+                            if (override != null && !override.isEmpty()) {
+                                while (!isAtEnd() && !matchesOverrideAt(override)) {
+                                    advance();
+                                }
+                                return SourceSpan.sourceSpan(start, location());
+                            }
+                            while (!isAtEnd()) {
+                                char c = peek();
+                                if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
+                                    break;
+                                }
                                 advance();
                             }
                             return SourceSpan.sourceSpan(start, location());
                         }
-                        while (!isAtEnd()) {
-                            char c = peek();
-                            if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
-                                break;
-                            }
-                            advance();
-                        }
-                        return SourceSpan.sourceSpan(start, location());
-                    }
 
-                """);
+                    """);
+            }else {
+                sb.append("""
+                        private SourceSpan skipToRecoveryPoint() {
+                            var start = location();
+                            String override = null;
+                            if (pendingFailureRecoveryOverride.isPresent()) {
+                                override = pendingFailureRecoveryOverride.unwrap();
+                                pendingFailureRecoveryOverride = Option.none();
+                            } else if (!recoveryOverrideStack.isEmpty()) {
+                                override = recoveryOverrideStack.peek();
+                            }
+                            if (override != null && !override.isEmpty()) {
+                                while (!isAtEnd() && !matchesOverrideAt(override)) {
+                                    advance();
+                                }
+                                return SourceSpan.sourceSpan(start, location());
+                            }
+                            while (!isAtEnd()) {
+                                char c = peek();
+                                if (c == '\\n' || c == ';' || c == ',' || c == '}' || c == ')' || c == ']') {
+                                    break;
+                                }
+                                advance();
+                            }
+                            return SourceSpan.sourceSpan(start, location());
+                        }
+
+                    """);
+            }
             sb.append("""
                     private void addDiagnostic(String message, SourceSpan span) {
                         diagnostics.add(Diagnostic.error(message, span).withTag("error.unexpected-input"));
@@ -2316,6 +2686,20 @@ public final class ParserGenerator {
                                      .getFirst()
                                      .name();
         var sanitizedName = sanitize(startRuleName);
+        var resultNodeUnwrapExpr = config.mutableParseResult()
+                                   ? "result.node"
+                                   : "result.node.unwrap()";
+        // Read-site exprs for furthestFailure / furthestExpected. Under
+        // mutableParseResult these are raw nullable; emit fallback expressions
+        // that mirror Option.or(...) semantics without re-introducing boxing.
+        // The legacy variant continues to use Option.or(...) calls.
+        var furthestFailureOrLoc = config.mutableParseResult()
+                                   ? "(furthestFailure != null ? furthestFailure : location())"
+                                   : "furthestFailure.or(location())";
+        // expectedExpr matches `furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"))`.
+        var expectedExpr = config.mutableParseResult()
+                           ? "((furthestExpected != null && !furthestExpected.isEmpty()) ? furthestExpected : (result.expected != null ? result.expected : \"valid input\"))"
+                           : "furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or(\"valid input\"))";
         sb.append("""
                 // === Public Parse Methods ===
 
@@ -2323,17 +2707,17 @@ public final class ParserGenerator {
                     init(input);
                     var result = parse_%s();
                     if (result.isFailure()) {
-                        var errorLoc = furthestFailure.or(location());
-                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                        var errorLoc = %s;
+                        var expected = %s;
                         return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
                     var trailingTrivia = skipWhitespace(); // Capture trailing trivia
                     if (!isAtEnd()) {
-                        var errorLoc = furthestFailure.or(location());
+                        var errorLoc = %s;
                         return Result.failure(new ParseError(errorLoc, "unexpected input"));
                     }
                     // Attach trailing trivia to root node
-                    var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
+                    var rootNode = attachTrailingTrivia(%s, trailingTrivia);
                     return Result.success(rootNode);
                 }
 
@@ -2357,7 +2741,7 @@ public final class ParserGenerator {
                     };
                 }
 
-            """.formatted(sanitizedName));
+            """.formatted(sanitizedName, furthestFailureOrLoc, expectedExpr, furthestFailureOrLoc, resultNodeUnwrapExpr));
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                     /**
@@ -2371,16 +2755,16 @@ public final class ParserGenerator {
 
                         if (result.isFailure()) {
                             // Record the failure and attempt recovery
-                            var errorLoc = furthestFailure.or(location());
+                            var errorLoc = %s;
                             var errorSpan = SourceSpan.sourceSpan(errorLoc, errorLoc);
-                            var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                            var expected = %s;
                             addDiagnostic("expected " + expected, errorSpan);
 
                             // Skip to recovery point and try to continue
                             var skippedSpan = skipToRecoveryPoint();
                             if (skippedSpan.length() > 0) {
                                 var skippedText = skippedSpan.extract(input);
-                                var errorNode = new CstNode.Error(skippedSpan, skippedText, expected, List.of(), List.of());
+                                var errorNode = new CstNode.Error(idGen.next(), skippedSpan, skippedText, expected, List.of(), List.of());
                                 return ParseResultWithDiagnostics.withErrors(Option.some(errorNode), diagnostics, input);
                             }
                             return ParseResultWithDiagnostics.withErrors(Option.none(), diagnostics, input);
@@ -2389,24 +2773,30 @@ public final class ParserGenerator {
                         var trailingTrivia = skipWhitespace();
                         if (!isAtEnd()) {
                             // Unexpected trailing input - use furthest failure position for error
-                            var errorLoc = furthestFailure.or(location());
+                            var errorLoc = %s;
                             var skippedSpan = skipToRecoveryPoint();
-                            var errorSpan = SourceSpan.sourceSpan(errorLoc, skippedSpan.end());
+                            var errorSpan = new SourceSpan(errorLoc.line(), errorLoc.column(), errorLoc.offset(),
+                                                           skippedSpan.endLine(), skippedSpan.endColumn(), skippedSpan.endOffset());
                             addDiagnostic("unexpected input", errorSpan, "expected end of input");
 
                             // Attach error node to result
-                            var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
+                            var rootNode = attachTrailingTrivia(%s, trailingTrivia);
                             return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                         }
 
-                        var rootNode = attachTrailingTrivia(result.node.unwrap(), trailingTrivia);
+                        var rootNode = attachTrailingTrivia(%s, trailingTrivia);
                         if (diagnostics.isEmpty()) {
                             return ParseResultWithDiagnostics.success(rootNode, input);
                         }
                         return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                     }
 
-                """.formatted(sanitizedName));
+                """.formatted(sanitizedName,
+                              furthestFailureOrLoc,
+                              expectedExpr,
+                              furthestFailureOrLoc,
+                              resultNodeUnwrapExpr,
+                              resultNodeUnwrapExpr));
         }
         generateCstParseRuleAt(sb);
     }
@@ -2420,7 +2810,17 @@ public final class ParserGenerator {
      * rule's generated {@code parse_<name>()} method.
      */
     private void generateCstParseRuleAt(StringBuilder sb) {
-        sb.append("""
+        var resultNodeUnwrapExpr = config.mutableParseResult()
+                                   ? "result.node"
+                                   : "result.node.unwrap()";
+        var furthestFailureOrLoc = config.mutableParseResult()
+                                   ? "(furthestFailure != null ? furthestFailure : location())"
+                                   : "furthestFailure.or(location())";
+        var expectedExpr = config.mutableParseResult()
+                           ? "((furthestExpected != null && !furthestExpected.isEmpty()) ? furthestExpected : (result.expected != null ? result.expected : \"valid input\"))"
+                           : "furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or(\"valid input\"))";
+        var ruleAtBlock = new StringBuilder();
+        ruleAtBlock.append("""
                 // === PartialParse (0.3.0) ===
 
                 /**
@@ -2442,13 +2842,13 @@ public final class ParserGenerator {
         for (var rule : grammar.rules()) {
             var ruleClassName = toClassName(rule.name());
             var methodName = "parse_" + sanitize(rule.name());
-            sb.append("        m.put(RuleId.")
-              .append(ruleClassName)
-              .append(".class, this::")
-              .append(methodName)
-              .append(");\n");
+            ruleAtBlock.append("        m.put(RuleId.")
+                       .append(ruleClassName)
+                       .append(".class, this::")
+                       .append(methodName)
+                       .append(");\n");
         }
-        sb.append("""
+        ruleAtBlock.append("""
                     return Map.copyOf(m);
                 }
 
@@ -2483,11 +2883,11 @@ public final class ParserGenerator {
                     seekTo(offset);
                     var result = supplier.get();
                     if (result.isFailure()) {
-                        var errorLoc = furthestFailure.or(location());
-                        var expected = furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or("valid input"));
+                        var errorLoc = __FURTHEST_FAILURE_OR_LOC__;
+                        var expected = __EXPECTED_EXPR__;
                         return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
-                    return Result.success(new PartialParse(result.node.unwrap(), pos));
+                    return Result.success(new PartialParse(__RESULT_NODE__, pos));
                 }
 
                 /**
@@ -2511,13 +2911,31 @@ public final class ParserGenerator {
                 }
 
             """);
+        sb.append(ruleAtBlock.toString()
+                             .replace("__FURTHEST_FAILURE_OR_LOC__", furthestFailureOrLoc)
+                             .replace("__EXPECTED_EXPR__", expectedExpr)
+                             .replace("__RESULT_NODE__", resultNodeUnwrapExpr));
     }
 
     private void generateCstRuleMethods(StringBuilder sb) {
         sb.append("    // === Rule Parsing Methods ===\n\n");
         int ruleId = 0;
         for (var rule : grammar.rules()) {
+            // Phase G2: per-rule chunk-helper context. Reset before each rule so chunk ids
+            // restart and the buffer list is empty; flush deferred helpers (declared at
+            // class scope) after the rule's primary method emission completes.
+            pendingChunkHelpers = new java.util.ArrayList<>();
+            currentRuleSequenceCounter = 0;
+            currentRuleChoiceCounter = 0;
+            currentRuleName = sanitize(rule.name());
+            currentRuleIdConst = toConstantName(rule.name());
             generateCstRuleMethod(sb, rule, ruleId++ );
+            for (var helper : pendingChunkHelpers) {
+                sb.append(helper);
+            }
+            pendingChunkHelpers = null;
+            currentRuleName = null;
+            currentRuleIdConst = null;
         }
     }
 
@@ -2535,12 +2953,22 @@ public final class ParserGenerator {
             generateCstRuleBodyMethod(sb, rule, ruleId);
             return;
         }
+        // Phase G: when the rule expression is a top-level Choice, emit each
+        // alternative as a private helper method (Leaf pattern). The rule body
+        // becomes a thin dispatcher (potentially using FIRST-set switch). This
+        // keeps every emitted method small enough for HotSpot's FreqInlineSize
+        // (325 bytes) and lets C2 inline the per-alt helpers.
+        if (rule.expression() instanceof Expression.Choice topChoice) {
+            emitCstChoiceRule(sb, rule, ruleId, topChoice);
+            return;
+        }
         // §7.4 selective packrat: when the flag is on AND this rule's (unsanitized) name is in
-        // the skip-set, omit the cache lookup and cache put within this rule method. The cache
-        // field itself and its use by other rules are preserved. When either the flag is off
-        // or the rule is absent from the skip-set, emission is byte-identical to pre-§7.4.
-        boolean skipCache = config.selectivePackrat() && config.packratSkipRules()
-                                                               .contains(ruleName);
+        // the effective skip-set (caller-supplied or auto-detected), omit the cache lookup and
+        // cache put within this rule method. The cache field itself and its use by other rules
+        // are preserved. When either the flag is off or the rule is absent from the skip-set,
+        // emission is byte-identical to pre-§7.4. Phase 1.8: skip-set may be auto-derived from
+        // grammar shape — see {@link PackratAnalyzer}.
+        boolean skipCache = effectivePackratSkipRules.contains(ruleName);
         sb.append("    private CstParseResult ")
           .append(methodName)
           .append("() {\n");
@@ -2575,10 +3003,16 @@ public final class ParserGenerator {
             sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
             sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
             sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
-            sb.append("                    var hitEndLoc = cached.endLocation.unwrap();\n");
+            sb.append("                    var hitEndLoc = ")
+              .append(endLocationUnwrap("cached"))
+              .append(";\n");
             sb.append("                    restoreLocation(hitEndLoc);\n");
-            sb.append("                    var hitNode = attachLeadingTrivia(cached.node.unwrap(), hitLeading);\n");
-            sb.append("                    return CstParseResult.success(hitNode, cached.text.or(\"\"), hitEndLoc);\n");
+            sb.append("                    var hitNode = attachLeadingTrivia(")
+              .append(nodeUnwrap("cached"))
+              .append(", hitLeading);\n");
+            sb.append("                    return CstParseResult.success(hitNode, ")
+              .append(textOrEmpty("cached"))
+              .append(", hitEndLoc);\n");
             sb.append("                }\n");
             sb.append("                return cached;\n");
             sb.append("            }\n");
@@ -2631,7 +3065,10 @@ public final class ParserGenerator {
         }
         sb.append("            var endLoc = location();\n");
         if (inlineLocations) {
-            sb.append("            var span = SourceSpan.sourceSpan(new SourceLocation(startLine, startColumn, startOffset), endLoc);\n");
+            // Phase 1.7 (D2): build SourceSpan from inline ints + endLoc primitives —
+            // skip the sourceSpan(SourceLocation, SourceLocation) factory which would
+            // re-allocate via SourceLocation::new on the start side.
+            sb.append("            var span = new SourceSpan(startLine, startColumn, startOffset, endLoc.line(), endLoc.column(), endLoc.offset());\n");
         }else {
             sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
         }
@@ -2655,8 +3092,12 @@ public final class ParserGenerator {
         sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
         sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
         sb.append("            }\n");
-        sb.append("            cacheableResult = CstParseResult.success(cacheNode, result.text.or(\"\"), endLoc);\n");
-        sb.append("            finalResult = CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
+        sb.append("            cacheableResult = CstParseResult.success(cacheNode, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
+        sb.append("            finalResult = CstParseResult.success(node, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
         sb.append("        } else {\n");
         if (inlineLocations) {
             // Inline field restore — no SourceLocation allocation on failure path.
@@ -2743,10 +3184,16 @@ public final class ParserGenerator {
         sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
         sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
         sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
-        sb.append("                    var hitEndLoc = cached.endLocation.unwrap();\n");
+        sb.append("                    var hitEndLoc = ")
+          .append(endLocationUnwrap("cached"))
+          .append(";\n");
         sb.append("                    restoreLocation(hitEndLoc);\n");
-        sb.append("                    var hitNode = attachLeadingTrivia(cached.node.unwrap(), hitLeading);\n");
-        sb.append("                    return CstParseResult.success(hitNode, cached.text.or(\"\"), hitEndLoc);\n");
+        sb.append("                    var hitNode = attachLeadingTrivia(")
+          .append(nodeUnwrap("cached"))
+          .append(", hitLeading);\n");
+        sb.append("                    return CstParseResult.success(hitNode, ")
+          .append(textOrEmpty("cached"))
+          .append(", hitEndLoc);\n");
         sb.append("                }\n");
         sb.append("                return cached;\n");
         sb.append("            }\n");
@@ -2757,7 +3204,9 @@ public final class ParserGenerator {
         // duplicate leading-trivia per growth iteration.
         sb.append("        var activeSeed = growingSeeds.get(key);\n");
         sb.append("        if (activeSeed != null) {\n");
-        sb.append("            if (activeSeed.isSuccess()) restoreLocation(activeSeed.endLocation.unwrap());\n");
+        sb.append("            if (activeSeed.isSuccess()) restoreLocation(")
+          .append(endLocationUnwrap("activeSeed"))
+          .append(");\n");
         sb.append("            return activeSeed;\n");
         sb.append("        }\n");
         // Capture leading whitespace & carried pending at the outer level.
@@ -2790,8 +3239,12 @@ public final class ParserGenerator {
           .append("();\n");
         sb.append("            if (iter.isCutFailure()) { cutFired = true; break; }\n");
         sb.append("            if (iter.isFailure()) break;\n");
-        sb.append("            int newEnd = iter.endLocation.unwrap().offset();\n");
-        sb.append("            int prevEnd = lastSeed.isSuccess() ? lastSeed.endLocation.unwrap().offset() : bodyStartPos;\n");
+        sb.append("            int newEnd = ")
+          .append(endLocationUnwrap("iter"))
+          .append(".offset();\n");
+        sb.append("            int prevEnd = lastSeed.isSuccess() ? ")
+          .append(endLocationUnwrap("lastSeed"))
+          .append(".offset() : bodyStartPos;\n");
         sb.append("            if (newEnd <= prevEnd) break;\n");
         sb.append("            lastSeed = iter;\n");
         sb.append("            growingSeeds.put(key, lastSeed);\n");
@@ -2815,9 +3268,17 @@ public final class ParserGenerator {
             // 0.3.6: clear pending override on success path.
             sb.append("            clearPendingRecoveryOverride();\n");
         }
-        sb.append("            restoreLocation(lastSeed.endLocation.unwrap());\n");
-        sb.append("            var node = attachLeadingTrivia(lastSeed.node.unwrap(), leadingTrivia);\n");
-        sb.append("            finalResult = CstParseResult.success(node, lastSeed.text.or(\"\"), lastSeed.endLocation.unwrap());\n");
+        sb.append("            restoreLocation(")
+          .append(endLocationUnwrap("lastSeed"))
+          .append(");\n");
+        sb.append("            var node = attachLeadingTrivia(")
+          .append(nodeUnwrap("lastSeed"))
+          .append(", leadingTrivia);\n");
+        sb.append("            finalResult = CstParseResult.success(node, ")
+          .append(textOrEmpty("lastSeed"))
+          .append(", ")
+          .append(endLocationUnwrap("lastSeed"))
+          .append(");\n");
         // Bug C fix: cache the empty-leading lastSeed (body emission attaches no
         // leading trivia). The wrapped node above is for return only. Bug C' is
         // intentionally NOT applied at the LR settle path: PegEngine's LR path
@@ -2880,7 +3341,10 @@ public final class ParserGenerator {
         sb.append("    private CstParseResult ")
           .append(bodyMethodName)
           .append("() {\n");
-        sb.append("        var startLoc = location();\n");
+        // Phase 1.7 (D): inline int captures — no SourceLocation allocation on entry.
+        sb.append("        int startOffset = pos;\n");
+        sb.append("        int startLine = line;\n");
+        sb.append("        int startColumn = column;\n");
         sb.append("        var children = new ArrayList<CstNode>();\n");
         sb.append("        var __ruleName = ")
           .append(ruleIdConst)
@@ -2891,14 +3355,1184 @@ public final class ParserGenerator {
         sb.append("        \n");
         sb.append("        if (result.isSuccess()) {\n");
         sb.append("            var endLoc = location();\n");
-        sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
+        sb.append("            var span = new SourceSpan(startLine, startColumn, startOffset, endLoc.line(), endLoc.column(), endLoc.offset());\n");
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", List.<Trivia>of());\n");
-        sb.append("            return CstParseResult.success(node, result.text.or(\"\"), endLoc);\n");
+        sb.append("            return CstParseResult.success(node, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
         sb.append("        }\n");
         sb.append("        return result;\n");
         sb.append("    }\n\n");
+    }
+
+    /**
+     * Phase G: emit a rule whose top-level expression is a {@link Expression.Choice}
+     * with each alternative split into its own private helper method. The rule body
+     * becomes a thin dispatcher; helpers carry all per-alt parsing logic. This
+     * shrinks every emitted method below HotSpot's FreqInlineSize (325 bytes) and
+     * lets C2 inline through the dispatcher.
+     *
+     * <p>Helper signature contract: each helper takes the ambient {@code children}
+     * list (so adds/removes are visible to the caller's epilogue) plus the snapshot
+     * state captured at choice entry (start pos/line/col, pendingLeading snapshot,
+     * children-state). The helper restores children to the snapshot at entry,
+     * runs the alternative's body, and on regular failure restores pos/line/col
+     * + pendingLeading. On cut-failure it returns the cut-failure unchanged so the
+     * dispatcher can convert it to a regular failure for sibling-skipping.
+     *
+     * <p>PEG semantics preserved: cut inside an alt converts to regular failure at
+     * the choice level (matches inline emission). FIRST-set dispatch falls through
+     * to the default tail when no dispatched alt succeeds.
+     */
+    private void emitCstChoiceRule(StringBuilder sb, Rule rule, int ruleId, Expression.Choice choice) {
+        var methodName = "parse_" + sanitize(rule.name());
+        var ruleName = rule.name();
+        boolean inlineLocations = config.inlineLocations();
+        boolean skipCache = effectivePackratSkipRules.contains(ruleName);
+        var ruleIdConst = toConstantName(ruleName);
+        // === Rule body (dispatcher) ===
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("() {\n");
+        if (inlineLocations) {
+            sb.append("        int startOffset = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
+        }else {
+            sb.append("        var startLoc = location();\n");
+        }
+        sb.append("        \n");
+        if (!skipCache) {
+            sb.append("        long key = cacheKey(")
+              .append(ruleId)
+              .append(", ")
+              .append(inlineLocations
+                      ? "startOffset"
+                      : "startLoc.offset()")
+              .append(");\n");
+            sb.append("        if (cache != null) {\n");
+            sb.append("            var cached = cache.get(key);\n");
+            sb.append("            if (cached != null) {\n");
+            sb.append("                if (cached.isSuccess()) {\n");
+            sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+            sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+            sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
+            sb.append("                    var hitEndLoc = ")
+              .append(endLocationUnwrap("cached"))
+              .append(";\n");
+            sb.append("                    restoreLocation(hitEndLoc);\n");
+            sb.append("                    var hitNode = attachLeadingTrivia(")
+              .append(nodeUnwrap("cached"))
+              .append(", hitLeading);\n");
+            sb.append("                    return CstParseResult.success(hitNode, ")
+              .append(textOrEmpty("cached"))
+              .append(", hitEndLoc);\n");
+            sb.append("                }\n");
+            sb.append("                return cached;\n");
+            sb.append("            }\n");
+            sb.append("        }\n");
+            sb.append("        \n");
+        }
+        sb.append("        var carriedLeading = takePendingLeading();\n");
+        sb.append("        var localLeadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
+        sb.append("        var leadingTrivia = concatTrivia(carriedLeading, localLeadingTrivia);\n");
+        sb.append("        var children = new ArrayList<CstNode>();\n");
+        sb.append("        var __ruleName = ")
+          .append(ruleIdConst)
+          .append(";\n");
+        sb.append("        \n");
+        boolean emitRecoverHooks = errorReporting == ErrorReporting.ADVANCED && rule.hasRecover();
+        if (emitRecoverHooks) {
+            sb.append("        pushRecoveryOverride(\"")
+              .append(escape(rule.recover()
+                                 .unwrap()))
+              .append("\");\n");
+        }
+        // Choice-entry snapshot state (shared across helper calls).
+        sb.append("        CstParseResult result = null;\n");
+        sb.append("        int choiceStart0Pos = pos;\n");
+        sb.append("        int choiceStart0Line = line;\n");
+        sb.append("        int choiceStart0Column = column;\n");
+        sb.append("        int choicePending0 = savePendingLeading();\n");
+        var childrenStateName = config.markResetChildren()
+                                ? "childrenMark0"
+                                : "savedChildren0";
+        if (config.markResetChildren()) {
+            sb.append("        int ")
+              .append(childrenStateName)
+              .append(" = children.size();\n");
+        }else {
+            sb.append("        var ")
+              .append(childrenStateName)
+              .append(" = new ArrayList<>(children);\n");
+        }
+        // Dispatcher: FIRST-set switch (when classifiable) or PEG-order chain.
+        var classifiedF = config.choiceDispatch()
+                          ? ChoiceDispatchAnalyzer.classify(choice, firstSets())
+                          : java.util.Optional.<ChoiceDispatchAnalyzer.Classified>empty();
+        if (classifiedF.isPresent()) {
+            var c = classifiedF.get();
+            var buckets = ChoiceDispatchAnalyzer.bucketsForClassified(c);
+            emitChoiceRuleDispatcherF(sb, rule, buckets, c.defaults(), childrenStateName);
+        }else {
+            emitChoiceRuleDispatcherPeg(sb, rule, choice, childrenStateName);
+        }
+        // All-alts-failed epilogue: synthesize a "one of alternatives" failure if
+        // no helper produced a result. This matches the inline emission's tail.
+        sb.append("        if (result == null) {\n");
+        if (config.markResetChildren()) {
+            sb.append("            if (children.size() > ")
+              .append(childrenStateName)
+              .append(") {\n");
+            sb.append("                children.subList(")
+              .append(childrenStateName)
+              .append(", children.size()).clear();\n");
+            sb.append("            }\n");
+        }else {
+            sb.append("            children.clear();\n");
+            sb.append("            children.addAll(")
+              .append(childrenStateName)
+              .append(");\n");
+        }
+        sb.append("            restorePendingLeading(choicePending0);\n");
+        sb.append("            result = CstParseResult.failure(\"one of alternatives\");\n");
+        sb.append("        }\n");
+        sb.append("        \n");
+        if (emitRecoverHooks) {
+            sb.append("        if (!result.isSuccess()) {\n");
+            sb.append("            recordFailureRecoveryOverride(\"")
+              .append(escape(rule.recover()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("        }\n");
+            sb.append("        popRecoveryOverride();\n");
+        }
+        sb.append("        CstParseResult finalResult;\n");
+        sb.append("        CstParseResult cacheableResult;\n");
+        sb.append("        if (result.isSuccess()) {\n");
+        if (emitRecoverHooks) {
+            sb.append("            clearPendingRecoveryOverride();\n");
+        }
+        sb.append("            var endLoc = location();\n");
+        if (inlineLocations) {
+            sb.append("            var span = new SourceSpan(startLine, startColumn, startOffset, endLoc.line(), endLoc.column(), endLoc.offset());\n");
+        }else {
+            sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
+        }
+        sb.append("            var pendingAtExit = takePendingLeading();\n");
+        sb.append("            var cacheNode = wrapWithRuleName(result, children, span, ")
+          .append(ruleIdConst)
+          .append(", List.<Trivia>of());\n");
+        sb.append("            var node = wrapWithRuleName(result, children, span, ")
+          .append(ruleIdConst)
+          .append(", leadingTrivia);\n");
+        sb.append("            if (!pendingAtExit.isEmpty()) {\n");
+        sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
+        sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
+        sb.append("            }\n");
+        sb.append("            cacheableResult = CstParseResult.success(cacheNode, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
+        sb.append("            finalResult = CstParseResult.success(node, ")
+          .append(textOrEmpty("result"))
+          .append(", endLoc);\n");
+        sb.append("        } else {\n");
+        if (inlineLocations) {
+            sb.append("            this.pos = startOffset;\n");
+            sb.append("            this.line = startLine;\n");
+            sb.append("            this.column = startColumn;\n");
+        }else {
+            sb.append("            restoreLocation(startLoc);\n");
+        }
+        sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        if (rule.hasErrorMessage()) {
+            sb.append("            finalResult = CstParseResult.failure(\"")
+              .append(escape(rule.errorMessage()
+                                 .unwrap()))
+              .append("\");\n");
+        }else if (rule.hasExpected()) {
+            sb.append("            trackFailure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
+            sb.append("            finalResult = CstParseResult.failure(\"")
+              .append(escape(rule.expected()
+                                 .unwrap()))
+              .append("\");\n");
+        }else {
+            sb.append("            finalResult = result;\n");
+        }
+        sb.append("            cacheableResult = finalResult;\n");
+        sb.append("        }\n");
+        sb.append("        \n");
+        if (!skipCache) {
+            sb.append("        if (cache != null) cache.put(key, cacheableResult);\n");
+        }
+        sb.append("        return finalResult;\n");
+        sb.append("    }\n\n");
+        // === Per-alternative helper methods ===
+        for (int i = 0; i < choice.alternatives()
+                                  .size(); i++ ) {
+            emitCstChoiceAltHelper(sb,
+                                   rule,
+                                   choice.alternatives()
+                                         .get(i),
+                                   i);
+        }
+    }
+
+    /**
+     * Phase G: emit dispatcher body using FIRST-set classification. Each {@code case}
+     * in the switch calls the helpers for the dispatched alternatives in PEG order;
+     * after a case body, falls through to the defaults tail. The {@code default:}
+     * branch runs the defaults tail directly.
+     */
+    private void emitChoiceRuleDispatcherF(StringBuilder sb,
+                                           Rule rule,
+                                           java.util.List<ChoiceDispatchAnalyzer.DispatchBucket> buckets,
+                                           java.util.List<ChoiceDispatchAnalyzer.AltEntry> defaults,
+                                           String childrenStateName) {
+        sb.append("        if (pos < input.length()) {\n");
+        sb.append("            char dispatchChar0 = input.charAt(pos);\n");
+        sb.append("            switch (dispatchChar0) {\n");
+        for (var bucket : buckets) {
+            for (var c : bucket.chars()) {
+                sb.append("                case ")
+                  .append(literalChar(c))
+                  .append(":\n");
+            }
+            sb.append("                {\n");
+            emitHelperCallChain(sb, rule, bucket.alts(), childrenStateName, "                    ");
+            sb.append("                    break;\n");
+            sb.append("                }\n");
+        }
+        sb.append("            }\n");
+        sb.append("        }\n");
+        if (!defaults.isEmpty()) {
+            sb.append("        if (result == null || (!result.isSuccess() && !result.isCutFailure())) {\n");
+            // Restore pos for defaults tail (a dispatched alt may have advanced pos before failing).
+            sb.append("            this.pos = choiceStart0Pos;\n");
+            sb.append("            this.line = choiceStart0Line;\n");
+            sb.append("            this.column = choiceStart0Column;\n");
+            sb.append("            restorePendingLeading(choicePending0);\n");
+            sb.append("            result = null;\n");
+            emitHelperCallChain(sb, rule, defaults, childrenStateName, "            ");
+            sb.append("        }\n");
+        }
+    }
+
+    /**
+     * Phase G: emit dispatcher body as a PEG-order chain of helper calls (no
+     * FIRST-set classification). Each helper is tried in original grammar order.
+     */
+    private void emitChoiceRuleDispatcherPeg(StringBuilder sb,
+                                             Rule rule,
+                                             Expression.Choice choice,
+                                             String childrenStateName) {
+        var entries = new java.util.ArrayList<ChoiceDispatchAnalyzer.AltEntry>();
+        for (int i = 0; i < choice.alternatives()
+                                  .size(); i++ ) {
+            entries.add(new ChoiceDispatchAnalyzer.AltEntry(i,
+                                                            choice.alternatives()
+                                                                  .get(i),
+                                                            null));
+        }
+        emitHelperCallChain(sb, rule, entries, childrenStateName, "        ");
+    }
+
+    /**
+     * Emit a chain of helper calls for the given alternatives. The first call
+     * is unconditional; subsequent calls are guarded by {@code !isSuccess() && !isCutFailure()}.
+     * After every call, cut-failure is converted to regular failure (siblings of THIS choice
+     * are skipped via the guard, but enclosing choices see a regular failure).
+     */
+    private void emitHelperCallChain(StringBuilder sb,
+                                     Rule rule,
+                                     java.util.List<ChoiceDispatchAnalyzer.AltEntry> alts,
+                                     String childrenStateName,
+                                     String pad) {
+        var methodBase = "parse_" + sanitize(rule.name()) + "_alt";
+        for (int k = 0; k < alts.size(); k++ ) {
+            var entry = alts.get(k);
+            int origIndex = entry.originalIndex();
+            if (k == 0) {
+                sb.append(pad)
+                  .append("result = ")
+                  .append(methodBase)
+                  .append(origIndex)
+                  .append("(children, choiceStart0Pos, choiceStart0Line, choiceStart0Column, choicePending0, ")
+                  .append(childrenStateName)
+                  .append(");\n");
+            }else {
+                sb.append(pad)
+                  .append("if (!result.isSuccess() && !result.isCutFailure()) {\n");
+                sb.append(pad)
+                  .append("    result = ")
+                  .append(methodBase)
+                  .append(origIndex)
+                  .append("(children, choiceStart0Pos, choiceStart0Line, choiceStart0Column, choicePending0, ")
+                  .append(childrenStateName)
+                  .append(");\n");
+                sb.append(pad)
+                  .append("}\n");
+            }
+        }
+        // Cut-failure conversion: cut commits to choice-failure; siblings won't be tried (guarded
+        // above), but enclosing constructs see a regular failure.
+        sb.append(pad)
+          .append("if (result != null && result.isCutFailure()) result = result.asRegularFailure();\n");
+    }
+
+    /**
+     * Emit a single per-alternative helper method. The helper takes {@code children}
+     * (passed by reference from the caller's local list) plus the choice-entry
+     * snapshot state. On entry it restores children to the snapshot (clearing any
+     * residue from a previously-failed alt). It then runs the alternative's body
+     * via {@link #generateCstExpressionCode}. On success it returns the result.
+     * On regular failure it restores pos/line/col + pendingLeading and returns
+     * the failure. On cut-failure it returns the cut-failure unchanged for the
+     * dispatcher to convert.
+     */
+    private void emitCstChoiceAltHelper(StringBuilder sb, Rule rule, Expression alt, int origIndex) {
+        var methodName = "parse_" + sanitize(rule.name()) + "_alt" + origIndex;
+        var altVar = "alt0_" + origIndex;
+        var ruleIdConst = toConstantName(rule.name());
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("(ArrayList<CstNode> children, int choiceStartPos, int choiceStartLine, int choiceStartColumn, int choicePending, ");
+        if (config.markResetChildren()) {
+            sb.append("int childrenState");
+        }else {
+            sb.append("ArrayList<CstNode> childrenState");
+        }
+        sb.append(") {\n");
+        // Helper-local __ruleName: scoped to this method body so emission templates
+        // that reference __ruleName (TokenBoundary, ZeroOrMore, OneOrMore, Repetition
+        // wrap-as-NonTerminal sites) compile after extraction from the parent rule.
+        sb.append("        var __ruleName = ")
+          .append(ruleIdConst)
+          .append(";\n");
+        // Restore children to snapshot at entry (clears residue from previous failed alt).
+        if (config.markResetChildren()) {
+            sb.append("        if (children.size() > childrenState) {\n");
+            sb.append("            children.subList(childrenState, children.size()).clear();\n");
+            sb.append("        }\n");
+        }else {
+            sb.append("        children.clear();\n");
+            sb.append("        children.addAll(childrenState);\n");
+        }
+        // Run alternative body. Counter is local to this helper (restarting at 0
+        // is safe — variable names are scoped to this method).
+        var counter = new int[]{0};
+        // The helper-local result variable name must match what generateCstExpressionCode
+        // emits for the alt expression. We use the standard pattern alt0_<origIndex>.
+        generateCstExpressionCode(sb, alt, altVar, 2, true, counter, false);
+        sb.append("        if (")
+          .append(altVar)
+          .append(".isSuccess()) {\n");
+        sb.append("            return ")
+          .append(altVar)
+          .append(";\n");
+        sb.append("        }\n");
+        // Cut-failure: return as-is so dispatcher can convert.
+        sb.append("        if (")
+          .append(altVar)
+          .append(".isCutFailure()) {\n");
+        sb.append("            return ")
+          .append(altVar)
+          .append(";\n");
+        sb.append("        }\n");
+        // Regular failure: restore pos/line/col + pendingLeading; return failure.
+        sb.append("        this.pos = choiceStartPos;\n");
+        sb.append("        this.line = choiceStartLine;\n");
+        sb.append("        this.column = choiceStartColumn;\n");
+        sb.append("        restorePendingLeading(choicePending);\n");
+        sb.append("        return ")
+          .append(altVar)
+          .append(";\n");
+        sb.append("    }\n\n");
+    }
+
+    // ============================================================
+    // Phase G2: Sequence chunking
+    // ============================================================
+    /**
+     * Phase G2: Emit a CST {@link Expression.Sequence} body, splitting into
+     * per-chunk helper methods when the sequence is large enough to benefit.
+     *
+     * <p>Chunking criteria (see {@link #shouldChunkSequence(Expression.Sequence)}):
+     * <ul>
+     *   <li>Element count exceeds {@link #SEQ_CHUNK_ELEMENT_THRESHOLD}, OR</li>
+     *   <li>Estimated emitted-byte weight exceeds {@link #SEQ_CHUNK_BYTE_THRESHOLD}.</li>
+     * </ul>
+     *
+     * <p>When chunking, the dispatcher emitted in-place captures sequence-entry
+     * state (pos/line/column/pending/children-snapshot) and calls each chunk
+     * helper in order. Each helper takes that state as parameters; on element
+     * failure within the helper, the helper performs the same per-element
+     * rollback as the inline emission and returns the failure result.
+     *
+     * <p>PEG semantics:
+     * <ul>
+     *   <li>Sequence atomicity — failure of any element rolls back to sequence
+     *       entry. Each chunk's element-failure handler restores location +
+     *       pending + children to the sequence-start snapshot.</li>
+     *   <li>Cut propagation — once an element succeeds that is a {@code Cut},
+     *       subsequent failures convert to cut-failure. Cut state is propagated
+     *       across chunks <i>statically</i>: chunk N's emission knows whether
+     *       any prior-chunk element was a cut, and within the chunk a runtime
+     *       boolean tracks cuts that occur in-chunk. The chunk's failure-handler
+     *       decision uses {@code priorChunkCut || localCut} per element.</li>
+     * </ul>
+     *
+     * <p>When chunking is not triggered, this method emits the original byte-
+     * identical inline body so the existing parity tests stay green.
+     */
+    private void emitCstSequenceMaybeChunked(StringBuilder sb,
+                                             Expression.Sequence seq,
+                                             String resultVar,
+                                             int indent,
+                                             boolean addToChildren,
+                                             int[] counter,
+                                             boolean inWhitespaceRule,
+                                             int id) {
+        if (pendingChunkHelpers != null && currentRuleName != null && shouldChunkSequence(seq)) {
+            emitCstSequenceChunkedDispatcher(sb, seq, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
+            return;
+        }
+        emitCstSequenceInline(sb, seq, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
+    }
+
+    /**
+     * Phase G2: chunking heuristic. Triggered when either the element count
+     * exceeds {@link #SEQ_CHUNK_ELEMENT_THRESHOLD} or the estimated emitted-byte
+     * weight exceeds {@link #SEQ_CHUNK_BYTE_THRESHOLD}. The byte estimate is
+     * a rough proxy summed via {@link #estimateExpressionWeight(Expression)};
+     * it doesn't need to be exact — it's a pre-filter to keep small Sequences
+     * byte-identical to the pre-G2 emission.
+     */
+    private static boolean shouldChunkSequence(Expression.Sequence seq) {
+        var elements = seq.elements();
+        if (elements.size() > SEQ_CHUNK_ELEMENT_THRESHOLD) {
+            return true;
+        }
+        int weight = 0;
+        for (var elem : elements) {
+            weight += estimateExpressionWeight(elem);
+            if (weight > SEQ_CHUNK_BYTE_THRESHOLD) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Phase G2: pack elements into chunks. Each chunk takes elements until either
+     * the cumulative weight exceeds {@link #SEQ_CHUNK_MAX_WEIGHT} or the count
+     * reaches {@link #SEQ_CHUNK_MAX_ELEMENTS}. A single heavy element (weight ≥
+     * {@code SEQ_CHUNK_MAX_WEIGHT}) gets its own chunk. Returns a list of
+     * {@code [startInclusive, endExclusive]} pairs.
+     */
+    private static java.util.List<int[] > computeChunkBounds(java.util.List<Expression> elements) {
+        var bounds = new java.util.ArrayList<int[] >();
+        int n = elements.size();
+        int i = 0;
+        while (i < n) {
+            int start = i;
+            int weight = 0;
+            int count = 0;
+            while (i < n && count < SEQ_CHUNK_MAX_ELEMENTS) {
+                int w = estimateExpressionWeight(elements.get(i));
+                // Heavy element: emit it as its own chunk (or end the current chunk
+                // here if we already have elements buffered).
+                if (count > 0 && weight + w > SEQ_CHUNK_MAX_WEIGHT) {
+                    break;
+                }
+                weight += w;
+                count++ ;
+                i++ ;
+                if (weight > SEQ_CHUNK_MAX_WEIGHT) {
+                    break;
+                }
+            }
+            bounds.add(new int[]{start, i});
+        }
+        return bounds;
+    }
+
+    /**
+     * Phase G2: rough byte-weight estimate of an Expression's emitted code.
+     * Tuned against observed emissions; the absolute scale doesn't matter — only
+     * the ranking does (so the pre-filter doesn't chunk trivially small sequences).
+     */
+    private static int estimateExpressionWeight(Expression expr) {
+        return switch (expr) {
+            case Expression.Literal lit -> 80 + lit.text()
+                                                  .length() * 2;
+            case Expression.CharClass ignored -> 120;
+            case Expression.Any ignored -> 60;
+            case Expression.Reference ignored -> 60;
+            case Expression.Cut ignored -> 20;
+            case Expression.BackReference ignored -> 80;
+            case Expression.Dictionary ignored -> 200;
+            case Expression.TokenBoundary tb -> 200 + estimateExpressionWeight(tb.expression());
+            case Expression.Ignore ig -> 60 + estimateExpressionWeight(ig.expression());
+            case Expression.Capture cap -> 80 + estimateExpressionWeight(cap.expression());
+            case Expression.CaptureScope cs -> 80 + estimateExpressionWeight(cs.expression());
+            case Expression.Group grp -> estimateExpressionWeight(grp.expression());
+            case Expression.And and -> 200 + estimateExpressionWeight(and.expression());
+            case Expression.Not not -> 200 + estimateExpressionWeight(not.expression());
+            case Expression.Optional opt -> 250 + estimateExpressionWeight(opt.expression());
+            case Expression.ZeroOrMore zom -> 350 + estimateExpressionWeight(zom.expression());
+            case Expression.OneOrMore oom -> 400 + estimateExpressionWeight(oom.expression());
+            case Expression.Repetition rep -> 400 + estimateExpressionWeight(rep.expression());
+            case Expression.Sequence sub -> {
+                int w = 100;
+                for (var e : sub.elements()) {
+                    w += 200 + estimateExpressionWeight(e);
+                }
+                yield w;
+            }
+            case Expression.Choice choice -> {
+                int w = 200;
+                for (var alt : choice.alternatives()) {
+                    w += 250 + estimateExpressionWeight(alt);
+                }
+                yield w;
+            }
+        };
+    }
+
+    /**
+     * Phase G2: emit the dispatcher portion of a chunked Sequence (in-place,
+     * inside the calling method's body). The dispatcher captures sequence-entry
+     * state, then calls each chunk helper sequentially, short-circuiting on
+     * non-success. Helper method bodies are appended to {@link #pendingChunkHelpers}
+     * for later flush at class scope.
+     */
+    private void emitCstSequenceChunkedDispatcher(StringBuilder sb,
+                                                  Expression.Sequence seq,
+                                                  String resultVar,
+                                                  int indent,
+                                                  boolean addToChildren,
+                                                  int[] counter,
+                                                  boolean inWhitespaceRule,
+                                                  int id) {
+        var pad = "    ".repeat(indent);
+        var seqStartPos = "seqStartPos" + id;
+        var seqStartLine = "seqStartLine" + id;
+        var seqStartColumn = "seqStartColumn" + id;
+        var seqPending = "seqPending" + id;
+        var seqChildren = "seqChildren" + id;
+        var elements = seq.elements();
+        int seqOrdinal = currentRuleSequenceCounter++ ;
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(null, \"\");\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartPos)
+          .append(" = pos;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartLine)
+          .append(" = line;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartColumn)
+          .append(" = column;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqPending)
+          .append(" = savePendingLeading();\n");
+        if (addToChildren) {
+            sb.append(pad)
+              .append("var ")
+              .append(seqChildren)
+              .append(" = new ArrayList<>(children);\n");
+        }
+        // Walk elements grouped into chunks. Each chunk packs elements until either
+        // SEQ_CHUNK_MAX_ELEMENTS is reached OR cumulative weight exceeds
+        // SEQ_CHUNK_MAX_WEIGHT (whichever comes first). A single very heavy element
+        // always gets its own chunk (so it doesn't drag in additional elements).
+        var chunkBounds = computeChunkBounds(elements);
+        boolean priorCut = false;
+        int chunkIndex = 0;
+        for (int chunkIdx = 0; chunkIdx < chunkBounds.size(); chunkIdx++ ) {
+            int start = chunkBounds.get(chunkIdx) [0];
+            int end = chunkBounds.get(chunkIdx) [1];
+            // Emit dispatcher call to this chunk.
+            String chunkMethod = "parse_" + currentRuleName + "_seq" + seqOrdinal + "_chunk" + chunkIndex;
+            if (chunkIndex == 0) {
+                sb.append(pad)
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(chunkMethod)
+                  .append("(");
+            }else {
+                sb.append(pad)
+                  .append("if (")
+                  .append(resultVar)
+                  .append(".isSuccess()) ")
+                  .append(resultVar)
+                  .append(" = ")
+                  .append(chunkMethod)
+                  .append("(");
+            }
+            // Args: children (if addToChildren), seqStartPos, seqStartLine, seqStartColumn, seqPending,
+            //       seqChildren (if addToChildren).
+            if (addToChildren) {
+                sb.append("children, ");
+            }
+            sb.append(seqStartPos)
+              .append(", ")
+              .append(seqStartLine)
+              .append(", ")
+              .append(seqStartColumn)
+              .append(", ")
+              .append(seqPending);
+            if (addToChildren) {
+                sb.append(", ")
+                  .append(seqChildren);
+            }
+            sb.append(");\n");
+            // Emit the chunk helper method (deferred to pendingChunkHelpers — class-scope sibling).
+            emitCstSequenceChunkHelper(seq,
+                                       elements,
+                                       start,
+                                       end,
+                                       seqOrdinal,
+                                       chunkIndex,
+                                       priorCut,
+                                       addToChildren,
+                                       inWhitespaceRule);
+            // Update priorCut for next chunk (any Cut element in this chunk implies cut is set
+            // statically at next-chunk entry).
+            for (int i = start; i < end; i++ ) {
+                if (elements.get(i) instanceof Expression.Cut) {
+                    priorCut = true;
+                    break;
+                }
+            }
+            chunkIndex++ ;
+        }
+        // After all chunks: success epilogue (matches inline emission's trailing `if isSuccess` block).
+        sb.append(pad)
+          .append("if (")
+          .append(resultVar)
+          .append(".isSuccess()) {\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(null, substring(")
+          .append(seqStartPos)
+          .append(", pos));\n");
+        sb.append(pad)
+          .append("}\n");
+    }
+
+    /**
+     * Phase G2: append a chunk helper method body to {@link #pendingChunkHelpers}.
+     * The helper takes sequence-entry state and runs its element subset with the
+     * same per-element rollback shape as the inline emission. Static {@code priorCut}
+     * encodes whether any earlier-chunk element was a Cut (so failures in this chunk
+     * convert to cut-failures even before any in-chunk Cut runs).
+     */
+    private void emitCstSequenceChunkHelper(Expression.Sequence seq,
+                                            java.util.List<Expression> elements,
+                                            int start,
+                                            int end,
+                                            int seqOrdinal,
+                                            int chunkIndex,
+                                            boolean priorCut,
+                                            boolean addToChildren,
+                                            boolean inWhitespaceRule) {
+        // Each chunk helper writes to its OWN StringBuilder so nested chunked Sequences
+        // (chunk helper containing a chunked sub-Sequence) don't have their bodies
+        // interleaved. The list is flushed in insertion order; helpers appear as
+        // sibling class-level methods.
+        var sb = new StringBuilder();
+        pendingChunkHelpers.add(sb);
+        String methodName = "parse_" + currentRuleName + "_seq" + seqOrdinal + "_chunk" + chunkIndex;
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("(");
+        if (addToChildren) {
+            sb.append("ArrayList<CstNode> children, ");
+        }
+        sb.append("int seqStartPos, int seqStartLine, int seqStartColumn, int seqPending");
+        if (addToChildren) {
+            sb.append(", ArrayList<CstNode> seqChildren");
+        }
+        sb.append(") {\n");
+        // Helper-local __ruleName so inner emissions referencing it (TokenBoundary, ZeroOrMore
+        // wrap-as-NonTerminal sites) compile. Mirrors Phase G alt helper convention.
+        sb.append("        var __ruleName = ")
+          .append(currentRuleIdConst)
+          .append(";\n");
+        // Helper-local sequence result variable. Initialized to success so the per-element
+        // `if (result.isSuccess())` short-circuit works correctly within the chunk.
+        sb.append("        CstParseResult result = CstParseResult.successNoLoc(null, \"\");\n");
+        // In-chunk cut tracking: starts at the static priorCut value, may flip to true
+        // mid-chunk when a Cut element is encountered.
+        sb.append("        boolean cut = ")
+          .append(priorCut)
+          .append(";\n");
+        // Helper-local counter for sub-emission unique-name suffixes; restarting at 0 is safe
+        // since the helper's variable names are scoped to this method.
+        var counter = new int[]{0};
+        int indent = 2;
+        var pad = "    ".repeat(indent);
+        for (int i = start; i < end; i++ ) {
+            var elem = elements.get(i);
+            sb.append(pad)
+              .append("if (result.isSuccess()) {\n");
+            if (!inWhitespaceRule && !isPredicate(elem)) {
+                sb.append(pad)
+                  .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+            }
+            // Element-local result variable name. The leading `chunkIdx_` prefix is just
+            // a unique-name disambiguator across elements within the chunk.
+            int globalElemIdx = i;
+            var elemVar = "elem_" + globalElemIdx;
+            generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
+            // Cut-failure propagation.
+            sb.append(pad)
+              .append("    if (")
+              .append(elemVar)
+              .append(".isCutFailure()) {\n");
+            sb.append(pad)
+              .append("        restoreLocationRaw(seqStartPos, seqStartLine, seqStartColumn);\n");
+            sb.append(pad)
+              .append("        restorePendingLeading(seqPending);\n");
+            if (addToChildren) {
+                sb.append(pad)
+                  .append("        children.clear();\n");
+                sb.append(pad)
+                  .append("        children.addAll(seqChildren);\n");
+            }
+            sb.append(pad)
+              .append("        result = ")
+              .append(elemVar)
+              .append(";\n");
+            sb.append(pad)
+              .append("    } else if (")
+              .append(elemVar)
+              .append(".isFailure()) {\n");
+            sb.append(pad)
+              .append("        restoreLocationRaw(seqStartPos, seqStartLine, seqStartColumn);\n");
+            sb.append(pad)
+              .append("        restorePendingLeading(seqPending);\n");
+            if (addToChildren) {
+                sb.append(pad)
+                  .append("        children.clear();\n");
+                sb.append(pad)
+                  .append("        children.addAll(seqChildren);\n");
+            }
+            sb.append(pad)
+              .append("        result = cut ? ")
+              .append(elemVar)
+              .append(".asCutFailure() : ")
+              .append(elemVar)
+              .append(";\n");
+            sb.append(pad)
+              .append("    }\n");
+            sb.append(pad)
+              .append("}\n");
+            if (elem instanceof Expression.Cut) {
+                sb.append(pad)
+                  .append("cut = true;\n");
+            }
+        }
+        sb.append("        return result;\n");
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * Phase G2: byte-identical inline CST Sequence emission (the original code,
+     * preserved for small sequences so existing parity tests stay green).
+     */
+    private void emitCstSequenceInline(StringBuilder sb,
+                                       Expression.Sequence seq,
+                                       String resultVar,
+                                       int indent,
+                                       boolean addToChildren,
+                                       int[] counter,
+                                       boolean inWhitespaceRule,
+                                       int id) {
+        var pad = "    ".repeat(indent);
+        var seqStartPos = "seqStartPos" + id;
+        var seqStartLine = "seqStartLine" + id;
+        var seqStartColumn = "seqStartColumn" + id;
+        var seqPending = "seqPending" + id;
+        var seqChildren = "seqChildren" + id;
+        var cutVar = "cut" + id;
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(null, \"\");\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartPos)
+          .append(" = pos;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartLine)
+          .append(" = line;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqStartColumn)
+          .append(" = column;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(seqPending)
+          .append(" = savePendingLeading();\n");
+        if (addToChildren) {
+            sb.append(pad)
+              .append("var ")
+              .append(seqChildren)
+              .append(" = new ArrayList<>(children);\n");
+        }
+        sb.append(pad)
+          .append("boolean ")
+          .append(cutVar)
+          .append(" = false;\n");
+        int i = 0;
+        for (var elem : seq.elements()) {
+            sb.append(pad)
+              .append("if (")
+              .append(resultVar)
+              .append(".isSuccess()) {\n");
+            if (!inWhitespaceRule && !isPredicate(elem)) {
+                sb.append(pad)
+                  .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+            }
+            var elemVar = "elem" + id + "_" + i;
+            generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
+            sb.append(pad)
+              .append("    if (")
+              .append(elemVar)
+              .append(".isCutFailure()) {\n");
+            sb.append(pad)
+              .append("        restoreLocationRaw(")
+              .append(seqStartPos)
+              .append(", ")
+              .append(seqStartLine)
+              .append(", ")
+              .append(seqStartColumn)
+              .append(");\n");
+            sb.append(pad)
+              .append("        restorePendingLeading(")
+              .append(seqPending)
+              .append(");\n");
+            if (addToChildren) {
+                sb.append(pad)
+                  .append("        children.clear();\n");
+                sb.append(pad)
+                  .append("        children.addAll(")
+                  .append(seqChildren)
+                  .append(");\n");
+            }
+            sb.append(pad)
+              .append("        ")
+              .append(resultVar)
+              .append(" = ")
+              .append(elemVar)
+              .append(";\n");
+            sb.append(pad)
+              .append("    } else if (")
+              .append(elemVar)
+              .append(".isFailure()) {\n");
+            sb.append(pad)
+              .append("        restoreLocationRaw(")
+              .append(seqStartPos)
+              .append(", ")
+              .append(seqStartLine)
+              .append(", ")
+              .append(seqStartColumn)
+              .append(");\n");
+            sb.append(pad)
+              .append("        restorePendingLeading(")
+              .append(seqPending)
+              .append(");\n");
+            if (addToChildren) {
+                sb.append(pad)
+                  .append("        children.clear();\n");
+                sb.append(pad)
+                  .append("        children.addAll(")
+                  .append(seqChildren)
+                  .append(");\n");
+            }
+            sb.append(pad)
+              .append("        ")
+              .append(resultVar)
+              .append(" = ")
+              .append(cutVar)
+              .append(" ? ")
+              .append(elemVar)
+              .append(".asCutFailure() : ")
+              .append(elemVar)
+              .append(";\n");
+            sb.append(pad)
+              .append("    }\n");
+            sb.append(pad)
+              .append("}\n");
+            if (elem instanceof Expression.Cut) {
+                sb.append(pad)
+                  .append(cutVar)
+                  .append(" = true;\n");
+            }
+            i++ ;
+        }
+        sb.append(pad)
+          .append("if (")
+          .append(resultVar)
+          .append(".isSuccess()) {\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(null, substring(")
+          .append(seqStartPos)
+          .append(", pos));\n");
+        sb.append(pad)
+          .append("}\n");
+    }
+
+    // ============================================================
+    // Phase H: nested-Choice extraction
+    // ============================================================
+    /**
+     * Phase H: emit a CST {@link Expression.Choice} body, optionally extracting
+     * heavy nested Choices into per-rule helper methods. When the Choice exceeds
+     * either the alt-count or estimated-byte threshold, the inline emission is
+     * deferred to a sibling helper {@code parse_<rule>_choice<N>} and the call
+     * site emits a thin "var resultVar = helper(children)" call.
+     *
+     * <p>Helper signature contract: takes the ambient {@code children} list
+     * (when {@code addToChildren} is true) so any in-Choice additions survive
+     * across the helper boundary. Returns the result of the inline Choice
+     * emission, including the "all alts failed" epilogue. Caller binds it to
+     * {@code resultVar} unchanged.
+     *
+     * <p>PEG semantics preserved — the helper body is the SAME inline emission
+     * that {@link #emitCstChoiceInline} would produce; only its lexical home
+     * moves. Cut-failure conversion, whitespace handling, and the "one of
+     * alternatives" failure all happen identically.
+     *
+     * <p>When extraction is not triggered (small Choice OR no per-rule chunk
+     * helper context — e.g. inside an ad-hoc emit path that didn't set up
+     * {@link #pendingChunkHelpers}), the inline emission runs directly.
+     */
+    private void emitCstChoiceMaybeExtracted(StringBuilder sb,
+                                             Expression.Choice choice,
+                                             String resultVar,
+                                             int indent,
+                                             boolean addToChildren,
+                                             int[] counter,
+                                             boolean inWhitespaceRule,
+                                             int id) {
+        if (pendingChunkHelpers != null && currentRuleName != null && shouldExtractNestedChoice(choice)) {
+            emitCstChoiceExtractedDispatcher(sb, choice, resultVar, indent, addToChildren, inWhitespaceRule);
+            return;
+        }
+        emitCstChoiceInline(sb, choice, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
+    }
+
+    /**
+     * Phase H: extraction heuristic. Trigger when the Choice has at least
+     * {@link #NESTED_CHOICE_ALT_THRESHOLD} alternatives OR its estimated emitted-byte
+     * weight exceeds {@link #NESTED_CHOICE_BYTE_THRESHOLD}. Pre-filter; the byte
+     * estimate is rough and only needs to rank correctly relative to small-Choice
+     * cases that should remain inline.
+     */
+    private static boolean shouldExtractNestedChoice(Expression.Choice choice) {
+        if (choice.alternatives()
+                  .size() >= NESTED_CHOICE_ALT_THRESHOLD) {
+            return true;
+        }
+        return estimateExpressionWeight(choice) >= NESTED_CHOICE_BYTE_THRESHOLD;
+    }
+
+    /**
+     * Phase H: emit the dispatcher portion of an extracted Choice (in-place,
+     * inside the calling method's body). The dispatcher emits a single helper
+     * call; the helper body is appended to {@link #pendingChunkHelpers} for
+     * later flush at class scope.
+     */
+    private void emitCstChoiceExtractedDispatcher(StringBuilder sb,
+                                                  Expression.Choice choice,
+                                                  String resultVar,
+                                                  int indent,
+                                                  boolean addToChildren,
+                                                  boolean inWhitespaceRule) {
+        var pad = "    ".repeat(indent);
+        int choiceOrdinal = currentRuleChoiceCounter++ ;
+        String helperName = "parse_" + currentRuleName + "_choice" + choiceOrdinal;
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(" = ")
+          .append(helperName)
+          .append("(");
+        if (addToChildren) {
+            sb.append("children");
+        }
+        sb.append(");\n");
+        emitCstChoiceExtractedHelper(choice, choiceOrdinal, addToChildren, inWhitespaceRule);
+    }
+
+    /**
+     * Phase H: append a Choice helper method body to {@link #pendingChunkHelpers}.
+     * The helper takes {@code children} (when applicable), declares helper-local
+     * {@code __ruleName} and a fresh emission counter starting at 0, then runs the
+     * standard inline Choice emission against an internal result variable, and
+     * returns it. Mirrors the chunk-helper convention from Phase G2 so nested
+     * Choice extractions inside chunk helpers (or vice-versa) compose correctly.
+     */
+    private void emitCstChoiceExtractedHelper(Expression.Choice choice,
+                                              int choiceOrdinal,
+                                              boolean addToChildren,
+                                              boolean inWhitespaceRule) {
+        // Each Choice helper writes to its OWN StringBuilder so nested extractions
+        // (helper containing another extracted Choice or chunked Sequence) don't
+        // interleave bodies. The list is flushed in insertion order; helpers appear
+        // as sibling class-level methods.
+        var sb = new StringBuilder();
+        pendingChunkHelpers.add(sb);
+        String methodName = "parse_" + currentRuleName + "_choice" + choiceOrdinal;
+        sb.append("    private CstParseResult ")
+          .append(methodName)
+          .append("(");
+        if (addToChildren) {
+            sb.append("ArrayList<CstNode> children");
+        }
+        sb.append(") {\n");
+        // Helper-local __ruleName so inner emissions referencing it (TokenBoundary,
+        // ZeroOrMore wrap-as-NonTerminal sites) compile after extraction. Mirrors
+        // Phase G alt-helper and Phase G2 chunk-helper conventions.
+        sb.append("        var __ruleName = ")
+          .append(currentRuleIdConst)
+          .append(";\n");
+        // Run the standard inline Choice emission. Counter is local to this helper
+        // (restarting at 0 is safe — variable names are scoped to this method body).
+        var counter = new int[]{0};
+        int innerId = counter[0]++ ;
+        emitCstChoiceInline(sb, choice, "result", 2, addToChildren, counter, inWhitespaceRule, innerId);
+        sb.append("        return result;\n");
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * Phase H: byte-identical inline CST Choice emission (the original code,
+     * preserved so existing parity tests stay green when extraction is not
+     * triggered, and reused by the helper body when extraction IS triggered).
+     */
+    private void emitCstChoiceInline(StringBuilder sb,
+                                     Expression.Choice choice,
+                                     String resultVar,
+                                     int indent,
+                                     boolean addToChildren,
+                                     int[] counter,
+                                     boolean inWhitespaceRule,
+                                     int id) {
+        var pad = "    ".repeat(indent);
+        // Phase 1.7 (D): inline int captures — Choice restore is hot under
+        // backtracking. The base name is reused across helpers; suffixes
+        // Pos/Line/Column denote the 3 inline ints.
+        var choiceStart = "choiceStart" + id;
+        // §7.2: the child-state variable is either a pre-cloned ArrayList
+        // (legacy path, flag off) or an int size mark (optimized path, flag on).
+        // Emitted identifier differs so byte-identical output is preserved when
+        // the flag is off.
+        var childrenState = config.markResetChildren()
+                            ? "childrenMark" + id
+                            : "savedChildren" + id;
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(" = null;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(choiceStart)
+          .append("Pos = pos;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(choiceStart)
+          .append("Line = line;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(choiceStart)
+          .append("Column = column;\n");
+        // Snapshot pending-leading so failed alternatives can be rolled
+        // back — captured trivia inside one alt must not leak forward
+        // into sibling alternatives.
+        sb.append(pad)
+          .append("int choicePending")
+          .append(id)
+          .append(" = savePendingLeading();\n");
+        // Don't skip whitespace here - let alternatives capture trivia themselves
+        emitChildrenSave(sb, pad, childrenState, addToChildren);
+        // Phase 1F: try extended FIRST-set classification first (covers Reference,
+        // CharClass, mixed choices). Falls back to legacy literal-only classifier when
+        // the extended path can't dispatch any alt.
+        var classifiedF = config.choiceDispatch()
+                          ? ChoiceDispatchAnalyzer.classify(choice, firstSets())
+                          : java.util.Optional.<ChoiceDispatchAnalyzer.Classified>empty();
+        if (classifiedF.isPresent()) {
+            var c = classifiedF.get();
+            var buckets = ChoiceDispatchAnalyzer.bucketsForClassified(c);
+            emitCstChoiceDispatchF(sb,
+                                   buckets,
+                                   c.defaults(),
+                                   id,
+                                   indent,
+                                   addToChildren,
+                                   counter,
+                                   inWhitespaceRule,
+                                   resultVar,
+                                   choiceStart,
+                                   childrenState);
+        }else {
+            int i = 0;
+            for (var alt : choice.alternatives()) {
+                emitCstChoiceAlt(sb,
+                                 alt,
+                                 id,
+                                 i,
+                                 indent,
+                                 addToChildren,
+                                 counter,
+                                 inWhitespaceRule,
+                                 resultVar,
+                                 choiceStart,
+                                 childrenState,
+                                 pad);
+                i++ ;
+            }
+            for (int j = 0; j < choice.alternatives()
+                                      .size(); j++ ) {
+                sb.append(pad)
+                  .append("}\n");
+            }
+        }
+        sb.append(pad)
+          .append("if (")
+          .append(resultVar)
+          .append(" == null) {\n");
+        emitChildrenRestore(sb, pad + "    ", childrenState, addToChildren);
+        sb.append(pad)
+          .append("    restorePendingLeading(choicePending")
+          .append(id)
+          .append(");\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = CstParseResult.failure(\"one of alternatives\");\n");
+        sb.append(pad)
+          .append("}\n");
     }
 
     private boolean isTokenRule(Expression expr) {
@@ -2912,6 +4546,425 @@ public final class ParserGenerator {
             case Expression.Group grp -> isTokenRule(grp.expression());
             default -> false;
         };
+    }
+
+    // ============================================================
+    // Phase 1.9 (DFA spike) — token fast-path detection & emission.
+    //
+    // When a TokenBoundary wraps a Sequence(CharClass, ZeroOrMore(CharClass))
+    // (with optional Group wrappers), and both classes are pure ASCII range
+    // descriptors (no \\u/\\x escapes outside ASCII, not case-insensitive),
+    // emit a tight inline scanner instead of going through matchCharClassCst.
+    //
+    // Identifier-shaped rules in real grammars (e.g. Java25's
+    //   Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
+    // ) are extremely high-volume; the framework loop costs many cycles per
+    // character (failure cache, trackFailure, advance, build a Terminal node
+    // per character, ZeroOrMore quantifier overhead). This fast-path skips
+    // all of that and emits a plain `while (i < end && isCont(c)) i++;`
+    // ============================================================
+    private static Expression unwrapGroup(Expression e) {
+        while (e instanceof Expression.Group g) {
+            e = g.expression();
+        }
+        return e;
+    }
+
+    private boolean isFastPathTokenBoundary(Expression.TokenBoundary tb) {
+        var inner = unwrapGroup(tb.expression());
+        if (! (inner instanceof Expression.Sequence seq)) {
+            return false;
+        }
+        var elements = seq.elements();
+        if (elements.size() != 2) {
+            return false;
+        }
+        var first = unwrapGroup(elements.get(0));
+        var second = unwrapGroup(elements.get(1));
+        if (! (first instanceof Expression.CharClass startCls)) {
+            return false;
+        }
+        if (! (second instanceof Expression.ZeroOrMore zom)) {
+            return false;
+        }
+        var contInner = unwrapGroup(zom.expression());
+        if (! (contInner instanceof Expression.CharClass contCls)) {
+            return false;
+        }
+        // Conservatively reject case-insensitive and negated classes — the slow
+        // path's matchesPattern handles them, but our gen-time decoder is
+        // ASCII/range-only.
+        if (startCls.caseInsensitive() || contCls.caseInsensitive()) {
+            return false;
+        }
+        if (startCls.negated() || contCls.negated()) {
+            return false;
+        }
+        return decodeAsciiCharClass(startCls.pattern()) != null && decodeAsciiCharClass(contCls.pattern()) != null;
+    }
+
+    /**
+     * Decode a CharClass pattern (the raw text between [ and ]) into a list of
+     * inclusive ASCII ranges. Returns null when the pattern uses any feature
+     * the fast path doesn't handle (non-ASCII chars, \\u/\\x escapes that
+     * resolve outside ASCII).
+     *
+     * <p>Mirrors the runtime {@code matchesPattern} parsing rules: {@code \\}
+     * escapes ({@code n,r,t,\\,],-}), single chars, and {@code c1-c2} ranges.
+     * Non-ASCII (>= 128) characters and outside-ASCII unicode/hex escapes
+     * disqualify the pattern.
+     */
+    /** Inclusive ASCII range used by the fast-path char-class decoder. */
+    private record AsciiRange(int lo, int hi) {}
+
+    private java.util.List<AsciiRange> decodeAsciiCharClass(String pattern) {
+        var ranges = new java.util.ArrayList<AsciiRange>();
+        int i = 0;
+        int len = pattern.length();
+        while (i < len) {
+            int decodedStart;
+            int consumed;
+            int next = decodePatternChar(pattern, i, len);
+            if (next < 0) {
+                return null;
+            }
+            decodedStart = next & 0xFF;
+            consumed = next>>> 8;
+            if (decodedStart > 127) {
+                return null;
+            }
+            int rangeMid = i + consumed;
+            if (rangeMid < len && pattern.charAt(rangeMid) == '-' && rangeMid + 1 < len) {
+                int next2 = decodePatternChar(pattern, rangeMid + 1, len);
+                if (next2 < 0) {
+                    return null;
+                }
+                int decodedEnd = next2 & 0xFF;
+                int endConsumed = next2>>> 8;
+                if (decodedEnd > 127) {
+                    return null;
+                }
+                ranges.add(new AsciiRange(decodedStart, decodedEnd));
+                i = rangeMid + 1 + endConsumed;
+            }else {
+                ranges.add(new AsciiRange(decodedStart, decodedStart));
+                i = rangeMid;
+            }
+        }
+        if (ranges.isEmpty()) {
+            return null;
+        }
+        return ranges;
+    }
+
+    /**
+     * Decode a single character from a CharClass pattern at offset {@code i}.
+     * Returns a packed int: low byte = decoded char value (0-127 for ASCII,
+     * else the caller should reject), high bits = consumed length. Returns
+     * a negative value to signal failure (malformed escape, non-ASCII unicode
+     * escape).
+     */
+    private int decodePatternChar(String pattern, int i, int len) {
+        char c = pattern.charAt(i);
+        if (c != '\\' || i + 1 >= len) {
+            return (c & 0xFF) | (1<< 8);
+        }
+        char esc = pattern.charAt(i + 1);
+        return switch (esc) {
+            case'n' -> ('\n' & 0xFF) | (2<< 8);
+            case'r' -> ('\r' & 0xFF) | (2<< 8);
+            case't' -> ('\t' & 0xFF) | (2<< 8);
+            case'\\' -> ('\\' & 0xFF) | (2<< 8);
+            case']' -> (']' & 0xFF) | (2<< 8);
+            case'-' -> ('-' & 0xFF) | (2<< 8);
+            case'x' -> decodeHexEscape(pattern, i + 2, 2, len, 4);
+            case'u' -> decodeHexEscape(pattern, i + 2, 4, len, 6);
+            default -> (esc & 0xFF) | (2<< 8);
+        };
+    }
+
+    private int decodeHexEscape(String pattern, int hexStart, int hexDigits, int len, int totalConsumed) {
+        if (hexStart + hexDigits > len) {
+            return - 1;
+        }
+        try{
+            int value = Integer.parseInt(pattern.substring(hexStart, hexStart + hexDigits), 16);
+            if (value < 0 || value > 255) {
+                return - 1;
+            }
+            return (value & 0xFF) | (totalConsumed<< 8);
+        } catch (NumberFormatException nfe) {
+            return - 1;
+        }
+    }
+
+    /**
+     * Build a Java boolean expression that tests whether {@code varName} (a
+     * char) is in the supplied ASCII range set. Single-element ranges become
+     * {@code v == 'x'}; multi-element ranges become {@code v >= 'a' && v <= 'z'}.
+     */
+    private String charClassExpr(String varName, java.util.List<AsciiRange> ranges) {
+        var sb = new StringBuilder();
+        for (int idx = 0; idx < ranges.size(); idx++ ) {
+            if (idx > 0) sb.append(" || ");
+            var r = ranges.get(idx);
+            if (r.lo() == r.hi()) {
+                sb.append("(")
+                  .append(varName)
+                  .append(" == ")
+                  .append(asciiLiteral(r.lo()))
+                  .append(")");
+            }else {
+                sb.append("(")
+                  .append(varName)
+                  .append(" >= ")
+                  .append(asciiLiteral(r.lo()))
+                  .append(" && ")
+                  .append(varName)
+                  .append(" <= ")
+                  .append(asciiLiteral(r.hi()))
+                  .append(")");
+            }
+        }
+        return sb.toString();
+    }
+
+    private String asciiLiteral(int v) {
+        // Always emit numeric for safety (no quoting issues with $, ', etc.).
+        return "(char) " + v;
+    }
+
+    private void emitCstFastPathTokenBoundary(StringBuilder sb,
+                                              Expression.TokenBoundary tb,
+                                              String resultVar,
+                                              int indent,
+                                              boolean addToChildren,
+                                              int id,
+                                              boolean inWhitespaceRule) {
+        var pad = "        ".substring(0, Math.min(8, indent * 4)) + (indent > 2
+                                                                      ? " ".repeat((indent - 2) * 4)
+                                                                      : "");
+        // Use the canonical 4-space indent matching neighbouring emissions.
+        pad = " ".repeat(indent * 4);
+        var inner = unwrapGroup(tb.expression());
+        var seq = (Expression.Sequence) inner;
+        var startCls = (Expression.CharClass) unwrapGroup(seq.elements()
+                                                             .get(0));
+        var contCls = (Expression.CharClass) unwrapGroup(((Expression.ZeroOrMore) unwrapGroup(seq.elements()
+                                                                                                 .get(1))).expression());
+        var startRanges = decodeAsciiCharClass(startCls.pattern());
+        var contRanges = decodeAsciiCharClass(contCls.pattern());
+        var tbStartPos = "tbStartPos" + id;
+        var tbStartLine = "tbStartLine" + id;
+        var tbStartColumn = "tbStartColumn" + id;
+        var fpEnd = "fpEnd" + id;
+        var fpInput = "fpInput" + id;
+        var fpFirst = "fpFirst" + id;
+        sb.append(pad)
+          .append("int ")
+          .append(tbStartPos)
+          .append(" = pos;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(tbStartLine)
+          .append(" = line;\n");
+        sb.append(pad)
+          .append("int ")
+          .append(tbStartColumn)
+          .append(" = column;\n");
+        sb.append(pad)
+          .append("CstParseResult ")
+          .append(resultVar)
+          .append(";\n");
+        // Bounds + first-char test: the rule body's first CharClass must match,
+        // mirroring matchCharClassCst's isAtEnd / matches semantics. On miss
+        // we set a failure result identical in shape to the slow path's failure
+        // (no trivia/state mutation).
+        sb.append(pad)
+          .append("if (pos >= input.length()) {\n");
+        sb.append(pad)
+          .append("    trackFailure(\"[")
+          .append(escape(startCls.pattern()))
+          .append("]\");\n");
+        sb.append(pad)
+          .append("    ")
+          .append(resultVar)
+          .append(" = CstParseResult.failure(\"character class\");\n");
+        sb.append(pad)
+          .append("} else {\n");
+        sb.append(pad)
+          .append("    String ")
+          .append(fpInput)
+          .append(" = input;\n");
+        sb.append(pad)
+          .append("    char ")
+          .append(fpFirst)
+          .append(" = ")
+          .append(fpInput)
+          .append(".charAt(pos);\n");
+        sb.append(pad)
+          .append("    if (!(")
+          .append(charClassExpr(fpFirst, startRanges))
+          .append(")) {\n");
+        sb.append(pad)
+          .append("        trackFailure(\"[")
+          .append(escape(startCls.pattern()))
+          .append("]\");\n");
+        sb.append(pad)
+          .append("        ")
+          .append(resultVar)
+          .append(" = CstParseResult.failure(\"character class\");\n");
+        sb.append(pad)
+          .append("    } else {\n");
+        // Tight scanner: advance through start char + zero-or-more cont chars.
+        // line/column update mirrors advance(): newline → line++, column=1, else column++.
+        // We update line/column in the loop only if any of the ranges include
+        // '\n' / '\r'; otherwise we can skip the per-char branching. For
+        // Identifier this is the common case.
+        boolean startCanCrLf = rangesContainNewlineOrCr(startRanges);
+        boolean contCanCrLf = rangesContainNewlineOrCr(contRanges);
+        sb.append(pad)
+          .append("        int ")
+          .append(fpEnd)
+          .append(" = pos + 1;\n");
+        sb.append(pad)
+          .append("        int fpLine")
+          .append(id)
+          .append(" = line;\n");
+        sb.append(pad)
+          .append("        int fpCol")
+          .append(id)
+          .append(" = column + 1;\n");
+        if (startCanCrLf) {
+            sb.append(pad)
+              .append("        if (")
+              .append(fpFirst)
+              .append(" == '\\n') { fpLine")
+              .append(id)
+              .append("++; fpCol")
+              .append(id)
+              .append(" = 1; }\n");
+        }
+        sb.append(pad)
+          .append("        int fpLen")
+          .append(id)
+          .append(" = ")
+          .append(fpInput)
+          .append(".length();\n");
+        sb.append(pad)
+          .append("        while (")
+          .append(fpEnd)
+          .append(" < fpLen")
+          .append(id)
+          .append(") {\n");
+        sb.append(pad)
+          .append("            char fpC")
+          .append(id)
+          .append(" = ")
+          .append(fpInput)
+          .append(".charAt(")
+          .append(fpEnd)
+          .append(");\n");
+        sb.append(pad)
+          .append("            if (!(")
+          .append(charClassExpr("fpC" + id, contRanges))
+          .append(")) break;\n");
+        sb.append(pad)
+          .append("            ")
+          .append(fpEnd)
+          .append("++;\n");
+        if (contCanCrLf) {
+            sb.append(pad)
+              .append("            if (fpC")
+              .append(id)
+              .append(" == '\\n') { fpLine")
+              .append(id)
+              .append("++; fpCol")
+              .append(id)
+              .append(" = 1; } else { fpCol")
+              .append(id)
+              .append("++; }\n");
+        }else {
+            sb.append(pad)
+              .append("            fpCol")
+              .append(id)
+              .append("++;\n");
+        }
+        sb.append(pad)
+          .append("        }\n");
+        // Commit position state and build the Token node identical to the
+        // slow-path tbNode shape (id, span, ruleName, text, leading, trailing).
+        sb.append(pad)
+          .append("        pos = ")
+          .append(fpEnd)
+          .append(";\n");
+        sb.append(pad)
+          .append("        line = fpLine")
+          .append(id)
+          .append(";\n");
+        sb.append(pad)
+          .append("        column = fpCol")
+          .append(id)
+          .append(";\n");
+        sb.append(pad)
+          .append("        var tbText")
+          .append(id)
+          .append(" = ")
+          .append(fpInput)
+          .append(".substring(")
+          .append(tbStartPos)
+          .append(", ")
+          .append(fpEnd)
+          .append(");\n");
+        sb.append(pad)
+          .append("        var tbSpan")
+          .append(id)
+          .append(" = new SourceSpan(")
+          .append(tbStartLine)
+          .append(", ")
+          .append(tbStartColumn)
+          .append(", ")
+          .append(tbStartPos)
+          .append(", line, column, pos);\n");
+        var tokenRuleId = inWhitespaceRule
+                          ? "RULE_PEG_TOKEN"
+                          : "__ruleName";
+        sb.append(pad)
+          .append("        var tbNode")
+          .append(id)
+          .append(" = new CstNode.Token(idGen.next(), tbSpan")
+          .append(id)
+          .append(", ")
+          .append(tokenRuleId)
+          .append(", tbText")
+          .append(id)
+          .append(", takePendingLeading(), List.of());\n");
+        if (addToChildren) {
+            sb.append(pad)
+              .append("        children.add(tbNode")
+              .append(id)
+              .append(");\n");
+        }
+        sb.append(pad)
+          .append("        ")
+          .append(resultVar)
+          .append(" = CstParseResult.successNoLoc(tbNode")
+          .append(id)
+          .append(", tbText")
+          .append(id)
+          .append(");\n");
+        sb.append(pad)
+          .append("    }\n");
+        sb.append(pad)
+          .append("}\n");
+    }
+
+    private boolean rangesContainNewlineOrCr(java.util.List<AsciiRange> ranges) {
+        for (var r : ranges) {
+            if (r.lo() <= '\n' && '\n' <= r.hi()) return true;
+            if (r.lo() <= '\r' && '\r' <= r.hi()) return true;
+        }
+        return false;
     }
 
     private boolean isPredicate(Expression expr) {
@@ -3046,11 +5099,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -3072,11 +5129,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -3102,11 +5163,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -3122,11 +5187,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -3144,237 +5213,51 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
             }
             case Expression.Sequence seq -> {
-                var seqStart = "seqStart" + id;
-                var seqPending = "seqPending" + id;
-                var seqChildren = "seqChildren" + id;
-                var cutVar = "cut" + id;
-                sb.append(pad)
-                  .append("CstParseResult ")
-                  .append(resultVar)
-                  .append(" = CstParseResult.success(null, \"\", location());\n");
-                sb.append(pad)
-                  .append("var ")
-                  .append(seqStart)
-                  .append(" = location();\n");
-                // Snapshot pending-leading so any between-element trivia appended
-                // inside this sequence can be rolled back on failure.
-                sb.append(pad)
-                  .append("List<Trivia> ")
-                  .append(seqPending)
-                  .append(" = savePendingLeading();\n");
-                // 0.3.5 (Bug C''): snapshot children so any partial additions by a
-                // failing later element are rolled back along with location/pending.
-                if (addToChildren) {
-                    sb.append(pad)
-                      .append("var ")
-                      .append(seqChildren)
-                      .append(" = new ArrayList<>(children);\n");
-                }
-                sb.append(pad)
-                  .append("boolean ")
-                  .append(cutVar)
-                  .append(" = false;\n");
-                int i = 0;
-                for (var elem : seq.elements()) {
-                    sb.append(pad)
-                      .append("if (")
-                      .append(resultVar)
-                      .append(".isSuccess()) {\n");
-                    // Skip whitespace before non-predicate elements (matching interpreter behavior);
-                    // captured trivia is appended to the pending-leading buffer so the following
-                    // element claims it.
-                    if (!inWhitespaceRule && !isPredicate(elem)) {
-                        sb.append(pad)
-                          .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
-                    }
-                    var elemVar = "elem" + id + "_" + i;
-                    generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
-                    // Check for cut failure propagation first
-                    sb.append(pad)
-                      .append("    if (")
-                      .append(elemVar)
-                      .append(".isCutFailure()) {\n");
-                    sb.append(pad)
-                      .append("        restoreLocation(")
-                      .append(seqStart)
-                      .append(");\n");
-                    sb.append(pad)
-                      .append("        restorePendingLeading(")
-                      .append(seqPending)
-                      .append(");\n");
-                    if (addToChildren) {
-                        sb.append(pad)
-                          .append("        children.clear();\n");
-                        sb.append(pad)
-                          .append("        children.addAll(")
-                          .append(seqChildren)
-                          .append(");\n");
-                    }
-                    sb.append(pad)
-                      .append("        ")
-                      .append(resultVar)
-                      .append(" = ")
-                      .append(elemVar)
-                      .append(";\n");
-                    sb.append(pad)
-                      .append("    } else if (")
-                      .append(elemVar)
-                      .append(".isFailure()) {\n");
-                    sb.append(pad)
-                      .append("        restoreLocation(")
-                      .append(seqStart)
-                      .append(");\n");
-                    sb.append(pad)
-                      .append("        restorePendingLeading(")
-                      .append(seqPending)
-                      .append(");\n");
-                    if (addToChildren) {
-                        sb.append(pad)
-                          .append("        children.clear();\n");
-                        sb.append(pad)
-                          .append("        children.addAll(")
-                          .append(seqChildren)
-                          .append(");\n");
-                    }
-                    sb.append(pad)
-                      .append("        ")
-                      .append(resultVar)
-                      .append(" = ")
-                      .append(cutVar)
-                      .append(" ? ")
-                      .append(elemVar)
-                      .append(".asCutFailure() : ")
-                      .append(elemVar)
-                      .append(";\n");
-                    sb.append(pad)
-                      .append("    }\n");
-                    sb.append(pad)
-                      .append("}\n");
-                    // Track if this element was a cut
-                    if (elem instanceof Expression.Cut) {
-                        sb.append(pad)
-                          .append(cutVar)
-                          .append(" = true;\n");
-                    }
-                    i++ ;
-                }
-                sb.append(pad)
-                  .append("if (")
-                  .append(resultVar)
-                  .append(".isSuccess()) {\n");
-                sb.append(pad)
-                  .append("    ")
-                  .append(resultVar)
-                  .append(" = CstParseResult.success(null, substring(")
-                  .append(seqStart)
-                  .append(".offset(), pos), location());\n");
-                sb.append(pad)
-                  .append("}\n");
+                emitCstSequenceMaybeChunked(sb, seq, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
             }
             case Expression.Choice choice -> {
-                var choiceStart = "choiceStart" + id;
-                // §7.2: the child-state variable is either a pre-cloned ArrayList
-                // (legacy path, flag off) or an int size mark (optimized path, flag on).
-                // Emitted identifier differs so byte-identical output is preserved when
-                // the flag is off.
-                var childrenState = config.markResetChildren()
-                                    ? "childrenMark" + id
-                                    : "savedChildren" + id;
-                sb.append(pad)
-                  .append("CstParseResult ")
-                  .append(resultVar)
-                  .append(" = null;\n");
-                sb.append(pad)
-                  .append("var ")
-                  .append(choiceStart)
-                  .append(" = location();\n");
-                // Snapshot pending-leading so failed alternatives can be rolled
-                // back — captured trivia inside one alt must not leak forward
-                // into sibling alternatives.
-                sb.append(pad)
-                  .append("List<Trivia> choicePending")
-                  .append(id)
-                  .append(" = savePendingLeading();\n");
-                // Don't skip whitespace here - let alternatives capture trivia themselves
-                emitChildrenSave(sb, pad, childrenState, addToChildren);
-                var classified = config.choiceDispatch()
-                                 ? ChoiceDispatchAnalyzer.classify(choice)
-                                 : java.util.Optional.<java.util.List<ChoiceDispatchAnalyzer.AltEntry>>empty();
-                if (classified.isPresent()) {
-                    var grouped = ChoiceDispatchAnalyzer.groupByChar(classified.get());
-                    var buckets = ChoiceDispatchAnalyzer.buckets(grouped);
-                    emitCstChoiceDispatch(sb,
-                                          buckets,
-                                          id,
-                                          indent,
-                                          addToChildren,
-                                          counter,
-                                          inWhitespaceRule,
-                                          resultVar,
-                                          choiceStart,
-                                          childrenState);
-                }else {
-                    int i = 0;
-                    for (var alt : choice.alternatives()) {
-                        emitCstChoiceAlt(sb,
-                                         alt,
-                                         id,
-                                         i,
-                                         indent,
-                                         addToChildren,
-                                         counter,
-                                         inWhitespaceRule,
-                                         resultVar,
-                                         choiceStart,
-                                         childrenState,
-                                         pad);
-                        i++ ;
-                    }
-                    for (int j = 0; j < choice.alternatives()
-                                              .size(); j++ ) {
-                        sb.append(pad)
-                          .append("}\n");
-                    }
-                }
-                sb.append(pad)
-                  .append("if (")
-                  .append(resultVar)
-                  .append(" == null) {\n");
-                emitChildrenRestore(sb, pad + "    ", childrenState, addToChildren);
-                sb.append(pad)
-                  .append("    restorePendingLeading(choicePending")
-                  .append(id)
-                  .append(");\n");
-                sb.append(pad)
-                  .append("    ")
-                  .append(resultVar)
-                  .append(" = CstParseResult.failure(\"one of alternatives\");\n");
-                sb.append(pad)
-                  .append("}\n");
+                emitCstChoiceMaybeExtracted(sb, choice, resultVar, indent, addToChildren, counter, inWhitespaceRule, id);
             }
             case Expression.ZeroOrMore zom -> {
-                var zomStart = "zomStart" + id;
-                var beforeLoc = "beforeLoc" + id;
+                // Phase 1.7 (D): inline int captures — no SourceLocation per iteration.
+                var zomStartPos = "zomStartPos" + id;
+                var zomStartLine = "zomStartLine" + id;
+                var zomStartColumn = "zomStartColumn" + id;
+                var beforePos = "beforePos" + id;
+                var beforeLine = "beforeLine" + id;
+                var beforeColumn = "beforeColumn" + id;
                 var zomElem = "zomElem" + id;
                 var savedChildrenZom = "savedChildrenZom" + id;
                 sb.append(pad)
                   .append("CstParseResult ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                  .append(" = CstParseResult.successNoLoc(null, \"\");\n");
                 sb.append(pad)
-                  .append("var ")
-                  .append(zomStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(zomStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(zomStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(zomStartColumn)
+                  .append(" = column;\n");
                 // Save parent children and collect loop children separately
                 if (addToChildren) {
                     sb.append(pad)
@@ -3387,11 +5270,19 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("while (true) {\n");
                 sb.append(pad)
-                  .append("    var ")
-                  .append(beforeLoc)
-                  .append(" = location();\n");
+                  .append("    int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
                 sb.append(pad)
-                  .append("    List<Trivia> zomIterPending")
+                  .append("    int ")
+                  .append(beforeLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforeColumn)
+                  .append(" = column;\n");
+                sb.append(pad)
+                  .append("    int zomIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3423,12 +5314,16 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    if (")
                   .append(zomElem)
-                  .append(".isFailure() || location().offset() == ")
-                  .append(beforeLoc)
-                  .append(".offset()) {\n");
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
                 sb.append(pad)
-                  .append("        restoreLocation(")
-                  .append(beforeLoc)
+                  .append("        restoreLocationRaw(")
+                  .append(beforePos)
+                  .append(", ")
+                  .append(beforeLine)
+                  .append(", ")
+                  .append(beforeColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("        restorePendingLeading(zomIterPending")
@@ -3471,11 +5366,15 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var zomSpan")
                       .append(id)
-                      .append(" = SourceSpan.sourceSpan(")
-                      .append(zomStart)
-                      .append(", location());\n");
+                      .append(" = new SourceSpan(")
+                      .append(zomStartLine)
+                      .append(", ")
+                      .append(zomStartColumn)
+                      .append(", ")
+                      .append(zomStartPos)
+                      .append(", line, column, pos);\n");
                     sb.append(pad)
-                      .append("        children.add(new CstNode.NonTerminal(zomSpan")
+                      .append("        children.add(new CstNode.NonTerminal(idGen.next(), zomSpan")
                       .append(id)
                       .append(", __ruleName, zomChildren")
                       .append(id)
@@ -3485,9 +5384,9 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("    ")
                       .append(resultVar)
-                      .append(" = CstParseResult.success(null, substring(")
-                      .append(zomStart)
-                      .append(".offset(), pos), location());\n");
+                      .append(" = CstParseResult.successNoLoc(null, substring(")
+                      .append(zomStartPos)
+                      .append(", pos));\n");
                     sb.append(pad)
                       .append("} else {\n");
                     sb.append(pad)
@@ -3507,17 +5406,22 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("    ")
                       .append(resultVar)
-                      .append(" = CstParseResult.success(null, substring(")
-                      .append(zomStart)
-                      .append(".offset(), pos), location());\n");
+                      .append(" = CstParseResult.successNoLoc(null, substring(")
+                      .append(zomStartPos)
+                      .append(", pos));\n");
                     sb.append(pad)
                       .append("}\n");
                 }
             }
             case Expression.OneOrMore oom -> {
+                // Phase 1.7 (D): inline int captures — no SourceLocation per iteration.
                 var oomFirst = "oomFirst" + id;
-                var oomStart = "oomStart" + id;
-                var beforeLoc = "beforeLoc" + id;
+                var oomStartPos = "oomStartPos" + id;
+                var oomStartLine = "oomStartLine" + id;
+                var oomStartColumn = "oomStartColumn" + id;
+                var beforePos = "beforePos" + id;
+                var beforeLine = "beforeLine" + id;
+                var beforeColumn = "beforeColumn" + id;
                 var oomElem = "oomElem" + id;
                 var savedChildrenOom = "savedChildrenOom" + id;
                 // Save parent children before first match
@@ -3530,7 +5434,7 @@ public final class ParserGenerator {
                       .append("children.clear();\n");
                 }
                 sb.append(pad)
-                  .append("List<Trivia> oomEntryPending")
+                  .append("int oomEntryPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 generateCstExpressionCode(sb,
@@ -3547,9 +5451,17 @@ public final class ParserGenerator {
                   .append(oomFirst)
                   .append(";\n");
                 sb.append(pad)
-                  .append("var ")
-                  .append(oomStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(oomStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(oomStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(oomStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("if (!")
                   .append(oomFirst)
@@ -3567,11 +5479,19 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    while (true) {\n");
                 sb.append(pad)
-                  .append("        var ")
-                  .append(beforeLoc)
-                  .append(" = location();\n");
+                  .append("        int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
                 sb.append(pad)
-                  .append("        List<Trivia> oomIterPending")
+                  .append("        int ")
+                  .append(beforeLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("        int ")
+                  .append(beforeColumn)
+                  .append(" = column;\n");
+                sb.append(pad)
+                  .append("        int oomIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3603,12 +5523,16 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("        if (")
                   .append(oomElem)
-                  .append(".isFailure() || location().offset() == ")
-                  .append(beforeLoc)
-                  .append(".offset()) {\n");
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
                 sb.append(pad)
-                  .append("            restoreLocation(")
-                  .append(beforeLoc)
+                  .append("            restoreLocationRaw(")
+                  .append(beforePos)
+                  .append(", ")
+                  .append(beforeLine)
+                  .append(", ")
+                  .append(beforeColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("            restorePendingLeading(oomIterPending")
@@ -3653,11 +5577,15 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var oomSpan")
                       .append(id)
-                      .append(" = SourceSpan.sourceSpan(")
-                      .append(oomStart)
-                      .append(", location());\n");
+                      .append(" = new SourceSpan(")
+                      .append(oomStartLine)
+                      .append(", ")
+                      .append(oomStartColumn)
+                      .append(", ")
+                      .append(oomStartPos)
+                      .append(", line, column, pos);\n");
                     sb.append(pad)
-                      .append("        children.add(new CstNode.NonTerminal(oomSpan")
+                      .append("        children.add(new CstNode.NonTerminal(idGen.next(), oomSpan")
                       .append(id)
                       .append(", __ruleName, oomChildren")
                       .append(id)
@@ -3677,15 +5605,26 @@ public final class ParserGenerator {
                 }
             }
             case Expression.Optional opt -> {
-                var optStart = "optStart" + id;
+                // Phase 1.7 (D): inline int captures for restore-on-failure path.
+                var optStartPos = "optStartPos" + id;
+                var optStartLine = "optStartLine" + id;
+                var optStartColumn = "optStartColumn" + id;
                 var optElem = "optElem" + id;
                 var savedChildrenOpt = "savedChildrenOpt" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(optStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(optStartPos)
+                  .append(" = pos;\n");
                 sb.append(pad)
-                  .append("List<Trivia> optPending")
+                  .append("int ")
+                  .append(optStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(optStartColumn)
+                  .append(" = column;\n");
+                sb.append(pad)
+                  .append("int optPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 // Save parent children before inner expression
@@ -3715,8 +5654,12 @@ public final class ParserGenerator {
                   .append(optElem)
                   .append(".isCutFailure()) {\n");
                 sb.append(pad)
-                  .append("    restoreLocation(")
-                  .append(optStart)
+                  .append("    restoreLocationRaw(")
+                  .append(optStartPos)
+                  .append(", ")
+                  .append(optStartLine)
+                  .append(", ")
+                  .append(optStartColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("    restorePendingLeading(optPending")
@@ -3767,8 +5710,12 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("} else {\n");
                 sb.append(pad)
-                  .append("    restoreLocation(")
-                  .append(optStart)
+                  .append("    restoreLocationRaw(")
+                  .append(optStartPos)
+                  .append(", ")
+                  .append(optStartLine)
+                  .append(", ")
+                  .append(optStartColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("    restorePendingLeading(optPending")
@@ -3785,14 +5732,19 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                  .append(" = CstParseResult.successNoLoc(null, \"\");\n");
                 sb.append(pad)
                   .append("}\n");
             }
             case Expression.Repetition rep -> {
+                // Phase 1.7 (D): inline int captures — no SourceLocation per iteration.
                 var repCount = "repCount" + id;
-                var repStart = "repStart" + id;
-                var beforeLoc = "beforeLoc" + id;
+                var repStartPos = "repStartPos" + id;
+                var repStartLine = "repStartLine" + id;
+                var repStartColumn = "repStartColumn" + id;
+                var beforePos = "beforePos" + id;
+                var beforeLine = "beforeLine" + id;
+                var beforeColumn = "beforeColumn" + id;
                 var repElem = "repElem" + id;
                 var repCutFailed = "repCutFailed" + id;
                 var savedChildrenRep = "savedChildrenRep" + id;
@@ -3801,9 +5753,17 @@ public final class ParserGenerator {
                   .append(repCount)
                   .append(" = 0;\n");
                 sb.append(pad)
-                  .append("var ")
-                  .append(repStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(repStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(repStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("CstParseResult ")
                   .append(repCutFailed)
@@ -3829,11 +5789,19 @@ public final class ParserGenerator {
                   .append(maxStr)
                   .append(") {\n");
                 sb.append(pad)
-                  .append("    var ")
-                  .append(beforeLoc)
-                  .append(" = location();\n");
+                  .append("    int ")
+                  .append(beforePos)
+                  .append(" = pos;\n");
                 sb.append(pad)
-                  .append("    List<Trivia> repIterPending")
+                  .append("    int ")
+                  .append(beforeLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("    int ")
+                  .append(beforeColumn)
+                  .append(" = column;\n");
+                sb.append(pad)
+                  .append("    int repIterPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (!inWhitespaceRule) {
@@ -3867,12 +5835,16 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    if (")
                   .append(repElem)
-                  .append(".isFailure() || location().offset() == ")
-                  .append(beforeLoc)
-                  .append(".offset()) {\n");
+                  .append(".isFailure() || pos == ")
+                  .append(beforePos)
+                  .append(") {\n");
                 sb.append(pad)
-                  .append("        restoreLocation(")
-                  .append(beforeLoc)
+                  .append("        restoreLocationRaw(")
+                  .append(beforePos)
+                  .append(", ")
+                  .append(beforeLine)
+                  .append(", ")
+                  .append(beforeColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("        restorePendingLeading(repIterPending")
@@ -3942,11 +5914,15 @@ public final class ParserGenerator {
                     sb.append(pad)
                       .append("        var repSpan")
                       .append(id)
-                      .append(" = SourceSpan.sourceSpan(")
-                      .append(repStart)
-                      .append(", location());\n");
+                      .append(" = new SourceSpan(")
+                      .append(repStartLine)
+                      .append(", ")
+                      .append(repStartColumn)
+                      .append(", ")
+                      .append(repStartPos)
+                      .append(", line, column, pos);\n");
                     sb.append(pad)
-                      .append("        children.add(new CstNode.NonTerminal(repSpan")
+                      .append("        children.add(new CstNode.NonTerminal(idGen.next(), repSpan")
                       .append(id)
                       .append(", __ruleName, repChildren")
                       .append(id)
@@ -3957,9 +5933,9 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, substring(")
-                  .append(repStart)
-                  .append(".offset(), pos), location());\n");
+                  .append(" = CstParseResult.successNoLoc(null, substring(")
+                  .append(repStartPos)
+                  .append(", pos));\n");
                 sb.append(pad)
                   .append("} else {\n");
                 if (addToChildren) {
@@ -3971,8 +5947,12 @@ public final class ParserGenerator {
                       .append(");\n");
                 }
                 sb.append(pad)
-                  .append("    restoreLocation(")
-                  .append(repStart)
+                  .append("    restoreLocationRaw(")
+                  .append(repStartPos)
+                  .append(", ")
+                  .append(repStartLine)
+                  .append(", ")
+                  .append(repStartColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("    ")
@@ -3984,15 +5964,26 @@ public final class ParserGenerator {
                   .append("}\n");
             }
             case Expression.And and -> {
-                var andStart = "andStart" + id;
+                // Phase 1.7 (D): inline int captures for predicate restore.
+                var andStartPos = "andStartPos" + id;
+                var andStartLine = "andStartLine" + id;
+                var andStartColumn = "andStartColumn" + id;
                 var savedChildren = "savedChildrenAnd" + id;
                 var andElem = "andElem" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(andStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(andStartPos)
+                  .append(" = pos;\n");
                 sb.append(pad)
-                  .append("List<Trivia> andPending")
+                  .append("int ")
+                  .append(andStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(andStartColumn)
+                  .append(" = column;\n");
+                sb.append(pad)
+                  .append("int andPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (addToChildren) {
@@ -4003,8 +5994,12 @@ public final class ParserGenerator {
                 }
                 generateCstExpressionCode(sb, and.expression(), andElem, indent, false, counter, inWhitespaceRule);
                 sb.append(pad)
-                  .append("restoreLocation(")
-                  .append(andStart)
+                  .append("restoreLocationRaw(")
+                  .append(andStartPos)
+                  .append(", ")
+                  .append(andStartLine)
+                  .append(", ")
+                  .append(andStartColumn)
                   .append(");\n");
                 // Predicates don't consume trivia state either.
                 sb.append(pad)
@@ -4024,20 +6019,31 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = ")
                   .append(andElem)
-                  .append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ")
+                  .append(".isSuccess() ? CstParseResult.successNoLoc(null, \"\") : ")
                   .append(andElem)
                   .append(";\n");
             }
             case Expression.Not not -> {
-                var notStart = "notStart" + id;
+                // Phase 1.7 (D): inline int captures for predicate restore.
+                var notStartPos = "notStartPos" + id;
+                var notStartLine = "notStartLine" + id;
+                var notStartColumn = "notStartColumn" + id;
                 var savedChildren = "savedChildrenNot" + id;
                 var notElem = "notElem" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(notStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(notStartPos)
+                  .append(" = pos;\n");
                 sb.append(pad)
-                  .append("List<Trivia> notPending")
+                  .append("int ")
+                  .append(notStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(notStartColumn)
+                  .append(" = column;\n");
+                sb.append(pad)
+                  .append("int notPending")
                   .append(id)
                   .append(" = savePendingLeading();\n");
                 if (addToChildren) {
@@ -4048,8 +6054,12 @@ public final class ParserGenerator {
                 }
                 generateCstExpressionCode(sb, not.expression(), notElem, indent, false, counter, inWhitespaceRule);
                 sb.append(pad)
-                  .append("restoreLocation(")
-                  .append(notStart)
+                  .append("restoreLocationRaw(")
+                  .append(notStartPos)
+                  .append(", ")
+                  .append(notStartLine)
+                  .append(", ")
+                  .append(notStartColumn)
                   .append(");\n");
                 sb.append(pad)
                   .append("restorePendingLeading(notPending")
@@ -4068,16 +6078,38 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = ")
                   .append(notElem)
-                  .append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.success(null, \"\", location());\n");
+                  .append(".isSuccess() ? CstParseResult.failure(\"not match\") : CstParseResult.successNoLoc(null, \"\");\n");
             }
             case Expression.TokenBoundary tb -> {
-                var tbStart = "tbStart" + id;
+                // Phase 1.9 (DFA spike): fast-path detection for token-shaped rules
+                // — emit a tight inline character scanner instead of the framework's
+                // matchCharClassCst loop. Triggered only when (a) the flag is on,
+                // (b) the inner expression is Sequence(CharClass, ZeroOrMore(CharClass))
+                // (with optional Group wrappers), and (c) both classes are pure ASCII
+                // (non-case-insensitive, no escapes that escape ASCII). Failures fall
+                // through to the slow path identically.
+                if (config.tokenFastPath() && isFastPathTokenBoundary(tb)) {
+                    emitCstFastPathTokenBoundary(sb, tb, resultVar, indent, addToChildren, id, inWhitespaceRule);
+                    break;
+                }
+                // Phase 1.7 (D): inline int captures — avoid SourceLocation per token.
+                var tbStartPos = "tbStartPos" + id;
+                var tbStartLine = "tbStartLine" + id;
+                var tbStartColumn = "tbStartColumn" + id;
                 var savedChildren = "savedChildrenTb" + id;
                 var tbElem = "tbElem" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(tbStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(tbStartPos)
+                  .append(" = pos;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(tbStartLine)
+                  .append(" = line;\n");
+                sb.append(pad)
+                  .append("int ")
+                  .append(tbStartColumn)
+                  .append(" = column;\n");
                 sb.append(pad)
                   .append("tokenBoundaryDepth++;\n");
                 if (addToChildren) {
@@ -4109,21 +6141,25 @@ public final class ParserGenerator {
                   .append("    var tbText")
                   .append(id)
                   .append(" = substring(")
-                  .append(tbStart)
-                  .append(".offset(), pos);\n");
+                  .append(tbStartPos)
+                  .append(", pos);\n");
                 sb.append(pad)
                   .append("    var tbSpan")
                   .append(id)
-                  .append(" = SourceSpan.sourceSpan(")
-                  .append(tbStart)
-                  .append(", location());\n");
+                  .append(" = new SourceSpan(")
+                  .append(tbStartLine)
+                  .append(", ")
+                  .append(tbStartColumn)
+                  .append(", ")
+                  .append(tbStartPos)
+                  .append(", line, column, pos);\n");
                 var tokenRuleId = inWhitespaceRule
                                   ? "RULE_PEG_TOKEN"
                                   : "__ruleName";
                 sb.append(pad)
                   .append("    var tbNode")
                   .append(id)
-                  .append(" = new CstNode.Token(tbSpan")
+                  .append(" = new CstNode.Token(idGen.next(), tbSpan")
                   .append(id)
                   .append(", ")
                   .append(tokenRuleId)
@@ -4139,11 +6175,11 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(tbNode")
+                  .append(" = CstParseResult.successNoLoc(tbNode")
                   .append(id)
                   .append(", tbText")
                   .append(id)
-                  .append(", location());\n");
+                  .append(");\n");
                 sb.append(pad)
                   .append("} else {\n");
                 sb.append(pad)
@@ -4178,17 +6214,18 @@ public final class ParserGenerator {
                   .append(resultVar)
                   .append(" = ")
                   .append(ignElem)
-                  .append(".isSuccess() ? CstParseResult.success(null, \"\", location()) : ")
+                  .append(".isSuccess() ? CstParseResult.successNoLoc(null, \"\") : ")
                   .append(ignElem)
                   .append(";\n");
             }
             case Expression.Capture cap -> {
-                var capStart = "capStart" + id;
+                // Phase 1.7 (D): inline int capture — only pos is needed (substring offset).
+                var capStartPos = "capStartPos" + id;
                 var capElem = "capElem" + id;
                 sb.append(pad)
-                  .append("var ")
-                  .append(capStart)
-                  .append(" = location();\n");
+                  .append("int ")
+                  .append(capStartPos)
+                  .append(" = pos;\n");
                 generateCstExpressionCode(sb,
                                           cap.expression(),
                                           capElem,
@@ -4204,8 +6241,8 @@ public final class ParserGenerator {
                   .append("    captures.put(\"")
                   .append(cap.name())
                   .append("\", substring(")
-                  .append(capStart)
-                  .append(".offset(), pos));\n");
+                  .append(capStartPos)
+                  .append(", pos));\n");
                 sb.append(pad)
                   .append("}\n");
                 sb.append(pad)
@@ -4258,11 +6295,15 @@ public final class ParserGenerator {
                       .append(resultVar)
                       .append(".isSuccess() && ")
                       .append(resultVar)
-                      .append(".node.isPresent()) {\n");
+                      .append(config.mutableParseResult()
+                              ? ".node != null) {\n"
+                              : ".node.isPresent()) {\n");
                     sb.append(pad)
                       .append("    children.add(")
                       .append(resultVar)
-                      .append(".node.unwrap());\n");
+                      .append(config.mutableParseResult()
+                              ? ".node);\n"
+                              : ".node.unwrap());\n");
                     sb.append(pad)
                       .append("}\n");
                 }
@@ -4271,7 +6312,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("var ")
                   .append(resultVar)
-                  .append(" = CstParseResult.success(null, \"\", location());\n");
+                  .append(" = CstParseResult.successNoLoc(null, \"\");\n");
             }
             case Expression.Group grp -> {
                 generateCstExpressionCode(sb,
@@ -4330,9 +6371,13 @@ public final class ParserGenerator {
         sb.append(pad)
           .append("} else {\n");
         sb.append(pad)
-          .append("    restoreLocation(")
+          .append("    restoreLocationRaw(")
           .append(choiceStart)
-          .append(");\n");
+          .append("Pos, ")
+          .append(choiceStart)
+          .append("Line, ")
+          .append(choiceStart)
+          .append("Column);\n");
         // Roll back any pending-leading trivia captured inside the failed alt,
         // so sibling alternatives start from the same buffer state as the Choice entry.
         sb.append(pad)
@@ -4441,6 +6486,113 @@ public final class ParserGenerator {
     }
 
     /**
+     * §7.1F: Phase 1F dispatch emission supporting partial dispatch with default fallback.
+     * Emits a switch over {@code input.charAt(pos)} where each case contains the dispatched
+     * alts that match that char (in PEG order); after a case's dispatched alts all fail, the
+     * default tail (alternatives with unknown FIRST) is tried in PEG order. The {@code default:}
+     * branch runs ONLY the default tail.
+     *
+     * <p>PEG-correctness invariant: defaults form a contiguous tail of the original alternative
+     * list (enforced by {@link ChoiceDispatchAnalyzer#classify(Expression.Choice, ChoiceDispatchAnalyzer.FirstSets)}).
+     * This means every dispatched alt has a smaller original-index than every default alt, so
+     * trying dispatched alts first preserves PEG ordered-choice semantics.
+     */
+    private void emitCstChoiceDispatchF(StringBuilder sb,
+                                        java.util.List<ChoiceDispatchAnalyzer.DispatchBucket> buckets,
+                                        java.util.List<ChoiceDispatchAnalyzer.AltEntry> defaults,
+                                        int id,
+                                        int indent,
+                                        boolean addToChildren,
+                                        int[] counter,
+                                        boolean inWhitespaceRule,
+                                        String resultVar,
+                                        String choiceStart,
+                                        String childrenState) {
+        var pad = "    ".repeat(indent);
+        var dispatchVar = "dispatchChar" + id;
+        // Generate a small inner method-style block: "if (pos < input.length()) { switch ... }"
+        // followed (only if defaults present) by an unconditional "if (resultVar == null)" tail
+        // running the defaults in PEG order. When pos is at EOF, only defaults run (any literal-
+        // bearing dispatched alt would fail on EOF anyway, so this preserves correctness).
+        sb.append(pad)
+          .append("if (pos < input.length()) {\n");
+        sb.append(pad)
+          .append("    char ")
+          .append(dispatchVar)
+          .append(" = input.charAt(pos);\n");
+        sb.append(pad)
+          .append("    switch (")
+          .append(dispatchVar)
+          .append(") {\n");
+        var casePad = pad + "        ";
+        var bodyPad = pad + "            ";
+        for (var bucket : buckets) {
+            for (var c : bucket.chars()) {
+                sb.append(casePad)
+                  .append("case ")
+                  .append(literalChar(c))
+                  .append(":\n");
+            }
+            sb.append(casePad)
+              .append("{\n");
+            emitCstChoiceAltChainClosed(sb,
+                                        bucket.alts(),
+                                        id,
+                                        indent + 3,
+                                        addToChildren,
+                                        counter,
+                                        inWhitespaceRule,
+                                        resultVar,
+                                        choiceStart,
+                                        childrenState,
+                                        bodyPad);
+            sb.append(bodyPad)
+              .append("break;\n");
+            sb.append(casePad)
+              .append("}\n");
+        }
+        sb.append(pad)
+          .append("    }\n");
+        sb.append(pad)
+          .append("}\n");
+        // Default fallback: run after switch (if no dispatched alt succeeded) AND on EOF / unmatched
+        // dispatch char. Must restore choiceStart/children/pending-leading because a dispatched alt
+        // may have advanced state before failing.
+        if (!defaults.isEmpty()) {
+            sb.append(pad)
+              .append("if (")
+              .append(resultVar)
+              .append(" == null) {\n");
+            // Restore parser position so default alts start from the choice's entry point.
+            sb.append(pad)
+              .append("    restoreLocationRaw(")
+              .append(choiceStart)
+              .append("Pos, ")
+              .append(choiceStart)
+              .append("Line, ")
+              .append(choiceStart)
+              .append("Column);\n");
+            sb.append(pad)
+              .append("    restorePendingLeading(choicePending")
+              .append(id)
+              .append(");\n");
+            emitCstChoiceAltChainClosed(sb,
+                                        defaults,
+                                        id,
+                                        indent + 1,
+                                        addToChildren,
+                                        counter,
+                                        inWhitespaceRule,
+                                        resultVar,
+                                        choiceStart,
+                                        childrenState,
+                                        pad + "    ");
+            sb.append(pad)
+              .append("}\n");
+        }
+    }
+
+    /**
      * §7.2: Emit the per-Choice child-state save. With {@code markResetChildren} off,
      * clones {@code children} into an ArrayList (legacy path). With the flag on, records
      * only the current size as an int mark — O(1) save, no copy.
@@ -4537,12 +6689,14 @@ public final class ParserGenerator {
                                 .unwrap();
             var innerExpr = extractInnerExpression(wsExpr);
             sb.append("        while (!isAtEnd()) {\n");
-            sb.append("            var wsStartLoc = location();\n");
-            sb.append("            var wsStartPos = pos;\n");
+            // Phase 1.7 (D): inline int captures — no SourceLocation allocation per trivia element.
+            sb.append("            int wsStartLine = line;\n");
+            sb.append("            int wsStartColumn = column;\n");
+            sb.append("            int wsStartPos = pos;\n");
             generateCstExpressionCode(sb, innerExpr, "wsResult", 3, false, new int[]{0}, true);
             sb.append("            if (wsResult.isFailure() || pos == wsStartPos) break;\n");
             sb.append("            var wsText = substring(wsStartPos, pos);\n");
-            sb.append("            var wsSpan = SourceSpan.sourceSpan(wsStartLoc, location());\n");
+            sb.append("            var wsSpan = new SourceSpan(wsStartLine, wsStartColumn, wsStartPos, line, column, pos);\n");
             sb.append("            trivia.add(classifyTrivia(wsSpan, wsText));\n");
             sb.append("        }\n");
         }
@@ -4556,24 +6710,31 @@ public final class ParserGenerator {
                 private CstNode wrapWithRuleName(CstParseResult result, List<CstNode> children, SourceSpan span, RuleId ruleId, List<Trivia> leadingTrivia) {
                     // If result produced a single node (Token or Terminal), re-wrap with rule name and trivia
                     // This matches PegEngine.wrapWithRuleName behavior
-                    if (result.node.isPresent()) {
-                        var inner = result.node.unwrap();
+                    if (__NODE_PRESENT__) {
+                        var inner = __NODE_UNWRAP__;
                         return switch (inner) {
-                            case CstNode.Token tok -> new CstNode.Token(span, ruleId, tok.text(), leadingTrivia, List.of());
-                            case CstNode.Terminal t -> new CstNode.Terminal(span, ruleId, t.text(), leadingTrivia, List.of());
-                            case CstNode.NonTerminal nt -> new CstNode.NonTerminal(span, ruleId, nt.children(), leadingTrivia, List.of());
-            """);
+                            case CstNode.Token tok -> new CstNode.Token(tok.id(), span, ruleId, tok.text(), leadingTrivia, List.of());
+                            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), span, ruleId, t.text(), leadingTrivia, List.of());
+                            case CstNode.NonTerminal nt -> new CstNode.NonTerminal(nt.id(), span, ruleId, nt.children(), leadingTrivia, List.of());
+            """.replace("__NODE_PRESENT__",
+                        config.mutableParseResult()
+                        ? "result.node != null"
+                        : "result.node.isPresent()")
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                .replace("__NODE_UNWRAP__",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         config.mutableParseResult()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         ? "result.node"
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         : "result.node.unwrap()"));
         // Add Error case only for ADVANCED mode
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
-                            case CstNode.Error err -> new CstNode.NonTerminal(span, ruleId, children, leadingTrivia, List.of());
+                            case CstNode.Error err -> new CstNode.NonTerminal(err.id(), span, ruleId, children, leadingTrivia, List.of());
                 """);
         }
         sb.append("""
                         };
                     }
                     // No inner node — wrap children in NonTerminal
-                    return new CstNode.NonTerminal(span, ruleId, children, leadingTrivia, List.of());
+                    return new CstNode.NonTerminal(idGen.next(), span, ruleId, children, leadingTrivia, List.of());
                 }
 
                 private Trivia classifyTrivia(SourceSpan span, String text) {
@@ -4604,13 +6765,14 @@ public final class ParserGenerator {
                     return snapshot;
                 }
 
-                private List<Trivia> savePendingLeading() {
-                    return List.copyOf(pendingLeadingTrivia);
+                private int savePendingLeading() {
+                    return pendingLeadingTrivia.size();
                 }
 
-                private void restorePendingLeading(List<Trivia> snapshot) {
-                    pendingLeadingTrivia.clear();
-                    pendingLeadingTrivia.addAll(snapshot);
+                private void restorePendingLeading(int snapshot) {
+                    if (pendingLeadingTrivia.size() > snapshot) {
+                        pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size()).clear();
+                    }
                 }
 
                 private List<Trivia> concatTrivia(List<Trivia> first, List<Trivia> second) {
@@ -4628,19 +6790,19 @@ public final class ParserGenerator {
                     }
                     return switch (node) {
                         case CstNode.Terminal t -> new CstNode.Terminal(
-                            t.span(), t.rule(), t.text(), leadingTrivia, t.trailingTrivia()
+                            t.id(), t.span(), t.rule(), t.text(), leadingTrivia, t.trailingTrivia()
                         );
                         case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
-                            nt.span(), nt.rule(), nt.children(), leadingTrivia, nt.trailingTrivia()
+                            nt.id(), nt.span(), nt.rule(), nt.children(), leadingTrivia, nt.trailingTrivia()
                         );
                         case CstNode.Token tok -> new CstNode.Token(
-                            tok.span(), tok.rule(), tok.text(), leadingTrivia, tok.trailingTrivia()
+                            tok.id(), tok.span(), tok.rule(), tok.text(), leadingTrivia, tok.trailingTrivia()
                         );
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
-                                err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia()
+                                err.id(), err.span(), err.skippedText(), err.expected(), leadingTrivia, err.trailingTrivia()
                             );
                 """);
         }
@@ -4654,20 +6816,20 @@ public final class ParserGenerator {
                     }
                     return switch (node) {
                         case CstNode.Terminal t -> new CstNode.Terminal(
-                            t.span(), t.rule(), t.text(), t.leadingTrivia(), trailingTrivia
+                            t.id(), t.span(), t.rule(), t.text(), t.leadingTrivia(), trailingTrivia
                         );
                         case CstNode.NonTerminal nt -> new CstNode.NonTerminal(
-                            nt.span(), nt.rule(), nt.children(), nt.leadingTrivia(), trailingTrivia
+                            nt.id(), nt.span(), nt.rule(), nt.children(), nt.leadingTrivia(), trailingTrivia
                         );
                         case CstNode.Token tok -> new CstNode.Token(
-                            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
+                            tok.id(), tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), trailingTrivia
                         );
             """);
         // Add Error case only for ADVANCED mode
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
-                                err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia
+                                err.id(), err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), trailingTrivia
                             );
                 """);
         }
@@ -4692,7 +6854,7 @@ public final class ParserGenerator {
                             if (ntChildren.isEmpty()) {
                                 var combined = concatTrivia(nt.trailingTrivia(), trivia);
                                 yield new CstNode.NonTerminal(
-                                    nt.span(), nt.rule(), ntChildren, nt.leadingTrivia(), combined
+                                    nt.id(), nt.span(), nt.rule(), ntChildren, nt.leadingTrivia(), combined
                                 );
                             }
                             var newChildren = new ArrayList<CstNode>(ntChildren);
@@ -4700,20 +6862,20 @@ public final class ParserGenerator {
                             var lastChild = newChildren.get(lastIdx);
                             newChildren.set(lastIdx, attachTrailingToTail(lastChild, trivia));
                             yield new CstNode.NonTerminal(
-                                nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia()
+                                nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia()
                             );
                         }
                         case CstNode.Terminal t -> new CstNode.Terminal(
-                            t.span(), t.rule(), t.text(), t.leadingTrivia(), concatTrivia(t.trailingTrivia(), trivia)
+                            t.id(), t.span(), t.rule(), t.text(), t.leadingTrivia(), concatTrivia(t.trailingTrivia(), trivia)
                         );
                         case CstNode.Token tok -> new CstNode.Token(
-                            tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), concatTrivia(tok.trailingTrivia(), trivia)
+                            tok.id(), tok.span(), tok.rule(), tok.text(), tok.leadingTrivia(), concatTrivia(tok.trailingTrivia(), trivia)
                         );
             """);
         if (errorReporting == ErrorReporting.ADVANCED) {
             sb.append("""
                             case CstNode.Error err -> new CstNode.Error(
-                                err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), concatTrivia(err.trailingTrivia(), trivia)
+                                err.id(), err.span(), err.skippedText(), err.expected(), err.leadingTrivia(), concatTrivia(err.trailingTrivia(), trivia)
                             );
                 """);
         }
@@ -4734,75 +6896,149 @@ public final class ParserGenerator {
         sb.append("""
                 // === CST Parse Result ===
             """);
-        sb.append("""
+        if (config.mutableParseResult()) {
+            // Spike A: raw nullable fields — no Option boxing on the parse hot path.
+            // Field names match the Option-typed variant ('node', 'text', 'expected',
+            // 'endLocation') so emission sites can be uniformly rewritten with raw
+            // access patterns. CstParseResult instances are still freshly allocated
+            // per call (cache safety), but the per-call Option$Some allocations are
+            // gone — that's the spike's primary target.
+            sb.append("""
 
-                private static final class CstParseResult {
-                    final boolean success;
-                    final Option<CstNode> node;
-                    final Option<String> text;
-                    final Option<String> expected;
-                    final Option<SourceLocation> endLocation;
-                    final boolean cutFailed;
+                    private static final class CstParseResult {
+                        final boolean success;
+                        final CstNode node;          // raw nullable
+                        final String text;           // raw nullable
+                        final String expected;       // raw nullable
+                        final SourceLocation endLocation; // raw nullable
+                        final boolean cutFailed;
 
-                    private CstParseResult(boolean success, Option<CstNode> node, Option<String> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
-                        this.success = success;
-                        this.node = node;
-                        this.text = text;
-                        this.expected = expected;
-                        this.endLocation = endLocation;
-                        this.cutFailed = cutFailed;
+                        private CstParseResult(boolean success, CstNode node, String text, String expected, SourceLocation endLocation, boolean cutFailed) {
+                            this.success = success;
+                            this.node = node;
+                            this.text = text;
+                            this.expected = expected;
+                            this.endLocation = endLocation;
+                            this.cutFailed = cutFailed;
+                        }
+
+                        boolean isSuccess() { return success; }
+                        boolean isFailure() { return !success; }
+                        boolean isCutFailure() { return !success && cutFailed; }
+
+                        static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
+                            return new CstParseResult(true, node, text, null, endLocation, false);
+                        }
+
+                        // Phase 1.7 (D2): intermediate-result success that omits endLocation.
+                        // Only rule-body and LR-body successes need endLocation (consumed by
+                        // cache hits and LR grow-loop). All in-rule expression results have
+                        // their endLocation field discarded by callers, so skipping the
+                        // location() call here removes the dominant SourceLocation allocator
+                        // on the self-host fixture.
+                        static CstParseResult successNoLoc(CstNode node, String text) {
+                            return new CstParseResult(true, node, text, null, null, false);
+                        }
+
+                        static CstParseResult failure(String expected) {
+                            return new CstParseResult(false, null, null, expected, null, false);
+                        }
+
+                        static CstParseResult cutFailure(String expected) {
+                            return new CstParseResult(false, null, null, expected, null, true);
+                        }
+
+                        CstParseResult asCutFailure() {
+                            return cutFailed ? this : new CstParseResult(false, null, null, expected, null, true);
+                        }
+
+                        CstParseResult asRegularFailure() {
+                            return cutFailed ? new CstParseResult(false, null, null, expected, null, false) : this;
+                        }
                     }
+                """);
+        }else {
+            sb.append("""
 
-                    boolean isSuccess() { return success; }
-                    boolean isFailure() { return !success; }
-                    boolean isCutFailure() { return !success && cutFailed; }
+                    private static final class CstParseResult {
+                        final boolean success;
+                        final Option<CstNode> node;
+                        final Option<String> text;
+                        final Option<String> expected;
+                        final Option<SourceLocation> endLocation;
+                        final boolean cutFailed;
 
-                    static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
-                        return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.some(endLocation), false);
+                        private CstParseResult(boolean success, Option<CstNode> node, Option<String> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
+                            this.success = success;
+                            this.node = node;
+                            this.text = text;
+                            this.expected = expected;
+                            this.endLocation = endLocation;
+                            this.cutFailed = cutFailed;
+                        }
+
+                        boolean isSuccess() { return success; }
+                        boolean isFailure() { return !success; }
+                        boolean isCutFailure() { return !success && cutFailed; }
+
+                        static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
+                            return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.some(endLocation), false);
+                        }
+
+                        // Phase 1.7 (D2): intermediate-result success that omits endLocation.
+                        // See mutable variant above for rationale.
+                        static CstParseResult successNoLoc(CstNode node, String text) {
+                            return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.none(), false);
+                        }
+
+                        static CstParseResult failure(String expected) {
+                            return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), false);
+                        }
+
+                        static CstParseResult cutFailure(String expected) {
+                            return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), true);
+                        }
+
+                        CstParseResult asCutFailure() {
+                            return cutFailed ? this : new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), true);
+                        }
+
+                        CstParseResult asRegularFailure() {
+                            return cutFailed ? new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), false) : this;
+                        }
                     }
-
-                    static CstParseResult failure(String expected) {
-                        return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), false);
-                    }
-
-                    static CstParseResult cutFailure(String expected) {
-                        return new CstParseResult(false, Option.none(), Option.none(), Option.some(expected), Option.none(), true);
-                    }
-
-                    CstParseResult asCutFailure() {
-                        return cutFailed ? this : new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), true);
-                    }
-
-                    CstParseResult asRegularFailure() {
-                        return cutFailed ? new CstParseResult(false, Option.none(), Option.none(), expected, Option.none(), false) : this;
-                    }
-                }
-            """);
+                """);
+        }
     }
 
     // === Match-method emitters (phase 1 perf flags) ===
+    // Phase 1.7 (D2): match helpers return successNoLoc — endLocation field on
+    // intermediate (per-leaf) results is never read by callers. The
+    // reuseEndLocation flag is now a no-op for these emitters since the span
+    // is built from primitive ints and no SourceLocation is materialized.
     private void emitMatchLiteralCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation()
-                        ? "endLoc"
-                        : "location()";
-        var endLocDecl = config.reuseEndLocation()
-                         ? "        var endLoc = location();\n"
-                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchLiteralCst(String text, boolean caseInsensitive) {\n");
         if (config.literalFailureCache()) {
             sb.append("        int len = text.length();\n");
             sb.append("        if (input.length() - pos < len) {\n");
             sb.append("            var f = literalFailure(text);\n");
-            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
-            sb.append("        var startLoc = location();\n");
+            // Phase 1.7 (D): inline int captures — no SourceLocation per literal.
+            sb.append("        int startPos = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
             sb.append("        if (caseInsensitive) {\n");
             sb.append("            for (int i = 0; i < len; i++) {\n");
             sb.append("                if (Character.toLowerCase(text.charAt(i)) != Character.toLowerCase(input.charAt(pos + i))) {\n");
             sb.append("                    var f = literalFailure(text);\n");
-            sb.append("                    trackFailure(f.expected.unwrap());\n");
+            sb.append("                    trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("                    return f;\n");
             sb.append("                }\n");
             sb.append("            }\n");
@@ -4810,7 +7046,9 @@ public final class ParserGenerator {
             sb.append("            for (int i = 0; i < len; i++) {\n");
             sb.append("                if (text.charAt(i) != input.charAt(pos + i)) {\n");
             sb.append("                    var f = literalFailure(text);\n");
-            sb.append("                    trackFailure(f.expected.unwrap());\n");
+            sb.append("                    trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("                    return f;\n");
             sb.append("                }\n");
             sb.append("            }\n");
@@ -4820,7 +7058,10 @@ public final class ParserGenerator {
             sb.append("            trackFailure(\"'\" + text + \"'\");\n");
             sb.append("            return CstParseResult.failure(\"'\" + text + \"'\");\n");
             sb.append("        }\n");
-            sb.append("        var startLoc = location();\n");
+            // Phase 1.7 (D): inline int captures — no SourceLocation per literal.
+            sb.append("        int startPos = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
             sb.append("        for (int i = 0; i < text.length(); i++) {\n");
             sb.append("            char expected = text.charAt(i);\n");
             sb.append("            char actual = peek(i);\n");
@@ -4859,14 +7100,10 @@ public final class ParserGenerator {
             sb.append("            advance();\n");
             sb.append("        }\n");
         }
-        sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
-          .append(endLocVar)
-          .append(");\n");
-        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, text, takePendingLeading(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ")
-          .append(endLocVar)
-          .append(");\n");
+        // Phase 1.7 (D2): build SourceSpan from inline ints — no SourceLocation alloc.
+        sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, text, takePendingLeading(), List.of());\n");
+        sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");
         if (config.literalFailureCache()) {
@@ -4883,12 +7120,6 @@ public final class ParserGenerator {
     }
 
     private void emitMatchDictionaryCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation()
-                        ? "endLoc"
-                        : "location()";
-        var endLocDecl = config.reuseEndLocation()
-                         ? "        var endLoc = location();\n"
-                         : "";
         sb.append("    private CstParseResult matchDictionaryCst(List<String> words, boolean caseInsensitive) {\n");
         sb.append("        String longestMatch = null;\n");
         sb.append("        int longestLen = 0;\n");
@@ -4902,44 +7133,44 @@ public final class ParserGenerator {
         sb.append("            trackFailure(\"dictionary word\");\n");
         sb.append("            return CstParseResult.failure(\"dictionary word\");\n");
         sb.append("        }\n");
-        sb.append("        var startLoc = location();\n");
+        // Phase 1.7 (D): inline int captures.
+        sb.append("        int startPos = pos;\n");
+        sb.append("        int startLine = line;\n");
+        sb.append("        int startColumn = column;\n");
         sb.append("        for (int i = 0; i < longestLen; i++) {\n");
         sb.append("            advance();\n");
         sb.append("        }\n");
-        sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
-          .append(endLocVar)
-          .append(");\n");
-        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_LITERAL, longestMatch, takePendingLeading(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, longestMatch, ")
-          .append(endLocVar)
-          .append(");\n");
+        // Phase 1.7 (D2): primitive-int span; successNoLoc result.
+        sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, longestMatch, takePendingLeading(), List.of());\n");
+        sb.append("        return CstParseResult.successNoLoc(node, longestMatch);\n");
         sb.append("    }\n");
         sb.append("\n");
     }
 
     private void emitMatchCharClassCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation()
-                        ? "endLoc"
-                        : "location()";
-        var endLocDecl = config.reuseEndLocation()
-                         ? "        var endLoc = location();\n"
-                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchCharClassCst(String pattern, boolean negated, boolean caseInsensitive) {\n");
         if (config.charClassFailureCache()) {
             sb.append("        if (isAtEnd()) {\n");
             sb.append("            var f = charClassFailure(pattern, negated);\n");
-            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
-            sb.append("        var startLoc = location();\n");
+            // Phase 1.7 (D): inline int captures — no SourceLocation per char-class match.
+            sb.append("        int startPos = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
             sb.append("        char c = peek();\n");
             sb.append("        boolean matches = matchesPattern(c, pattern, caseInsensitive);\n");
             sb.append("        if (negated) matches = !matches;\n");
             sb.append("        if (!matches) {\n");
             sb.append("            var f = charClassFailure(pattern, negated);\n");
-            sb.append("            trackFailure(f.expected.unwrap());\n");
+            sb.append("            trackFailure(")
+              .append(expectedUnwrap("f"))
+              .append(");\n");
             sb.append("            return f;\n");
             sb.append("        }\n");
         }else {
@@ -4947,7 +7178,10 @@ public final class ParserGenerator {
             sb.append("            trackFailure(\"[\" + (negated ? \"^\" : \"\") + pattern + \"]\");\n");
             sb.append("            return CstParseResult.failure(\"character class\");\n");
             sb.append("        }\n");
-            sb.append("        var startLoc = location();\n");
+            // Phase 1.7 (D): inline int captures.
+            sb.append("        int startPos = pos;\n");
+            sb.append("        int startLine = line;\n");
+            sb.append("        int startColumn = column;\n");
             sb.append("        char c = peek();\n");
             sb.append("        boolean matches = matchesPattern(c, pattern, caseInsensitive);\n");
             sb.append("        if (negated) matches = !matches;\n");
@@ -4957,15 +7191,12 @@ public final class ParserGenerator {
             sb.append("        }\n");
         }
         sb.append("        advance();\n");
-        sb.append("        var text = String.valueOf(c);\n");
-        sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
-          .append(endLocVar)
-          .append(");\n");
-        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ")
-          .append(endLocVar)
-          .append(");\n");
+        // Candidate #4: ASCII pool eliminates fresh 1-char String alloc per match.
+        sb.append("        var text = c < 128 ? ASCII_CHAR_STRINGS[c] : String.valueOf(c);\n");
+        // Phase 1.7 (D2): primitive-int span; successNoLoc result.
+        sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
+        sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");
         if (config.charClassFailureCache()) {
@@ -4983,29 +7214,23 @@ public final class ParserGenerator {
     }
 
     private void emitMatchAnyCst(StringBuilder sb) {
-        var endLocVar = config.reuseEndLocation()
-                        ? "endLoc"
-                        : "location()";
-        var endLocDecl = config.reuseEndLocation()
-                         ? "        var endLoc = location();\n"
-                         : "";
         sb.append("\n");
         sb.append("    private CstParseResult matchAnyCst() {\n");
         sb.append("        if (isAtEnd()) {\n");
         sb.append("            trackFailure(\"any character\");\n");
         sb.append("            return CstParseResult.failure(\"any character\");\n");
         sb.append("        }\n");
-        sb.append("        var startLoc = location();\n");
+        // Phase 1.7 (D): inline int captures — no SourceLocation per any-match.
+        sb.append("        int startPos = pos;\n");
+        sb.append("        int startLine = line;\n");
+        sb.append("        int startColumn = column;\n");
         sb.append("        char c = advance();\n");
-        sb.append("        var text = String.valueOf(c);\n");
-        sb.append(endLocDecl);
-        sb.append("        var span = SourceSpan.sourceSpan(startLoc, ")
-          .append(endLocVar)
-          .append(");\n");
-        sb.append("        var node = new CstNode.Terminal(span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");
-        sb.append("        return CstParseResult.success(node, text, ")
-          .append(endLocVar)
-          .append(");\n");
+        // Candidate #4: ASCII pool eliminates fresh 1-char String alloc per match.
+        sb.append("        var text = c < 128 ? ASCII_CHAR_STRINGS[c] : String.valueOf(c);\n");
+        // Phase 1.7 (D2): primitive-int span; successNoLoc result.
+        sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");
+        sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");
     }

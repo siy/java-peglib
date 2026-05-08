@@ -23,7 +23,10 @@ import java.util.Deque;
  * @since 0.3.3
  */
 public final class Renderer {
-    private enum Mode { FLAT, BREAK }
+    private enum Mode {
+        FLAT,
+        BREAK
+    }
 
     private record Frame(int indent, Mode mode, Doc doc) {}
 
@@ -60,7 +63,8 @@ public final class Renderer {
             }
             case Doc.Text text -> {
                 sb.append(text.value());
-                return column + text.value().length();
+                return column + text.value()
+                                   .length();
             }
             case Doc.Line ignored -> {
                 if (frame.mode() == Mode.FLAT) {
@@ -90,14 +94,16 @@ public final class Renderer {
                 return column;
             }
             case Doc.Indent indent -> {
-                stack.push(new Frame(frame.indent() + indent.amount(), frame.mode(), indent.inner()));
+                stack.push(new Frame(frame.indent() + indent.amount(),
+                                     frame.mode(),
+                                     indent.inner()));
                 return column;
             }
             case Doc.Group group -> {
                 Mode mode;
                 if (containsHardLine(group.inner())) {
                     mode = Mode.BREAK;
-                } else {
+                }else {
                     mode = fits(group.inner(), frame.indent(), width - column, stack)
                            ? Mode.FLAT
                            : Mode.BREAK;
@@ -125,7 +131,7 @@ public final class Renderer {
     }
 
     private static void appendSpaces(StringBuilder sb, int count) {
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < count; i++ ) {
             sb.append(' ');
         }
     }
@@ -144,22 +150,22 @@ public final class Renderer {
         }
         var probe = new ArrayDeque<Frame>();
         probe.push(new Frame(indent, Mode.FLAT, inner));
-
         var surroundingIter = surrounding.iterator();
         int budget = remaining;
         while (true) {
             Frame f;
             if (!probe.isEmpty()) {
                 f = probe.pop();
-            } else if (surroundingIter.hasNext()) {
+            }else if (surroundingIter.hasNext()) {
                 f = surroundingIter.next();
-            } else {
+            }else {
                 return true;
             }
             switch (f.doc()) {
                 case Doc.Empty ignored -> {}
                 case Doc.Text text -> {
-                    budget -= text.value().length();
+                    budget -= text.value()
+                                  .length();
                     if (budget < 0) {
                         return false;
                     }
@@ -170,7 +176,7 @@ public final class Renderer {
                         if (budget < 0) {
                             return false;
                         }
-                    } else {
+                    }else {
                         return true;
                     }
                 }
@@ -178,7 +184,6 @@ public final class Renderer {
                     if (f.mode() == Mode.BREAK) {
                         return true;
                     }
-                    // FLAT softline contributes 0 columns
                 }
                 case Doc.HardLine ignored -> {
                     return true;
@@ -188,7 +193,9 @@ public final class Renderer {
                     probe.push(new Frame(f.indent(), f.mode(), concat.left()));
                 }
                 case Doc.Indent ind -> {
-                    probe.push(new Frame(f.indent() + ind.amount(), f.mode(), ind.inner()));
+                    probe.push(new Frame(f.indent() + ind.amount(),
+                                         f.mode(),
+                                         ind.inner()));
                 }
                 case Doc.Group group -> {
                     // Optimistically assume the group fits flat too.

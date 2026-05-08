@@ -148,8 +148,9 @@ Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
 - [x] Advanced error recovery with Rust-style diagnostics
 - [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
 - [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
-- [x] 565 passing tests, 1 skipped (RoundTripTest — pre-existing trivia gap)
-- [x] Performance rework (0.2.2): 4.23× speedup on 1,900-LOC Java 25 fixture via generator-time perf flags; see `docs/PERF-REWORK-SPEC.md` and `docs/bench-results/`.
+- [x] 705 passing peglib-core tests + supporting modules (peglib-formatter 66, peglib-maven-plugin 5, peglib-playground 27); RoundTripTest enabled and 22/22 since 0.3.5
+- [x] Performance rework (0.2.2): 4.23× speedup on 1,900-LOC Java 25 fixture via generator-time perf flags; see `docs/archive/PERF-REWORK-SPEC.md` (archived) and `docs/bench-results/`.
+- [x] Throughput-engine Tier 1 arc + post-rollback wins (0.5.0-candidate): reference fixture **19.12 ms / 68.02 MB** (vs 76.2 ms / 150 MB pre-Tier-1); selfhost fixture 832 ms / 1.85 GB. See `docs/incremental/THROUGHPUT-ENGINE-TIER1.md` and `docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md` (Move B post-mortem).
 
 ### Remaining Work
 - [ ] Lambda action attachment (lowest priority) - attach actions programmatically using type-safe RuleId:
@@ -289,7 +290,7 @@ error: unexpected input
 ### Recovery Points
 Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
 
-## Test Coverage (565 tests)
+## Test Coverage (705 peglib-core tests + supporting modules)
 
 ### Grammar Parser Tests (17 tests)
 - Simple rules, actions, sequences, choices
@@ -419,7 +420,7 @@ The `Keyword` rule should only include hard keywords. Contextual keywords are ma
 
 ```bash
 mvn compile          # Compile
-mvn test             # Run tests (565 passing, 1 skipped)
+mvn test             # Run tests (705+ peglib-core tests; 0 skipped)
 mvn verify           # Full verification
 ```
 

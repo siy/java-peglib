@@ -11,14 +11,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests covering the public {@code Session} / {@code IncrementalParser} /
- * {@code Edit} API shape: no-op edits, cursor clamping, cursor shift rules,
- * and the invariants in SPEC §4.4.
+ * {@code Edit} / {@code Cursor} API shape: no-op edits, cursor clamping,
+ * cursor shift rules, and the invariants in SPEC §4.4 / §5.
  */
 final class SessionApiTest {
 
-    // Permissive grammar: accepts any sequence of tokens + punctuation so
-    // intermediate fuzz / edited buffers still parse. The session API tests
-    // care about offsets, cursor shifts, stats — not about grammar precision.
     private static final String GRAMMAR = """
         Program <- Token*
         Token <- Word / Punct
@@ -84,28 +81,28 @@ final class SessionApiTest {
 
         @Test
         void initialize_default_cursor_is_zero() {
-            var s = parser().initialize("let x = 1;");
-            assertThat(s.cursor()).isEqualTo(0);
-            assertThat(s.text()).isEqualTo("let x = 1;");
+            var init = parser().initialize("let x = 1;");
+            assertThat(init.cursor().offset()).isEqualTo(0);
+            assertThat(init.session().text()).isEqualTo("let x = 1;");
         }
 
         @Test
         void initialize_clamps_cursor_over_end() {
-            var s = parser().initialize("let x = 1;", 9999);
-            assertThat(s.cursor()).isEqualTo("let x = 1;".length());
+            var init = parser().initialize("let x = 1;", 9999);
+            assertThat(init.cursor().offset()).isEqualTo("let x = 1;".length());
         }
 
         @Test
         void initialize_clamps_cursor_negative() {
-            var s = parser().initialize("let x = 1;", -5);
-            assertThat(s.cursor()).isEqualTo(0);
+            var init = parser().initialize("let x = 1;", -5);
+            assertThat(init.cursor().offset()).isEqualTo(0);
         }
 
         @Test
         void initialize_emits_tree_root() {
-            var s = parser().initialize("let x = 1;");
-            assertThat(s.root()).isNotNull();
-            assertThat(s.stats().reparseCount()).isEqualTo(0);
+            var init = parser().initialize("let x = 1;");
+            assertThat(init.session().root()).isNotNull();
+            assertThat(init.session().stats().reparseCount()).isEqualTo(0);
         }
     }
 
@@ -114,37 +111,38 @@ final class SessionApiTest {
     class NoOp {
         @Test
         void no_op_edit_returns_same_session() {
-            var s0 = parser().initialize("let x = 1;");
-            var s1 = s0.edit(0, 0, "");
-            assertThat(s1).isSameAs(s0);
-            assertThat(s0.stats().reparseCount()).isEqualTo(0);
+            var init = parser().initialize("let x = 1;");
+            var outcome = init.session().edit(init.cursor(), 0, 0, "");
+            assertThat(outcome.newSession()).isSameAs(init.session());
+            assertThat(outcome.newCursor()).isSameAs(init.cursor());
+            assertThat(init.session().stats().reparseCount()).isEqualTo(0);
         }
     }
 
     @Nested
-    @DisplayName("Cursor movement")
+    @DisplayName("Cursor movement (Lever D — pure, no Session allocation)")
     class CursorMove {
         @Test
         void move_cursor_pure_does_not_change_tree() {
-            var s0 = parser().initialize("let x = 1;", 0);
-            var s1 = s0.moveCursor(4);
-            assertThat(s1.cursor()).isEqualTo(4);
-            assertThat(s1.text()).isEqualTo(s0.text());
-            assertThat(s1.root()).isSameAs(s0.root());
+            var init = parser().initialize("let x = 1;", 0);
+            var moved = init.cursor().moveTo(4, init.session().index());
+            assertThat(moved.offset()).isEqualTo(4);
+            // Session was not touched; same root, same text.
+            assertThat(init.session().text()).isEqualTo("let x = 1;");
         }
 
         @Test
         void move_cursor_clamps_to_buffer() {
-            var s0 = parser().initialize("let x = 1;");
-            var s1 = s0.moveCursor(1000);
-            assertThat(s1.cursor()).isEqualTo("let x = 1;".length());
+            var init = parser().initialize("let x = 1;");
+            var moved = init.cursor().moveTo(1000, init.session().index());
+            assertThat(moved.offset()).isEqualTo("let x = 1;".length());
         }
 
         @Test
-        void move_cursor_same_position_returns_same_session() {
-            var s0 = parser().initialize("let x = 1;", 5);
-            var s1 = s0.moveCursor(5);
-            assertThat(s1).isSameAs(s0);
+        void move_cursor_to_same_offset_yields_equal_record() {
+            var init = parser().initialize("let x = 1;", 5);
+            var moved = init.cursor().moveTo(5, init.session().index());
+            assertThat(moved).isEqualTo(init.cursor());
         }
     }
 
@@ -153,23 +151,23 @@ final class SessionApiTest {
     class CursorShift {
         @Test
         void cursor_before_edit_stays_put() {
-            var s0 = parser().initialize("let x = 1;", 2); // cursor at 'l' | 'et'
-            var s1 = s0.edit(6, 0, "y"); // insert after 'x '
-            assertThat(s1.cursor()).isEqualTo(2);
+            var init = parser().initialize("let x = 1;", 2); // cursor at 'l' | 'et'
+            var outcome = init.session().edit(init.cursor(), 6, 0, "y"); // insert after 'x '
+            assertThat(outcome.newCursor().offset()).isEqualTo(2);
         }
 
         @Test
         void cursor_after_edit_shifts_by_delta() {
-            var s0 = parser().initialize("let x = 1;", 9); // near end
-            var s1 = s0.edit(4, 1, "yyy"); // replace 'x' with 'yyy' -> delta +2
-            assertThat(s1.cursor()).isEqualTo(11);
+            var init = parser().initialize("let x = 1;", 9); // near end
+            var outcome = init.session().edit(init.cursor(), 4, 1, "yyy"); // replace 'x' with 'yyy'
+            assertThat(outcome.newCursor().offset()).isEqualTo(11);
         }
 
         @Test
         void cursor_inside_edit_snaps_to_end_of_replacement() {
-            var s0 = parser().initialize("let x = 1;", 5); // cursor between 'x' and ' '
-            var s1 = s0.edit(4, 4, "foo = "); // replace 'x = ' with 'foo = '
-            assertThat(s1.cursor()).isEqualTo(4 + "foo = ".length());
+            var init = parser().initialize("let x = 1;", 5); // cursor between 'x' and ' '
+            var outcome = init.session().edit(init.cursor(), 4, 4, "foo = "); // replace 'x = ' with 'foo = '
+            assertThat(outcome.newCursor().offset()).isEqualTo(4 + "foo = ".length());
         }
     }
 
@@ -178,15 +176,15 @@ final class SessionApiTest {
     class OutOfRange {
         @Test
         void edit_offset_past_end_rejected() {
-            var s = parser().initialize("abc");
-            assertThatThrownBy(() -> s.edit(100, 0, "x"))
+            var init = parser().initialize("abc");
+            assertThatThrownBy(() -> init.session().edit(init.cursor(), 100, 0, "x"))
                 .isInstanceOf(IllegalArgumentException.class);
         }
 
         @Test
         void edit_range_past_end_rejected() {
-            var s = parser().initialize("abc");
-            assertThatThrownBy(() -> s.edit(1, 100, ""))
+            var init = parser().initialize("abc");
+            assertThatThrownBy(() -> init.session().edit(init.cursor(), 1, 100, ""))
                 .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -196,18 +194,18 @@ final class SessionApiTest {
     class ReparseAll {
         @Test
         void reparse_all_increments_fullReparseCount() {
-            var s0 = parser().initialize("let x = 1;");
-            var s1 = s0.reparseAll();
-            assertThat(s1.stats().fullReparseCount()).isEqualTo(1);
-            assertThat(s1.stats().reparseCount()).isEqualTo(1);
+            var init = parser().initialize("let x = 1;");
+            var outcome = init.session().reparseAll(init.cursor());
+            assertThat(outcome.newSession().stats().fullReparseCount()).isEqualTo(1);
+            assertThat(outcome.newSession().stats().reparseCount()).isEqualTo(1);
         }
 
         @Test
         void reparse_all_preserves_text_and_cursor() {
-            var s0 = parser().initialize("let x = 1;", 5);
-            var s1 = s0.reparseAll();
-            assertThat(s1.text()).isEqualTo(s0.text());
-            assertThat(s1.cursor()).isEqualTo(5);
+            var init = parser().initialize("let x = 1;", 5);
+            var outcome = init.session().reparseAll(init.cursor());
+            assertThat(outcome.newSession().text()).isEqualTo(init.session().text());
+            assertThat(outcome.newCursor().offset()).isEqualTo(5);
         }
     }
 
@@ -216,15 +214,15 @@ final class SessionApiTest {
     class StatsChecks {
         @Test
         void initial_stats_zero() {
-            var s = parser().initialize("let x = 1;");
-            assertThat(s.stats()).isEqualTo(Stats.INITIAL);
+            var init = parser().initialize("let x = 1;");
+            assertThat(init.session().stats()).isEqualTo(Stats.INITIAL);
         }
 
         @Test
         void edit_increments_reparseCount() {
-            var s0 = parser().initialize("let x = 1;");
-            var s1 = s0.edit(9, 0, "2");
-            assertThat(s1.stats().reparseCount()).isEqualTo(1);
+            var init = parser().initialize("let x = 1;");
+            var outcome = init.session().edit(init.cursor(), 9, 0, "2");
+            assertThat(outcome.newSession().stats().reparseCount()).isEqualTo(1);
         }
 
         @Test

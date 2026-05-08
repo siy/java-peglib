@@ -67,13 +67,24 @@ Listed in the harness's `@Param` annotation:
 | Variant | Configuration |
 |---|---|
 | `none` | All generator flags off — unflagged baseline |
-| `phase1` | `ParserConfig.DEFAULT` (phase-1 on, `choiceDispatch` on, other phase-2 off) |
+| `phase1` | Phase-1 flags on, all phase-2 flags off |
 | `phase1_choiceDispatch` | phase-1 + `choiceDispatch` only |
 | `phase1_markResetChildren` | phase-1 + `markResetChildren` only |
 | `phase1_inlineLocations` | phase-1 + `inlineLocations` only |
 | `phase1_allStructural` | phase-1 + all phase-2 (no `selectivePackrat`) |
-| `phase1_allStructural_skipPackrat` | above + `selectivePackrat` with skip-set `{Identifier, QualifiedName, Type}` |
+| `phase1_allStructural_skipPackrat` | above + `selectivePackrat` with explicit skip-set `{Identifier, QualifiedName, Type}` |
+| `phase1_allStructural_mutableResult` | above + `mutableParseResult` (Move A: -8.5% wallclock vs `phase1_allStructural`) |
+| `phase1_allStructural_mutableResult_autoSkipPackrat` | above with empty `packratSkipRules` → auto-derived skip-set via `PackratAnalyzer.autoSkipPackratRules`. **Currently the headline variant for cumulative throughput-engine numbers** (-67% wallclock vs pre-Tier-1 baseline). |
 | `interpreter` | `PegEngine` path, `ParserConfig.DEFAULT` |
+
+The harness is also parametrized on a `fixture` param:
+
+| Fixture | Source | Purpose |
+|---|---|---|
+| `reference` | 1,900-LOC `FactoryClassGenerator.java.txt` | Stable, low-variance throughput bench |
+| `selfhost` | The Java25 generated parser parsing its own ~37k-LOC generated source | Stress fixture; exposes scaling regressions the small fixture misses (e.g. Move E's IntCstParseResultMap regressed self-host by 22% while reference stayed in noise) |
+
+The `selfhost` fixture is incompatible with `variant=interpreter` (no generated source to feed back) — that combination is rejected at `@Setup`.
 
 ## Adding a new variant
 
@@ -169,6 +180,6 @@ raw files serve as machine-readable backup.
 ## Related
 
 - [`PERF-FLAGS.md`](PERF-FLAGS.md) — what each `ParserConfig` flag does
-- [`PERF-REWORK-SPEC.md`](PERF-REWORK-SPEC.md) — design rationale and
-  phase-by-phase specification
+- [`archive/PERF-REWORK-SPEC.md`](archive/PERF-REWORK-SPEC.md) — design rationale and
+  phase-by-phase specification (archived; superseded by [`incremental/THROUGHPUT-ENGINE-TIER1.md`](incremental/THROUGHPUT-ENGINE-TIER1.md))
 - [`CHANGELOG.md`](../CHANGELOG.md) — per-release measured numbers

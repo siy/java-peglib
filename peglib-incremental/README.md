@@ -5,8 +5,10 @@ module; zero source changes to `peglib-core` beyond the
 `Parser#parseRuleAt(Class<? extends RuleId>, String, int)` API that landed in
 0.3.0.
 
-See [`docs/incremental/SPEC.md`](../docs/incremental/SPEC.md) for the full
-design — this README is the quick-start.
+See [`docs/archive/SPEC-incremental-original.md`](../docs/archive/SPEC-incremental-original.md)
+for the original (archived) design and
+[`docs/incremental/ARCHITECTURE-0.5.0.md`](../docs/incremental/ARCHITECTURE-0.5.0.md)
+for the current 0.5.0 architecture — this README is the quick-start.
 
 ## Status
 

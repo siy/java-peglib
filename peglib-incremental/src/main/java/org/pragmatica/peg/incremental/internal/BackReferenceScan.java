@@ -90,7 +90,7 @@ public final class BackReferenceScan {
             case Expression.CaptureScope cs -> hasBackReference(cs.expression());
             case Expression.Group grp -> hasBackReference(grp.expression());
             case Expression.Literal _, Expression.CharClass _, Expression.Any _,
-                 Expression.Reference _, Expression.Dictionary _, Expression.Cut _ -> false;
+            Expression.Reference _, Expression.Dictionary _, Expression.Cut _ -> false;
         };
     }
 
@@ -116,8 +116,10 @@ public final class BackReferenceScan {
     private static void collectReferences(Expression expr, Set<String> out) {
         switch (expr) {
             case Expression.Reference ref -> out.add(ref.ruleName());
-            case Expression.Sequence seq -> seq.elements().forEach(e -> collectReferences(e, out));
-            case Expression.Choice choice -> choice.alternatives().forEach(e -> collectReferences(e, out));
+            case Expression.Sequence seq -> seq.elements()
+                                               .forEach(e -> collectReferences(e, out));
+            case Expression.Choice choice -> choice.alternatives()
+                                                   .forEach(e -> collectReferences(e, out));
             case Expression.ZeroOrMore zom -> collectReferences(zom.expression(), out);
             case Expression.OneOrMore oom -> collectReferences(oom.expression(), out);
             case Expression.Optional opt -> collectReferences(opt.expression(), out);
@@ -130,7 +132,7 @@ public final class BackReferenceScan {
             case Expression.CaptureScope cs -> collectReferences(cs.expression(), out);
             case Expression.Group grp -> collectReferences(grp.expression(), out);
             case Expression.Literal _, Expression.CharClass _, Expression.Any _,
-                 Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {}
+            Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {}
         }
     }
 

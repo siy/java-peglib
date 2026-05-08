@@ -33,10 +33,17 @@ import java.util.concurrent.TimeUnit;
 /**
  * JMH harness for commit #10's default-flipping decision.
  *
- * <p>Parametrized across seven {@link ParserConfig} variants (spec §8, PERF-REWORK-SPEC.md).
- * Each variant compiles a freshly generated parser class at {@link Level#Trial} and benchmarks
- * parsing the 1,900-LOC {@code FactoryClassGenerator.java.txt} fixture with a fresh parser
- * instance per invocation (generated parsers are single-use).
+ * <p>Parametrized across seven {@link ParserConfig} variants (spec §8, PERF-REWORK-SPEC.md) and
+ * two {@code fixture} sources: {@code reference} (1,900-LOC {@code
+ * FactoryClassGenerator.java.txt}, ~100 KB) and {@code selfhost} (the generated parser source
+ * itself, ~25× larger — exposes scaling problems the small bench misses).
+ *
+ * <p>Each variant compiles a freshly generated parser class at {@link Level#Trial} and
+ * benchmarks parsing the chosen fixture with a fresh parser instance per invocation (generated
+ * parsers are single-use).
+ *
+ * <p>The {@code interpreter} variant is incompatible with {@code fixture=selfhost} (no generated
+ * source exists to feed back); that combination is rejected explicitly in {@link #setup()}.
  *
  * <p>Run with: {@code mvn -Pbench clean compile exec:java}.
  */
@@ -61,9 +68,27 @@ public class Java25ParseBenchmark {
         "phase1_inlineLocations",
         "phase1_allStructural",
         "phase1_allStructural_skipPackrat",
+        "phase1_allStructural_mutableResult",
+        "phase1_allStructural_mutableResult_autoSkipPackrat",
         "interpreter"
     })
     public String variant;
+
+    /**
+     * Source under test:
+     * <ul>
+     *   <li>{@code reference} — the canonical 1,900-LOC {@code FactoryClassGenerator.java.txt}
+     *       fixture (~100 KB). Stable, low variance, fits L2; primary throughput bench.</li>
+     *   <li>{@code selfhost} — the generated parser source itself (~25× the work,
+     *       millions of CST nodes). Exposes scaling/cache-behavior regressions the small fixture
+     *       can miss (e.g. E's IntCstParseResultMap regressed self-host by 22% while the small
+     *       fixture stayed within noise).</li>
+     * </ul>
+     * The {@code selfhost} fixture is incompatible with {@code variant=interpreter} — there's no
+     * generated source to feed back. That combination is rejected at {@link #setup()}.
+     */
+    @Param({"reference", "selfhost"})
+    public String fixture;
 
     private Class<?> parserClass;
     private Method parseMethod;
@@ -76,9 +101,16 @@ public class Java25ParseBenchmark {
     @Setup(Level.Trial)
     public void setup() throws Exception {
         var grammarText = loadResource(GRAMMAR_RESOURCE);
-        fixtureSource = loadResource(FIXTURE_RESOURCE);
 
         if ("interpreter".equals(variant)) {
+            if ("selfhost".equals(fixture)) {
+                throw new IllegalArgumentException(
+                        "fixture=selfhost is not supported with variant=interpreter "
+                        + "(interpreter does not produce a generated parser source). "
+                        + "Use variant=interpreter with fixture=reference for "
+                        + "interpreter-vs-generator comparison on the small fixture.");
+            }
+            fixtureSource = loadResource(FIXTURE_RESOURCE);
             var grammar = GrammarParser.parse(grammarText).unwrap();
             interpreterParser = PegParser.fromGrammarWithoutActions(grammar, ParserConfig.DEFAULT).unwrap();
             return;
@@ -92,8 +124,26 @@ public class Java25ParseBenchmark {
         if (sourceResult.isFailure()) {
             throw new IllegalStateException("Failed to generate parser for variant " + variant + ": " + sourceResult);
         }
-        parserClass = compileAndLoad(sourceResult.unwrap(), fqcn);
+        var generatedSource = sourceResult.unwrap();
+        parserClass = compileAndLoad(generatedSource, fqcn);
         parseMethod = parserClass.getMethod("parse", String.class);
+        fixtureSource = fixtureSourceFor(fixture, generatedSource);
+    }
+
+    /**
+     * Resolves the input string the bench will parse.
+     * <ul>
+     *   <li>{@code reference} → the canonical {@code FactoryClassGenerator.java.txt} fixture.</li>
+     *   <li>{@code selfhost} → the freshly generated parser's own source code (the parser parses
+     *       itself; ~25× the work of the reference fixture).</li>
+     * </ul>
+     */
+    private static String fixtureSourceFor(String fixture, String generatedSource) throws Exception {
+        return switch (fixture) {
+            case "reference" -> loadResource(FIXTURE_RESOURCE);
+            case "selfhost" -> generatedSource;
+            default -> throw new IllegalArgumentException("Unknown fixture: " + fixture);
+        };
     }
 
     @Benchmark
@@ -115,6 +165,14 @@ public class Java25ParseBenchmark {
             case "phase1_allStructural" -> withStructural(true, true, true, false, Set.of());
             case "phase1_allStructural_skipPackrat" -> withStructural(true, true, true, true,
                     Set.of("Identifier", "QualifiedName", "Type"));
+            case "phase1_allStructural_mutableResult" -> withStructural(true, true, true, false, Set.of(), true);
+            // Phase 1.8: structural+mutableResult variant with selectivePackrat=ON and empty
+            // packratSkipRules — triggers auto-detection in PackratAnalyzer (LR rules excluded).
+            case "phase1_allStructural_mutableResult_autoSkipPackrat" -> withStructural(true, true, true, true, Set.of(), true);
+            // Phase 1.9 (DFA spike): structural + autoSkipPackrat WITHOUT tokenFastPath — A/B baseline.
+            case "phase1_allStructural_mutableResult_autoSkipPackrat_noFastPath" -> withStructural(true, true, true, true, Set.of(), true, false);
+            // Phase 1.9 (DFA spike): structural + autoSkipPackrat WITH tokenFastPath — A/B variant.
+            case "phase1_allStructural_mutableResult_autoSkipPackrat_fastPath" -> withStructural(true, true, true, true, Set.of(), true, true);
             default -> throw new IllegalArgumentException("Unknown variant: " + variant);
         };
     }
@@ -135,7 +193,9 @@ public class Java25ParseBenchmark {
                 false,                      // markResetChildren
                 false,                      // inlineLocations
                 false,                      // selectivePackrat
-                Set.of());                  // packratSkipRules
+                Set.of(),                   // packratSkipRules
+                false,                      // mutableParseResult
+                false);                     // tokenFastPath
     }
 
     /**
@@ -147,6 +207,25 @@ public class Java25ParseBenchmark {
                                                boolean inlineLocations,
                                                boolean selectivePackrat,
                                                Set<String> packratSkipRules) {
+        return withStructural(choiceDispatch, markResetChildren, inlineLocations, selectivePackrat, packratSkipRules, false);
+    }
+
+    private static ParserConfig withStructural(boolean choiceDispatch,
+                                               boolean markResetChildren,
+                                               boolean inlineLocations,
+                                               boolean selectivePackrat,
+                                               Set<String> packratSkipRules,
+                                               boolean mutableParseResult) {
+        return withStructural(choiceDispatch, markResetChildren, inlineLocations, selectivePackrat, packratSkipRules, mutableParseResult, true);
+    }
+
+    private static ParserConfig withStructural(boolean choiceDispatch,
+                                               boolean markResetChildren,
+                                               boolean inlineLocations,
+                                               boolean selectivePackrat,
+                                               Set<String> packratSkipRules,
+                                               boolean mutableParseResult,
+                                               boolean tokenFastPath) {
         return new ParserConfig(
                 true,                       // packratEnabled
                 RecoveryStrategy.BASIC,
@@ -161,7 +240,9 @@ public class Java25ParseBenchmark {
                 markResetChildren,
                 inlineLocations,
                 selectivePackrat,
-                Set.copyOf(packratSkipRules));
+                Set.copyOf(packratSkipRules),
+                mutableParseResult,
+                tokenFastPath);             // phase 1.9 (DFA spike)
     }
 
     static String loadResource(String resourcePath) throws Exception {

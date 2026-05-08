@@ -1,13 +1,19 @@
 package org.pragmatica.peg.incremental.internal;
 
+import org.pragmatica.lang.Result;
 import org.pragmatica.peg.PegParser;
 import org.pragmatica.peg.action.RuleId;
 import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.incremental.Cursor;
 import org.pragmatica.peg.incremental.IncrementalParser;
+import org.pragmatica.peg.incremental.InitialSession;
 import org.pragmatica.peg.incremental.Session;
+import org.pragmatica.peg.incremental.SessionError;
 import org.pragmatica.peg.parser.Parser;
 import org.pragmatica.peg.parser.ParserConfig;
+import org.pragmatica.peg.parser.PegEngine;
 import org.pragmatica.peg.tree.CstNode;
+import org.pragmatica.peg.tree.IdGenerator;
 
 import java.util.Set;
 
@@ -33,6 +39,7 @@ public final class SessionFactory implements IncrementalParser {
     private final ParserConfig config;
     private final Parser parser;
     private final Set<String> fallbackRules;
+    private final Set<String> safePivotRules;
     private final RuleIdRegistry registry;
     private final boolean triviaFastPathEnabled;
 
@@ -40,11 +47,13 @@ public final class SessionFactory implements IncrementalParser {
                            ParserConfig config,
                            Parser parser,
                            Set<String> fallbackRules,
+                           Set<String> safePivotRules,
                            boolean triviaFastPathEnabled) {
         this.grammar = grammar;
         this.config = config;
         this.parser = parser;
         this.fallbackRules = fallbackRules;
+        this.safePivotRules = safePivotRules;
         this.registry = new RuleIdRegistry();
         this.triviaFastPathEnabled = triviaFastPathEnabled;
     }
@@ -73,48 +82,113 @@ public final class SessionFactory implements IncrementalParser {
      * {@code false}; opt-in via {@link IncrementalParser#create(Grammar,
      * ParserConfig, boolean)}.
      */
-    public static IncrementalParser sessionFactory(Grammar grammar, ParserConfig config, boolean triviaFastPathEnabled) {
+    public static IncrementalParser sessionFactory(Grammar grammar,
+                                                   ParserConfig config,
+                                                   boolean triviaFastPathEnabled) {
         // 0.4.0 — caller is expected to supply a validated Grammar (constructed
         // through {@link Grammar#grammar(java.util.List, org.pragmatica.lang.Option,
         // org.pragmatica.lang.Option, org.pragmatica.lang.Option, java.util.List,
         // java.util.List)} or via {@link GrammarParser#parse(String)}). Surface
         // PegEngine construction errors as IllegalArgumentException to preserve
         // the pre-0.4.0 contract — IncrementalParser is a construction-time API.
-        var parser = PegParser.fromGrammar(grammar, config).fold(
-            cause -> { throw new IllegalArgumentException("invalid grammar: " + cause.message()); },
-            p -> p);
+        var parser = PegParser.fromGrammar(grammar, config)
+                              .fold(cause -> {
+                                        throw new IllegalArgumentException("invalid grammar: " + cause.message());
+                                    },
+                                    p -> p);
         var fallback = BackReferenceScan.unsafeRules(grammar);
-        return new SessionFactory(grammar, config, parser, fallback, triviaFastPathEnabled);
+        var safePivots = SafePivotAnalyzer.safePivotRules(grammar);
+        return new SessionFactory(grammar, config, parser, fallback, safePivots, triviaFastPathEnabled);
     }
 
     @Override
-    public Session initialize(String buffer, int cursorOffset) {
+    public InitialSession initialize(String buffer, int cursorOffset) {
         if (buffer == null) {
             throw new IllegalArgumentException("buffer must not be null");
         }
-        int clampedCursor = Math.max(0, Math.min(cursorOffset, buffer.length()));
-        CstNode root = parseFull(buffer);
-        return IncrementalSession.initial(this, buffer, clampedCursor, root);
+        int clampedCursor = Math.max(0,
+                                     Math.min(cursorOffset, buffer.length()));
+        // Phase 1.5 (v0.5.0): allocate ONE IdGenerator per Session lineage; thread
+        // it through every reparse so node IDs stay stable across edits. This is
+        // the precondition for Path D's optimized NodeIndex.applyIncremental.
+        var idGen = new IdGenerator.PerSessionCounter();
+        // 0.5.0 — parseFull returns Result<CstNode>. On failure synthesise a
+        // degraded Session per Path A: caller's contract on initialize is
+        // non-Result, so wrap the failure in a CstNode.Error root and surface
+        // it through Session#parseSuccessful()/lastParseError().
+        // 0.5.0 (Lever D): return Session paired with an initial Cursor.
+        IncrementalSession session = parseFull(buffer, idGen)
+        .fold(cause -> IncrementalSession.degradedInitial(this, buffer, idGen, (SessionError) cause),
+              root -> IncrementalSession.initial(this, buffer, root, idGen));
+        var cursor = Cursor.at(clampedCursor, session.index());
+        return new InitialSession(session, cursor);
     }
 
-    Grammar grammar() { return grammar; }
-    ParserConfig config() { return config; }
-    Parser parser() { return parser; }
-    Set<String> fallbackRules() { return fallbackRules; }
-    RuleIdRegistry registry() { return registry; }
-    boolean triviaFastPathEnabled() { return triviaFastPathEnabled; }
+    Grammar grammar() {
+        return grammar;
+    }
+
+    ParserConfig config() {
+        return config;
+    }
+
+    Parser parser() {
+        return parser;
+    }
+
+    Set<String> fallbackRules() {
+        return fallbackRules;
+    }
 
     /**
-     * Full-parse the buffer via the backing {@link Parser}. Surfaces errors
-     * as {@link IllegalStateException} — v1 treats an unparseable full
-     * buffer as a programmer-level failure; recovery-aware callers should
-     * configure {@link ParserConfig} with {@link
-     * org.pragmatica.peg.error.RecoveryStrategy#ADVANCED} and read
-     * diagnostics from the resulting tree's {@link CstNode.Error} nodes.
+     * Phase 2 (v0.5.0) — Lever B: rule names that are safe to use as
+     * incremental {@code parseRuleAt} pivots. See
+     * {@link SafePivotAnalyzer} for the criterion. The set is computed once
+     * per factory and reused for the lifetime of every {@link Session} this
+     * factory produces.
      */
-    CstNode parseFull(String buffer) {
-        return parser.parseCst(buffer).fold(
-            cause -> { throw new IllegalStateException("full parse failed: " + cause.message()); },
-            node -> node);
+    Set<String> safePivotRules() {
+        return safePivotRules;
+    }
+
+    RuleIdRegistry registry() {
+        return registry;
+    }
+
+    boolean triviaFastPathEnabled() {
+        return triviaFastPathEnabled;
+    }
+
+    /**
+     * Phase 1.5 (v0.5.0): Session-aware full-parse that uses the supplied
+     * {@link IdGenerator}. Routes through {@link PegEngine}'s id-aware overload
+     * so node IDs come from the Session's counter rather than a fresh per-call
+     * one.
+     *
+     * <p>0.5.0 — failures surface as {@link Result#failure(org.pragmatica.lang.Cause)}
+     * carrying a {@link SessionError} variant rather than the pre-0.5.0
+     * {@link IllegalStateException}. Callers in {@link IncrementalSession}
+     * propagate Result through {@code fallback}/{@code reparseAll}; the public
+     * {@link Session} surface synthesises a degraded Session on failure so the
+     * exception never escapes (Path A — see {@link SessionError}).
+     *
+     * <p>Recovery-aware callers should configure {@link ParserConfig} with
+     * {@link org.pragmatica.peg.error.RecoveryStrategy#ADVANCED} and read
+     * diagnostics from the resulting tree's {@link CstNode.Error} nodes — that
+     * path produces a successful Result with embedded error nodes rather than
+     * a Result.failure.
+     */
+    Result<CstNode> parseFull(String buffer, IdGenerator idGen) {
+        var startRule = grammar.effectiveStartRule();
+        if (startRule.isEmpty()) {
+            return new SessionError.NoStartRule().result();
+        }
+        var engine = (PegEngine) parser;
+        return engine.parseCst(buffer,
+                               startRule.unwrap()
+                                        .name(),
+                               idGen)
+                     .fold(cause -> new SessionError.ParseFailed(cause.message()).result(),
+                           Result::success);
     }
 }

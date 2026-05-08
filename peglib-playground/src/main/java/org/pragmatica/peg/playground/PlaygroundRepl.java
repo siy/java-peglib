@@ -49,7 +49,7 @@ public final class PlaygroundRepl {
     private RecoveryStrategy recovery = RecoveryStrategy.BASIC;
     private Option<String> startRule = Option.none();
     private String grammarCache = "";
-    private long grammarMtime = -1L;
+    private long grammarMtime = - 1L;
 
     public PlaygroundRepl(Path grammarPath, BufferedReader reader, PrintStream out, boolean trace) {
         this.grammarPath = grammarPath;
@@ -79,7 +79,7 @@ public final class PlaygroundRepl {
             return;
         }
         boolean trace = false;
-        for (int i = 1; i < args.length; i++) {
+        for (int i = 1; i < args.length; i++ ) {
             if ("--trace".equals(args[i])) {
                 trace = true;
             }
@@ -128,19 +128,23 @@ public final class PlaygroundRepl {
     private boolean handleMetaCommand(String line) throws IOException {
         String[] parts = line.split("\\s+", 2);
         String cmd = parts[0];
-        String arg = parts.length > 1 ? parts[1].trim() : "";
+        String arg = parts.length > 1
+                     ? parts[1].trim()
+                     : "";
         switch (cmd) {
-            case ":quit", ":q", ":exit" -> {
+            case":quit", ":q", ":exit" -> {
                 return true;
             }
-            case ":help" -> printHelp();
-            case ":trace" -> trace = parseOnOff(arg, trace);
-            case ":packrat" -> packrat = parseOnOff(arg, packrat);
-            case ":trivia" -> captureTrivia = parseOnOff(arg, captureTrivia);
-            case ":recovery" -> recovery = parseRecovery(arg, recovery);
-            case ":start" -> startRule = arg.isEmpty() ? Option.none() : Option.some(arg);
-            case ":reload" -> forceReload();
-            case ":status" -> printStatus();
+            case":help" -> printHelp();
+            case":trace" -> trace = parseOnOff(arg, trace);
+            case":packrat" -> packrat = parseOnOff(arg, packrat);
+            case":trivia" -> captureTrivia = parseOnOff(arg, captureTrivia);
+            case":recovery" -> recovery = parseRecovery(arg, recovery);
+            case":start" -> startRule = arg.isEmpty()
+                                        ? Option.none()
+                                        : Option.some(arg);
+            case":reload" -> forceReload();
+            case":status" -> printStatus();
             default -> out.println("unknown command: " + cmd + " (try :help)");
         }
         return false;
@@ -162,7 +166,11 @@ public final class PlaygroundRepl {
     private void printStatus() {
         out.println(String.format("grammar: %s (mtime=%d, %d chars)", grammarPath, grammarMtime, grammarCache.length()));
         out.println(String.format("packrat=%s trivia=%s recovery=%s trace=%s start=%s",
-                                  packrat, captureTrivia, recovery, trace, startRule.or("<default>")));
+                                  packrat,
+                                  captureTrivia,
+                                  recovery,
+                                  trace,
+                                  startRule.or("<default>")));
     }
 
     private static boolean parseOnOff(String arg, boolean current) {
@@ -170,8 +178,8 @@ public final class PlaygroundRepl {
             return !current;
         }
         return switch (arg.toLowerCase(Locale.ROOT)) {
-            case "on", "true", "yes", "1" -> true;
-            case "off", "false", "no", "0" -> false;
+            case"on", "true", "yes", "1" -> true;
+            case"off", "false", "no", "0" -> false;
             default -> current;
         };
     }
@@ -180,7 +188,7 @@ public final class PlaygroundRepl {
         if (arg.isEmpty()) {
             return current;
         }
-        try {
+        try{
             return RecoveryStrategy.valueOf(arg.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             return current;
@@ -188,12 +196,13 @@ public final class PlaygroundRepl {
     }
 
     private void forceReload() throws IOException {
-        grammarMtime = -1L;
+        grammarMtime = - 1L;
         loadGrammarIfChanged();
     }
 
     private void loadGrammarIfChanged() throws IOException {
-        long mtime = Files.getLastModifiedTime(grammarPath).to(TimeUnit.MILLISECONDS);
+        long mtime = Files.getLastModifiedTime(grammarPath)
+                          .to(TimeUnit.MILLISECONDS);
         if (mtime == grammarMtime) {
             return;
         }
@@ -215,7 +224,9 @@ public final class PlaygroundRepl {
             return;
         }
         var stats = outcome.stats();
-        String status = outcome.hasErrors() ? "FAIL" : "OK";
+        String status = outcome.hasErrors()
+                        ? "FAIL"
+                        : "OK";
         out.println(String.format("%s  nodes=%d trivia=%d  %.3f ms",
                                   status,
                                   stats.nodeCount(),
@@ -227,7 +238,8 @@ public final class PlaygroundRepl {
             }
         }
         if (trace) {
-            out.print(outcome.tracer().pretty());
+            out.print(outcome.tracer()
+                             .pretty());
         }
     }
 }

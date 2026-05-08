@@ -2,7 +2,6 @@ package org.pragmatica.peg.incremental.internal;
 
 import org.pragmatica.peg.incremental.Edit;
 import org.pragmatica.peg.tree.CstNode;
-import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
 import org.pragmatica.peg.tree.Trivia;
 
@@ -71,7 +70,9 @@ public final class TriviaRedistribution {
      * tokenisation.
      */
     public static CstNode tryTriviaOnlyEdit(CstNode root, String newBuffer, Edit edit) {
-        var match = findContainingTrivia(root, edit.offset(), edit.offset() + edit.oldLen());
+        var match = findContainingTrivia(root,
+                                         edit.offset(),
+                                         edit.offset() + edit.oldLen());
         if (match == null) {
             return null;
         }
@@ -99,7 +100,6 @@ public final class TriviaRedistribution {
     }
 
     // ---- trivia containment detection ------------------------------------
-
     /**
      * Walk {@code node}'s subtree looking for a trivia run whose span fully
      * contains the half-open edit range {@code [editStart, editEnd)}.
@@ -116,10 +116,10 @@ public final class TriviaRedistribution {
      */
     public static TriviaMatch findContainingTrivia(CstNode node, int editStart, int editEnd) {
         return findContainingTriviaInList(node, node.leadingTrivia(), Owner.LEADING, editStart, editEnd) instanceof TriviaMatch m
-            ? m
-            : findContainingTriviaInList(node, node.trailingTrivia(), Owner.TRAILING, editStart, editEnd) instanceof TriviaMatch m2
-                ? m2
-                : findContainingTriviaInChildren(node, editStart, editEnd);
+               ? m
+               : findContainingTriviaInList(node, node.trailingTrivia(), Owner.TRAILING, editStart, editEnd) instanceof TriviaMatch m2
+                 ? m2
+                 : findContainingTriviaInChildren(node, editStart, editEnd);
     }
 
     private static TriviaMatch findContainingTriviaInList(CstNode owner,
@@ -130,10 +130,12 @@ public final class TriviaRedistribution {
         if (trivia == null) {
             return null;
         }
-        for (int i = 0; i < trivia.size(); i++) {
+        for (int i = 0; i < trivia.size(); i++ ) {
             var t = trivia.get(i);
-            int a = t.span().startOffset();
-            int b = t.span().endOffset();
+            int a = t.span()
+                     .startOffset();
+            int b = t.span()
+                     .endOffset();
             if (a <= editStart && editEnd <= b) {
                 return new TriviaMatch(owner, kind, i, t);
             }
@@ -142,12 +144,14 @@ public final class TriviaRedistribution {
     }
 
     private static TriviaMatch findContainingTriviaInChildren(CstNode node, int editStart, int editEnd) {
-        if (!(node instanceof CstNode.NonTerminal nt)) {
+        if (! (node instanceof CstNode.NonTerminal nt)) {
             return null;
         }
         for (var child : nt.children()) {
-            int a = child.span().startOffset();
-            int b = child.span().endOffset();
+            int a = child.span()
+                         .startOffset();
+            int b = child.span()
+                         .endOffset();
             // Only descend into children whose own span (plus trivia margins) could contain the edit.
             // Leading trivia of a child sits before child.span().start(); trailing trivia (if any)
             // sits after child.span().end(). Conservative: check the child if any trivia or the
@@ -171,25 +175,32 @@ public final class TriviaRedistribution {
      */
     private static boolean couldContain(CstNode child, int editStart, int editEnd) {
         for (var t : nullToEmpty(child.leadingTrivia())) {
-            if (t.span().startOffset() <= editStart && editEnd <= t.span().endOffset()) {
+            if (t.span()
+                 .startOffset() <= editStart && editEnd <= t.span()
+                                                            .endOffset()) {
                 return true;
             }
         }
         for (var t : nullToEmpty(child.trailingTrivia())) {
-            if (t.span().startOffset() <= editStart && editEnd <= t.span().endOffset()) {
+            if (t.span()
+                 .startOffset() <= editStart && editEnd <= t.span()
+                                                            .endOffset()) {
                 return true;
             }
         }
         // Child's own span containing the edit: descend in case of nested trivia attachments.
-        return child.span().startOffset() <= editStart && editEnd <= child.span().endOffset();
+        return child.span()
+                    .startOffset() <= editStart && editEnd <= child.span()
+                                                                   .endOffset();
     }
 
     private static List<Trivia> nullToEmpty(List<Trivia> trivia) {
-        return trivia == null ? List.of() : trivia;
+        return trivia == null
+               ? List.of()
+               : trivia;
     }
 
     // ---- legality of trivia-only replacement -----------------------------
-
     /**
      * Is {@code newText} a legal in-place rewrite for {@code trivia}? Pure
      * deletions (newText empty) within a trivia run are always legal — they
@@ -237,14 +248,17 @@ public final class TriviaRedistribution {
     }
 
     private static boolean isLineCommentBoundaryUntouched(Trivia.LineComment lc, Edit edit) {
-        int start = lc.span().startOffset();
+        int start = lc.span()
+                      .startOffset();
         // Don't allow deleting the leading "//" prefix (offsets [start, start+2]).
         return edit.offset() >= start + 2;
     }
 
     private static boolean isBlockCommentBoundaryUntouched(Trivia.BlockComment bc, Edit edit) {
-        int start = bc.span().startOffset();
-        int end = bc.span().endOffset();
+        int start = bc.span()
+                      .startOffset();
+        int end = bc.span()
+                    .endOffset();
         // Protect leading "/*" (offsets [start, start+2]) and trailing "*/" (offsets [end-2, end]).
         return edit.offset() >= start + 2 && edit.offset() + edit.oldLen() <= end - 2;
     }
@@ -255,7 +269,7 @@ public final class TriviaRedistribution {
         }
         // Disallow newlines — a newline mid-line-comment terminates it and
         // changes tokenisation downstream.
-        for (int i = 0; i < newText.length(); i++) {
+        for (int i = 0; i < newText.length(); i++ ) {
             if (newText.charAt(i) == '\n' || newText.charAt(i) == '\r') {
                 return false;
             }
@@ -272,7 +286,7 @@ public final class TriviaRedistribution {
     }
 
     private static boolean allWhitespace(String s) {
-        for (int i = 0; i < s.length(); i++) {
+        for (int i = 0; i < s.length(); i++ ) {
             if (!Character.isWhitespace(s.charAt(i))) {
                 return false;
             }
@@ -281,7 +295,6 @@ public final class TriviaRedistribution {
     }
 
     // ---- in-place trivia rewrite -----------------------------------------
-
     /**
      * Build a new root with {@code match}'s trivia text rewritten and every
      * downstream offset shifted by {@code edit.delta()}. Structural copy is
@@ -297,12 +310,10 @@ public final class TriviaRedistribution {
     private static CstNode rewriteNode(CstNode node, TriviaMatch match, String newText, Edit edit) {
         int delta = edit.delta();
         int editEnd = edit.offset() + edit.oldLen();
-
         // If THIS node owns the trivia match, rewrite the trivia list in place.
         if (node == match.owner()) {
             return rebuildOwnerWithRewrittenTrivia(node, match, newText, edit);
         }
-
         // Otherwise: descend into children that lie at-or-after the edit start, shifting as needed.
         return shiftAndDescend(node, match, newText, edit, delta, editEnd);
     }
@@ -317,10 +328,23 @@ public final class TriviaRedistribution {
         var newLeading = shiftTriviaListAfter(node.leadingTrivia(), delta, editEnd);
         var newTrailing = shiftTriviaListAfter(node.trailingTrivia(), delta, editEnd);
         return switch (node) {
-            case CstNode.Terminal t -> new CstNode.Terminal(newSpan, t.rule(), t.text(), newLeading, newTrailing);
-            case CstNode.Token t -> new CstNode.Token(newSpan, t.rule(), t.text(), newLeading, newTrailing);
-            case CstNode.Error e -> new CstNode.Error(newSpan, e.skippedText(), e.expected(), newLeading, newTrailing);
-            case CstNode.NonTerminal nt -> rebuildNonTerminalChildren(nt, newSpan, newLeading, newTrailing, match, newText, edit, delta, editEnd);
+            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), newSpan, t.rule(), t.text(), newLeading, newTrailing);
+            case CstNode.Token t -> new CstNode.Token(t.id(), newSpan, t.rule(), t.text(), newLeading, newTrailing);
+            case CstNode.Error e -> new CstNode.Error(e.id(),
+                                                      newSpan,
+                                                      e.skippedText(),
+                                                      e.expected(),
+                                                      newLeading,
+                                                      newTrailing);
+            case CstNode.NonTerminal nt -> rebuildNonTerminalChildren(nt,
+                                                                      newSpan,
+                                                                      newLeading,
+                                                                      newTrailing,
+                                                                      match,
+                                                                      newText,
+                                                                      edit,
+                                                                      delta,
+                                                                      editEnd);
         };
     }
 
@@ -333,7 +357,8 @@ public final class TriviaRedistribution {
                                                       Edit edit,
                                                       int delta,
                                                       int editEnd) {
-        var newChildren = new ArrayList<CstNode>(nt.children().size());
+        var newChildren = new ArrayList<CstNode>(nt.children()
+                                                   .size());
         for (var child : nt.children()) {
             // Order matters: a child whose own span starts at-or-after editEnd may
             // STILL own the matched trivia (its leadingTrivia sits BEFORE the
@@ -341,20 +366,21 @@ public final class TriviaRedistribution {
             // then the unaffected case.
             if (childContainsMatch(child, match)) {
                 newChildren.add(rewriteNode(child, match, newText, edit));
-            } else if (child.span().startOffset() >= editEnd) {
+            }else if (child.span()
+                           .startOffset() >= editEnd) {
                 newChildren.add(shiftAllOffsets(child, delta));
-            } else {
+            }else {
                 newChildren.add(child);
             }
         }
-        return new CstNode.NonTerminal(newSpan, nt.rule(), List.copyOf(newChildren), newLeading, newTrailing);
+        return new CstNode.NonTerminal(nt.id(), newSpan, nt.rule(), List.copyOf(newChildren), newLeading, newTrailing);
     }
 
     private static boolean childContainsMatch(CstNode child, TriviaMatch match) {
         if (child == match.owner()) {
             return true;
         }
-        if (!(child instanceof CstNode.NonTerminal nt)) {
+        if (! (child instanceof CstNode.NonTerminal nt)) {
             return false;
         }
         for (var c : nt.children()) {
@@ -379,12 +405,11 @@ public final class TriviaRedistribution {
                                                            Edit edit) {
         int delta = edit.delta();
         int editEnd = edit.offset() + edit.oldLen();
-
         var leading = owner.leadingTrivia();
         var trailing = owner.trailingTrivia();
         if (match.kind() == Owner.LEADING) {
             leading = rewriteTriviaList(leading, match.index(), newText, edit);
-        } else {
+        }else {
             trailing = rewriteTriviaList(trailing, match.index(), newText, edit);
         }
         // The owner's own span: when the matched trivia sits in the owner's
@@ -397,15 +422,21 @@ public final class TriviaRedistribution {
         // compatibility), the owner's span stays put.
         SourceSpan ownerSpan;
         if (match.kind() == Owner.LEADING && delta != 0) {
-            ownerSpan = SourceSpan.sourceSpan(shiftLoc(owner.span().start(), delta), shiftLoc(owner.span().end(), delta));
-        } else {
+            var os = owner.span();
+            ownerSpan = new SourceSpan(os.startLine(), os.startColumn(), os.startOffset() + delta,
+                                       os.endLine(), os.endColumn(), os.endOffset() + delta);
+        }else {
             ownerSpan = owner.span();
         }
-
         return switch (owner) {
-            case CstNode.Terminal t -> new CstNode.Terminal(ownerSpan, t.rule(), t.text(), leading, trailing);
-            case CstNode.Token t -> new CstNode.Token(ownerSpan, t.rule(), t.text(), leading, trailing);
-            case CstNode.Error e -> new CstNode.Error(ownerSpan, e.skippedText(), e.expected(), leading, trailing);
+            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), ownerSpan, t.rule(), t.text(), leading, trailing);
+            case CstNode.Token t -> new CstNode.Token(t.id(), ownerSpan, t.rule(), t.text(), leading, trailing);
+            case CstNode.Error e -> new CstNode.Error(e.id(),
+                                                      ownerSpan,
+                                                      e.skippedText(),
+                                                      e.expected(),
+                                                      leading,
+                                                      trailing);
             case CstNode.NonTerminal nt -> rebuildOwnerNonTerminal(nt, ownerSpan, leading, trailing, delta, editEnd);
         };
     }
@@ -417,15 +448,17 @@ public final class TriviaRedistribution {
                                                    int delta,
                                                    int editEnd) {
         // Children of the owner: shift those at-or-after editEnd; leave others alone.
-        var newChildren = new ArrayList<CstNode>(nt.children().size());
+        var newChildren = new ArrayList<CstNode>(nt.children()
+                                                   .size());
         for (var child : nt.children()) {
-            if (child.span().startOffset() >= editEnd) {
+            if (child.span()
+                     .startOffset() >= editEnd) {
                 newChildren.add(shiftAllOffsets(child, delta));
-            } else {
+            }else {
                 newChildren.add(child);
             }
         }
-        return new CstNode.NonTerminal(ownerSpan, nt.rule(), List.copyOf(newChildren), leading, trailing);
+        return new CstNode.NonTerminal(nt.id(), ownerSpan, nt.rule(), List.copyOf(newChildren), leading, trailing);
     }
 
     /**
@@ -440,13 +473,13 @@ public final class TriviaRedistribution {
             return List.of();
         }
         var out = new ArrayList<Trivia>(trivia.size());
-        for (int i = 0; i < trivia.size(); i++) {
+        for (int i = 0; i < trivia.size(); i++ ) {
             var t = trivia.get(i);
             if (i < index) {
                 out.add(t);
-            } else if (i == index) {
+            }else if (i == index) {
                 out.add(rewriteSingleTrivia(t, newText, edit));
-            } else {
+            }else {
                 out.add(shiftTrivia(t, edit.delta()));
             }
         }
@@ -454,17 +487,15 @@ public final class TriviaRedistribution {
     }
 
     private static Trivia rewriteSingleTrivia(Trivia trivia, String newText, Edit edit) {
-        int triviaStart = trivia.span().startOffset();
+        int triviaStart = trivia.span()
+                                .startOffset();
         int relStart = edit.offset() - triviaStart;
         int relEnd = relStart + edit.oldLen();
         var oldText = trivia.text();
         var rebuilt = oldText.substring(0, relStart) + newText + oldText.substring(relEnd);
-        var newSpan = SourceSpan.sourceSpan(
-            trivia.span().start(),
-            new SourceLocation(
-                trivia.span().endLine(),
-                trivia.span().endColumn(),
-                trivia.span().endOffset() + edit.delta()));
+        var ts = trivia.span();
+        var newSpan = new SourceSpan(ts.startLine(), ts.startColumn(), ts.startOffset(),
+                                     ts.endLine(), ts.endColumn(), ts.endOffset() + edit.delta());
         return switch (trivia) {
             case Trivia.Whitespace _ -> new Trivia.Whitespace(newSpan, rebuilt);
             case Trivia.LineComment _ -> new Trivia.LineComment(newSpan, rebuilt);
@@ -473,38 +504,45 @@ public final class TriviaRedistribution {
     }
 
     // ---- offset shifting (subset of TreeSplicer; duplicated to keep helpers self-contained) -----
-
     private static SourceSpan shiftSpanForEdit(SourceSpan span, int delta, int editEnd) {
         if (delta == 0) {
             return span;
         }
-        var start = span.startOffset() >= editEnd ? shiftLoc(span.start(), delta) : span.start();
-        var end = span.endOffset() >= editEnd ? shiftLoc(span.end(), delta) : span.end();
-        return SourceSpan.sourceSpan(start, end);
+        int newStartOffset = span.startOffset() >= editEnd ? span.startOffset() + delta : span.startOffset();
+        int newEndOffset = span.endOffset() >= editEnd ? span.endOffset() + delta : span.endOffset();
+        return new SourceSpan(span.startLine(), span.startColumn(), newStartOffset,
+                              span.endLine(), span.endColumn(), newEndOffset);
     }
 
     private static List<Trivia> shiftTriviaListAfter(List<Trivia> trivia, int delta, int editEnd) {
         if (trivia == null || trivia.isEmpty() || delta == 0) {
-            return trivia == null ? List.of() : trivia;
+            return trivia == null
+                   ? List.of()
+                   : trivia;
         }
         boolean any = false;
         var out = new ArrayList<Trivia>(trivia.size());
         for (var t : trivia) {
-            if (t.span().startOffset() >= editEnd) {
+            if (t.span()
+                 .startOffset() >= editEnd) {
                 out.add(shiftTrivia(t, delta));
                 any = true;
-            } else {
+            }else {
                 out.add(t);
             }
         }
-        return any ? List.copyOf(out) : trivia;
+        return any
+               ? List.copyOf(out)
+               : trivia;
     }
 
     private static Trivia shiftTrivia(Trivia trivia, int delta) {
         if (delta == 0) {
             return trivia;
         }
-        var newSpan = SourceSpan.sourceSpan(shiftLoc(trivia.span().start(), delta), shiftLoc(trivia.span().end(), delta));
+        var s = trivia.span();
+        var newSpan = new SourceSpan(s.startLine(), s.startColumn(), s.startOffset() + delta,
+                                     s.endLine(), s.endColumn(), s.endOffset() + delta);
         return switch (trivia) {
             case Trivia.Whitespace w -> new Trivia.Whitespace(newSpan, w.text());
             case Trivia.LineComment l -> new Trivia.LineComment(newSpan, l.text());
@@ -519,14 +557,12 @@ public final class TriviaRedistribution {
         return TreeSplicer.shiftAll(node, delta);
     }
 
-    private static SourceLocation shiftLoc(SourceLocation loc, int delta) {
-        return new SourceLocation(loc.line(), loc.column(), loc.offset() + delta);
-    }
-
     // ---- internal records ------------------------------------------------
-
     /** Whether a matched trivia sits in its owner's leading or trailing list. */
-    public enum Owner { LEADING, TRAILING }
+    public enum Owner {
+        LEADING,
+        TRAILING
+    }
 
     /** Result of {@link #findContainingTrivia}: which node owns the trivia, where, and the trivia itself. */
     public record TriviaMatch(CstNode owner, Owner kind, int index, Trivia trivia) {}

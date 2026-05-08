@@ -1,5 +1,4 @@
 package org.pragmatica.peg.incremental;
-
 /**
  * A single splice over a {@link Session}'s buffer: replace the substring
  * {@code text[offset, offset + oldLen)} with {@code newText}.
