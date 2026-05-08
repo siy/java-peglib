@@ -327,7 +327,7 @@ Trivia attribution correctness — full byte-equal round-trip on all 22 corpus f
 - **CST hash baseline regenerated for `large/FactoryClassGenerator.java.txt`.** The Bug C'' children-rollback fix removes a duplicate trailing comma child in enum-constant lists; that fixture's CST shape legitimately changes. Other 21 fixtures' baselines are unchanged. Committed as a separate baseline-shift commit alongside the Bug C'' fix. Anyone diffing 0.3.4 baselines against 0.3.5 will see the single-fixture shift; this is expected.
 - **`RoundTripTest` re-enabled.** All 22 corpus fixtures round-trip byte-equal via the generated parser. The `@Disabled` annotation and pointer comment in the test are removed.
 - `docs/TRIVIA-ATTRIBUTION.md` — updated to document the full Bug A/B/C/C'/C'' resolution.
-- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — Phase 1 marked complete; Bug C originally deferred to 0.3.6 was solved in 0.3.5 along with Bug C'/C''.
+- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — Phase 1 marked complete; Bug C originally deferred to 0.3.6 was solved in 0.3.5 along with Bug C'/C''. (File deleted in 0.5.0-candidate cleanup; recover from git history if needed.)
 
 ### Known limitations
 

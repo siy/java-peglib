@@ -259,7 +259,7 @@ Regen via:
 
 ## 10. Where to find historical context
 
-- `docs/RELEASE-PLAN-0.3.5-0.4.0.md` — the plan that drove the 0.3.5→0.4.0 arc, marked complete through Phase 8.
+- *(deleted 0.5.0-candidate cleanup)* `docs/RELEASE-PLAN-0.3.5-0.4.0.md` was the plan that drove the 0.3.5→0.4.0 arc. Marked complete through Phase 8 before removal; recover from git history if needed.
 - `docs/AUDIT-REPORTS/CONSOLIDATED-BACKLOG.md` — the audit findings that drove 0.3.4 cleanup. Most P3 items shipped in 0.4.0.
 - `docs/PERF-REWORK-SPEC.md` — the 0.2.2 perf rework spec; historical.
 - `docs/incremental/SPEC.md` — the 0.3.0-0.3.2 incremental spec. v2 shipped, v2.5 NO-GO'd by spike.
