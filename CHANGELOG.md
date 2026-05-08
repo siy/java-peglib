@@ -100,10 +100,15 @@ Branding: parser generator output is now the **throughput engine** (full-reparse
 - **E (packrat as `int[]`-keyed open-addressing map)** — clean on small bench, but **+22% regression on self-host stress test**. Linear probing scales badly at the load factors the 37k-LOC fixture stresses. Reverted. Lesson informed adding self-host as the second JMH fixture.
 - **H2 (recursive per-alt extraction in nested Choices)** — bytecode size dropped further but +4-7% wallclock regression. C2 was already inlining post-H; further splitting traded inline-friendly bytecode for call-overhead. Reverted.
 
+**+ DFA fast-path (token-shaped rules)** — `tokenFastPath` flag default-on. Detects rules whose body matches `< CharClass + ZeroOrMore<CharClass> >` (Identifier-shape) and emits a tight inline scanner using pre-computed ASCII bitmasks instead of going through the framework's `matchCharClass` per character. **-9.8% reference / -7.6% self-host wallclock**. On Java25 only `Identifier` matches the spike's pattern; generalizing to `OneOrMore<CharClass>` (whitespace) and mixed Literal+CharClass (NumLit) is the obvious next extension and would compound.
+
+**vs javac comparison:** at the time of writing, peglib's throughput engine parses the 1900-LOC reference fixture in 22.6 ms (vs javac 9 ms = 2.5× of javac) with strictly more output (lossless CST + trivia for formatter+linter use cases). javac produces AST without trivia.
+
 **Items deferred:**
 - **B (mutable parse-state singleton)** — biggest remaining allocation lever (5,264 CstParseResult on self-host). Requires incremental delivery (left-recursive seed-and-grow snapshotting, packrat aliasing); 4-6 commit work.
-- **DFA lexer for token rules** — biggest individual potential gain (2-3× on lex-heavy paths); 2-3 weeks architectural lift.
-- **ASCII whitespace fast path**, **char-class bit-packing** — tactical micro-opts, ~3-15% potential each.
+- **Generalized DFA lexer** — extend the spike pattern to `OneOrMore<CharClass>` (whitespace) and mixed Literal+CharClass (NumLit). Each generalization compounds with the Identifier win.
+- **ASCII whitespace fast path** — folded into generalized DFA above.
+- **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. Tactical, ~5-15% on char-class-heavy paths.
 
 ## [0.4.3] - 2026-05-06
 
