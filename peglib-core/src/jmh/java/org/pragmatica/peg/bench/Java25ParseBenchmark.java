@@ -69,6 +69,7 @@ public class Java25ParseBenchmark {
         "phase1_allStructural",
         "phase1_allStructural_skipPackrat",
         "phase1_allStructural_mutableResult",
+        "phase1_allStructural_mutableResult_autoSkipPackrat",
         "interpreter"
     })
     public String variant;
@@ -165,6 +166,9 @@ public class Java25ParseBenchmark {
             case "phase1_allStructural_skipPackrat" -> withStructural(true, true, true, true,
                     Set.of("Identifier", "QualifiedName", "Type"));
             case "phase1_allStructural_mutableResult" -> withStructural(true, true, true, false, Set.of(), true);
+            // Phase 1.8: structural+mutableResult variant with selectivePackrat=ON and empty
+            // packratSkipRules — triggers auto-detection in PackratAnalyzer (LR rules excluded).
+            case "phase1_allStructural_mutableResult_autoSkipPackrat" -> withStructural(true, true, true, true, Set.of(), true);
             default -> throw new IllegalArgumentException("Unknown variant: " + variant);
         };
     }

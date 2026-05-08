@@ -7,6 +7,8 @@ import org.pragmatica.peg.grammar.analysis.ExpressionShape;
 import org.pragmatica.peg.grammar.analysis.FirstCharAnalysis;
 import org.pragmatica.peg.parser.ParserConfig;
 
+import java.util.Set;
+
 /**
  * Generates standalone parser source code from a Grammar.
  * The generated parser depends only on pragmatica-lite:core.
@@ -100,6 +102,17 @@ public final class ParserGenerator {
     private final ParserConfig config;
     private boolean inWhitespaceRuleGeneration;
 
+    /**
+     * Phase 1.8: effective set of rule names that bypass the packrat cache. When
+     * {@link ParserConfig#selectivePackrat()} is on AND the caller-supplied
+     * {@link ParserConfig#packratSkipRules()} is empty, this field is populated by
+     * {@link PackratAnalyzer#autoSkipPackratRules(Grammar)}. When the caller supplied an
+     * explicit non-empty skip set, that set is honoured verbatim (no auto augmentation).
+     * When {@code selectivePackrat} is off, this field is empty and the cache is consulted
+     * for every non-LR rule as before.
+     */
+    private final Set<String> effectivePackratSkipRules;
+
     /** Lazily-computed grammar-wide FIRST sets for §7.1F dispatch. */
     private ChoiceDispatchAnalyzer.FirstSets firstSets;
 
@@ -184,6 +197,31 @@ public final class ParserGenerator {
         this.errorReporting = errorReporting;
         this.config = config;
         this.inWhitespaceRuleGeneration = false;
+        this.effectivePackratSkipRules = computeEffectiveSkipRules(grammar, config);
+    }
+
+    /**
+     * Phase 1.8 (selective packrat auto-skip). Resolves {@link ParserConfig#packratSkipRules()}
+     * into the final skip-set used during emission.
+     *
+     * <ul>
+     *   <li>{@code selectivePackrat=false} → empty set (cache used for every non-LR rule).</li>
+     *   <li>{@code selectivePackrat=true} with non-empty {@code packratSkipRules} → the caller's
+     *       explicit set, verbatim (no auto-augmentation; honors the existing 0.2.9 contract).</li>
+     *   <li>{@code selectivePackrat=true} with empty {@code packratSkipRules} → the auto-detected
+     *       set from {@link PackratAnalyzer#autoSkipPackratRules(Grammar)}. Left-recursive rules
+     *       are excluded by the analyzer.</li>
+     * </ul>
+     */
+    private static Set<String> computeEffectiveSkipRules(Grammar grammar, ParserConfig config) {
+        if (!config.selectivePackrat()) {
+            return Set.of();
+        }
+        if (!config.packratSkipRules()
+                   .isEmpty()) {
+            return Set.copyOf(config.packratSkipRules());
+        }
+        return PackratAnalyzer.autoSkipPackratRules(grammar);
     }
 
     /**
@@ -2917,11 +2955,12 @@ public final class ParserGenerator {
             return;
         }
         // §7.4 selective packrat: when the flag is on AND this rule's (unsanitized) name is in
-        // the skip-set, omit the cache lookup and cache put within this rule method. The cache
-        // field itself and its use by other rules are preserved. When either the flag is off
-        // or the rule is absent from the skip-set, emission is byte-identical to pre-§7.4.
-        boolean skipCache = config.selectivePackrat() && config.packratSkipRules()
-                                                               .contains(ruleName);
+        // the effective skip-set (caller-supplied or auto-detected), omit the cache lookup and
+        // cache put within this rule method. The cache field itself and its use by other rules
+        // are preserved. When either the flag is off or the rule is absent from the skip-set,
+        // emission is byte-identical to pre-§7.4. Phase 1.8: skip-set may be auto-derived from
+        // grammar shape — see {@link PackratAnalyzer}.
+        boolean skipCache = effectivePackratSkipRules.contains(ruleName);
         sb.append("    private CstParseResult ")
           .append(methodName)
           .append("() {\n");
@@ -3343,8 +3382,7 @@ public final class ParserGenerator {
         var methodName = "parse_" + sanitize(rule.name());
         var ruleName = rule.name();
         boolean inlineLocations = config.inlineLocations();
-        boolean skipCache = config.selectivePackrat() && config.packratSkipRules()
-                                                               .contains(ruleName);
+        boolean skipCache = effectivePackratSkipRules.contains(ruleName);
         var ruleIdConst = toConstantName(ruleName);
         // === Rule body (dispatcher) ===
         sb.append("    private CstParseResult ")
