@@ -100,6 +100,17 @@ public final class ParserGenerator {
     private final ParserConfig config;
     private boolean inWhitespaceRuleGeneration;
 
+    /** Lazily-computed grammar-wide FIRST sets for §7.1F dispatch. */
+    private ChoiceDispatchAnalyzer.FirstSets firstSets;
+
+    /** Phase 1F: lazy FIRST set computation (per-generator, single pass over grammar). */
+    private ChoiceDispatchAnalyzer.FirstSets firstSets() {
+        if (firstSets == null) {
+            firstSets = ChoiceDispatchAnalyzer.FirstSets.compute(grammar);
+        }
+        return firstSets;
+    }
+
     private ParserGenerator(Grammar grammar,
                             String packageName,
                             String className,
@@ -3682,22 +3693,26 @@ public final class ParserGenerator {
                   .append(" = savePendingLeading();\n");
                 // Don't skip whitespace here - let alternatives capture trivia themselves
                 emitChildrenSave(sb, pad, childrenState, addToChildren);
-                var classified = config.choiceDispatch()
-                                 ? ChoiceDispatchAnalyzer.classify(choice)
-                                 : java.util.Optional.<java.util.List<ChoiceDispatchAnalyzer.AltEntry>>empty();
-                if (classified.isPresent()) {
-                    var grouped = ChoiceDispatchAnalyzer.groupByChar(classified.get());
-                    var buckets = ChoiceDispatchAnalyzer.buckets(grouped);
-                    emitCstChoiceDispatch(sb,
-                                          buckets,
-                                          id,
-                                          indent,
-                                          addToChildren,
-                                          counter,
-                                          inWhitespaceRule,
-                                          resultVar,
-                                          choiceStart,
-                                          childrenState);
+                // Phase 1F: try extended FIRST-set classification first (covers Reference,
+                // CharClass, mixed choices). Falls back to legacy literal-only classifier when
+                // the extended path can't dispatch any alt.
+                var classifiedF = config.choiceDispatch()
+                                  ? ChoiceDispatchAnalyzer.classify(choice, firstSets())
+                                  : java.util.Optional.<ChoiceDispatchAnalyzer.Classified>empty();
+                if (classifiedF.isPresent()) {
+                    var c = classifiedF.get();
+                    var buckets = ChoiceDispatchAnalyzer.bucketsForClassified(c);
+                    emitCstChoiceDispatchF(sb,
+                                           buckets,
+                                           c.defaults(),
+                                           id,
+                                           indent,
+                                           addToChildren,
+                                           counter,
+                                           inWhitespaceRule,
+                                           resultVar,
+                                           choiceStart,
+                                           childrenState);
                 }else {
                     int i = 0;
                     for (var alt : choice.alternatives()) {
@@ -4977,6 +4992,113 @@ public final class ParserGenerator {
           .append("    }\n");
         sb.append(pad)
           .append("}\n");
+    }
+
+    /**
+     * §7.1F: Phase 1F dispatch emission supporting partial dispatch with default fallback.
+     * Emits a switch over {@code input.charAt(pos)} where each case contains the dispatched
+     * alts that match that char (in PEG order); after a case's dispatched alts all fail, the
+     * default tail (alternatives with unknown FIRST) is tried in PEG order. The {@code default:}
+     * branch runs ONLY the default tail.
+     *
+     * <p>PEG-correctness invariant: defaults form a contiguous tail of the original alternative
+     * list (enforced by {@link ChoiceDispatchAnalyzer#classify(Expression.Choice, ChoiceDispatchAnalyzer.FirstSets)}).
+     * This means every dispatched alt has a smaller original-index than every default alt, so
+     * trying dispatched alts first preserves PEG ordered-choice semantics.
+     */
+    private void emitCstChoiceDispatchF(StringBuilder sb,
+                                        java.util.List<ChoiceDispatchAnalyzer.DispatchBucket> buckets,
+                                        java.util.List<ChoiceDispatchAnalyzer.AltEntry> defaults,
+                                        int id,
+                                        int indent,
+                                        boolean addToChildren,
+                                        int[] counter,
+                                        boolean inWhitespaceRule,
+                                        String resultVar,
+                                        String choiceStart,
+                                        String childrenState) {
+        var pad = "    ".repeat(indent);
+        var dispatchVar = "dispatchChar" + id;
+        // Generate a small inner method-style block: "if (pos < input.length()) { switch ... }"
+        // followed (only if defaults present) by an unconditional "if (resultVar == null)" tail
+        // running the defaults in PEG order. When pos is at EOF, only defaults run (any literal-
+        // bearing dispatched alt would fail on EOF anyway, so this preserves correctness).
+        sb.append(pad)
+          .append("if (pos < input.length()) {\n");
+        sb.append(pad)
+          .append("    char ")
+          .append(dispatchVar)
+          .append(" = input.charAt(pos);\n");
+        sb.append(pad)
+          .append("    switch (")
+          .append(dispatchVar)
+          .append(") {\n");
+        var casePad = pad + "        ";
+        var bodyPad = pad + "            ";
+        for (var bucket : buckets) {
+            for (var c : bucket.chars()) {
+                sb.append(casePad)
+                  .append("case ")
+                  .append(literalChar(c))
+                  .append(":\n");
+            }
+            sb.append(casePad)
+              .append("{\n");
+            emitCstChoiceAltChainClosed(sb,
+                                        bucket.alts(),
+                                        id,
+                                        indent + 3,
+                                        addToChildren,
+                                        counter,
+                                        inWhitespaceRule,
+                                        resultVar,
+                                        choiceStart,
+                                        childrenState,
+                                        bodyPad);
+            sb.append(bodyPad)
+              .append("break;\n");
+            sb.append(casePad)
+              .append("}\n");
+        }
+        sb.append(pad)
+          .append("    }\n");
+        sb.append(pad)
+          .append("}\n");
+        // Default fallback: run after switch (if no dispatched alt succeeded) AND on EOF / unmatched
+        // dispatch char. Must restore choiceStart/children/pending-leading because a dispatched alt
+        // may have advanced state before failing.
+        if (!defaults.isEmpty()) {
+            sb.append(pad)
+              .append("if (")
+              .append(resultVar)
+              .append(" == null) {\n");
+            // Restore parser position so default alts start from the choice's entry point.
+            sb.append(pad)
+              .append("    restoreLocationRaw(")
+              .append(choiceStart)
+              .append("Pos, ")
+              .append(choiceStart)
+              .append("Line, ")
+              .append(choiceStart)
+              .append("Column);\n");
+            sb.append(pad)
+              .append("    restorePendingLeading(choicePending")
+              .append(id)
+              .append(");\n");
+            emitCstChoiceAltChainClosed(sb,
+                                        defaults,
+                                        id,
+                                        indent + 1,
+                                        addToChildren,
+                                        counter,
+                                        inWhitespaceRule,
+                                        resultVar,
+                                        choiceStart,
+                                        childrenState,
+                                        pad + "    ");
+            sb.append(pad)
+              .append("}\n");
+        }
     }
 
     /**
