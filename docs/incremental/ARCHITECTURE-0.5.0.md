@@ -6,7 +6,7 @@
 
 ## 200-word summary
 
-Peglib's 0.4.x incremental parser is grafted on top of an architecture optimized for parse-once correctness. Every persistent perf challenge documented across `docs/incremental/V2.5-SPIKE.md`, the lever-1 puzzle in `HANDOVER.md` §6.2, the failed unsafe-generator spike, and the failed `NodeIndex.evolve` attempt is a manifestation of the same mismatch — the data structures fight incremental work.
+Peglib's 0.4.x incremental parser is grafted on top of an architecture optimized for parse-once correctness. Every persistent perf challenge documented across `docs/archive/V2.5-SPIKE.md`, the lever-1 puzzle in `HANDOVER.md` §6.2, the failed unsafe-generator spike, and the failed `NodeIndex.evolve` attempt is a manifestation of the same mismatch — the data structures fight incremental work.
 
 This spec proposes an **incremental-native** redesign for v0.5.0, gathered into four levers:
 

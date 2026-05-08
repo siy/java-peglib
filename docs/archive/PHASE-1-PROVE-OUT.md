@@ -1,8 +1,11 @@
 # Phase 1 Prove-Out — Path A → Path D
 
+> **Status:** historical / archived 2026-05-08. Interim phase results; final state in PHASE-1-RESULTS.md.
+
+
 **Date:** 2026-05-07
 **Branch:** release-0.5.0 (commits `8f844eb` through `8b27dd6`)
-**Spec:** [`ARCHITECTURE-0.5.0.md`](ARCHITECTURE-0.5.0.md), [`PHASE-0-RESULTS.md`](PHASE-0-RESULTS.md)
+**Spec:** [`ARCHITECTURE-0.5.0.md`](../incremental/ARCHITECTURE-0.5.0.md), [`PHASE-0-RESULTS.md`](PHASE-0-RESULTS.md)
 
 ## Verdict
 

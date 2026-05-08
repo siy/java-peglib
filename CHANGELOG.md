@@ -15,13 +15,13 @@ Sandbox prototype of Lever A (stable IDs + LongLongMap NodeIndex) lands additive
 
 - **Identity-preservation invariant** — `IdTreeSplicer` preserves sibling subtree reference equality through splices (spec §8 Q3 gate).
 - **Trivia-bearing edits** — calculator grammar with `%whitespace` + comments, three representative edits, incremental update equivalent to full rebuild (spec §8 Q4 gate).
-- **Perf** — JMH bench: 38× speedup at 100 nodes, 47× at 1000, 67× at 10000. Well above the 5× gate threshold; consistent with spec §2's projected 300× per-edit reduction. See [`docs/bench-results/phase0-spike-results.md`](docs/bench-results/phase0-spike-results.md) and [`docs/incremental/PHASE-0-RESULTS.md`](docs/incremental/PHASE-0-RESULTS.md).
+- **Perf** — JMH bench: 38× speedup at 100 nodes, 47× at 1000, 67× at 10000. Well above the 5× gate threshold; consistent with spec §2's projected 300× per-edit reduction. See [`docs/bench-results/phase0-spike-results.md`](docs/bench-results/phase0-spike-results.md) and [`docs/archive/PHASE-0-RESULTS.md`](docs/archive/PHASE-0-RESULTS.md).
 
 ### Phase 1 prove-out (2026-05-07)
 
 Path A (offset decoupling from records) — RED. 1.10-1.29× speedup on flat-tree mid-buffer edits; not worth the cross-cutting refactor. See [`docs/bench-results/phase1-spanindex-results.md`](docs/bench-results/phase1-spanindex-results.md).
 
-Path D (stable-id ancestor preservation) — GREEN. **96-604× speedup** on flat-tree mid-buffer edits with absolute time flat across N (~25-40 ns), confirming genuine O(δ) scaling. The fix: TreeSplicer reuses old ancestor IDs across splices; applyIncremental skips ancestor-rewiring as a result. See [`docs/bench-results/path-d-results.md`](docs/bench-results/path-d-results.md) and [`docs/incremental/PHASE-1-PROVE-OUT.md`](docs/incremental/PHASE-1-PROVE-OUT.md).
+Path D (stable-id ancestor preservation) — GREEN. **96-604× speedup** on flat-tree mid-buffer edits with absolute time flat across N (~25-40 ns), confirming genuine O(δ) scaling. The fix: TreeSplicer reuses old ancestor IDs across splices; applyIncremental skips ancestor-rewiring as a result. See [`docs/bench-results/path-d-results.md`](docs/bench-results/path-d-results.md) and [`docs/archive/PHASE-1-PROVE-OUT.md`](docs/archive/PHASE-1-PROVE-OUT.md).
 
 ### Phase 1 production migration (2026-05-07)
 
@@ -222,7 +222,7 @@ The interpreter (PegEngine) is now FASTER than the generator's phase1 path becau
 ### Documentation
 
 - **HANDOVER §6.2 retraction.** The lever-1 incremental-perf "1-2 day fix" framing was wrong. Two failed attempts (12/100 and 31/100 parity regressions). Real fix needs 5-10 days of correctness analysis. Documented two latent bugs: (a) fallback-rule bypass — `tryIncrementalReparse` only checks the chosen pivot, not its ancestors; (b) `reparseAt`'s acceptance check proves length parity but not structural parity.
-- **`docs/incremental/V2.5-SPIKE.md` addendum.** Retracts the spike doc's "zero correctness risk" claim. Parity was never asserted in the spike's probe — only timing.
+- **`docs/archive/V2.5-SPIKE.md` addendum.** Retracts the spike doc's "zero correctness risk" claim. Parity was never asserted in the spike's probe — only timing.
 - **HANDOVER §6.4 correction.** Tier-1 perf flags (`inlineLocations`, `markResetChildren`, `selectivePackrat`) are generator-only. They do NOT speed up the interpreter path that `IncrementalParser` uses.
 
 ### Reverted
@@ -236,7 +236,7 @@ The interpreter (PegEngine) is now FASTER than the generator's phase1 path becau
 
 ## [0.4.0] - 2026-05-01
 
-API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap (the original 0.4.0 plan item; superseded by `docs/incremental/V2.5-SPIKE.md`'s NO-GO recommendation — the actual lever is pivot-selection, not cache invalidation).
+API consolidation + test hygiene. **Breaking.** No incremental v2.5 cache remap (the original 0.4.0 plan item; superseded by `docs/archive/V2.5-SPIKE.md`'s NO-GO recommendation — the actual lever is pivot-selection, not cache invalidation).
 
 ### Changed (BREAKING)
 
@@ -306,7 +306,7 @@ Generator-side `%recover` per-rule overrides. Non-breaking.
 
 ### Known limitations
 
-- **Incremental parser `singleCharEdit` perf** is still ~325 ms/op on the 1,900-LOC fixture. `docs/incremental/V2.5-SPIKE.md` documents the diagnosis (the dominant cost is pivot overshoot in `findBoundaryCandidate`, not cache invalidation as v2.5 assumed) and a proposed "lever 1" fix (edit-anchored pivot selection). A naive lever-1 swap was attempted in 0.3.6 development but produced correctness regressions on `IncrementalParityTest` due to subtle interaction with `NodeIndex.contains`'s inclusive-boundary semantics — the smallestContaining lookup can return a node ending exactly at `editStart`, yielding a different pivot than the warm-pointer walk would. A correct fix needs careful boundary semantics work; deferred.
+- **Incremental parser `singleCharEdit` perf** is still ~325 ms/op on the 1,900-LOC fixture. `docs/archive/V2.5-SPIKE.md` documents the diagnosis (the dominant cost is pivot overshoot in `findBoundaryCandidate`, not cache invalidation as v2.5 assumed) and a proposed "lever 1" fix (edit-anchored pivot selection). A naive lever-1 swap was attempted in 0.3.6 development but produced correctness regressions on `IncrementalParityTest` due to subtle interaction with `NodeIndex.contains`'s inclusive-boundary semantics — the smallestContaining lookup can return a node ending exactly at `editStart`, yielding a different pivot than the warm-pointer walk would. A correct fix needs careful boundary semantics work; deferred.
 
 ## [0.3.5] - 2026-05-01
 
@@ -462,7 +462,7 @@ Next lever: **v2.5 span-rewriting cache remap** (SPEC §5.4). Not part of this r
 
 ### Added
 
-- **`peglib-incremental` module — v1 implementation** per `docs/incremental/SPEC.md`. Cursor-anchored stateful parser that reparses only the subtree affected by an edit, falling back to full reparse when needed. Designed for editor-scale workflows (formatters on save, live diagnostics, LSP backends).
+- **`peglib-incremental` module — v1 implementation** per `docs/archive/SPEC-incremental-original.md`. Cursor-anchored stateful parser that reparses only the subtree affected by an edit, falling back to full reparse when needed. Designed for editor-scale workflows (formatters on save, live diagnostics, LSP backends).
 - Public API in `org.pragmatica.peg.incremental`:
   - `IncrementalParser.create(grammar)` / `create(grammar, config)` — factory.
   - `Session initialize(String buffer)` / `initialize(String buffer, int cursorOffset)` — immutable session.
@@ -522,7 +522,7 @@ Infrastructure-only minor-bump release. No new user-facing features beyond the `
 
 ### Added
 
-- `Parser#parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset)` — partial-parse entry point. Parses a specific rule against input starting at the given offset; returns `Result<PartialParse>` wrapping the resulting CST subtree and its end offset. Implemented by `PegEngine` (interpreter) and by generated parsers via an identity map keyed on the `RuleId` marker classes the generator has been emitting since 0.2.6. This is the API `peglib-incremental` (0.3.1) depends on per `docs/incremental/SPEC.md` §5.6.
+- `Parser#parseRuleAt(Class<? extends RuleId> ruleId, String input, int offset)` — partial-parse entry point. Parses a specific rule against input starting at the given offset; returns `Result<PartialParse>` wrapping the resulting CST subtree and its end offset. Implemented by `PegEngine` (interpreter) and by generated parsers via an identity map keyed on the `RuleId` marker classes the generator has been emitting since 0.2.6. This is the API `peglib-incremental` (0.3.1) depends on per `docs/archive/SPEC-incremental-original.md` §5.6.
 - `org.pragmatica.peg.parser.PartialParse` record `(CstNode node, int endOffset)`.
 - `peglib-incremental` and `peglib-formatter` shell modules — empty placeholders with just a `package-info.java` each. Reservations for 0.3.1 and 0.3.3.
 - `docs/PARTIAL-PARSE.md` — `parseRuleAt` API reference.
@@ -782,7 +782,7 @@ Interpreter speedup is below the 1.5× plan target, reflecting the interpreter's
   - `bulkAdvanceLiteral` — on successful match of literal text with no `\n`, updates `pos` and `column` in bulk rather than looping `advance()` per char.
   - `skipWhitespaceFastPath` — emits a first-char precheck derived from the grammar's `%whitespace` rule (e.g. `' '`/`'\t'`/`'\r'`/`'\n'`/`'/'` for Java 25); returns `List.of()` immediately when current char can't start trivia.
   - `reuseEndLocation` — allocates end-position `SourceLocation` once per successful match instead of twice (span end + result endLocation).
-- Phase-2 flag defaults (set per measured win per PERF-REWORK-SPEC §12.6):
+- Phase-2 flag defaults (set per measured win per `docs/archive/PERF-REWORK-SPEC.md` §12.6):
   - `choiceDispatch` default **on** — measured 2.49× speedup over phase-1 baseline.
   - `markResetChildren`, `inlineLocations` default **off** — no statistically significant individual win on the reference JVM.
   - `selectivePackrat` default **off** — marginal combo win (~5%) sits inside measurement noise; callers opting in must also provide `packratSkipRules`.

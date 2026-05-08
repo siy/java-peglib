@@ -180,6 +180,6 @@ raw files serve as machine-readable backup.
 ## Related
 
 - [`PERF-FLAGS.md`](PERF-FLAGS.md) — what each `ParserConfig` flag does
-- [`PERF-REWORK-SPEC.md`](PERF-REWORK-SPEC.md) — design rationale and
-  phase-by-phase specification
+- [`archive/PERF-REWORK-SPEC.md`](archive/PERF-REWORK-SPEC.md) — design rationale and
+  phase-by-phase specification (archived; superseded by [`incremental/THROUGHPUT-ENGINE-TIER1.md`](incremental/THROUGHPUT-ENGINE-TIER1.md))
 - [`CHANGELOG.md`](../CHANGELOG.md) — per-release measured numbers

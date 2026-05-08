@@ -1,5 +1,8 @@
 # peglib-incremental — detailed spec
 
+> **Status:** historical / archived 2026-05-08. Original 0.2.x-era proposal; shipped through 0.4.x; current architecture in ARCHITECTURE-0.5.0.md.
+
+
 **Target module:** `peglib-incremental` (new; sibling to `peglib`).
 **Depends on:** `peglib:0.2.x+` (compile-scope; read-only use of `Grammar`, `CstNode`, `Trivia`, `SourceSpan`, `PegParser`).
 **Status:** proposal / spec for an implementing agent. Not yet executed.

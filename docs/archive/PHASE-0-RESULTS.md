@@ -1,8 +1,11 @@
 # Phase 0 — GO/NO-GO Results
 
+> **Status:** historical / archived 2026-05-08. Interim phase results; final state in PHASE-1-RESULTS.md.
+
+
 **Date:** 2026-05-07
 **Branch:** release-0.5.0
-**Spec:** [`ARCHITECTURE-0.5.0.md`](ARCHITECTURE-0.5.0.md)
+**Spec:** [`ARCHITECTURE-0.5.0.md`](../incremental/ARCHITECTURE-0.5.0.md)
 
 ## Verdict: **GO**
 

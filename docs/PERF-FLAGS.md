@@ -13,8 +13,9 @@ deterministic, byte-identical Java source.
 
 For the design rationale behind each flag — including the patches
 originally prototyped and the measured wins — see
-[`PERF-REWORK-SPEC.md`](PERF-REWORK-SPEC.md) §§6–7. This document is a
-tabular quick-reference; the spec is the source of truth.
+[`archive/PERF-REWORK-SPEC.md`](archive/PERF-REWORK-SPEC.md) §§6–7
+(archived). This document is a tabular quick-reference; the spec is
+the source of truth.
 
 ## Scope
 

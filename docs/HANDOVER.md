@@ -121,13 +121,13 @@ Tagged 2026-04-21 originally. Published to Central on demand because a downstrea
 
 Trigger ID `trig_01HhXqsGeHfRoWNNnqM7TLod`, fires **2026-05-08T14:00:00Z**. Runs JMH + async-profiler against the post-0.3.6 baseline, captures flame graphs, posts results as a comment on the open release-0.3.6 PR or as a new issue. View at https://claude.ai/code/routines/trig_01HhXqsGeHfRoWNNnqM7TLod
 
-The agent will report which Tier (per `docs/incremental/V2.5-SPIKE.md` § "Alternative levers") the next bottleneck lives in.
+The agent will report which Tier (per `docs/archive/V2.5-SPIKE.md` § "Alternative levers") the next bottleneck lives in.
 
 **Important context:** the agent assumes 0.3.6 contains the lever 1 fix, which it doesn't. The agent may report numbers worse than the spike's projected 5-15ms (because lever 1 is still not landed). The agent's logic still works as a baseline-capture — just interpret the results in light of "lever 1 not yet shipped."
 
 ### 6.2 Lever 1 — incremental perf (DEFERRED — deeper than the spike claimed)
 
-**Status:** the spike doc's "zero correctness risk" claim is **retracted**. See `docs/incremental/V2.5-SPIKE.md` "Addendum (post-0.4.0)" for the retraction. Two failed attempts on this lever:
+**Status:** the spike doc's "zero correctness risk" claim is **retracted**. See `docs/archive/V2.5-SPIKE.md` "Addendum (post-0.4.0)" for the retraction. Two failed attempts on this lever:
 
 | Attempt | Approach | Failures | Stash |
 |---|---|---|---|
@@ -242,7 +242,7 @@ Regen via:
 ### Bench
 - `peglib-core/src/jmh/java/org/pragmatica/peg/bench/Java25ParseBenchmark.java`
 - `peglib-incremental/src/jmh/java/org/pragmatica/peg/incremental/bench/IncrementalBenchmark.java`
-- `docs/incremental/V2.5-SPIKE.md` — **read this before any incremental perf work**
+- `docs/archive/V2.5-SPIKE.md` — **read this before any incremental perf work** (archived; lever-1 superseded by 0.5.0 architecture)
 
 ## 9. Things that are easy to get wrong
 
@@ -261,10 +261,11 @@ Regen via:
 
 - *(deleted 0.5.0-candidate cleanup)* `docs/RELEASE-PLAN-0.3.5-0.4.0.md` was the plan that drove the 0.3.5→0.4.0 arc. Marked complete through Phase 8 before removal; recover from git history if needed.
 - `docs/AUDIT-REPORTS/CONSOLIDATED-BACKLOG.md` — the audit findings that drove 0.3.4 cleanup. Most P3 items shipped in 0.4.0.
-- `docs/PERF-REWORK-SPEC.md` — the 0.2.2 perf rework spec; historical.
-- `docs/incremental/SPEC.md` — the 0.3.0-0.3.2 incremental spec. v2 shipped, v2.5 NO-GO'd by spike.
-- `docs/incremental/V2.5-SPIKE.md` — the v2.5 NO-GO + lever-1 design + post-0.4.0 retraction. Lever-1 superseded by 0.5.0 architecture.
-- `docs/incremental/UNSAFE-GENERATOR-SPIKE.md` — the post-0.4.0 unsafe-generator design + status. Infrastructure landed (5 commits in `release-0.4.2` history); behavior conversion deferred to 0.5.0.
+- `docs/archive/PERF-REWORK-SPEC.md` — the 0.2.2 perf rework spec; archived/historical.
+- `docs/archive/SPEC-incremental-original.md` — the 0.3.0-0.3.2 incremental spec (archived). v2 shipped, v2.5 NO-GO'd by spike.
+- `docs/archive/V2.5-SPIKE.md` — the v2.5 NO-GO + lever-1 design + post-0.4.0 retraction (archived). Lever-1 superseded by 0.5.0 architecture.
+- `docs/archive/UNSAFE-GENERATOR-SPIKE.md` — the post-0.4.0 unsafe-generator design + status (archived). Infrastructure landed (5 commits in `release-0.4.2` history); behavior conversion deferred to 0.5.0.
+- `docs/archive/PHASE-0-RESULTS.md`, `docs/archive/PHASE-1-PROVE-OUT.md` — interim 0.5.0 phase results (archived); final state in `docs/incremental/PHASE-1-RESULTS.md`.
 - `docs/incremental/ARCHITECTURE-0.5.0.md` — **forward-looking** architectural spec for the 0.5.0 incremental-native rework. Read this before touching incremental perf or correctness.
 - `docs/bench-results/` — committed JMH JSON from each perf-touching release.
 

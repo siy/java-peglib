@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-07
 **Branch:** release-0.5.0 (commits `2443779` through `65a719f`)
-**Spec:** [`ARCHITECTURE-0.5.0.md`](ARCHITECTURE-0.5.0.md), [`PHASE-1-PROVE-OUT.md`](PHASE-1-PROVE-OUT.md), [`PHASE-0-RESULTS.md`](PHASE-0-RESULTS.md)
+**Spec:** [`ARCHITECTURE-0.5.0.md`](ARCHITECTURE-0.5.0.md), [`PHASE-1-PROVE-OUT.md`](../archive/PHASE-1-PROVE-OUT.md), [`PHASE-0-RESULTS.md`](../archive/PHASE-0-RESULTS.md)
 
 ## Verdict
 

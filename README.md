@@ -36,7 +36,7 @@ Quick links:
 - [`peglib-incremental` README](peglib-incremental/README.md) — incremental reparsing
 - [`peglib-formatter` README](peglib-formatter/README.md) — pretty-printer framework
 - [`docs/PRETTY-PRINTING.md`](docs/PRETTY-PRINTING.md) — formatter design notes
-- [`docs/incremental/SPEC.md`](docs/incremental/SPEC.md) — incremental parsing spec
+- [`docs/incremental/ARCHITECTURE-0.5.0.md`](docs/incremental/ARCHITECTURE-0.5.0.md) — incremental parsing architecture (0.5.0)
 
 ## Quick Start
 
@@ -496,7 +496,7 @@ Flags (all consumed at generation time — no runtime branching in the emitted p
 | `markResetChildren` | 2 | off | Replace children clone+clear+addAll with mark-and-trim |
 | `mutableParseResult` | 2 | off (opt-in) | Emit mutable `CstParseResult` with raw nullable fields — eliminates Option boxing |
 
-Default-off flags can be flipped on per-project via a custom `ParserConfig`. See [`docs/PERF-FLAGS.md`](docs/PERF-FLAGS.md) for the per-flag reference and guidance on when to flip, [`docs/PERF-REWORK-SPEC.md`](docs/PERF-REWORK-SPEC.md) for the underlying design, and [`docs/bench-results/java25-parse.json`](docs/bench-results/java25-parse.json) for raw JMH data.
+Default-off flags can be flipped on per-project via a custom `ParserConfig`. See [`docs/PERF-FLAGS.md`](docs/PERF-FLAGS.md) for the per-flag reference and guidance on when to flip, [`docs/archive/PERF-REWORK-SPEC.md`](docs/archive/PERF-REWORK-SPEC.md) for the underlying design (archived; superseded by [`docs/incremental/THROUGHPUT-ENGINE-TIER1.md`](docs/incremental/THROUGHPUT-ENGINE-TIER1.md)), and [`docs/bench-results/java25-parse.json`](docs/bench-results/java25-parse.json) for raw JMH data.
 
 To reproduce benchmarks:
 
