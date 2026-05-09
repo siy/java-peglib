@@ -70,6 +70,7 @@ public class Java25ParseBenchmark {
         "phase1_allStructural_skipPackrat",
         "phase1_allStructural_mutableResult",
         "phase1_allStructural_mutableResult_autoSkipPackrat",
+        "phase1_allStructural_mutableResult_autoSkipPackrat_postPass",
         "interpreter"
     })
     public String variant;
@@ -173,6 +174,10 @@ public class Java25ParseBenchmark {
             case "phase1_allStructural_mutableResult_autoSkipPackrat_noFastPath" -> withStructural(true, true, true, true, Set.of(), true, false);
             // Phase 1.9 (DFA spike): structural + autoSkipPackrat WITH tokenFastPath — A/B variant.
             case "phase1_allStructural_mutableResult_autoSkipPackrat_fastPath" -> withStructural(true, true, true, true, Set.of(), true, true);
+            // Step 4 follow-up: post-pass trivia attribution A/B vs autoSkipPackrat baseline
+            // (which leaves triviaPostPass=false). Same generator-time perf flags as
+            // autoSkipPackrat; only triviaPostPass flips ON.
+            case "phase1_allStructural_mutableResult_autoSkipPackrat_postPass" -> withStructural(true, true, true, true, Set.of(), true, true, true);
             default -> throw new IllegalArgumentException("Unknown variant: " + variant);
         };
     }
@@ -195,7 +200,8 @@ public class Java25ParseBenchmark {
                 false,                      // selectivePackrat
                 Set.of(),                   // packratSkipRules
                 false,                      // mutableParseResult
-                false);                     // tokenFastPath
+                false,                      // tokenFastPath
+                false);                     // triviaPostPass
     }
 
     /**
@@ -226,6 +232,18 @@ public class Java25ParseBenchmark {
                                                Set<String> packratSkipRules,
                                                boolean mutableParseResult,
                                                boolean tokenFastPath) {
+        return withStructural(choiceDispatch, markResetChildren, inlineLocations, selectivePackrat,
+                              packratSkipRules, mutableParseResult, tokenFastPath, false);
+    }
+
+    private static ParserConfig withStructural(boolean choiceDispatch,
+                                               boolean markResetChildren,
+                                               boolean inlineLocations,
+                                               boolean selectivePackrat,
+                                               Set<String> packratSkipRules,
+                                               boolean mutableParseResult,
+                                               boolean tokenFastPath,
+                                               boolean triviaPostPass) {
         return new ParserConfig(
                 true,                       // packratEnabled
                 RecoveryStrategy.BASIC,
@@ -242,7 +260,8 @@ public class Java25ParseBenchmark {
                 selectivePackrat,
                 Set.copyOf(packratSkipRules),
                 mutableParseResult,
-                tokenFastPath);             // phase 1.9 (DFA spike)
+                tokenFastPath,              // phase 1.9 (DFA spike)
+                triviaPostPass);            // Step 4 — post-pass trivia attribution
     }
 
     static String loadResource(String resourcePath) throws Exception {

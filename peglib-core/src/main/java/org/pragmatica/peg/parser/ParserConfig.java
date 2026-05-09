@@ -60,68 +60,82 @@ import java.util.Set;
  *     left-recursive rules are excluded. Pass a non-empty explicit set to
  *     override the auto-detection with caller-curated rule names (the
  *     traditional 0.2.9 behaviour, retained verbatim for that case).
+ * @param triviaPostPass when {@code true}, the interpreter's {@code parseCst}
+ *     and {@code parseRuleAt} entry points apply
+ *     {@code TriviaPostPass.assignTrivia(input, cst, grammar)} to the
+ *     successful CST before returning it. The post-pass replaces the trivia
+ *     attribution computed by the engine's buffer/save/restore machinery with
+ *     a context-independent attribution derived solely from
+ *     {@code (input, span, grammar.whitespace())}. Total trivia text is
+ *     preserved (round-trip reconstruction is byte-equal); only the
+ *     leading/trailing slot in which a given trivia chunk lives can differ.
+ *     Default: {@code true} (Step 4 commit 6 of trivia rework — post-pass
+ *     attribution is now the default; opt-out by constructing a
+ *     {@code ParserConfig} explicitly with this field set to {@code false}).
+ *     When {@code false}, no post-pass is invoked.
  */
-public record ParserConfig(
- boolean packratEnabled,
- RecoveryStrategy recoveryStrategy,
- boolean captureTrivia,
- boolean fastTrackFailure,
- boolean literalFailureCache,
- boolean charClassFailureCache,
- boolean bulkAdvanceLiteral,
- boolean skipWhitespaceFastPath,
- boolean reuseEndLocation,
- boolean choiceDispatch,
- boolean markResetChildren,
- boolean inlineLocations,
- boolean selectivePackrat,
- Set<String> packratSkipRules,
- boolean mutableParseResult,
- boolean tokenFastPath) {
-    public static final ParserConfig DEFAULT = new ParserConfig(
-    true,
-    RecoveryStrategy.BASIC,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    true,
-    false,
-    true,
-    true,
-    Set.of(),
-    false,
-    true);
+public record ParserConfig(boolean packratEnabled,
+                           RecoveryStrategy recoveryStrategy,
+                           boolean captureTrivia,
+                           boolean fastTrackFailure,
+                           boolean literalFailureCache,
+                           boolean charClassFailureCache,
+                           boolean bulkAdvanceLiteral,
+                           boolean skipWhitespaceFastPath,
+                           boolean reuseEndLocation,
+                           boolean choiceDispatch,
+                           boolean markResetChildren,
+                           boolean inlineLocations,
+                           boolean selectivePackrat,
+                           Set<String> packratSkipRules,
+                           boolean mutableParseResult,
+                           boolean tokenFastPath,
+                           boolean triviaPostPass) {
+    public static final ParserConfig DEFAULT = new ParserConfig(true,
+                                                                RecoveryStrategy.BASIC,
+                                                                true,
+                                                                true,
+                                                                true,
+                                                                true,
+                                                                true,
+                                                                true,
+                                                                true,
+                                                                true,
+                                                                false,
+                                                                true,
+                                                                true,
+                                                                Set.of(),
+                                                                false,
+                                                                true,
+                                                                true);
 
     /**
      * Convenience factory for the three-field runtime configuration. Phase 1
-     * generator-time perf flags, phase-2 {@code choiceDispatch}, and phase-1.8
-     * {@code selectivePackrat} default to {@code true}; remaining phase-2 flags
-     * default to {@code false}. Equivalent to {@link #DEFAULT} with the caller's
-     * three runtime fields substituted.
+     * generator-time perf flags, phase-2 {@code choiceDispatch}, phase-1.8
+     * {@code selectivePackrat}, and Step-4 {@code triviaPostPass} default to
+     * {@code true}; remaining phase-2 flags default to {@code false}.
+     * Equivalent to {@link #DEFAULT} with the caller's three runtime fields
+     * substituted.
      */
     public static ParserConfig parserConfig(boolean packratEnabled,
                                             RecoveryStrategy recoveryStrategy,
                                             boolean captureTrivia) {
-        return new ParserConfig(
-        packratEnabled,
-        recoveryStrategy,
-        captureTrivia,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        false,
-        true,
-        true,
-        Set.of(),
-        false,
-        true);
+        return new ParserConfig(packratEnabled,
+                                recoveryStrategy,
+                                captureTrivia,
+                                true,
+                                true,
+                                true,
+                                true,
+                                true,
+                                true,
+                                true,
+                                false,
+                                true,
+                                true,
+                                Set.of(),
+                                false,
+                                true,
+                                true);
     }
 }

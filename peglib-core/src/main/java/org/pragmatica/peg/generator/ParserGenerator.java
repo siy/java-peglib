@@ -242,8 +242,8 @@ public final class ParserGenerator {
         }
         for (var skip : config.packratSkipRules()) {
             if (lrRules.contains(skip)) {
-                throw new IllegalArgumentException(
-                "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules");
+                throw new IllegalArgumentException("rule '" + skip
+                                                   + "' is left-recursive; cannot be in packratSkipRules");
             }
         }
     }
@@ -277,6 +277,76 @@ public final class ParserGenerator {
         return config.mutableParseResult()
                ? varName + ".expected"
                : varName + ".expected.unwrap()";
+    }
+
+    /**
+     * Cleanup A: returns the inline expression for {@code takePendingLeading()}.
+     * Under {@code triviaPostPass=true}, the helper is a no-op returning
+     * {@code List.of()}; emitting the literal here at gen-time eliminates the
+     * dead method dispatch at runtime.
+     */
+    private String takePendingExpr() {
+        return config.triviaPostPass()
+               ? "List.<Trivia>of()"
+               : "takePendingLeading()";
+    }
+
+    /**
+     * Cleanup A: returns the inline expression for {@code savePendingLeading()}.
+     * Under flag-ON, save returns {@code 0} (the sentinel); we just emit it.
+     */
+    private String savePendingExpr() {
+        return config.triviaPostPass()
+               ? "0"
+               : "savePendingLeading()";
+    }
+
+    /**
+     * Cleanup A: emit a {@code restorePendingLeading(<snapshotVar>)} statement.
+     * Under flag-ON, emits nothing — the call would be a no-op anyway.
+     */
+    private void emitRestorePending(StringBuilder sb, String indent, String snapshotVar) {
+        if (config.triviaPostPass()) {
+            return;
+        }
+        sb.append(indent)
+          .append("restorePendingLeading(")
+          .append(snapshotVar)
+          .append(");\n");
+    }
+
+    /**
+     * Cleanup A: emit an {@code appendPending(<expr>)} statement, evaluating
+     * {@code expr} eagerly (so any side-effect like {@code skipWhitespace()}
+     * still runs). Under flag-ON, emits {@code expr;} (a statement) so the
+     * skip still occurs but the buffer append is elided.
+     */
+    private void emitAppendPendingFromExpr(StringBuilder sb, String indent, String expr) {
+        if (config.triviaPostPass()) {
+            sb.append(indent)
+              .append(expr)
+              .append(";\n");
+            return;
+        }
+        sb.append(indent)
+          .append("appendPending(")
+          .append(expr)
+          .append(");\n");
+    }
+
+    /**
+     * Cleanup A: emit a {@code pendingLeadingTrivia.addAll(<expr>)} statement
+     * for the rule-failure re-deposit path. Under flag-ON, the generated
+     * parser's pendingLeadingTrivia field is unused; skip the statement.
+     */
+    private void emitPendingAddAll(StringBuilder sb, String indent, String expr) {
+        if (config.triviaPostPass()) {
+            return;
+        }
+        sb.append(indent)
+          .append("pendingLeadingTrivia.addAll(")
+          .append(expr)
+          .append(");\n");
     }
 
     public static ParserGenerator parserGenerator(Grammar grammar, String packageName, String className) {
@@ -335,6 +405,9 @@ public final class ParserGenerator {
         generateCstParseMethods(sb);
         generateCstRuleMethods(sb);
         generateCstHelperMethods(sb);
+        if (config.triviaPostPass()) {
+            generateCstTriviaPostPass(sb);
+        }
         generateClassEnd(sb);
         return sb.toString();
     }
@@ -1874,20 +1947,26 @@ public final class ParserGenerator {
                     List<Trivia> leadingTrivia();
                     List<Trivia> trailingTrivia();
 
-                    record Terminal(long id, SourceSpan span, RuleId rule, String text,
+                    record Terminal(long id, SourceSpan span, RuleId rule, StringSpan textSpan,
                                     List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        /** Convenience constructor — wraps a String as a fully-materialized StringSpan. */
+                        public Terminal(long id, SourceSpan span, RuleId rule, String text,
+                                        List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) {
+                            this(id, span, rule, StringSpan.ofString(text), leadingTrivia, trailingTrivia);
+                        }
+                        public String text() { return textSpan.toString(); }
                         @Override
                         public boolean equals(Object other) {
                             return other instanceof Terminal that
                                 && java.util.Objects.equals(span, that.span)
                                 && java.util.Objects.equals(rule, that.rule)
-                                && java.util.Objects.equals(text, that.text)
+                                && java.util.Objects.equals(textSpan, that.textSpan)
                                 && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
                                 && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
                         }
                         @Override
                         public int hashCode() {
-                            return java.util.Objects.hash(Terminal.class, span, rule, text, leadingTrivia, trailingTrivia);
+                            return java.util.Objects.hash(Terminal.class, span, rule, textSpan, leadingTrivia, trailingTrivia);
                         }
                     }
 
@@ -1908,20 +1987,26 @@ public final class ParserGenerator {
                         }
                     }
 
-                    record Token(long id, SourceSpan span, RuleId rule, String text,
+                    record Token(long id, SourceSpan span, RuleId rule, StringSpan textSpan,
                                  List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        /** Convenience constructor — wraps a String as a fully-materialized StringSpan. */
+                        public Token(long id, SourceSpan span, RuleId rule, String text,
+                                     List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) {
+                            this(id, span, rule, StringSpan.ofString(text), leadingTrivia, trailingTrivia);
+                        }
+                        public String text() { return textSpan.toString(); }
                         @Override
                         public boolean equals(Object other) {
                             return other instanceof Token that
                                 && java.util.Objects.equals(span, that.span)
                                 && java.util.Objects.equals(rule, that.rule)
-                                && java.util.Objects.equals(text, that.text)
+                                && java.util.Objects.equals(textSpan, that.textSpan)
                                 && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
                                 && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
                         }
                         @Override
                         public int hashCode() {
-                            return java.util.Objects.hash(Token.class, span, rule, text, leadingTrivia, trailingTrivia);
+                            return java.util.Objects.hash(Token.class, span, rule, textSpan, leadingTrivia, trailingTrivia);
                         }
                     }
             """);
@@ -1948,6 +2033,80 @@ public final class ParserGenerator {
                 """);
         }
         sb.append("""
+                }
+
+                /**
+                 * View into a substring of the parser input. Defers materialization to a
+                 * Java String until first access via toString(). Cleanup F.3: token text in
+                 * generated parsers flows through StringSpan to avoid eager substring()
+                 * allocation in match helpers, token boundary capture, and DFA fast-path.
+                 *
+                 * <p>Embedded inline so the standalone-parser invariant (depends only on
+                 * pragmatica-lite:core) is preserved.
+                 */
+                public static final class StringSpan implements CharSequence {
+                    private final String source;
+                    private final int start;
+                    private final int end;
+                    private String materialized;
+
+                    public StringSpan(String source, int start, int end) {
+                        this.source = source;
+                        this.start = start;
+                        this.end = end;
+                    }
+
+                    /** Wrap a fully-materialized String with no deferral. */
+                    public static StringSpan ofString(String text) {
+                        var span = new StringSpan(text, 0, text.length());
+                        span.materialized = text;
+                        return span;
+                    }
+
+                    public int start() { return start; }
+                    public int end() { return end; }
+
+                    @Override public int length() { return end - start; }
+                    @Override public char charAt(int i) { return source.charAt(start + i); }
+                    @Override public CharSequence subSequence(int s, int e) {
+                        return new StringSpan(source, start + s, start + e);
+                    }
+
+                    @Override
+                    public String toString() {
+                        var m = materialized;
+                        if (m == null) {
+                            m = source.substring(start, end);
+                            materialized = m;
+                        }
+                        return m;
+                    }
+
+                    @Override
+                    public boolean equals(Object o) {
+                        if (this == o) return true;
+                        if (o instanceof StringSpan that) {
+                            int len = this.length();
+                            if (len != that.length()) return false;
+                            if (this.source == that.source && this.start == that.start && this.end == that.end) return true;
+                            for (int i = 0; i < len; i++) {
+                                if (this.source.charAt(this.start + i) != that.source.charAt(that.start + i)) return false;
+                            }
+                            return true;
+                        }
+                        return false;
+                    }
+
+                    @Override
+                    public int hashCode() {
+                        if (materialized != null) return materialized.hashCode();
+                        int h = 0;
+                        int len = end - start;
+                        for (int i = 0; i < len; i++) {
+                            h = 31 * h + source.charAt(start + i);
+                        }
+                        return h;
+                    }
                 }
 
                 public sealed interface AstNode {
@@ -2448,6 +2607,15 @@ public final class ParserGenerator {
                     return input.substring(start, end);
                 }
 
+                /**
+                 * Cleanup F.3: build a StringSpan view over the input without materializing
+                 * a Java String. Used by match helpers and token boundary capture so the
+                 * substring is deferred until a consumer actually needs it.
+                 */
+                private StringSpan substringSpan(int start, int end) {
+                    return new StringSpan(input, start, end);
+                }
+
                 private long cacheKey(int ruleId, int position) {
                     return ((long) ruleId << 32) | position;
                 }
@@ -2700,6 +2868,9 @@ public final class ParserGenerator {
         var expectedExpr = config.mutableParseResult()
                            ? "((furthestExpected != null && !furthestExpected.isEmpty()) ? furthestExpected : (result.expected != null ? result.expected : \"valid input\"))"
                            : "furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or(\"valid input\"))";
+        var postPassParseLine = config.triviaPostPass()
+                                ? "                    rootNode = TriviaPostPass.assignTrivia(input, rootNode, 0);\n"
+                                : "";
         sb.append("""
                 // === Public Parse Methods ===
 
@@ -2718,7 +2889,7 @@ public final class ParserGenerator {
                     }
                     // Attach trailing trivia to root node
                     var rootNode = attachTrailingTrivia(%s, trailingTrivia);
-                    return Result.success(rootNode);
+                %s    return Result.success(rootNode);
                 }
 
                 /**
@@ -2741,8 +2912,19 @@ public final class ParserGenerator {
                     };
                 }
 
-            """.formatted(sanitizedName, furthestFailureOrLoc, expectedExpr, furthestFailureOrLoc, resultNodeUnwrapExpr));
+            """.formatted(sanitizedName,
+                          furthestFailureOrLoc,
+                          expectedExpr,
+                          furthestFailureOrLoc,
+                          resultNodeUnwrapExpr,
+                          postPassParseLine));
         if (errorReporting == ErrorReporting.ADVANCED) {
+            var postPassDiagBranchLine = config.triviaPostPass()
+                                         ? "                            rootNode = TriviaPostPass.assignTrivia(input, rootNode, 0);\n"
+                                         : "";
+            var postPassDiagSuccessLine = config.triviaPostPass()
+                                          ? "                        rootNode = TriviaPostPass.assignTrivia(input, rootNode, 0);\n"
+                                          : "";
             sb.append("""
                     /**
                      * Parse with advanced error recovery and Rust-style diagnostics.
@@ -2781,11 +2963,11 @@ public final class ParserGenerator {
 
                             // Attach error node to result
                             var rootNode = attachTrailingTrivia(%s, trailingTrivia);
-                            return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
+                %s            return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                         }
 
                         var rootNode = attachTrailingTrivia(%s, trailingTrivia);
-                        if (diagnostics.isEmpty()) {
+                %s        if (diagnostics.isEmpty()) {
                             return ParseResultWithDiagnostics.success(rootNode, input);
                         }
                         return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
@@ -2796,7 +2978,9 @@ public final class ParserGenerator {
                               expectedExpr,
                               furthestFailureOrLoc,
                               resultNodeUnwrapExpr,
-                              resultNodeUnwrapExpr));
+                              postPassDiagBranchLine,
+                              resultNodeUnwrapExpr,
+                              postPassDiagSuccessLine));
         }
         generateCstParseRuleAt(sb);
     }
@@ -2887,7 +3071,7 @@ public final class ParserGenerator {
                         var expected = __EXPECTED_EXPR__;
                         return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
-                    return Result.success(new PartialParse(__RESULT_NODE__, pos));
+                    return Result.success(new PartialParse(__POST_PASS_WRAP__, pos));
                 }
 
                 /**
@@ -2911,9 +3095,13 @@ public final class ParserGenerator {
                 }
 
             """);
+        var postPassWrapExpr = config.triviaPostPass()
+                               ? "TriviaPostPass.assignTrivia(input, " + resultNodeUnwrapExpr + ", offset)"
+                               : resultNodeUnwrapExpr;
         sb.append(ruleAtBlock.toString()
                              .replace("__FURTHEST_FAILURE_OR_LOC__", furthestFailureOrLoc)
                              .replace("__EXPECTED_EXPR__", expectedExpr)
+                             .replace("__POST_PASS_WRAP__", postPassWrapExpr)
                              .replace("__RESULT_NODE__", resultNodeUnwrapExpr));
     }
 
@@ -3000,7 +3188,9 @@ public final class ParserGenerator {
             sb.append("            var cached = cache.get(key);\n");
             sb.append("            if (cached != null) {\n");
             sb.append("                if (cached.isSuccess()) {\n");
-            sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+            sb.append("                    var hitCarriedLeading = ")
+              .append(takePendingExpr())
+              .append(";\n");
             sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
             sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
             sb.append("                    var hitEndLoc = ")
@@ -3020,7 +3210,9 @@ public final class ParserGenerator {
             sb.append("        \n");
         }
         sb.append("        // Skip leading whitespace and combine with carried pending-leading.\n");
-        sb.append("        var carriedLeading = takePendingLeading();\n");
+        sb.append("        var carriedLeading = ")
+          .append(takePendingExpr())
+          .append(";\n");
         sb.append("        var localLeadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
         sb.append("        var leadingTrivia = concatTrivia(carriedLeading, localLeadingTrivia);\n");
         var ruleIdConst = toConstantName(ruleName);
@@ -3077,7 +3269,11 @@ public final class ParserGenerator {
         // child (typically inter-element skipWhitespace before a zero-width tail
         // element). Pos is NOT rewound — predicate combinators rely on pos being
         // past consumed whitespace. Mirrors PegEngine.parseRule.
-        sb.append("            var pendingAtExit = takePendingLeading();\n");
+        // Cleanup A: under triviaPostPass=true, takePendingLeading returns an
+        // empty list, so the trailing-attach block is statically dead — elide.
+        if (!config.triviaPostPass()) {
+            sb.append("            var pendingAtExit = takePendingLeading();\n");
+        }
         // Bug C fix: cache the empty-leading wrapped node so cache hits don't
         // preserve stale leading trivia and duplicate it on outer nodes. The
         // returned node carries the actual leadingTrivia for this call site.
@@ -3088,10 +3284,12 @@ public final class ParserGenerator {
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", leadingTrivia);\n");
-        sb.append("            if (!pendingAtExit.isEmpty()) {\n");
-        sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
-        sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
-        sb.append("            }\n");
+        if (!config.triviaPostPass()) {
+            sb.append("            if (!pendingAtExit.isEmpty()) {\n");
+            sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
+            sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
+            sb.append("            }\n");
+        }
         sb.append("            cacheableResult = CstParseResult.success(cacheNode, ")
           .append(textOrEmpty("result"))
           .append(", endLoc);\n");
@@ -3108,8 +3306,11 @@ public final class ParserGenerator {
             sb.append("            restoreLocation(startLoc);\n");
         }
         // Re-deposit the caller's pending-leading so enclosing backtracking
-        // combinators can roll it back to their own snapshots.
-        sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        // combinators can roll it back to their own snapshots. Cleanup A:
+        // under flag-ON, the buffer is unused; skip the addAll entirely.
+        if (!config.triviaPostPass()) {
+            sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        }
         // Use custom error message if available
         if (rule.hasErrorMessage()) {
             sb.append("            finalResult = CstParseResult.failure(\"")
@@ -3181,7 +3382,9 @@ public final class ParserGenerator {
         sb.append("            var cached = cache.get(key);\n");
         sb.append("            if (cached != null) {\n");
         sb.append("                if (cached.isSuccess()) {\n");
-        sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+        sb.append("                    var hitCarriedLeading = ")
+          .append(takePendingExpr())
+          .append(";\n");
         sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
         sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
         sb.append("                    var hitEndLoc = ")
@@ -3210,7 +3413,9 @@ public final class ParserGenerator {
         sb.append("            return activeSeed;\n");
         sb.append("        }\n");
         // Capture leading whitespace & carried pending at the outer level.
-        sb.append("        var carriedLeading = takePendingLeading();\n");
+        sb.append("        var carriedLeading = ")
+          .append(takePendingExpr())
+          .append(";\n");
         sb.append("        var localLeadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
         sb.append("        var leadingTrivia = concatTrivia(carriedLeading, localLeadingTrivia);\n");
         sb.append("        int bodyStartPos = pos;\n");
@@ -3294,7 +3499,9 @@ public final class ParserGenerator {
         }else {
             sb.append("            restoreLocation(startLoc);\n");
         }
-        sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        if (!config.triviaPostPass()) {
+            sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        }
         if (rule.hasErrorMessage()) {
             sb.append("            finalResult = CstParseResult.failure(\"")
               .append(escape(rule.errorMessage()
@@ -3416,7 +3623,9 @@ public final class ParserGenerator {
             sb.append("            var cached = cache.get(key);\n");
             sb.append("            if (cached != null) {\n");
             sb.append("                if (cached.isSuccess()) {\n");
-            sb.append("                    var hitCarriedLeading = takePendingLeading();\n");
+            sb.append("                    var hitCarriedLeading = ")
+              .append(takePendingExpr())
+              .append(";\n");
             sb.append("                    var hitLocalLeading = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
             sb.append("                    var hitLeading = concatTrivia(hitCarriedLeading, hitLocalLeading);\n");
             sb.append("                    var hitEndLoc = ")
@@ -3435,7 +3644,9 @@ public final class ParserGenerator {
             sb.append("        }\n");
             sb.append("        \n");
         }
-        sb.append("        var carriedLeading = takePendingLeading();\n");
+        sb.append("        var carriedLeading = ")
+          .append(takePendingExpr())
+          .append(";\n");
         sb.append("        var localLeadingTrivia = (tokenBoundaryDepth > 0) ? List.<Trivia>of() : skipWhitespace();\n");
         sb.append("        var leadingTrivia = concatTrivia(carriedLeading, localLeadingTrivia);\n");
         sb.append("        var children = new ArrayList<CstNode>();\n");
@@ -3455,7 +3666,13 @@ public final class ParserGenerator {
         sb.append("        int choiceStart0Pos = pos;\n");
         sb.append("        int choiceStart0Line = line;\n");
         sb.append("        int choiceStart0Column = column;\n");
-        sb.append("        int choicePending0 = savePendingLeading();\n");
+        // Cleanup A: under triviaPostPass=true, savePendingLeading() returns 0
+        // (sentinel) and restorePendingLeading is a no-op; we still emit the
+        // declaration since helpers receive choicePending0 as a parameter, and
+        // the JIT trivially elides the dead local.
+        sb.append("        int choicePending0 = ")
+          .append(savePendingExpr())
+          .append(";\n");
         var childrenStateName = config.markResetChildren()
                                 ? "childrenMark0"
                                 : "savedChildren0";
@@ -3496,7 +3713,9 @@ public final class ParserGenerator {
               .append(childrenStateName)
               .append(");\n");
         }
-        sb.append("            restorePendingLeading(choicePending0);\n");
+        if (!config.triviaPostPass()) {
+            sb.append("            restorePendingLeading(choicePending0);\n");
+        }
         sb.append("            result = CstParseResult.failure(\"one of alternatives\");\n");
         sb.append("        }\n");
         sb.append("        \n");
@@ -3521,17 +3740,21 @@ public final class ParserGenerator {
         }else {
             sb.append("            var span = SourceSpan.sourceSpan(startLoc, endLoc);\n");
         }
-        sb.append("            var pendingAtExit = takePendingLeading();\n");
+        if (!config.triviaPostPass()) {
+            sb.append("            var pendingAtExit = takePendingLeading();\n");
+        }
         sb.append("            var cacheNode = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", List.<Trivia>of());\n");
         sb.append("            var node = wrapWithRuleName(result, children, span, ")
           .append(ruleIdConst)
           .append(", leadingTrivia);\n");
-        sb.append("            if (!pendingAtExit.isEmpty()) {\n");
-        sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
-        sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
-        sb.append("            }\n");
+        if (!config.triviaPostPass()) {
+            sb.append("            if (!pendingAtExit.isEmpty()) {\n");
+            sb.append("                cacheNode = attachTrailingToTail(cacheNode, pendingAtExit);\n");
+            sb.append("                node = attachTrailingToTail(node, pendingAtExit);\n");
+            sb.append("            }\n");
+        }
         sb.append("            cacheableResult = CstParseResult.success(cacheNode, ")
           .append(textOrEmpty("result"))
           .append(", endLoc);\n");
@@ -3546,7 +3769,9 @@ public final class ParserGenerator {
         }else {
             sb.append("            restoreLocation(startLoc);\n");
         }
-        sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        if (!config.triviaPostPass()) {
+            sb.append("            if (!carriedLeading.isEmpty()) pendingLeadingTrivia.addAll(carriedLeading);\n");
+        }
         if (rule.hasErrorMessage()) {
             sb.append("            finalResult = CstParseResult.failure(\"")
               .append(escape(rule.errorMessage()
@@ -3616,7 +3841,9 @@ public final class ParserGenerator {
             sb.append("            this.pos = choiceStart0Pos;\n");
             sb.append("            this.line = choiceStart0Line;\n");
             sb.append("            this.column = choiceStart0Column;\n");
-            sb.append("            restorePendingLeading(choicePending0);\n");
+            if (!config.triviaPostPass()) {
+                sb.append("            restorePendingLeading(choicePending0);\n");
+            }
             sb.append("            result = null;\n");
             emitHelperCallChain(sb, rule, defaults, childrenStateName, "            ");
             sb.append("        }\n");
@@ -3748,7 +3975,9 @@ public final class ParserGenerator {
         sb.append("        this.pos = choiceStartPos;\n");
         sb.append("        this.line = choiceStartLine;\n");
         sb.append("        this.column = choiceStartColumn;\n");
-        sb.append("        restorePendingLeading(choicePending);\n");
+        if (!config.triviaPostPass()) {
+            sb.append("        restorePendingLeading(choicePending);\n");
+        }
         sb.append("        return ")
           .append(altVar)
           .append(";\n");
@@ -3947,7 +4176,9 @@ public final class ParserGenerator {
         sb.append(pad)
           .append("int ")
           .append(seqPending)
-          .append(" = savePendingLeading();\n");
+          .append(" = ")
+          .append(savePendingExpr())
+          .append(";\n");
         if (addToChildren) {
             sb.append(pad)
               .append("var ")
@@ -4092,7 +4323,9 @@ public final class ParserGenerator {
               .append("if (result.isSuccess()) {\n");
             if (!inWhitespaceRule && !isPredicate(elem)) {
                 sb.append(pad)
-                  .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+                  .append(config.triviaPostPass()
+                          ? "    if (tokenBoundaryDepth == 0) skipWhitespace();\n"
+                          : "    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
             }
             // Element-local result variable name. The leading `chunkIdx_` prefix is just
             // a unique-name disambiguator across elements within the chunk.
@@ -4107,7 +4340,9 @@ public final class ParserGenerator {
             sb.append(pad)
               .append("        restoreLocationRaw(seqStartPos, seqStartLine, seqStartColumn);\n");
             sb.append(pad)
-              .append("        restorePendingLeading(seqPending);\n");
+              .append(config.triviaPostPass()
+                      ? ""
+                      : "        restorePendingLeading(seqPending);\n");
             if (addToChildren) {
                 sb.append(pad)
                   .append("        children.clear();\n");
@@ -4125,7 +4360,9 @@ public final class ParserGenerator {
             sb.append(pad)
               .append("        restoreLocationRaw(seqStartPos, seqStartLine, seqStartColumn);\n");
             sb.append(pad)
-              .append("        restorePendingLeading(seqPending);\n");
+              .append(config.triviaPostPass()
+                      ? ""
+                      : "        restorePendingLeading(seqPending);\n");
             if (addToChildren) {
                 sb.append(pad)
                   .append("        children.clear();\n");
@@ -4189,7 +4426,9 @@ public final class ParserGenerator {
         sb.append(pad)
           .append("int ")
           .append(seqPending)
-          .append(" = savePendingLeading();\n");
+          .append(" = ")
+          .append(savePendingExpr())
+          .append(";\n");
         if (addToChildren) {
             sb.append(pad)
               .append("var ")
@@ -4208,7 +4447,9 @@ public final class ParserGenerator {
               .append(".isSuccess()) {\n");
             if (!inWhitespaceRule && !isPredicate(elem)) {
                 sb.append(pad)
-                  .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+                  .append(config.triviaPostPass()
+                          ? "    if (tokenBoundaryDepth == 0) skipWhitespace();\n"
+                          : "    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
             }
             var elemVar = "elem" + id + "_" + i;
             generateCstExpressionCode(sb, elem, elemVar, indent + 1, addToChildren, counter, inWhitespaceRule);
@@ -4224,10 +4465,12 @@ public final class ParserGenerator {
               .append(", ")
               .append(seqStartColumn)
               .append(");\n");
-            sb.append(pad)
-              .append("        restorePendingLeading(")
-              .append(seqPending)
-              .append(");\n");
+            if (!config.triviaPostPass()) {
+                sb.append(pad)
+                  .append("        restorePendingLeading(")
+                  .append(seqPending)
+                  .append(");\n");
+            }
             if (addToChildren) {
                 sb.append(pad)
                   .append("        children.clear();\n");
@@ -4254,10 +4497,12 @@ public final class ParserGenerator {
               .append(", ")
               .append(seqStartColumn)
               .append(");\n");
-            sb.append(pad)
-              .append("        restorePendingLeading(")
-              .append(seqPending)
-              .append(");\n");
+            if (!config.triviaPostPass()) {
+                sb.append(pad)
+                  .append("        restorePendingLeading(")
+                  .append(seqPending)
+                  .append(");\n");
+            }
             if (addToChildren) {
                 sb.append(pad)
                   .append("        children.clear();\n");
@@ -4472,7 +4717,9 @@ public final class ParserGenerator {
         sb.append(pad)
           .append("int choicePending")
           .append(id)
-          .append(" = savePendingLeading();\n");
+          .append(" = ")
+          .append(savePendingExpr())
+          .append(";\n");
         // Don't skip whitespace here - let alternatives capture trivia themselves
         emitChildrenSave(sb, pad, childrenState, addToChildren);
         // Phase 1F: try extended FIRST-set classification first (covers Reference,
@@ -4523,10 +4770,12 @@ public final class ParserGenerator {
           .append(resultVar)
           .append(" == null) {\n");
         emitChildrenRestore(sb, pad + "    ", childrenState, addToChildren);
-        sb.append(pad)
-          .append("    restorePendingLeading(choicePending")
-          .append(id)
-          .append(");\n");
+        if (!config.triviaPostPass()) {
+            sb.append(pad)
+              .append("    restorePendingLeading(choicePending")
+              .append(id)
+              .append(");\n");
+        }
         sb.append(pad)
           .append("    ")
           .append(resultVar)
@@ -4906,12 +5155,13 @@ public final class ParserGenerator {
           .append("        column = fpCol")
           .append(id)
           .append(";\n");
+        // Cleanup F.3: emit StringSpan instead of input.substring(...) to defer
+        // materialization. Note: we use the parser instance's substringSpan()
+        // helper since fpInput is just a local alias for `input`.
         sb.append(pad)
           .append("        var tbText")
           .append(id)
-          .append(" = ")
-          .append(fpInput)
-          .append(".substring(")
+          .append(" = substringSpan(")
           .append(tbStartPos)
           .append(", ")
           .append(fpEnd)
@@ -4938,7 +5188,9 @@ public final class ParserGenerator {
           .append(tokenRuleId)
           .append(", tbText")
           .append(id)
-          .append(", takePendingLeading(), List.of());\n");
+          .append(", ")
+          .append(takePendingExpr())
+          .append(", List.of());\n");
         if (addToChildren) {
             sb.append(pad)
               .append("        children.add(tbNode")
@@ -5284,10 +5536,14 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    int zomIterPending")
                   .append(id)
-                  .append(" = savePendingLeading();\n");
+                  .append(" = ")
+                  .append(savePendingExpr())
+                  .append(";\n");
                 if (!inWhitespaceRule) {
                     sb.append(pad)
-                      .append("    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+                      .append(config.triviaPostPass()
+                              ? "    if (tokenBoundaryDepth == 0) skipWhitespace();\n"
+                              : "    if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
                 }
                 generateCstExpressionCode(sb,
                                           zom.expression(),
@@ -5325,10 +5581,12 @@ public final class ParserGenerator {
                   .append(", ")
                   .append(beforeColumn)
                   .append(");\n");
-                sb.append(pad)
-                  .append("        restorePendingLeading(zomIterPending")
-                  .append(id)
-                  .append(");\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("        restorePendingLeading(zomIterPending")
+                      .append(id)
+                      .append(");\n");
+                }
                 sb.append(pad)
                   .append("        break;\n");
                 sb.append(pad)
@@ -5436,7 +5694,9 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("int oomEntryPending")
                   .append(id)
-                  .append(" = savePendingLeading();\n");
+                  .append(" = ")
+                  .append(savePendingExpr())
+                  .append(";\n");
                 generateCstExpressionCode(sb,
                                           oom.expression(),
                                           oomFirst,
@@ -5462,16 +5722,18 @@ public final class ParserGenerator {
                   .append("int ")
                   .append(oomStartColumn)
                   .append(" = column;\n");
-                sb.append(pad)
-                  .append("if (!")
-                  .append(oomFirst)
-                  .append(".isSuccess()) {\n");
-                sb.append(pad)
-                  .append("    restorePendingLeading(oomEntryPending")
-                  .append(id)
-                  .append(");\n");
-                sb.append(pad)
-                  .append("}\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("if (!")
+                      .append(oomFirst)
+                      .append(".isSuccess()) {\n");
+                    sb.append(pad)
+                      .append("    restorePendingLeading(oomEntryPending")
+                      .append(id)
+                      .append(");\n");
+                    sb.append(pad)
+                      .append("}\n");
+                }
                 sb.append(pad)
                   .append("if (")
                   .append(oomFirst)
@@ -5493,10 +5755,14 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("        int oomIterPending")
                   .append(id)
-                  .append(" = savePendingLeading();\n");
+                  .append(" = ")
+                  .append(savePendingExpr())
+                  .append(";\n");
                 if (!inWhitespaceRule) {
                     sb.append(pad)
-                      .append("        if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+                      .append(config.triviaPostPass()
+                              ? "        if (tokenBoundaryDepth == 0) skipWhitespace();\n"
+                              : "        if (tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
                 }
                 generateCstExpressionCode(sb,
                                           oom.expression(),
@@ -5534,10 +5800,12 @@ public final class ParserGenerator {
                   .append(", ")
                   .append(beforeColumn)
                   .append(");\n");
-                sb.append(pad)
-                  .append("            restorePendingLeading(oomIterPending")
-                  .append(id)
-                  .append(");\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("            restorePendingLeading(oomIterPending")
+                      .append(id)
+                      .append(");\n");
+                }
                 sb.append(pad)
                   .append("            break;\n");
                 sb.append(pad)
@@ -5626,7 +5894,9 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("int optPending")
                   .append(id)
-                  .append(" = savePendingLeading();\n");
+                  .append(" = ")
+                  .append(savePendingExpr())
+                  .append(";\n");
                 // Save parent children before inner expression
                 if (addToChildren) {
                     sb.append(pad)
@@ -5661,10 +5931,12 @@ public final class ParserGenerator {
                   .append(", ")
                   .append(optStartColumn)
                   .append(");\n");
-                sb.append(pad)
-                  .append("    restorePendingLeading(optPending")
-                  .append(id)
-                  .append(");\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("    restorePendingLeading(optPending")
+                      .append(id)
+                      .append(");\n");
+                }
                 if (addToChildren) {
                     sb.append(pad)
                       .append("    children.clear();\n");
@@ -5717,10 +5989,12 @@ public final class ParserGenerator {
                   .append(", ")
                   .append(optStartColumn)
                   .append(");\n");
-                sb.append(pad)
-                  .append("    restorePendingLeading(optPending")
-                  .append(id)
-                  .append(");\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("    restorePendingLeading(optPending")
+                      .append(id)
+                      .append(");\n");
+                }
                 if (addToChildren) {
                     sb.append(pad)
                       .append("    children.clear();\n");
@@ -5803,12 +6077,16 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    int repIterPending")
                   .append(id)
-                  .append(" = savePendingLeading();\n");
+                  .append(" = ")
+                  .append(savePendingExpr())
+                  .append(";\n");
                 if (!inWhitespaceRule) {
                     sb.append(pad)
                       .append("    if (")
                       .append(repCount)
-                      .append(" > 0 && tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
+                      .append(config.triviaPostPass()
+                              ? " > 0 && tokenBoundaryDepth == 0) skipWhitespace();\n"
+                              : " > 0 && tokenBoundaryDepth == 0) appendPending(skipWhitespace());\n");
                 }
                 generateCstExpressionCode(sb,
                                           rep.expression(),
@@ -5846,10 +6124,12 @@ public final class ParserGenerator {
                   .append(", ")
                   .append(beforeColumn)
                   .append(");\n");
-                sb.append(pad)
-                  .append("        restorePendingLeading(repIterPending")
-                  .append(id)
-                  .append(");\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("        restorePendingLeading(repIterPending")
+                      .append(id)
+                      .append(");\n");
+                }
                 sb.append(pad)
                   .append("        break;\n");
                 sb.append(pad)
@@ -5982,10 +6262,12 @@ public final class ParserGenerator {
                   .append("int ")
                   .append(andStartColumn)
                   .append(" = column;\n");
-                sb.append(pad)
-                  .append("int andPending")
-                  .append(id)
-                  .append(" = savePendingLeading();\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("int andPending")
+                      .append(id)
+                      .append(" = savePendingLeading();\n");
+                }
                 if (addToChildren) {
                     sb.append(pad)
                       .append("var ")
@@ -6002,10 +6284,12 @@ public final class ParserGenerator {
                   .append(andStartColumn)
                   .append(");\n");
                 // Predicates don't consume trivia state either.
-                sb.append(pad)
-                  .append("restorePendingLeading(andPending")
-                  .append(id)
-                  .append(");\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("restorePendingLeading(andPending")
+                      .append(id)
+                      .append(");\n");
+                }
                 if (addToChildren) {
                     sb.append(pad)
                       .append("children.clear();\n");
@@ -6042,10 +6326,12 @@ public final class ParserGenerator {
                   .append("int ")
                   .append(notStartColumn)
                   .append(" = column;\n");
-                sb.append(pad)
-                  .append("int notPending")
-                  .append(id)
-                  .append(" = savePendingLeading();\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("int notPending")
+                      .append(id)
+                      .append(" = savePendingLeading();\n");
+                }
                 if (addToChildren) {
                     sb.append(pad)
                       .append("var ")
@@ -6061,10 +6347,12 @@ public final class ParserGenerator {
                   .append(", ")
                   .append(notStartColumn)
                   .append(");\n");
-                sb.append(pad)
-                  .append("restorePendingLeading(notPending")
-                  .append(id)
-                  .append(");\n");
+                if (!config.triviaPostPass()) {
+                    sb.append(pad)
+                      .append("restorePendingLeading(notPending")
+                      .append(id)
+                      .append(");\n");
+                }
                 if (addToChildren) {
                     sb.append(pad)
                       .append("children.clear();\n");
@@ -6140,7 +6428,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    var tbText")
                   .append(id)
-                  .append(" = substring(")
+                  .append(" = substringSpan(")
                   .append(tbStartPos)
                   .append(", pos);\n");
                 sb.append(pad)
@@ -6165,7 +6453,9 @@ public final class ParserGenerator {
                   .append(tokenRuleId)
                   .append(", tbText")
                   .append(id)
-                  .append(", takePendingLeading(), List.of());\n");
+                  .append(", ")
+                  .append(takePendingExpr())
+                  .append(", List.of());\n");
                 if (addToChildren) {
                     sb.append(pad)
                       .append("    children.add(tbNode")
@@ -6380,10 +6670,12 @@ public final class ParserGenerator {
           .append("Column);\n");
         // Roll back any pending-leading trivia captured inside the failed alt,
         // so sibling alternatives start from the same buffer state as the Choice entry.
-        sb.append(pad)
-          .append("    restorePendingLeading(choicePending")
-          .append(id)
-          .append(");\n");
+        if (!config.triviaPostPass()) {
+            sb.append(pad)
+              .append("    restorePendingLeading(choicePending")
+              .append(id)
+              .append(");\n");
+        }
     }
 
     /**
@@ -6572,10 +6864,12 @@ public final class ParserGenerator {
               .append("Line, ")
               .append(choiceStart)
               .append("Column);\n");
-            sb.append(pad)
-              .append("    restorePendingLeading(choicePending")
-              .append(id)
-              .append(");\n");
+            if (!config.triviaPostPass()) {
+                sb.append(pad)
+                  .append("    restorePendingLeading(choicePending")
+                  .append(id)
+                  .append(");\n");
+            }
             emitCstChoiceAltChainClosed(sb,
                                         defaults,
                                         id,
@@ -6750,31 +7044,60 @@ public final class ParserGenerator {
                 // === Pending-leading trivia helpers ===
                 // See docs/TRIVIA-ATTRIBUTION.md for the attribution rule.
 
-                private void appendPending(List<Trivia> captured) {
-                    if (!captured.isEmpty()) {
-                        pendingLeadingTrivia.addAll(captured);
-                    }
-                }
+            """);
+        // Step 4 commit 5: Under triviaPostPass=true, the post-pass produces correct
+        // attribution from the trivia stream. The buffer machinery is dead work — the
+        // call sites still call these helpers, but the helpers no-op (and the buffer
+        // field stays declared but unused — see PR description for rationale).
+        if (config.triviaPostPass()) {
+            sb.append("""
+                                private void appendPending(List<Trivia> captured) {
+                                    // no-op: triviaPostPass=true; attribution handled by post-pass.
+                                }
 
-                private List<Trivia> takePendingLeading() {
-                    if (pendingLeadingTrivia.isEmpty()) {
-                        return List.of();
-                    }
-                    var snapshot = List.copyOf(pendingLeadingTrivia);
-                    pendingLeadingTrivia.clear();
-                    return snapshot;
-                }
+                                private List<Trivia> takePendingLeading() {
+                                    return List.of();
+                                }
 
-                private int savePendingLeading() {
-                    return pendingLeadingTrivia.size();
-                }
+                                private int savePendingLeading() {
+                                    return 0;
+                                }
 
-                private void restorePendingLeading(int snapshot) {
-                    if (pendingLeadingTrivia.size() > snapshot) {
-                        pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size()).clear();
-                    }
-                }
+                                private void restorePendingLeading(int snapshot) {
+                                    // no-op: triviaPostPass=true; attribution handled by post-pass.
+                                }
 
+                            """);
+        }else {
+            sb.append("""
+                                private void appendPending(List<Trivia> captured) {
+                                    if (!captured.isEmpty()) {
+                                        pendingLeadingTrivia.addAll(captured);
+                                    }
+                                }
+
+                                private List<Trivia> takePendingLeading() {
+                                    if (pendingLeadingTrivia.isEmpty()) {
+                                        return List.of();
+                                    }
+                                    var snapshot = List.copyOf(pendingLeadingTrivia);
+                                    pendingLeadingTrivia.clear();
+                                    return snapshot;
+                                }
+
+                                private int savePendingLeading() {
+                                    return pendingLeadingTrivia.size();
+                                }
+
+                                private void restorePendingLeading(int snapshot) {
+                                    if (pendingLeadingTrivia.size() > snapshot) {
+                                        pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size()).clear();
+                                    }
+                                }
+
+                            """);
+        }
+        sb.append("""
                 private List<Trivia> concatTrivia(List<Trivia> first, List<Trivia> second) {
                     if (first.isEmpty()) return second;
                     if (second.isEmpty()) return first;
@@ -6908,12 +7231,17 @@ public final class ParserGenerator {
                     private static final class CstParseResult {
                         final boolean success;
                         final CstNode node;          // raw nullable
-                        final String text;           // raw nullable
+                        // Cleanup F.2: widen text from String to CharSequence so the
+                        // generator can emit StringSpan into this field in F.3 without
+                        // forcing String materialization. Consumers (textOrEmpty helper,
+                        // CstNode.Terminal/Token construction via wrapWithRuleName) all
+                        // accept CharSequence, so this is a non-breaking widening.
+                        final CharSequence text;     // raw nullable
                         final String expected;       // raw nullable
                         final SourceLocation endLocation; // raw nullable
                         final boolean cutFailed;
 
-                        private CstParseResult(boolean success, CstNode node, String text, String expected, SourceLocation endLocation, boolean cutFailed) {
+                        private CstParseResult(boolean success, CstNode node, CharSequence text, String expected, SourceLocation endLocation, boolean cutFailed) {
                             this.success = success;
                             this.node = node;
                             this.text = text;
@@ -6926,7 +7254,7 @@ public final class ParserGenerator {
                         boolean isFailure() { return !success; }
                         boolean isCutFailure() { return !success && cutFailed; }
 
-                        static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
+                        static CstParseResult success(CstNode node, CharSequence text, SourceLocation endLocation) {
                             return new CstParseResult(true, node, text, null, endLocation, false);
                         }
 
@@ -6936,7 +7264,7 @@ public final class ParserGenerator {
                         // their endLocation field discarded by callers, so skipping the
                         // location() call here removes the dominant SourceLocation allocator
                         // on the self-host fixture.
-                        static CstParseResult successNoLoc(CstNode node, String text) {
+                        static CstParseResult successNoLoc(CstNode node, CharSequence text) {
                             return new CstParseResult(true, node, text, null, null, false);
                         }
 
@@ -6963,12 +7291,16 @@ public final class ParserGenerator {
                     private static final class CstParseResult {
                         final boolean success;
                         final Option<CstNode> node;
-                        final Option<String> text;
+                        // Cleanup F.2: widen text from Option<String> to Option<CharSequence>
+                        // so F.3 can emit StringSpan into this field without forcing
+                        // String materialization. Consumers (textOrEmpty helper) read
+                        // via .or("") which produces CharSequence, accepted everywhere.
+                        final Option<CharSequence> text;
                         final Option<String> expected;
                         final Option<SourceLocation> endLocation;
                         final boolean cutFailed;
 
-                        private CstParseResult(boolean success, Option<CstNode> node, Option<String> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
+                        private CstParseResult(boolean success, Option<CstNode> node, Option<CharSequence> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
                             this.success = success;
                             this.node = node;
                             this.text = text;
@@ -6981,14 +7313,14 @@ public final class ParserGenerator {
                         boolean isFailure() { return !success; }
                         boolean isCutFailure() { return !success && cutFailed; }
 
-                        static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
-                            return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.some(endLocation), false);
+                        static CstParseResult success(CstNode node, CharSequence text, SourceLocation endLocation) {
+                            return new CstParseResult(true, Option.option(node), Option.<CharSequence>some(text), Option.none(), Option.some(endLocation), false);
                         }
 
                         // Phase 1.7 (D2): intermediate-result success that omits endLocation.
                         // See mutable variant above for rationale.
-                        static CstParseResult successNoLoc(CstNode node, String text) {
-                            return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.none(), false);
+                        static CstParseResult successNoLoc(CstNode node, CharSequence text) {
+                            return new CstParseResult(true, Option.option(node), Option.<CharSequence>some(text), Option.none(), Option.none(), false);
                         }
 
                         static CstParseResult failure(String expected) {
@@ -7009,6 +7341,718 @@ public final class ParserGenerator {
                     }
                 """);
         }
+    }
+
+    // === Step 4 commit 4: embedded TriviaPostPass (flag-ON only) ===
+    /**
+     * Emit a {@code private static final class TriviaPostPass} embedded in the
+     * generated parser. Provides {@code assignTrivia(input, cst, leadingScanFrom)}
+     * with the same semantics as
+     * {@link org.pragmatica.peg.tree.TriviaPostPass#assignTrivia(String, CstNode, org.pragmatica.peg.grammar.Grammar, int)}.
+     *
+     * <p>The embedded class is fully self-contained: it depends only on the
+     * generated parser's own embedded {@code CstNode}, {@code Trivia}, and
+     * {@code SourceSpan} types (which themselves depend only on
+     * {@code pragmatica-lite:core}). It never imports any peglib runtime class,
+     * preserving the standalone-parser invariant.
+     *
+     * <p>The whitespace matcher is generated from the grammar's
+     * {@code %whitespace} expression at generation time, walking the expression
+     * tree and emitting Java code per Expression subtype. This avoids needing
+     * the runtime {@code Grammar} object at parse time.
+     */
+    private void generateCstTriviaPostPass(StringBuilder sb) {
+        var hasWhitespace = grammar.whitespace()
+                                   .isPresent();
+        sb.append("    // === Embedded TriviaPostPass (Step 4 commit 4 — flag-ON) ===\n");
+        sb.append("    /**\n");
+        sb.append("     * Re-derive leading/trailing trivia attribution from\n");
+        sb.append("     * (input, span, %whitespace) after the engine returns its CST.\n");
+        sb.append("     * Mirrors org.pragmatica.peg.tree.TriviaPostPass at the runtime.\n");
+        sb.append("     */\n");
+        sb.append("    private static final class TriviaPostPass {\n");
+        sb.append("        private TriviaPostPass() {}\n\n");
+        sb.append("        static CstNode assignTrivia(String input, CstNode cst, int leadingScanFrom) {\n");
+        sb.append("            int rootStart = cst.span().startOffset();\n");
+        sb.append("            if (leadingScanFrom < 0 || leadingScanFrom > rootStart) {\n");
+        sb.append("                // Generator span semantics: rootStart may be 0 (span includes\n");
+        sb.append("                // leading whitespace). Clamp leadingScanFrom rather than reject.\n");
+        sb.append("                if (leadingScanFrom > 0 && rootStart == 0) {\n");
+        sb.append("                    leadingScanFrom = 0;\n");
+        sb.append("                } else {\n");
+        sb.append("                    throw new IllegalArgumentException(\n");
+        sb.append("                        \"leadingScanFrom \" + leadingScanFrom + \" out of range [0, \" + rootStart + \"]\");\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("            // Build line-start table once per pass (O(N)) so that per-chunk\n");
+        sb.append("            // computeSpan is O(log N) instead of O(from). Eliminates an O(N²)\n");
+        sb.append("            // hotspot for whitespace-rich source.\n");
+        sb.append("            int[] lineStarts = buildLineStarts(input);\n");
+        sb.append("            return rebuildRoot(input, cst, lineStarts, leadingScanFrom);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static int[] buildLineStarts(String input) {\n");
+        sb.append("            int len = input.length();\n");
+        sb.append("            int[] starts = new int[Math.max(8, len / 16 + 4)];\n");
+        sb.append("            int n = 0;\n");
+        sb.append("            starts[n++] = 0;\n");
+        sb.append("            for (int i = 0; i < len; i++) {\n");
+        sb.append("                if (input.charAt(i) == '\\n') {\n");
+        sb.append("                    if (n == starts.length) {\n");
+        sb.append("                        starts = java.util.Arrays.copyOf(starts, starts.length * 2);\n");
+        sb.append("                    }\n");
+        sb.append("                    starts[n++] = i + 1;\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("            return java.util.Arrays.copyOf(starts, n);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static int[] lineColAt(int[] lineStarts, int offset) {\n");
+        sb.append("            int idx = java.util.Arrays.binarySearch(lineStarts, offset);\n");
+        sb.append("            if (idx < 0) idx = -idx - 2;\n");
+        sb.append("            int line = idx + 1;\n");
+        sb.append("            int col = offset - lineStarts[idx] + 1;\n");
+        sb.append("            return new int[]{line, col};\n");
+        sb.append("        }\n\n");
+        sb.append("        static List<Trivia> scanWhitespace(String input, int from, int to, int[] lineStarts) {\n");
+        sb.append("            if (from >= to) return List.of();\n");
+        if (!hasWhitespace) {
+            sb.append("            return List.of();\n");
+        }else {
+            sb.append("            var trivia = new ArrayList<Trivia>();\n");
+            sb.append("            int pos = from;\n");
+            sb.append("            while (pos < to) {\n");
+            sb.append("                int matched = matchWsInner(input, pos, to);\n");
+            sb.append("                if (matched < 0 || matched == pos) break;\n");
+            sb.append("                var text = input.substring(pos, matched);\n");
+            sb.append("                var span = computeSpan(lineStarts, pos, matched);\n");
+            sb.append("                trivia.add(classify(span, text));\n");
+            sb.append("                pos = matched;\n");
+            sb.append("            }\n");
+            sb.append("            return List.copyOf(trivia);\n");
+        }
+        sb.append("        }\n\n");
+        // === Tree rebuild ===
+        // Span-semantics adapter: the generated parser's rule wrappers may use
+        // a span whose startOffset INCLUDES leading whitespace (rule entry
+        // captures startOffset BEFORE skipWhitespace, then the leading trivia
+        // is attached as the wrapper's leadingTrivia). The runtime engine, by
+        // contrast, captures startOffset AFTER skipWhitespace. Detect this by
+        // measuring whether the root's existing leadingTrivia text overlaps
+        // [rootStart, rootStart + leadingLen). If so, use rootStart as the
+        // "leading-end" boundary AND leadingScanFrom + (rootStart - leadingScanFrom)
+        // = rootStart for the leading scan. Otherwise (runtime semantics),
+        // scan up to rootStart as the runtime post-pass does.
+        // H2 (Cleanup B): the wrapper-span semantics decision (does the rule
+        // wrapper's span INCLUDE its leading whitespace?) is a property of the
+        // GENERATED parser globally, not of an individual node. Detect it once
+        // at the root and propagate the boolean through the recursion so each
+        // NonTerminal can advance the child-cursor past leadingLen without
+        // re-probing scanWhitespace per node.
+        sb.append("        private static CstNode rebuildRoot(String input, CstNode root, int[] lineStarts, int leadingScanFrom) {\n");
+        sb.append("            int rootStart = root.span().startOffset();\n");
+        sb.append("            int rootEnd = root.span().endOffset();\n");
+        sb.append("            int leadingTextLen = totalTriviaLength(root.leadingTrivia());\n");
+        sb.append("            // Generator semantics: span includes leading WS. The actual content\n");
+        sb.append("            // begins at (rootStart + leadingTextLen), and the leading WS lives\n");
+        sb.append("            // in [rootStart, rootStart + leadingTextLen).\n");
+        sb.append("            // Runtime semantics: span excludes leading WS. leadingTextLen is in\n");
+        sb.append("            // the gap [leadingScanFrom, rootStart). We distinguish by checking\n");
+        sb.append("            // whether scanning the pre-rootStart gap yields the leading.\n");
+        sb.append("            int leadingScanEnd;\n");
+        sb.append("            boolean wrapperSpanIncludesLeading = false;\n");
+        sb.append("            if (leadingTextLen > 0 && rootStart + leadingTextLen <= input.length()) {\n");
+        sb.append("                // Hypothesis: generator semantics — leading occupies [rootStart, rootStart + leadingTextLen).\n");
+        sb.append("                // Verify by re-scanning [rootStart, rootStart + leadingTextLen) and checking it consumes exactly that range.\n");
+        sb.append("                int probeEnd = rootStart + leadingTextLen;\n");
+        sb.append("                var probe = scanWhitespace(input, rootStart, probeEnd, lineStarts);\n");
+        sb.append("                if (totalTriviaLength(probe) == leadingTextLen) {\n");
+        sb.append("                    leadingScanEnd = probeEnd;\n");
+        sb.append("                    wrapperSpanIncludesLeading = true;\n");
+        sb.append("                } else {\n");
+        sb.append("                    leadingScanEnd = rootStart;\n");
+        sb.append("                }\n");
+        sb.append("            } else {\n");
+        sb.append("                leadingScanEnd = rootStart;\n");
+        sb.append("            }\n");
+        sb.append("            var leading = scanWhitespace(input, leadingScanFrom, leadingScanEnd, lineStarts);\n");
+        sb.append("            var trailingExternal = scanWhitespace(input, rootEnd, input.length(), lineStarts);\n");
+        sb.append("            return rebuildSelf(input, root, lineStarts, leading, trailingExternal, java.util.List.<Trivia>of(), wrapperSpanIncludesLeading);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static int totalTriviaLength(List<Trivia> trivia) {\n");
+        sb.append("            int total = 0;\n");
+        sb.append("            for (var t : trivia) total += t.text().length();\n");
+        sb.append("            return total;\n");
+        sb.append("        }\n\n");
+        // rebuildSelf: extraTrailing sticks on this node's own trailing slot
+        // (root post-EOF only). drainExtra propagates DOWN into the
+        // deepest-rightmost-leaf — H1 eliminates the post-construction
+        // attachTrailingToTail spine rebuild.
+        sb.append("        private static CstNode rebuildSelf(String input, CstNode node, int[] lineStarts,\n");
+        sb.append("                                           List<Trivia> leading, List<Trivia> extraTrailing,\n");
+        sb.append("                                           List<Trivia> drainExtra, boolean wrapperSpanIncludesLeading) {\n");
+        sb.append("            return switch (node) {\n");
+        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, extraTrailing, drainExtra, wrapperSpanIncludesLeading);\n");
+        sb.append("                case CstNode.Terminal t -> rebuildTerminal(t, leading, extraTrailing, drainExtra);\n");
+        sb.append("                case CstNode.Token tk -> rebuildToken(tk, leading, extraTrailing, drainExtra);\n");
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("                case CstNode.Error e -> rebuildError(e, leading, extraTrailing, drainExtra);\n");
+        }
+        sb.append("            };\n");
+        sb.append("        }\n\n");
+        // Cleanup D: leaf rebuild helpers — skip allocation when the rebuild
+        // would yield content-equal nodes (all incoming trivia empty AND
+        // existing trivia already empty).
+        sb.append("        private static boolean canSkipLeafRebuild(List<Trivia> leading, List<Trivia> extraTrailing,\n");
+        sb.append("                                                  List<Trivia> drainExtra,\n");
+        sb.append("                                                  List<Trivia> existingLeading, List<Trivia> existingTrailing) {\n");
+        sb.append("            return leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty()\n");
+        sb.append("                   && existingLeading.isEmpty() && existingTrailing.isEmpty();\n");
+        sb.append("        }\n\n");
+        sb.append("        private static CstNode.Terminal rebuildTerminal(CstNode.Terminal t, List<Trivia> leading,\n");
+        sb.append("                                                        List<Trivia> extraTrailing, List<Trivia> drainExtra) {\n");
+        sb.append("            if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, t.leadingTrivia(), t.trailingTrivia())) {\n");
+        sb.append("                return t;\n");
+        sb.append("            }\n");
+        sb.append("            return new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, combine(drainExtra, extraTrailing));\n");
+        sb.append("        }\n\n");
+        sb.append("        private static CstNode.Token rebuildToken(CstNode.Token tk, List<Trivia> leading,\n");
+        sb.append("                                                  List<Trivia> extraTrailing, List<Trivia> drainExtra) {\n");
+        sb.append("            if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, tk.leadingTrivia(), tk.trailingTrivia())) {\n");
+        sb.append("                return tk;\n");
+        sb.append("            }\n");
+        sb.append("            return new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, combine(drainExtra, extraTrailing));\n");
+        sb.append("        }\n\n");
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("        private static CstNode.Error rebuildError(CstNode.Error e, List<Trivia> leading,\n");
+            sb.append("                                                  List<Trivia> extraTrailing, List<Trivia> drainExtra) {\n");
+            sb.append("            if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, e.leadingTrivia(), e.trailingTrivia())) {\n");
+            sb.append("                return e;\n");
+            sb.append("            }\n");
+            sb.append("            return new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, combine(drainExtra, extraTrailing));\n");
+            sb.append("        }\n\n");
+        }
+        sb.append("        private static CstNode rebuildChild(String input, CstNode child, int[] lineStarts, int prevEnd,\n");
+        sb.append("                                            List<Trivia> drainExtra, boolean wrapperSpanIncludesLeading) {\n");
+        sb.append("            int childStart = child.span().startOffset();\n");
+        sb.append("            var leading = scanWhitespace(input, prevEnd, childStart, lineStarts);\n");
+        sb.append("            return switch (child) {\n");
+        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, java.util.List.<Trivia>of(), drainExtra, wrapperSpanIncludesLeading);\n");
+        sb.append("                case CstNode.Terminal t -> rebuildTerminal(t, leading, java.util.List.<Trivia>of(), drainExtra);\n");
+        sb.append("                case CstNode.Token tk -> rebuildToken(tk, leading, java.util.List.<Trivia>of(), drainExtra);\n");
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("                case CstNode.Error e -> rebuildError(e, leading, java.util.List.<Trivia>of(), drainExtra);\n");
+        }
+        sb.append("            };\n");
+        sb.append("        }\n\n");
+        sb.append("        private static CstNode.NonTerminal rebuildNonTerminal(String input, CstNode.NonTerminal nt, int[] lineStarts,\n");
+        sb.append("                                                              List<Trivia> leading, List<Trivia> extraTrailing,\n");
+        sb.append("                                                              List<Trivia> drainExtra, boolean wrapperSpanIncludesLeading) {\n");
+        sb.append("            int spanStart = nt.span().startOffset();\n");
+        sb.append("            int spanEnd = nt.span().endOffset();\n");
+        sb.append("            // H2: span-semantics decided once at the root. When wrapper span\n");
+        sb.append("            // includes its own leading WS, advance cursor past leadingLen so the\n");
+        sb.append("            // first child's leading scan does not re-emit the same trivia. No\n");
+        sb.append("            // per-node probe scan.\n");
+        sb.append("            int cursor = spanStart;\n");
+        sb.append("            if (wrapperSpanIncludesLeading) {\n");
+        sb.append("                int leadingLen = totalTriviaLength(leading);\n");
+        sb.append("                if (leadingLen > 0 && spanStart + leadingLen <= input.length()) {\n");
+        sb.append("                    cursor = spanStart + leadingLen;\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("            var children = nt.children();\n");
+        sb.append("            int childCount = children.size();\n");
+        sb.append("            if (childCount == 0) {\n");
+        sb.append("                // No children: gap [cursor, spanEnd) is the wrapper's internal\n");
+        sb.append("                // trailing. Combine with caller-supplied drainExtra (no deeper\n");
+        sb.append("                // descendant to absorb it) and extraTrailing.\n");
+        sb.append("                var internalTrailing = scanWhitespace(input, cursor, spanEnd, lineStarts);\n");
+        sb.append("                // Cleanup D: skip allocation if rebuild would yield identical content.\n");
+        sb.append("                if (leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty()\n");
+        sb.append("                    && internalTrailing.isEmpty()\n");
+        sb.append("                    && nt.leadingTrivia().isEmpty() && nt.trailingTrivia().isEmpty()) {\n");
+        sb.append("                    return nt;\n");
+        sb.append("                }\n");
+        sb.append("                return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), children, leading,\n");
+        sb.append("                        combine(combine(drainExtra, internalTrailing), extraTrailing));\n");
+        sb.append("            }\n");
+        sb.append("            // H1: thread orphan trailing INTO the last child's rebuildChild as\n");
+        sb.append("            // drainExtra instead of rebuilding the spine afterwards. Mirrors\n");
+        sb.append("            // PegEngine.attachTrailingToTail (Bug C' compensation): the orphan\n");
+        sb.append("            // trivia ends up in the deepest-rightmost-leaf's trailing slot,\n");
+        sb.append("            // matching CstReconstruct.emit's last-child-only emission.\n");
+        sb.append("            int lastChildEnd = children.get(childCount - 1).span().endOffset();\n");
+        sb.append("            var internalTrailing = scanWhitespace(input, lastChildEnd, spanEnd, lineStarts);\n");
+        sb.append("            var lastChildDrain = combine(drainExtra, internalTrailing);\n");
+        sb.append("            // Cleanup D: defer ArrayList allocation until first child diverges; skip\n");
+        sb.append("            // wrapper-rebuild entirely when no incoming trivia and no internal change.\n");
+        sb.append("            boolean canSkip = leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty()\n");
+        sb.append("                              && internalTrailing.isEmpty()\n");
+        sb.append("                              && nt.leadingTrivia().isEmpty() && nt.trailingTrivia().isEmpty();\n");
+        sb.append("            ArrayList<CstNode> newChildren = null;\n");
+        sb.append("            for (int i = 0; i < childCount; i++) {\n");
+        sb.append("                var c = children.get(i);\n");
+        sb.append("                var drainForThis = (i == childCount - 1) ? lastChildDrain : java.util.List.<Trivia>of();\n");
+        sb.append("                var rebuilt = rebuildChild(input, c, lineStarts, cursor, drainForThis, wrapperSpanIncludesLeading);\n");
+        sb.append("                if (newChildren == null) {\n");
+        sb.append("                    if (rebuilt != c) {\n");
+        sb.append("                        newChildren = new ArrayList<CstNode>(childCount);\n");
+        sb.append("                        for (int j = 0; j < i; j++) newChildren.add(children.get(j));\n");
+        sb.append("                        newChildren.add(rebuilt);\n");
+        sb.append("                    }\n");
+        sb.append("                } else {\n");
+        sb.append("                    newChildren.add(rebuilt);\n");
+        sb.append("                }\n");
+        sb.append("                cursor = c.span().endOffset();\n");
+        sb.append("            }\n");
+        sb.append("            if (newChildren == null && canSkip) {\n");
+        sb.append("                return nt;\n");
+        sb.append("            }\n");
+        sb.append("            var finalChildren = newChildren == null ? children : List.copyOf(newChildren);\n");
+        sb.append("            return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), finalChildren, leading, extraTrailing);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static List<Trivia> combine(List<Trivia> a, List<Trivia> b) {\n");
+        sb.append("            if (a.isEmpty()) return b;\n");
+        sb.append("            if (b.isEmpty()) return a;\n");
+        sb.append("            var combined = new ArrayList<Trivia>(a.size() + b.size());\n");
+        sb.append("            combined.addAll(a);\n");
+        sb.append("            combined.addAll(b);\n");
+        sb.append("            return List.copyOf(combined);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static Trivia classify(SourceSpan span, String text) {\n");
+        sb.append("            if (text.startsWith(\"//\")) {\n");
+        sb.append("                return new Trivia.LineComment(span, text);\n");
+        sb.append("            } else if (text.startsWith(\"/*\")) {\n");
+        sb.append("                return new Trivia.BlockComment(span, text);\n");
+        sb.append("            } else {\n");
+        sb.append("                return new Trivia.Whitespace(span, text);\n");
+        sb.append("            }\n");
+        sb.append("        }\n\n");
+        // Static copy of matchesPattern for char-class matching inside the post-pass.
+        // Mirrors the instance-method MATCHES_PATTERN_METHOD emitted elsewhere; kept
+        // as a separate static copy because the embedded class cannot reach instance
+        // methods of the enclosing parser.
+        sb.append("        private static boolean matchesPattern(char c, String pattern, boolean caseInsensitive) {\n");
+        sb.append("            char testChar = caseInsensitive ? Character.toLowerCase(c) : c;\n");
+        sb.append("            int i = 0;\n");
+        sb.append("            while (i < pattern.length()) {\n");
+        sb.append("                char start = pattern.charAt(i);\n");
+        sb.append("                if (start == '\\\\' && i + 1 < pattern.length()) {\n");
+        sb.append("                    char escaped = pattern.charAt(i + 1);\n");
+        sb.append("                    int consumed = 2;\n");
+        sb.append("                    char expected = switch (escaped) {\n");
+        sb.append("                        case 'n' -> '\\n';\n");
+        sb.append("                        case 'r' -> '\\r';\n");
+        sb.append("                        case 't' -> '\\t';\n");
+        sb.append("                        case '\\\\' -> '\\\\';\n");
+        sb.append("                        case ']' -> ']';\n");
+        sb.append("                        case '-' -> '-';\n");
+        sb.append("                        case 'x' -> {\n");
+        sb.append("                            if (i + 4 <= pattern.length()) {\n");
+        sb.append("                                try {\n");
+        sb.append("                                    var hex = pattern.substring(i + 2, i + 4);\n");
+        sb.append("                                    consumed = 4;\n");
+        sb.append("                                    yield (char) Integer.parseInt(hex, 16);\n");
+        sb.append("                                } catch (NumberFormatException e) { yield 'x'; }\n");
+        sb.append("                            }\n");
+        sb.append("                            yield 'x';\n");
+        sb.append("                        }\n");
+        sb.append("                        case 'u' -> {\n");
+        sb.append("                            if (i + 6 <= pattern.length()) {\n");
+        sb.append("                                try {\n");
+        sb.append("                                    var hex = pattern.substring(i + 2, i + 6);\n");
+        sb.append("                                    consumed = 6;\n");
+        sb.append("                                    yield (char) Integer.parseInt(hex, 16);\n");
+        sb.append("                                } catch (NumberFormatException e) { yield 'u'; }\n");
+        sb.append("                            }\n");
+        sb.append("                            yield 'u';\n");
+        sb.append("                        }\n");
+        sb.append("                        default -> escaped;\n");
+        sb.append("                    };\n");
+        sb.append("                    if (caseInsensitive) expected = Character.toLowerCase(expected);\n");
+        sb.append("                    if (testChar == expected) return true;\n");
+        sb.append("                    i += consumed;\n");
+        sb.append("                    continue;\n");
+        sb.append("                }\n");
+        sb.append("                if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {\n");
+        sb.append("                    char end = pattern.charAt(i + 2);\n");
+        sb.append("                    if (caseInsensitive) {\n");
+        sb.append("                        start = Character.toLowerCase(start);\n");
+        sb.append("                        end = Character.toLowerCase(end);\n");
+        sb.append("                    }\n");
+        sb.append("                    if (testChar >= start && testChar <= end) return true;\n");
+        sb.append("                    i += 3;\n");
+        sb.append("                } else {\n");
+        sb.append("                    if (caseInsensitive) start = Character.toLowerCase(start);\n");
+        sb.append("                    if (testChar == start) return true;\n");
+        sb.append("                    i++;\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("            return false;\n");
+        sb.append("        }\n\n");
+        sb.append("        private static SourceSpan computeSpan(int[] lineStarts, int from, int to) {\n");
+        sb.append("            int[] startLc = lineColAt(lineStarts, from);\n");
+        sb.append("            int[] endLc = lineColAt(lineStarts, to);\n");
+        sb.append("            return new SourceSpan(startLc[0], startLc[1], from, endLc[0], endLc[1], to);\n");
+        sb.append("        }\n\n");
+        // Emit per-expression matcher methods.
+        if (hasWhitespace) {
+            var wsExpr = grammar.whitespace()
+                                .unwrap();
+            var inner = ExpressionShape.extractInnerExpression(wsExpr);
+            var ctx = new TriviaPostPassEmitContext();
+            // Reserve method id 0 for the entry point.
+            int entryId = ctx.allocate(inner);
+            // Emit the entry method as `matchWsInner`; rename later via direct emission.
+            sb.append("        private static int matchWsInner(String input, int pos, int limit) {\n");
+            sb.append("            return ")
+              .append(ctx.callName(entryId))
+              .append("(input, pos, limit);\n");
+            sb.append("        }\n\n");
+            // Emit all queued methods.
+            while (ctx.hasPending()) {
+                var entry = ctx.nextPending();
+                emitTriviaPostPassMatcher(sb, entry.expr(), entry.id(), ctx);
+            }
+        }
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * Per-emission state for the embedded TriviaPostPass matcher generation.
+     * Allocates unique method ids per expression, deduplicating identical
+     * Reference targets and queueing each newly seen expression for emission.
+     */
+    private static final class TriviaPostPassEmitContext {
+        private final java.util.IdentityHashMap<Expression, Integer> idByExpr = new java.util.IdentityHashMap<>();
+        private final java.util.HashMap<String, Integer> idByRule = new java.util.HashMap<>();
+        private final java.util.ArrayDeque<TriviaPostPassEntry> queue = new java.util.ArrayDeque<>();
+        private int nextId = 0;
+
+        int allocate(Expression expr) {
+            var existing = idByExpr.get(expr);
+            if (existing != null) return existing;
+            int id = nextId++ ;
+            idByExpr.put(expr, id);
+            queue.add(new TriviaPostPassEntry(id, expr));
+            return id;
+        }
+
+        int allocateForRule(String ruleName, Expression body) {
+            var existing = idByRule.get(ruleName);
+            if (existing != null) return existing;
+            int id = allocate(body);
+            idByRule.put(ruleName, id);
+            return id;
+        }
+
+        boolean hasPending() {
+            return !queue.isEmpty();
+        }
+
+        TriviaPostPassEntry nextPending() {
+            return queue.removeFirst();
+        }
+
+        String callName(int id) {
+            return "matchWs_" + id;
+        }
+    }
+
+    private record TriviaPostPassEntry(int id, Expression expr) {}
+
+    /**
+     * Emit a single matcher method for {@code expr} into {@code sb}, naming it
+     * {@code matchWs_<id>(String input, int pos, int limit)}. Returns the next
+     * absolute offset on a successful match or {@code -1} on failure. Sub-
+     * expressions are queued via {@link TriviaPostPassEmitContext#allocate} and
+     * emitted in subsequent iterations.
+     */
+    private void emitTriviaPostPassMatcher(StringBuilder sb, Expression expr, int id, TriviaPostPassEmitContext ctx) {
+        sb.append("        private static int ")
+          .append(ctx.callName(id))
+          .append("(String input, int pos, int limit) {\n");
+        emitTriviaPostPassMatchBody(sb, expr, ctx, "            ");
+        sb.append("        }\n\n");
+    }
+
+    /**
+     * Emit the body of a matcher method for {@code expr}. The body must
+     * {@code return} an int value (next position or -1) on every control path.
+     */
+    private void emitTriviaPostPassMatchBody(StringBuilder sb,
+                                             Expression expr,
+                                             TriviaPostPassEmitContext ctx,
+                                             String indent) {
+        switch (expr) {
+            case Expression.Literal lit -> emitTppLiteral(sb, lit, indent);
+            case Expression.CharClass cc -> emitTppCharClass(sb, cc, indent);
+            case Expression.Any ignored -> {
+                sb.append(indent)
+                  .append("return pos < limit ? pos + 1 : -1;\n");
+            }
+            case Expression.Reference ref -> emitTppReference(sb, ref, ctx, indent);
+            case Expression.Sequence seq -> emitTppSequence(sb, seq, ctx, indent);
+            case Expression.Choice ch -> emitTppChoice(sb, ch, ctx, indent);
+            case Expression.ZeroOrMore zom -> emitTppZeroOrMore(sb, zom.expression(), ctx, indent);
+            case Expression.OneOrMore oom -> emitTppOneOrMore(sb, oom.expression(), ctx, indent);
+            case Expression.Optional opt -> emitTppOptional(sb, opt.expression(), ctx, indent);
+            case Expression.Repetition rep -> emitTppRepetition(sb, rep, ctx, indent);
+            case Expression.And and -> {
+                int sub = ctx.allocate(and.expression());
+                sb.append(indent)
+                  .append("return ")
+                  .append(ctx.callName(sub))
+                  .append("(input, pos, limit) >= 0 ? pos : -1;\n");
+            }
+            case Expression.Not not -> {
+                int sub = ctx.allocate(not.expression());
+                sb.append(indent)
+                  .append("return ")
+                  .append(ctx.callName(sub))
+                  .append("(input, pos, limit) < 0 ? pos : -1;\n");
+            }
+            case Expression.Group g -> emitTriviaPostPassMatchBody(sb, g.expression(), ctx, indent);
+            case Expression.TokenBoundary tb -> emitTriviaPostPassMatchBody(sb, tb.expression(), ctx, indent);
+            case Expression.Ignore ig -> emitTriviaPostPassMatchBody(sb, ig.expression(), ctx, indent);
+            case Expression.Capture cap -> emitTriviaPostPassMatchBody(sb, cap.expression(), ctx, indent);
+            case Expression.CaptureScope cs -> emitTriviaPostPassMatchBody(sb, cs.expression(), ctx, indent);
+            case Expression.BackReference ignored -> sb.append(indent)
+                                                       .append("return -1;\n");
+            case Expression.Dictionary ignored -> sb.append(indent)
+                                                    .append("return -1;\n");
+            case Expression.Cut ignored -> sb.append(indent)
+                                             .append("return pos;\n");
+        }
+    }
+
+    private void emitTppLiteral(StringBuilder sb, Expression.Literal lit, String indent) {
+        var literalStr = lit.text();
+        sb.append(indent)
+          .append("String text = ")
+          .append(quoteJavaString(literalStr))
+          .append(";\n");
+        sb.append(indent)
+          .append("int len = text.length();\n");
+        sb.append(indent)
+          .append("if (pos + len > limit) return -1;\n");
+        if (lit.caseInsensitive()) {
+            sb.append(indent)
+              .append("for (int i = 0; i < len; i++) {\n");
+            sb.append(indent)
+              .append("    if (Character.toLowerCase(input.charAt(pos + i)) != Character.toLowerCase(text.charAt(i))) return -1;\n");
+            sb.append(indent)
+              .append("}\n");
+        }else {
+            sb.append(indent)
+              .append("for (int i = 0; i < len; i++) {\n");
+            sb.append(indent)
+              .append("    if (input.charAt(pos + i) != text.charAt(i)) return -1;\n");
+            sb.append(indent)
+              .append("}\n");
+        }
+        sb.append(indent)
+          .append("return pos + len;\n");
+    }
+
+    private void emitTppCharClass(StringBuilder sb, Expression.CharClass cc, String indent) {
+        sb.append(indent)
+          .append("if (pos >= limit) return -1;\n");
+        sb.append(indent)
+          .append("char c = input.charAt(pos);\n");
+        sb.append(indent)
+          .append("boolean inClass = matchesPattern(c, ")
+          .append(quoteJavaString(cc.pattern()))
+          .append(", ")
+          .append(cc.caseInsensitive())
+          .append(");\n");
+        sb.append(indent)
+          .append("boolean ok = ")
+          .append(cc.negated()
+                  ? "!inClass"
+                  : "inClass")
+          .append(";\n");
+        sb.append(indent)
+          .append("return ok ? pos + 1 : -1;\n");
+    }
+
+    private void emitTppReference(StringBuilder sb,
+                                  Expression.Reference ref,
+                                  TriviaPostPassEmitContext ctx,
+                                  String indent) {
+        var ruleOpt = grammar.rule(ref.ruleName());
+        if (ruleOpt.isEmpty()) {
+            sb.append(indent)
+              .append("return -1;\n");
+            return;
+        }
+        int sub = ctx.allocateForRule(ref.ruleName(),
+                                      ruleOpt.unwrap()
+                                             .expression());
+        sb.append(indent)
+          .append("return ")
+          .append(ctx.callName(sub))
+          .append("(input, pos, limit);\n");
+    }
+
+    private void emitTppSequence(StringBuilder sb,
+                                 Expression.Sequence seq,
+                                 TriviaPostPassEmitContext ctx,
+                                 String indent) {
+        sb.append(indent)
+          .append("int cursor = pos;\n");
+        for (var elt : seq.elements()) {
+            int sub = ctx.allocate(elt);
+            sb.append(indent)
+              .append("cursor = ")
+              .append(ctx.callName(sub))
+              .append("(input, cursor, limit);\n");
+            sb.append(indent)
+              .append("if (cursor < 0) return -1;\n");
+        }
+        sb.append(indent)
+          .append("return cursor;\n");
+    }
+
+    private void emitTppChoice(StringBuilder sb, Expression.Choice ch, TriviaPostPassEmitContext ctx, String indent) {
+        for (var alt : ch.alternatives()) {
+            int sub = ctx.allocate(alt);
+            sb.append(indent)
+              .append("{\n");
+            sb.append(indent)
+              .append("    int r = ")
+              .append(ctx.callName(sub))
+              .append("(input, pos, limit);\n");
+            sb.append(indent)
+              .append("    if (r >= 0) return r;\n");
+            sb.append(indent)
+              .append("}\n");
+        }
+        sb.append(indent)
+          .append("return -1;\n");
+    }
+
+    private void emitTppZeroOrMore(StringBuilder sb, Expression body, TriviaPostPassEmitContext ctx, String indent) {
+        int sub = ctx.allocate(body);
+        sb.append(indent)
+          .append("int cursor = pos;\n");
+        sb.append(indent)
+          .append("while (true) {\n");
+        sb.append(indent)
+          .append("    int next = ")
+          .append(ctx.callName(sub))
+          .append("(input, cursor, limit);\n");
+        sb.append(indent)
+          .append("    if (next < 0 || next == cursor) break;\n");
+        sb.append(indent)
+          .append("    cursor = next;\n");
+        sb.append(indent)
+          .append("}\n");
+        sb.append(indent)
+          .append("return cursor;\n");
+    }
+
+    private void emitTppOneOrMore(StringBuilder sb, Expression body, TriviaPostPassEmitContext ctx, String indent) {
+        int sub = ctx.allocate(body);
+        sb.append(indent)
+          .append("int first = ")
+          .append(ctx.callName(sub))
+          .append("(input, pos, limit);\n");
+        sb.append(indent)
+          .append("if (first < 0 || first == pos) return -1;\n");
+        sb.append(indent)
+          .append("int cursor = first;\n");
+        sb.append(indent)
+          .append("while (true) {\n");
+        sb.append(indent)
+          .append("    int next = ")
+          .append(ctx.callName(sub))
+          .append("(input, cursor, limit);\n");
+        sb.append(indent)
+          .append("    if (next < 0 || next == cursor) break;\n");
+        sb.append(indent)
+          .append("    cursor = next;\n");
+        sb.append(indent)
+          .append("}\n");
+        sb.append(indent)
+          .append("return cursor;\n");
+    }
+
+    private void emitTppOptional(StringBuilder sb, Expression body, TriviaPostPassEmitContext ctx, String indent) {
+        int sub = ctx.allocate(body);
+        sb.append(indent)
+          .append("int next = ")
+          .append(ctx.callName(sub))
+          .append("(input, pos, limit);\n");
+        sb.append(indent)
+          .append("return next < 0 ? pos : next;\n");
+    }
+
+    private void emitTppRepetition(StringBuilder sb,
+                                   Expression.Repetition rep,
+                                   TriviaPostPassEmitContext ctx,
+                                   String indent) {
+        int sub = ctx.allocate(rep.expression());
+        var maxExpr = rep.max()
+                         .isPresent()
+                      ? String.valueOf(rep.max()
+                                          .unwrap())
+                      : "Integer.MAX_VALUE";
+        sb.append(indent)
+          .append("int cursor = pos;\n");
+        sb.append(indent)
+          .append("int count = 0;\n");
+        sb.append(indent)
+          .append("int max = ")
+          .append(maxExpr)
+          .append(";\n");
+        sb.append(indent)
+          .append("while (count < max) {\n");
+        sb.append(indent)
+          .append("    int next = ")
+          .append(ctx.callName(sub))
+          .append("(input, cursor, limit);\n");
+        sb.append(indent)
+          .append("    if (next < 0 || next == cursor) break;\n");
+        sb.append(indent)
+          .append("    cursor = next;\n");
+        sb.append(indent)
+          .append("    count++;\n");
+        sb.append(indent)
+          .append("}\n");
+        sb.append(indent)
+          .append("return count >= ")
+          .append(rep.min())
+          .append(" ? cursor : -1;\n");
+    }
+
+    /**
+     * Quote a string for embedding into Java source, escaping special chars.
+     * Mirrors the conventions used elsewhere in {@code ParserGenerator}.
+     */
+    private static String quoteJavaString(String s) {
+        var out = new StringBuilder(s.length() + 8);
+        out.append('"');
+        for (int i = 0; i < s.length(); i++ ) {
+            char c = s.charAt(i);
+            switch (c) {
+                case'"' -> out.append("\\\"");
+                case'\\' -> out.append("\\\\");
+                case'\n' -> out.append("\\n");
+                case'\r' -> out.append("\\r");
+                case'\t' -> out.append("\\t");
+                case'\b' -> out.append("\\b");
+                case'\f' -> out.append("\\f");
+                default -> {
+                    if (c < 0x20 || c == 0x7f) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    }else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+        out.append('"');
+        return out.toString();
     }
 
     // === Match-method emitters (phase 1 perf flags) ===
@@ -7102,7 +8146,9 @@ public final class ParserGenerator {
         }
         // Phase 1.7 (D2): build SourceSpan from inline ints — no SourceLocation alloc.
         sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
-        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, text, takePendingLeading(), List.of());\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, text, ")
+          .append(takePendingExpr())
+          .append(", List.of());\n");
         sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");
@@ -7142,7 +8188,9 @@ public final class ParserGenerator {
         sb.append("        }\n");
         // Phase 1.7 (D2): primitive-int span; successNoLoc result.
         sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
-        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, longestMatch, takePendingLeading(), List.of());\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_LITERAL, longestMatch, ")
+          .append(takePendingExpr())
+          .append(", List.of());\n");
         sb.append("        return CstParseResult.successNoLoc(node, longestMatch);\n");
         sb.append("    }\n");
         sb.append("\n");
@@ -7195,7 +8243,9 @@ public final class ParserGenerator {
         sb.append("        var text = c < 128 ? ASCII_CHAR_STRINGS[c] : String.valueOf(c);\n");
         // Phase 1.7 (D2): primitive-int span; successNoLoc result.
         sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
-        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_CHAR_CLASS, text, takePendingLeading(), List.of());\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_CHAR_CLASS, text, ")
+          .append(takePendingExpr())
+          .append(", List.of());\n");
         sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");
@@ -7229,7 +8279,9 @@ public final class ParserGenerator {
         sb.append("        var text = c < 128 ? ASCII_CHAR_STRINGS[c] : String.valueOf(c);\n");
         // Phase 1.7 (D2): primitive-int span; successNoLoc result.
         sb.append("        var span = new SourceSpan(startLine, startColumn, startPos, line, column, pos);\n");
-        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_ANY, text, takePendingLeading(), List.of());\n");
+        sb.append("        var node = new CstNode.Terminal(idGen.next(), span, RULE_PEG_ANY, text, ")
+          .append(takePendingExpr())
+          .append(", List.of());\n");
         sb.append("        return CstParseResult.successNoLoc(node, text);\n");
         sb.append("    }\n");
         sb.append("\n");

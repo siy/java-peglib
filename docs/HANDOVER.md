@@ -391,7 +391,7 @@ The Move B failure tells us **allocation rate is no longer a productive target**
 - **Profile-driven wallclock work** (NEW, highest-ROI suggestion) — `async-profiler` in CPU mode + flame graphs on the reference fixture. Identify the actual hot CPU work post-Tier-1, target that directly. The Move B failure proved alloc-rate metrics can be misleading; CPU samples are the trustworthy signal now. **EXECUTED THIS SESSION — see "Post-rollback profile-driven optimization arc" below for outcomes.**
 - **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. **Reassess with care** — same risk class as Move B. Bench wallclock first to confirm range-comparison isn't already JIT-optimized via SIMD/code-motion. Potential ~5-15% on char-class-heavy paths IF measurably hot.
 - **Lever B retry** (incremental engine) — gated on trivia attribution rework. SafePivotAnalyzer + NodeIndex.smallestEnclosing live as dormant infrastructure for the eventual retry. Independent of allocation patterns; unaffected by Move B finding.
-- **Trivia attribution rework** — context-independent attachment. Unblocks Lever B; comparable scope to Lever C. Independent of allocation; unaffected by Move B finding.
+- **Trivia attribution rework** — context-independent attachment. Unblocks Lever B; comparable scope to Lever C. Independent of allocation; unaffected by Move B finding. **STATUS UPDATED 2026-05-09:** investigated through 3 steps (catalog → adversarial corpus → post-pass prototype) on `release-0.5.1`. Prototype lands at `78c4003`. Verdict: **viable; ~6-10 days to production rework**. See "Trivia investigation arc (2026-05-09)" subsection below.
 - **Lever C — IR unification** (spec §4) — multi-week. Eliminates "every fix paid twice" pattern between PegEngine and ParserGenerator emission templates. Reduces 7,440 LOC to ~1,700. Maintainability + complexity reduction primary value, not raw perf.
 
 ### Post-rollback profile-driven optimization arc (this session, 2026-05-08)
@@ -455,6 +455,166 @@ Failed patterns target allocations the JIT already optimizes:
 - **Lever C IR unification** — multi-week, maintainability-first
 - **Re-profile post-`38b6a8e`** — the profile has shifted again; new candidates may emerge or the profile may be flat (no clear next move). Run a third profile pass if pursuing further wallclock work.
 
+### Trivia investigation arc (2026-05-09, on release-0.5.1)
+
+After 0.5.0 ship + tag move + branch creation for 0.5.1 patch cycle, a 3-step investigation arc explored the long-standing trivia attribution issue.
+
+**Background.** Current attribution couples to parse history via the `pendingLeadingTrivia` buffer + 30+ save/restore sites. RoundTripTest 22/22 green on corpus, but partial-reparse (`parseRuleAt`) attributes trivia differently than full reparse — blocking Lever B (incremental engine smaller-pivot optimization). HANDOVER §6.4 cited this as one of two blockers for Lever B.
+
+**Step 1 — context-dependency catalog.** Investigation-only mapping of attribution code in PegEngine + ParserGenerator. Findings:
+
+- Current attribution is *almost* a function of `(input, rule, span)` — buffer machinery is navigational, not algorithmic
+- Bonus latent issue: generator uses size-only `restorePendingLeading(int)` snapshot (`ParserGenerator.java:6768-6776`) vs interpreter's full-list `List.copyOf` (Bug A fix). Asymmetric. Currently passes RoundTripTest by luck — relies on `%whitespace` re-skip after rollback as load-bearing invariant.
+- Bug C' "orphan trivia → deepest leaf" is bookkeeping-context only; could attach to wrapper.trailing instead with same byte-equality.
+- Cost estimate: 6-10 days for production rework, comparable to one release cycle.
+
+**Step 2 — adversarial test corpus** (`test: trivia adversarial corpus + findings` `d2cc6be`). 17 tests across 7 divergence-target classes + 1 fuzz test. Findings:
+
+- 0 definite bugs
+- 2 latent bugs (generator size-only restore "robust-by-luck"; Optional CutFailure pending non-restore — unobservable through CST)
+- 3 robust-by-design (Bug C' nested cases, Predicate symmetry, %whitespace purity)
+
+Suite at `peglib-core/src/test/java/org/pragmatica/peg/perf/TriviaAdversarialTest.java`. Findings: [`docs/incremental/TRIVIA-ADVERSARIAL-FINDINGS.md`](incremental/TRIVIA-ADVERSARIAL-FINDINGS.md).
+
+**Step 3 — post-pass prototype** (`feat: TriviaPostPass — context-independent trivia attribution prototype` `78c4003`). New `org.pragmatica.peg.tree.TriviaPostPass` re-derives leading/trailing for every CST node from `(input, span)` without parse-history dependency. Validation: `TriviaPostPassTest` (16 tests, all passing). Findings:
+
+- **Round-trip preservation: 21/21 corpus + 9/9 adversarial inputs byte-equal**
+- **Total trivia text preserved: 0 text loss across 46,756 nodes inspected**
+- Structural divergence is slot-shifts only (6.4% of nodes; all balanced — leading shifts in both directions across NonTerminals; trailing shrinks only on NonTerminals; no Bug-C' shape in this corpus)
+- **`parseRuleAt` structural parity ACHIEVED under postPass** — context-loss disappears. Load-bearing claim for Lever B.
+
+**Verdict.** Production rework is viable. Recommended path for next session:
+
+1. **Decide leading-attachment policy at sibling boundaries** — engine "carries leading forward through pending"; postPass "attaches leading from previous-sibling-end coordinate". Both coherent; pick one and document.
+2. **Add hash-based parity gate against generated parser on the large 1900-LOC fixture** (Step 3 catalog excluded it for runtime).
+3. **Production rework, multi-commit parity-gated** (per Move B lessons): wire `triviaPostPass=true` flag into `PegParser`, replace 30+ buffer save/restore sites with empty-leading emission + post-pass call. ~6-10 days. Each commit green at TriviaPostPassTest + RoundTripTest + adversarial suite.
+
+After production rework: orthogonal Lever B blockers remain (fallback-rule bypass per §6.2 root cause #1, safe-pivot concept). Trivia rework alone removes ONE of two HANDOVER-cited blockers.
+
+### Step 4 production rework — commits 1-4 landed (2026-05-09)
+
+After Step 3 verdict, the production rework arc executed in the same session. Branch `release-0.5.1` advanced from `51144a6` to `dcd146f` (4 commits + 1 docs commit).
+
+| Commit | Description |
+|---|---|
+| `318f5cf` | feat: triviaPostPass flag wires TriviaPostPass as post-parse hook (Step 4 commit 1) |
+| `d7b3496` | feat: TriviaPostPass splice-offset overload for parseRuleAt subtree leading (Step 4 commit 2) |
+| `605327b` | perf: ParsingContext buffer ops no-op under triviaPostPass flag (Step 4 commit 3) |
+| `dcd146f` | feat: ParserGenerator emits embedded TriviaPostPass under flag-ON (Step 4 commit 4) |
+
+**Functional state:** the trivia rework is COMPLETE through commit 4. Under `triviaPostPass=true`:
+
+- **Interpreter** (`PegEngine`): buffer ops no-op via `ParsingContext` early-outs (38 call sites neutralized without source changes); post-pass produces correct attribution. Optimal — no wasted CPU.
+- **Generator** (`ParserGenerator`): generated parsers embed an inline `TriviaPostPass` (preserves standalone-parser invariant — generated parsers depend only on `pragmatica-lite:core`); `parseCst` calls the embedded post-pass after the body parse. Correct attribution; **suboptimal CPU** because buffer machinery still runs and is overwritten (commit 5 territory).
+- **`parseRuleAt`** honors splice offset (4-arg overload `assignTrivia(input, cst, grammar, leadingScanFrom)`); body subtree structurally identical to corresponding subtree of full reparse — Lever B unblocker validated in tests.
+
+**Test coverage:** 768 peglib-core tests + 1 pre-existing skip. `TriviaPostPassFlagTest` (12 tests across 4 nested classes), `TriviaPostPassSpliceOffsetTest` (7 tests), `GeneratedParserTriviaPostPassTest` (8 tests), `TriviaPostPassTest` (16 tests), `TriviaAdversarialTest` (16 enabled). All green under both flag-OFF (default) and flag-ON.
+
+**Default behavior (flag-OFF) unchanged** — every pre-existing test passes byte-for-byte identically. Adoption is opt-in via `PegParser.builder(grammar).triviaPostPass(true).build()` or constructing `ParserConfig` with the flag set.
+
+### Step 4 COMPLETE — all commits 1-7 shipped including default flip
+
+(historical note: commit 6 was attempted, reverted, and successfully retried after commit 7 fixed the underlying bug — see commits 6 → 7 → 6-redo sequence below)
+
+### Step 4 commit 5 landed; commit 6 attempted and reverted (BUG DISCOVERED — later fixed in commit 7)
+
+**Commit 5 (`4ed1cf5`)** — ParserGenerator emits no-op buffer methods under flag-ON. Pure CPU optimization parallel to commit 3 for the interpreter. Tests stay at 768 + 1 skip. Generated parser under flag-ON is now lean (no dead buffer work) AND correct (post-pass produces attribution).
+
+**Commit 6 attempted — REVERTED. Real bug surfaced in post-pass implementation.**
+
+Flipping `triviaPostPass` default to `true` triggered **20 RoundTripTest failures on the Java 25 corpus** — *not* slot-shifts but actual trivia text LOSS:
+
+- `void allCompoundAssignments` → `voidallCompoundAssignments` (lost whitespace between tokens)
+- `int r;` → `intr;`
+- `int b = 0;` → `intb = 0;`
+- Reconstructed lengths 1-2059 chars shorter than originals across 20 of 22 RoundTripTest fixtures (`Annotations.java`, `BlankLines.java`, `ChainAlignment.java`, `ClassLiterals.java`, `Comments.java`, `CompoundAssignments.java`, `Enums.java`, `ExhaustiveSwitchPatterns.java`, `Imports.java`, `KeywordPrefixedIdentifiers.java`, `Lambdas.java`, `LineWrapping.java`, `MultilineArguments.java`, `MultilineParameters.java`, `Records.java`, `SwitchExpressions.java`, `TernaryOperators.java`, `TextBlocks.java`, `large/FactoryClassGenerator.java.txt`, `flow-format-examples/BlankLineRules.java`)
+
+This contradicts the post-pass spec doc claim: *"Total trivia text is preserved (round-trip reconstruction is byte-equal); only the leading/trailing slot in which a given trivia chunk lives can differ."* The bug is REAL TEXT LOSS on production-realistic Java 25 inputs, not just attribution permutation.
+
+**Test coverage gap that masked the bug:**
+- Step 3 prototype's `TriviaPostPassTest` round-trip claim ("21/21 corpus") used the **smaller fixture set under perf-corpus**, EXCLUDING the `/large/` directory which has the realistic 1900-LOC `FactoryClassGenerator.java.txt`.
+- `TriviaAdversarialTest` (16 tests) uses small focused grammars — JSON-like, not full Java 25.
+- `GeneratedParserTriviaPostPassTest` (8 tests) uses 5 small grammars (parity, leading, trailing, comment, unchanged).
+- The full `RoundTripTest` corpus (22 Java 25 fixtures) was never run under flag-ON until commit 6 attempt.
+
+**Bug location:** The generator path is materially affected. `GeneratedJava25Parser.ensureLoaded()` calls `PegParser.generateCstParser(...)` with no explicit config → picks up `ParserConfig.DEFAULT` → flag-flip flips the generator's emission. Whether the interpreter-only path has the same bug is unverified (could be tested by setting flag-ON on Phase1ParityTest variants).
+
+**Next-session work needed (BEFORE default flip can be reattempted):**
+
+1. **Reproduce the bug in isolation** — create a focused test case that fails under flag-ON. Minimal Java 25 sub-fixture; goal is a 5-line input that loses trivia text under flag-ON.
+2. **Diagnose the embedded post-pass implementation** in the generated parser. `ParserGenerator.java`'s `embedded TriviaPostPass` (added in commit 4, ~617 lines) emits an inline post-pass. The bug likely lives there — possibly:
+   - Whitespace re-scan logic in the embedded post-pass mismatches the parser's own `skipWhitespace` semantics
+   - The embedded post-pass's coordinate-walking misses whitespace between tokens (specifically `(prev_node_end, this_node_start)` where the gap is a token-boundary rather than a sibling-boundary)
+   - Cache-hit interaction (Bug B fix is in the parser; the embedded post-pass might re-derive trivia for nodes whose body came from cache and lose context)
+3. **Fix the embedded post-pass** OR extend `TriviaPostPass` (runtime) similarly. Re-run RoundTripTest under flag-ON; should be 22/22.
+4. **Run full coverage under flag-ON** before reattempting commit 6: every existing test class set to flag-ON, measure failures, fix incrementally. NOT a default-flip until the bug is gone.
+5. **Bench impact study** (deferred from original plan — still relevant after bug fix).
+
+**What's still valuable from Steps 1-5:**
+- The flag is functional for SMALL grammars + adversarial inputs (validated)
+- `parseRuleAt` splice-offset overload is correct and unblocks Lever B's trivia-context-loss problem in principle
+- Buffer no-op infrastructure in both interpreter and generator is clean and ready
+- Commits 1-5 are SHIPPABLE; the flag is opt-in only
+
+After bug fix + commit 6, Lever B can be retried: `parseRuleAt` + post-pass produces structurally identical subtrees, removing the trivia-context-loss blocker. The orthogonal fallback-rule-bypass blocker (§6.2 root cause #1) still requires separate work.
+
+### Step 4 commit 7 — bug fix shipped (`612fbea`)
+
+After the diagnosis identified two distinct bugs in the post-pass implementation, commit 7 fixed both:
+
+1. **Bug C' drain compensation** — TriviaPostPass.rebuildNonTerminal now mirrors engine's `attachTrailingToTail`: orphan trivia drains into deepest-rightmost-leaf descendant instead of being placed on the wrapper's trailingTrivia. `CstReconstruct.emit` correctly emits leaf trailings on every walk path; the wrapper-trailing was invisible for non-last-wrapper-children. ~70 lines in `TriviaPostPass.java` runtime + ~30 lines in the embedded version emitted by `ParserGenerator.java`.
+
+2. **Generator-semantics cursor adjustment** — separately discovered: the generated parser's `wrapWithRuleName` produces wrappers whose span INCLUDES their own leading trivia (`startOffset` captured BEFORE `skipWhitespace`). The post-pass's child-walk at first-child time was double-emitting the wrapper's leading bytes via the first child's leading scan. Fix: `rebuildNonTerminal` probe-scans `[spanStart, spanStart+leadingLen)` and, if it matches the caller-supplied leading exactly, advances the cursor past it. Symmetric to existing `rebuildRoot` adapter; only kicks in for generator-semantics CSTs.
+
+Validation: RoundTripTest 22/22 under flag-ON (was 2/22 pre-fix). All 768 peglib-core tests + 1 skip green at flag-OFF default.
+
+**Honest scope note (from agent report):** two bugs were fixed under one commit message. Could have split into 7a/7b, but both touch the same `rebuildNonTerminal` method and same root cause family (post-pass not mirroring engine span/trivia coupling). The cursor-adjustment hunk is cleanly separable in the diff if retrospective splitting is desired.
+
+### Step 4 commit 6 — default flip succeeded (`3b372af`)
+
+After commit 7 fixed the bugs, commit 6 was retried: `ParserConfig.DEFAULT.triviaPostPass` and the `parserConfig(...)` factory both flipped from `false` to `true`. Two sentinel tests in `TriviaPostPassFlagTest` inverted (DefaultOffNoOp → DefaultOnNoOp; assert-false → assert-true).
+
+**Result: 0 test failures, 0 errors, 0 surprises.** No Tier-A/B/C cascade. The 8 `Phase{1,2}*ParityTest` files (which explicitly pass `triviaPostPass=false`) provide the legacy-attribution regression net. Other tests in the project use the default and are bit-for-bit identical under post-pass attribution thanks to the fix.
+
+**End-state for 0.5.1:** post-pass attribution is the default; legacy buffer-driven attribution is opt-out via explicit `new ParserConfig(..., triviaPostPass=false, ...)`. The trivia issue that motivated this multi-session investigation is **closed**: attribution is now context-independent, parseRuleAt produces structurally identical subtrees to full-reparse (Lever B trivia-context-loss blocker is RESOLVED), and the buffer machinery still functions for backward-compat.
+
+**Lever B retry:** the trivia-context-loss blocker is gone. The orthogonal fallback-rule-bypass blocker (§6.2 root cause #1) still requires separate work — that's the next-session entry point if pursuing incremental engine optimization.
+
+### Bench impact study (2026-05-09) — DONE; one bug fixed in flight
+
+After Step 4 default flip, A/B bench (reference + selfhost, JMH 5/3, gc profile) revealed a critical regression:
+
+| Fixture | Buffer-driven | Post-pass (default) | Δ% |
+|---|---:|---:|---:|
+| Reference (1900 LOC) | 19.78 ms | **418 ms** | +2,013% |
+| Selfhost (37k LOC) | 934.7 ms | **198,679 ms** | +21,162% |
+
+Investigation: `computeSpan(input, from, to)` re-scanned `[0, from)` from offset 0 on every trivia chunk → O(K · N) → O(N²). Empirical exponent 1.88 at N=32000. RoundTripTest's correctness gate didn't catch this because tests run to completion without time limits.
+
+**Fix shipped** at `6675479` — line-start table approach. O(N) one-shot precompute + O(log N) binary search per chunk. Both runtime and emitted versions updated.
+
+Post-fix bench:
+
+| Fixture | Buffer-driven | Post-pass (post-fix) | Δ% |
+|---|---:|---:|---:|
+| Reference (1900 LOC) | 19.78 ms | 26.87 ms | +35.8% |
+| Selfhost (37k LOC) | 934.7 ms | 943.6 ms | +0.95% (within noise) |
+
+Reference is 36% slower than legacy; selfhost is at parity. The post-pass overhead is real on small inputs (one tree-walk) but amortizes for large inputs where buffer save/restore dominated. **Acceptable as default**; opt-out remains available via explicit `ParserConfig` constructor.
+
+Allocation rate is essentially flat (within ~16% of legacy on selfhost; line-start table + per-call int[2] tuples cost some bytes but no longer drive wallclock).
+
+**Lessons banked:**
+- Correctness tests should NOT be the only guard against perf regressions. RoundTripTest passed all 22 fixtures under flag-ON before the bench revealed the problem.
+- Bench A/B mandatory before any default-changing commit.
+- The diagnosis approach (read code → identify suspected hotspot → empirical timing harness → confirm with magnitude analysis) generalized well: the smoking gun was found in 30 minutes; the fix was 30 LOC.
+
+### Outstanding work (post-Step-4 + bench-fix)
+
+- **Lever B retry** — fallback-rule-bypass blocker work (orthogonal to trivia, separately scoped). The trivia-context-loss blocker is now fully RESOLVED.
+- **Lever C IR unification** — multi-week, maintainability-first.
+- **Tighten reference fixture overhead** — post-pass is 36% slower on small inputs. If important, address H1 (`attachTrailingToTail` spine rebuild) and/or H4 (probe-scan in rebuildNonTerminal). Probably not worth chasing; selfhost (the actual perf-critical workload) is at parity.
+
 ### Items superseded by this session's work
 
 - §6.2 lever-1 puzzle: dissolved by Path D's stable-id algorithm.
@@ -466,4 +626,65 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 ---
 
-**Last updated:** 2026-05-08, end of profile-driven optimization arc (post-Move-B rollback). Branch `release-0.5.0` at `38b6a8e` — 2 commits past `v0.5.0-candidate` (`e849b63`). peglib-core 705 tests green (includes 6 smoke tests from the 2 shipped commits — CandidateTwoSmokeTest 3, CandidateFourSmokeTest 3); full reactor green via `mvn install`. Cumulative wins this session: -15.6% reference wallclock / -11.2% selfhost wallclock. Reference now under 20 ms. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: re-profile post-`38b6a8e` if pursuing further wallclock; otherwise pivot to trivia attribution rework / Lever B retry / Lever C IR unification.
+**Last updated:** 2026-05-09, end of Step 4 trivia rework + cleanup arc A→F.3 + StringSpan + Cleanup G + Lever B retry attempt + skip-postPass deferral.
+
+### Skip postPass for full parses — deferred (2026-05-09)
+
+After Cleanup G abandoned the +30% reference gap as structural, considered the cleaner architectural fix: under flag-ON, run the buffer machinery for full parses (`parseCst`) and run postPass only for `parseRuleAt`. That preserves both the buffer's free-attribution-during-parse property AND the postPass's structural-parity-for-splice property.
+
+**Cost-benefit assessment (deferred for that reason):**
+
+- **Implementation cost:** several days. Cleanup A's call-site short-circuit (38 sites in PegEngine + parallel emit sites) needs to be REVERSED selectively for full-parse path. Generator must emit two parse-paths (full vs partial). Adds a `parseMode` parameter / context flag throughout. Bench-gated to validate buffer path didn't regress since Cleanup A.
+- **Workloads that would benefit:**
+  - IDE plugin uses `parseRuleAt` (incremental), not `parseCst` — **no benefit** (postPass is mandatory for splice parity)
+  - Self-host workload — already at parity / faster than legacy — **no benefit**
+  - One-shot CLI / Maven plugin parsing — 25 ms vs 19 ms is **academic** at sub-frame budget
+- **Workloads that would NOT benefit:** the perf-critical paths.
+
+The +30% reference gap is therefore academic for current workloads. Documented as available-if-needed; not pursued.
+
+### Lever B retry — attempted, FAILED on bench (2026-05-09)
+
+After the trivia rework removed one of two HANDOVER §6.2 blockers (trivia-context-loss), retried Lever B by wiring the dormant `SafePivotAnalyzer.safePivotRules(Grammar)` into `tryIncrementalReparse`. Gate: only accept rules in safe-pivot set; walk outward otherwise.
+
+**Bench result (IncrementalSessionBench, 1000 edits, Regime B):**
+
+| Metric | Pre-Lever-B | Post-gate |
+|---|---:|---:|
+| Median | 5.0 ms | **21.9 ms (+338%)** |
+| p95 | 11.2 ms | 214.8 ms |
+| % under 16ms | 96.5% | **43.6%** |
+
+Reverted. HEAD unchanged at `46d8a05`.
+
+**Root cause of failure:** SafePivotAnalyzer's "unambiguous literal prefix" criterion is too conservative for Java 25 grammar. Most rules start with character classes (`Identifier <- [a-zA-Z_] ...`) or rule references (`Type <- ClassType / ...`), which the analyzer marks unsafe. Walk-up-find-safe-ancestor strategy lands at root for ~56% of edits → forces full reparse. Parity is preserved but perf is catastrophically worse.
+
+**What this implies:**
+- The existing "OLD walk-up + length check" passes IncrementalParityTest in current form, even without the safe-pivot gate. The §6.2 hypothetical bug ("smallestEnclosing descent strategy bypasses ancestors") doesn't actually fire in the current walk-up algorithm.
+- Lever B retry would need: (a) a smarter analyzer that includes rules with disjoint first-sets (not just literal prefixes), or (b) on-accept structural validation instead of static analysis gate.
+- Both are non-trivial (a few days each) and bench-gated.
+- Until then, the current incremental engine's length-check-only acceptance is the de facto safe state. Median 5.0 ms / p95 11.2 ms is already excellent.
+
+**Defer Lever B retry indefinitely.** The trivia work was the real blocker; the perf is already good enough that strengthening the gate hasn't been worth the analysis investment.
+
+### Cleanup G — reference-fixture tightening attempted, abandoned (2026-05-09)
+
+Two micro-optimizations attempted under bench gate (≥3% wallclock OR ≥5% alloc on reference); both REVERTED on evidence:
+
+- **G.1 — first-char prefilter on scanWhitespace.** Hypothesis: ~50% of scan calls return empty; precheck `input.charAt(prevEnd)` against whitespace-first-set to skip alloc. Reality: parser positions are always at token-content boundaries (skipWhitespace already advanced), so scan calls have either real whitespace or `from == to`. Existing `from >= to` short-circuit already catches the empty case; new prefilter rejected ~0 calls. Bench: alloc Δ +0.2%, wallclock noise. Reverted.
+
+- **G.2 — alloc tightening on non-empty scan path.** Three changes bundled: lineColAt returns long instead of int[2]; scanWhitespaceFast returns `List.of(single)` for size-1 chunks; combine() short-circuits empty. The combine change was already in place at `76498bf`. Other two micro-saves total ~32 KB out of 77 MB per-op (<0.05%). Bench: alloc Δ -0.4%, wallclock noise. Reverted.
+
+**Verdict: the +30% reference-fixture gap is structural, not micro-fixable.** Cost lives in:
+- Spine rebuild on divergence (List.copyOf of children, NonTerminal record construction)
+- Recursive scanWhitespace per node boundary
+- Per-chunk Trivia node classification
+
+Closing the gap requires structural redesigns (NOT "tightening"):
+1. Skip the post-pass entirely when CST already has correct trivia attribution (gate via engine-side flag)
+2. Persistent immutable lists with structural sharing for trivia lists
+3. Lazy SourceSpan materialization
+
+Each is its own spec. Selfhost (perf-critical) is already faster than legacy (-5%); the reference fixture's small inputs make the post-pass overhead a higher % of total but the absolute cost (~7 ms) is bounded.
+
+ Branch `release-0.5.1` at `0b29c78` — 20 commits past 0.5.1 base. peglib-core 805 tests + 1 pre-existing skipped, all green at the new default (post-pass + StringSpan). **Trivia rework + cleanup state: SHIPPED + bench-validated.** Cumulative selfhost wallclock now **-5% under legacy** (was at parity); reference fixture +30% over legacy (per-NonTerminal scan dominates; future work). 30 new StringSpanTest cases + StringSpan added as `org.pragmatica.peg.tree.StringSpan` (CharSequence view with lazy String materialization). Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: Lever B retry (fallback-rule-bypass blocker remains; trivia-context-loss blocker is RESOLVED) OR Lever C IR unification OR address reference-fixture per-NonTerminal scan cost (cache scanWhitespace, skip NonTerminals with full-coverage children, batch gap-scans).

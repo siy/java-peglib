@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-05-09
+
+_Unreleased — patch cycle following 0.5.0._
+
+### Added
+
+- **Trivia investigation arc — Steps 1-3** (2026-05-09): catalog of context-dependencies in current attribution, 17-test adversarial corpus targeting 7 divergence categories, post-pass prototype validating context-independent attribution. Round-trip preservation confirmed on 21/21 corpus + 9/9 adversarial inputs; 0 text loss across 46,756 nodes; `parseRuleAt` structural parity achievable under post-pass (load-bearing claim for incremental engine Lever B). Findings: [`docs/incremental/TRIVIA-ADVERSARIAL-FINDINGS.md`](docs/incremental/TRIVIA-ADVERSARIAL-FINDINGS.md). Verdict in HANDOVER §11.
+- **Trivia rework Step 4 commits 1-4** (production rework, foundational): opt-in `triviaPostPass` flag on `ParserConfig` (default `false` — zero behavior change). When enabled: post-parse hook applies `TriviaPostPass.assignTrivia(input, cst, grammar)` overriding buffer-driven attribution with context-independent re-derivation from `(input, span)` coordinates. `parseRuleAt` honors splice offset (4-arg overload `assignTrivia(input, cst, grammar, leadingScanFrom)`) — body subtree is structurally identical to corresponding subtree of full reparse, removing one of two HANDOVER §6.4 blockers for incremental engine Lever B. Generator-emitted parsers embed an inline post-pass equivalent (preserves standalone-parser invariant).
+- **`org.pragmatica.peg.tree.TriviaPostPass`** (new public API): pure function `(input, cst, grammar) → CstNode` that re-derives leading/trailing trivia from coordinates without parse-history dependency. 4-arg overload supports splice scenarios.
+
+### Changed
+
+- `ParsingContext` pending-trivia methods (`appendPendingLeadingTrivia`, `takePendingLeadingTrivia`, `savePendingLeadingTrivia`, `restorePendingLeadingTrivia`) early-out when `config.triviaPostPass()=true` — buffer becomes dead weight under the flag and is skipped (38 call sites in `PegEngine` no-op without source changes).
+- **Trivia rework Step 4 commit 5** (`4ed1cf5`): `ParserGenerator` emits no-op buffer methods under flag-ON. Mirror of commit 3 for the generator side — pure CPU optimization; correctness already from commit 4. Generated parsers under flag-ON no longer do dead-work buffer maintenance.
+
+### Fixed
+
+- **Trivia post-pass orphan-trivia placement matches engine's Bug C' compensation** (`612fbea`). Earlier commit 6 attempt revealed text-loss on Java 25 corpus (`void m()` → `voidm()`). Root cause: post-pass attached orphan trivia to wrapper.trailingTrivia, but `CstReconstruct.emit` only emits trailing for last-child of a wrapper — non-last-wrapper-trailing was invisible during reconstruction. Fix mirrors engine's `attachTrailingToTail` — drains orphan trivia into deepest-rightmost-leaf descendant. Plus a generator-semantics adapter: `rebuildNonTerminal` probe-scans for caller-supplied leading and skips it to prevent license-header double-emission on fixtures whose wrappers' spans include their own leading trivia. RoundTripTest 22/22 under flag-ON across all 22 corpus fixtures including `large/FactoryClassGenerator.java.txt`.
+- **`triviaPostPass` default flipped to `true`** (`3b372af`). After the fix, the default-flip succeeded with 0 test failures. Two sentinel tests in `TriviaPostPassFlagTest` inverted (DefaultOffNoOp → DefaultOnNoOp). Phase1/Phase2 parity tests insulated (explicitly pass `triviaPostPass=false`). The 8 fixture-pinning tests for the previous (buffer-driven) attribution remain green via explicit-OFF construction. **End-state for 0.5.1: post-pass attribution is the default; legacy buffer-driven attribution is opt-out via `new ParserConfig(..., triviaPostPass=false, ...)`.**
+- **Post-pass O(n²) bench regression fixed** (`6675479`). Initial A/B bench after default flip surfaced 22× / 239× wallclock regression on reference / selfhost fixtures. Investigation pinpointed `computeSpan(input, from, to)` re-scanning `[0, from)` from offset 0 on every trivia chunk to count newlines: O(K · N) where K trivia chunks scale with N input chars → O(N²). Empirical exponent reached 1.88 at N=32000. Fix: precompute a line-start table once per `assignTrivia` call (O(N)) + binary search per `computeSpan` (O(log N)). Both runtime `TriviaPostPass.java` and the embedded version emitted by `ParserGenerator.java` updated symmetrically. Post-fix bench: reference 26.87 ms (1.36× legacy 19.78 ms); selfhost 943.6 ms (1.01× legacy 934.7 ms — within noise). 15.6× speedup on reference, 210× on selfhost vs pre-fix.
+
+- **Trivia rework cleanup arc — Cleanups A through F.3** (2026-05-09, commits `763e6e0` through `0b29c78`):
+  - **Cleanup A** (`763e6e0`): strip dead buffer call sites in PegEngine + emitted parsers under flag-ON. 38 PegEngine sites + parallel emit sites short-circuited via `if (!triviaPostPass)` guards; consumers use `List.of()` directly.
+  - **Cleanup B** (`884c4c8`): TriviaPostPass thread orphan trailing through recursion (replaces O(depth) spine rebuild) + probe-scan moved out of hot path. Selfhost flipped from parity to **-5% under legacy**.
+  - **Cleanup D** (`c682eef`): TriviaPostPass skip rebuild when no trivia change needed. Reference -2.6%; selfhost -11.1% (now strictly faster than legacy).
+  - **Cleanup F.1** (`ff596be`): StringSpan runtime foundation. New `org.pragmatica.peg.tree.StringSpan` (CharSequence view with lazy String materialization). CstNode.Terminal/Token components changed from `String text` to `StringSpan textSpan`; `.text()` accessor preserved as String API via `toString()`. 30 new StringSpanTest cases.
+  - **Cleanup F.2** (`2fec82c`): emitted CstParseResult.text widened from String to CharSequence — structural prerequisite for F.3.
+  - **Cleanup F.3** (`0b29c78`): generator emits inline StringSpan + uses it for token boundary capture and match helper text, eliminating per-call substring allocation on the bench's hot path.
+
+  **Final bench numbers (post-F.3, vs legacy buffer-driven path):**
+
+  | Fixture | Buffer-driven | Post-pass (F.3) | Δ |
+  |---|---:|---:|---:|
+  | Reference (1900 LOC) | 19.08 ms / 70.65 MB | 24.88 ms / 77.13 MB | +30% wallclock / +9% alloc |
+  | Selfhost (37k LOC) | 825.6 ms / 1908 MB | **784.7 ms / 1881 MB** | **-5% wallclock / -1.4% alloc** |
+
+  Selfhost — the GC-bound fixture (52% G1 time per profile) — is now meaningfully faster than legacy buffer-driven attribution. Reference fixture remains +30% over legacy (per-NonTerminal scan cost dominates; addressable in future work). The trivia rework + StringSpan arc delivers a real win on the perf-critical workload (selfhost) while preserving correctness across all 22 RoundTripTest fixtures.
+
+### Removed
+
 ## [0.5.0] - 2026-05-06
 
 _Work in progress — incremental-native architectural rework. See `docs/incremental/ARCHITECTURE-0.5.0.md`._

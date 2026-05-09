@@ -12,6 +12,11 @@ import java.util.Objects;
  * {@code docs/incremental/ARCHITECTURE-0.5.0.md} §2). IDs are produced by
  * {@link IdGenerator} during parse and must be excluded from structural
  * equality (§7 R1) so two parses of the same input produce equal trees.
+ *
+ * <p>v0.5.1 (Cleanup E): {@link Terminal} and {@link Token} carry a
+ * {@link StringSpan textSpan} component instead of a fully-materialized
+ * {@code String}, deferring substring allocation. The {@code text()} accessor
+ * remains a {@link String}-returning method for source-compat with consumers.
  */
 public sealed interface CstNode {
     /**
@@ -44,25 +49,49 @@ public sealed interface CstNode {
 
     /**
      * Terminal node - a leaf that matched literal text.
+     *
+     * <p>v0.5.1 (Cleanup E): the {@code textSpan} component defers substring
+     * materialization. Use {@link #text()} to obtain a {@link String}.
      */
     record Terminal(
     long id,
     SourceSpan span,
     String rule,
-    String text,
+    StringSpan textSpan,
     List<Trivia> leadingTrivia,
     List<Trivia> trailingTrivia) implements CstNode {
+        /**
+         * Convenience constructor accepting a {@link String} for the text. Wraps the
+         * string in a fully-materialized {@link StringSpan}, so no substring is taken.
+         */
+        public Terminal(long id,
+                        SourceSpan span,
+                        String rule,
+                        String text,
+                        List<Trivia> leadingTrivia,
+                        List<Trivia> trailingTrivia) {
+            this(id, span, rule, StringSpan.ofString(text), leadingTrivia, trailingTrivia);
+        }
+
+        /**
+         * The matched text as a {@link String}. Lazily materializes the underlying
+         * {@link StringSpan} on first access.
+         */
+        public String text() {
+            return textSpan.toString();
+        }
+
         @Override
         public boolean equals(Object other) {
-            return other instanceof Terminal that && Objects.equals(span, that.span) && Objects.equals(rule, that.rule) && Objects.equals(text,
-                                                                                                                                          that.text) && Objects.equals(leadingTrivia,
-                                                                                                                                                                       that.leadingTrivia) && Objects.equals(trailingTrivia,
-                                                                                                                                                                                                             that.trailingTrivia);
+            return other instanceof Terminal that && Objects.equals(span, that.span) && Objects.equals(rule, that.rule) && Objects.equals(textSpan,
+                                                                                                                                          that.textSpan) && Objects.equals(leadingTrivia,
+                                                                                                                                                                           that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                                                                 that.trailingTrivia);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(Terminal.class, span, rule, text, leadingTrivia, trailingTrivia);
+            return Objects.hash(Terminal.class, span, rule, textSpan, leadingTrivia, trailingTrivia);
         }
     }
 
@@ -94,25 +123,49 @@ public sealed interface CstNode {
     /**
      * Token node - result of token boundary operator {@code < >}.
      * Captures the matched text as a single unit.
+     *
+     * <p>v0.5.1 (Cleanup E): the {@code textSpan} component defers substring
+     * materialization. Use {@link #text()} to obtain a {@link String}.
      */
     record Token(
     long id,
     SourceSpan span,
     String rule,
-    String text,
+    StringSpan textSpan,
     List<Trivia> leadingTrivia,
     List<Trivia> trailingTrivia) implements CstNode {
+        /**
+         * Convenience constructor accepting a {@link String} for the text. Wraps the
+         * string in a fully-materialized {@link StringSpan}, so no substring is taken.
+         */
+        public Token(long id,
+                     SourceSpan span,
+                     String rule,
+                     String text,
+                     List<Trivia> leadingTrivia,
+                     List<Trivia> trailingTrivia) {
+            this(id, span, rule, StringSpan.ofString(text), leadingTrivia, trailingTrivia);
+        }
+
+        /**
+         * The matched text as a {@link String}. Lazily materializes the underlying
+         * {@link StringSpan} on first access.
+         */
+        public String text() {
+            return textSpan.toString();
+        }
+
         @Override
         public boolean equals(Object other) {
-            return other instanceof Token that && Objects.equals(span, that.span) && Objects.equals(rule, that.rule) && Objects.equals(text,
-                                                                                                                                       that.text) && Objects.equals(leadingTrivia,
-                                                                                                                                                                    that.leadingTrivia) && Objects.equals(trailingTrivia,
-                                                                                                                                                                                                          that.trailingTrivia);
+            return other instanceof Token that && Objects.equals(span, that.span) && Objects.equals(rule, that.rule) && Objects.equals(textSpan,
+                                                                                                                                       that.textSpan) && Objects.equals(leadingTrivia,
+                                                                                                                                                                        that.leadingTrivia) && Objects.equals(trailingTrivia,
+                                                                                                                                                                                                              that.trailingTrivia);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(Token.class, span, rule, text, leadingTrivia, trailingTrivia);
+            return Objects.hash(Token.class, span, rule, textSpan, leadingTrivia, trailingTrivia);
         }
     }
 
