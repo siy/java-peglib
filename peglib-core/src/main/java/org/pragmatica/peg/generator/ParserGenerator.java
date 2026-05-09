@@ -7104,9 +7104,35 @@ public final class ParserGenerator {
         sb.append("                        \"leadingScanFrom \" + leadingScanFrom + \" out of range [0, \" + rootStart + \"]\");\n");
         sb.append("                }\n");
         sb.append("            }\n");
-        sb.append("            return rebuildRoot(input, cst, leadingScanFrom);\n");
+        sb.append("            // Build line-start table once per pass (O(N)) so that per-chunk\n");
+        sb.append("            // computeSpan is O(log N) instead of O(from). Eliminates an O(N²)\n");
+        sb.append("            // hotspot for whitespace-rich source.\n");
+        sb.append("            int[] lineStarts = buildLineStarts(input);\n");
+        sb.append("            return rebuildRoot(input, cst, lineStarts, leadingScanFrom);\n");
         sb.append("        }\n\n");
-        sb.append("        static List<Trivia> scanWhitespace(String input, int from, int to) {\n");
+        sb.append("        private static int[] buildLineStarts(String input) {\n");
+        sb.append("            int len = input.length();\n");
+        sb.append("            int[] starts = new int[Math.max(8, len / 16 + 4)];\n");
+        sb.append("            int n = 0;\n");
+        sb.append("            starts[n++] = 0;\n");
+        sb.append("            for (int i = 0; i < len; i++) {\n");
+        sb.append("                if (input.charAt(i) == '\\n') {\n");
+        sb.append("                    if (n == starts.length) {\n");
+        sb.append("                        starts = java.util.Arrays.copyOf(starts, starts.length * 2);\n");
+        sb.append("                    }\n");
+        sb.append("                    starts[n++] = i + 1;\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("            return java.util.Arrays.copyOf(starts, n);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static int[] lineColAt(int[] lineStarts, int offset) {\n");
+        sb.append("            int idx = java.util.Arrays.binarySearch(lineStarts, offset);\n");
+        sb.append("            if (idx < 0) idx = -idx - 2;\n");
+        sb.append("            int line = idx + 1;\n");
+        sb.append("            int col = offset - lineStarts[idx] + 1;\n");
+        sb.append("            return new int[]{line, col};\n");
+        sb.append("        }\n\n");
+        sb.append("        static List<Trivia> scanWhitespace(String input, int from, int to, int[] lineStarts) {\n");
         sb.append("            if (from >= to) return List.of();\n");
         if (!hasWhitespace) {
             sb.append("            return List.of();\n");
@@ -7117,7 +7143,7 @@ public final class ParserGenerator {
             sb.append("                int matched = matchWsInner(input, pos, to);\n");
             sb.append("                if (matched < 0 || matched == pos) break;\n");
             sb.append("                var text = input.substring(pos, matched);\n");
-            sb.append("                var span = computeSpan(input, pos, matched);\n");
+            sb.append("                var span = computeSpan(lineStarts, pos, matched);\n");
             sb.append("                trivia.add(classify(span, text));\n");
             sb.append("                pos = matched;\n");
             sb.append("            }\n");
@@ -7135,7 +7161,7 @@ public final class ParserGenerator {
         // "leading-end" boundary AND leadingScanFrom + (rootStart - leadingScanFrom)
         // = rootStart for the leading scan. Otherwise (runtime semantics),
         // scan up to rootStart as the runtime post-pass does.
-        sb.append("        private static CstNode rebuildRoot(String input, CstNode root, int leadingScanFrom) {\n");
+        sb.append("        private static CstNode rebuildRoot(String input, CstNode root, int[] lineStarts, int leadingScanFrom) {\n");
         sb.append("            int rootStart = root.span().startOffset();\n");
         sb.append("            int rootEnd = root.span().endOffset();\n");
         sb.append("            int leadingTextLen = totalTriviaLength(root.leadingTrivia());\n");
@@ -7150,7 +7176,7 @@ public final class ParserGenerator {
         sb.append("                // Hypothesis: generator semantics — leading occupies [rootStart, rootStart + leadingTextLen).\n");
         sb.append("                // Verify by re-scanning [rootStart, rootStart + leadingTextLen) and checking it consumes exactly that range.\n");
         sb.append("                int probeEnd = rootStart + leadingTextLen;\n");
-        sb.append("                var probe = scanWhitespace(input, rootStart, probeEnd);\n");
+        sb.append("                var probe = scanWhitespace(input, rootStart, probeEnd, lineStarts);\n");
         sb.append("                if (totalTriviaLength(probe) == leadingTextLen) {\n");
         sb.append("                    leadingScanEnd = probeEnd;\n");
         sb.append("                } else {\n");
@@ -7159,19 +7185,19 @@ public final class ParserGenerator {
         sb.append("            } else {\n");
         sb.append("                leadingScanEnd = rootStart;\n");
         sb.append("            }\n");
-        sb.append("            var leading = scanWhitespace(input, leadingScanFrom, leadingScanEnd);\n");
-        sb.append("            var trailingExternal = scanWhitespace(input, rootEnd, input.length());\n");
-        sb.append("            return rebuildSelf(input, root, leading, trailingExternal);\n");
+        sb.append("            var leading = scanWhitespace(input, leadingScanFrom, leadingScanEnd, lineStarts);\n");
+        sb.append("            var trailingExternal = scanWhitespace(input, rootEnd, input.length(), lineStarts);\n");
+        sb.append("            return rebuildSelf(input, root, lineStarts, leading, trailingExternal);\n");
         sb.append("        }\n\n");
         sb.append("        private static int totalTriviaLength(List<Trivia> trivia) {\n");
         sb.append("            int total = 0;\n");
         sb.append("            for (var t : trivia) total += t.text().length();\n");
         sb.append("            return total;\n");
         sb.append("        }\n\n");
-        sb.append("        private static CstNode rebuildSelf(String input, CstNode node,\n");
+        sb.append("        private static CstNode rebuildSelf(String input, CstNode node, int[] lineStarts,\n");
         sb.append("                                           List<Trivia> leading, List<Trivia> extraTrailing) {\n");
         sb.append("            return switch (node) {\n");
-        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, leading, extraTrailing);\n");
+        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, extraTrailing);\n");
         sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, extraTrailing);\n");
         sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, extraTrailing);\n");
         if (errorReporting == ErrorReporting.ADVANCED) {
@@ -7179,11 +7205,11 @@ public final class ParserGenerator {
         }
         sb.append("            };\n");
         sb.append("        }\n\n");
-        sb.append("        private static CstNode rebuildChild(String input, CstNode child, int prevEnd) {\n");
+        sb.append("        private static CstNode rebuildChild(String input, CstNode child, int[] lineStarts, int prevEnd) {\n");
         sb.append("            int childStart = child.span().startOffset();\n");
-        sb.append("            var leading = scanWhitespace(input, prevEnd, childStart);\n");
+        sb.append("            var leading = scanWhitespace(input, prevEnd, childStart, lineStarts);\n");
         sb.append("            return switch (child) {\n");
-        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, leading, List.of());\n");
+        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, List.of());\n");
         sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, List.of());\n");
         sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, List.of());\n");
         if (errorReporting == ErrorReporting.ADVANCED) {
@@ -7191,7 +7217,7 @@ public final class ParserGenerator {
         }
         sb.append("            };\n");
         sb.append("        }\n\n");
-        sb.append("        private static CstNode.NonTerminal rebuildNonTerminal(String input, CstNode.NonTerminal nt,\n");
+        sb.append("        private static CstNode.NonTerminal rebuildNonTerminal(String input, CstNode.NonTerminal nt, int[] lineStarts,\n");
         sb.append("                                                              List<Trivia> leading, List<Trivia> extraTrailing) {\n");
         sb.append("            int spanStart = nt.span().startOffset();\n");
         sb.append("            int spanEnd = nt.span().endOffset();\n");
@@ -7203,21 +7229,21 @@ public final class ParserGenerator {
         sb.append("            int leadingLen = totalTriviaLength(leading);\n");
         sb.append("            int cursor = spanStart;\n");
         sb.append("            if (leadingLen > 0 && spanStart + leadingLen <= input.length()) {\n");
-        sb.append("                var probe = scanWhitespace(input, spanStart, spanStart + leadingLen);\n");
+        sb.append("                var probe = scanWhitespace(input, spanStart, spanStart + leadingLen, lineStarts);\n");
         sb.append("                if (totalTriviaLength(probe) == leadingLen) {\n");
         sb.append("                    cursor = spanStart + leadingLen;\n");
         sb.append("                }\n");
         sb.append("            }\n");
         sb.append("            var newChildren = new ArrayList<CstNode>(nt.children().size());\n");
         sb.append("            for (var c : nt.children()) {\n");
-        sb.append("                var rebuilt = rebuildChild(input, c, cursor);\n");
+        sb.append("                var rebuilt = rebuildChild(input, c, lineStarts, cursor);\n");
         sb.append("                newChildren.add(rebuilt);\n");
         sb.append("                cursor = c.span().endOffset();\n");
         sb.append("            }\n");
         sb.append("            // Bug C' compensation — drain orphan trailing into the last terminal\n");
         sb.append("            // descendant so CstReconstruct.emit (last-child-trailing-only) stays\n");
         sb.append("            // byte-equal even when this wrapper is not its parent's last child.\n");
-        sb.append("            var internalTrailing = scanWhitespace(input, cursor, spanEnd);\n");
+        sb.append("            var internalTrailing = scanWhitespace(input, cursor, spanEnd, lineStarts);\n");
         sb.append("            List<Trivia> wrapperTrailing = extraTrailing;\n");
         sb.append("            if (!internalTrailing.isEmpty() && !newChildren.isEmpty()) {\n");
         sb.append("                int lastIdx = newChildren.size() - 1;\n");
@@ -7326,16 +7352,10 @@ public final class ParserGenerator {
         sb.append("            }\n");
         sb.append("            return false;\n");
         sb.append("        }\n\n");
-        sb.append("        private static SourceSpan computeSpan(String input, int from, int to) {\n");
-        sb.append("            int line = 1, col = 1;\n");
-        sb.append("            for (int i = 0; i < from; i++) {\n");
-        sb.append("                if (input.charAt(i) == '\\n') { line++; col = 1; } else { col++; }\n");
-        sb.append("            }\n");
-        sb.append("            int startLine = line, startCol = col;\n");
-        sb.append("            for (int i = from; i < to; i++) {\n");
-        sb.append("                if (input.charAt(i) == '\\n') { line++; col = 1; } else { col++; }\n");
-        sb.append("            }\n");
-        sb.append("            return new SourceSpan(startLine, startCol, from, line, col, to);\n");
+        sb.append("        private static SourceSpan computeSpan(int[] lineStarts, int from, int to) {\n");
+        sb.append("            int[] startLc = lineColAt(lineStarts, from);\n");
+        sb.append("            int[] endLc = lineColAt(lineStarts, to);\n");
+        sb.append("            return new SourceSpan(startLc[0], startLc[1], from, endLc[0], endLc[1], to);\n");
         sb.append("        }\n\n");
         // Emit per-expression matcher methods.
         if (hasWhitespace) {

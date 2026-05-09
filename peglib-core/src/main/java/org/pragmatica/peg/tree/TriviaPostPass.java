@@ -5,6 +5,7 @@ import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.analysis.ExpressionShape;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -119,7 +120,38 @@ public final class TriviaPostPass {
             throw new IllegalArgumentException(
             "leadingScanFrom " + leadingScanFrom + " out of range [0, " + rootStart + "]");
         }
-        return rebuildRoot(input, cst, grammar, leadingScanFrom);
+        // Pre-compute line-start table once per pass — O(N). Eliminates
+        // O(N²) re-scan that the previous per-chunk computeSpan performed.
+        int[] lineStarts = buildLineStarts(input);
+        return rebuildRoot(input, cst, grammar, lineStarts, leadingScanFrom);
+    }
+
+    /** Build a 1-based line-start offset table. {@code lineStarts[0] = 0} (line 1). */
+    private static int[] buildLineStarts(String input) {
+        int len = input.length();
+        // Worst case: every char is '\n' → len+1 entries. Common case: ~1 per ~30 chars.
+        var starts = new int[Math.max(8, len / 16 + 4)];
+        int n = 0;
+        starts[n++ ] = 0;
+        for (int i = 0; i < len; i++ ) {
+            if (input.charAt(i) == '\n') {
+                if (n == starts.length) {
+                    starts = Arrays.copyOf(starts, starts.length * 2);
+                }
+                starts[n++ ] = i + 1;
+            }
+        }
+        return Arrays.copyOf(starts, n);
+    }
+
+    /** Find {@code [line, col]} (1-based) for {@code offset} via binary search into {@code lineStarts}. */
+    private static int[] lineColAt(int[] lineStarts, int offset) {
+        int idx = Arrays.binarySearch(lineStarts, offset);
+        if (idx < 0) idx = - idx - 2;
+        // idx is now the index of the greatest lineStart <= offset.
+        int line = idx + 1;
+        int col = offset - lineStarts[idx] + 1;
+        return new int[]{line, col};
     }
 
     /**
@@ -129,6 +161,26 @@ public final class TriviaPostPass {
      * directive or when {@code from >= to}.
      */
     public static List<Trivia> scanWhitespace(String input, int from, int to, Grammar grammar) {
+        if (from >= to || grammar.whitespace()
+                                 .isEmpty()) {
+            return List.of();
+        }
+        // Public API: build a fresh line-start table for one-off callers.
+        // Internal users (assignTrivia recursion) call scanWhitespaceFast
+        // with a shared, pre-built lineStarts array.
+        return scanWhitespaceFast(input, from, to, grammar, buildLineStarts(input));
+    }
+
+    /**
+     * Internal fast variant of {@link #scanWhitespace}: takes a precomputed
+     * line-start table to avoid the O(N²) re-scan-from-zero that the previous
+     * implementation incurred for every trivia chunk.
+     */
+    private static List<Trivia> scanWhitespaceFast(String input,
+                                                   int from,
+                                                   int to,
+                                                   Grammar grammar,
+                                                   int[] lineStarts) {
         if (from >= to || grammar.whitespace()
                                  .isEmpty()) {
             return List.of();
@@ -143,7 +195,7 @@ public final class TriviaPostPass {
                 break;
             }
             var text = input.substring(pos, matched);
-            var span = computeSpan(input, pos, matched);
+            var span = computeSpanFast(lineStarts, pos, matched);
             trivia.add(classify(span, text));
             pos = matched;
         }
@@ -151,16 +203,20 @@ public final class TriviaPostPass {
     }
 
     // === Tree rebuild ===
-    private static CstNode rebuildRoot(String input, CstNode root, Grammar grammar, int leadingScanFrom) {
+    private static CstNode rebuildRoot(String input,
+                                       CstNode root,
+                                       Grammar grammar,
+                                       int[] lineStarts,
+                                       int leadingScanFrom) {
         int rootStart = root.span()
                             .startOffset();
         int rootEnd = root.span()
                           .endOffset();
-        var leading = scanWhitespace(input, leadingScanFrom, rootStart, grammar);
+        var leading = scanWhitespaceFast(input, leadingScanFrom, rootStart, grammar, lineStarts);
         // Root trailing covers the gap from rootEnd to end-of-input (matches
         // current engine behaviour: top-level wrapper carries post-EOF trivia).
-        var trailingExternal = scanWhitespace(input, rootEnd, input.length(), grammar);
-        return rebuildSelf(input, root, grammar, leading, trailingExternal);
+        var trailingExternal = scanWhitespaceFast(input, rootEnd, input.length(), grammar, lineStarts);
+        return rebuildSelf(input, root, grammar, lineStarts, leading, trailingExternal);
     }
 
     /**
@@ -172,10 +228,11 @@ public final class TriviaPostPass {
     private static CstNode rebuildSelf(String input,
                                        CstNode node,
                                        Grammar grammar,
+                                       int[] lineStarts,
                                        List<Trivia> leading,
                                        List<Trivia> extraTrailing) {
         return switch (node) {
-            case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, grammar, leading, extraTrailing);
+            case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, grammar, lineStarts, leading, extraTrailing);
             case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, extraTrailing);
             case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, extraTrailing);
             case CstNode.Error e -> new CstNode.Error(e.id(),
@@ -188,12 +245,16 @@ public final class TriviaPostPass {
     }
 
     /** Rebuild a non-root child given its preceding sibling's end offset. */
-    private static CstNode rebuildChild(String input, CstNode child, Grammar grammar, int prevEnd) {
+    private static CstNode rebuildChild(String input,
+                                        CstNode child,
+                                        Grammar grammar,
+                                        int[] lineStarts,
+                                        int prevEnd) {
         int childStart = child.span()
                               .startOffset();
-        var leading = scanWhitespace(input, prevEnd, childStart, grammar);
+        var leading = scanWhitespaceFast(input, prevEnd, childStart, grammar, lineStarts);
         return switch (child) {
-            case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, grammar, leading, List.of());
+            case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, grammar, lineStarts, leading, List.of());
             case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, List.of());
             case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, List.of());
             case CstNode.Error e -> new CstNode.Error(e.id(),
@@ -208,6 +269,7 @@ public final class TriviaPostPass {
     private static CstNode.NonTerminal rebuildNonTerminal(String input,
                                                           CstNode.NonTerminal nt,
                                                           Grammar grammar,
+                                                          int[] lineStarts,
                                                           List<Trivia> leading,
                                                           List<Trivia> extraTrailing) {
         int spanStart = nt.span()
@@ -218,7 +280,7 @@ public final class TriviaPostPass {
                                                    .size());
         int cursor = spanStart;
         for (var c : nt.children()) {
-            var rebuilt = rebuildChild(input, c, grammar, cursor);
+            var rebuilt = rebuildChild(input, c, grammar, lineStarts, cursor);
             newChildren.add(rebuilt);
             cursor = c.span()
                       .endOffset();
@@ -230,7 +292,7 @@ public final class TriviaPostPass {
         // the wrapper's last-child trailing slot. Without this, a wrapper
         // that is itself a non-last sibling would lose its trailing during
         // CstReconstruct.emit.
-        var internalTrailing = scanWhitespace(input, cursor, spanEnd, grammar);
+        var internalTrailing = scanWhitespaceFast(input, cursor, spanEnd, grammar, lineStarts);
         List<Trivia> wrapperTrailing = extraTrailing;
         if (!internalTrailing.isEmpty() && !newChildren.isEmpty()) {
             int lastIdx = newChildren.size() - 1;
@@ -317,30 +379,19 @@ public final class TriviaPostPass {
 
     // === Span computation ===
     /**
-     * Compute a {@link SourceSpan} for {@code input[from..to)} by counting
-     * newlines from offset 0. Line/column are 1-based to match
+     * Compute a {@link SourceSpan} for {@code input[from..to)} using a
+     * precomputed line-start table. Line/column are 1-based to match
      * {@link SourceLocation#START}.
+     *
+     * <p>Replaces the previous O(from)-per-call implementation that re-scanned
+     * {@code [0, from)} for every trivia chunk, producing O(N²) total work in
+     * whitespace-rich source. With a precomputed table built once per pass
+     * (O(N)), this is O(log N) per call via binary search.
      */
-    private static SourceSpan computeSpan(String input, int from, int to) {
-        int line = 1, col = 1;
-        for (int i = 0; i < from; i++ ) {
-            if (input.charAt(i) == '\n') {
-                line++ ;
-                col = 1;
-            }else {
-                col++ ;
-            }
-        }
-        int startLine = line, startCol = col;
-        for (int i = from; i < to; i++ ) {
-            if (input.charAt(i) == '\n') {
-                line++ ;
-                col = 1;
-            }else {
-                col++ ;
-            }
-        }
-        return new SourceSpan(startLine, startCol, from, line, col, to);
+    private static SourceSpan computeSpanFast(int[] lineStarts, int from, int to) {
+        int[] startLc = lineColAt(lineStarts, from);
+        int[] endLc = lineColAt(lineStarts, to);
+        return new SourceSpan(startLc[0], startLc[1], from, endLc[0], endLc[1], to);
     }
 
     // === Mini-PEG matcher for %whitespace ===
