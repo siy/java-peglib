@@ -626,4 +626,26 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 ---
 
-**Last updated:** 2026-05-09, end of Step 4 trivia rework + cleanup arc A→F.3 + StringSpan multi-commit. Branch `release-0.5.1` at `0b29c78` — 20 commits past 0.5.1 base. peglib-core 805 tests + 1 pre-existing skipped, all green at the new default (post-pass + StringSpan). **Trivia rework + cleanup state: SHIPPED + bench-validated.** Cumulative selfhost wallclock now **-5% under legacy** (was at parity); reference fixture +30% over legacy (per-NonTerminal scan dominates; future work). 30 new StringSpanTest cases + StringSpan added as `org.pragmatica.peg.tree.StringSpan` (CharSequence view with lazy String materialization). Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: Lever B retry (fallback-rule-bypass blocker remains; trivia-context-loss blocker is RESOLVED) OR Lever C IR unification OR address reference-fixture per-NonTerminal scan cost (cache scanWhitespace, skip NonTerminals with full-coverage children, batch gap-scans).
+**Last updated:** 2026-05-09, end of Step 4 trivia rework + cleanup arc A→F.3 + StringSpan + Cleanup G investigation (reference-fixture tightening attempted, REVERTED).
+
+### Cleanup G — reference-fixture tightening attempted, abandoned (2026-05-09)
+
+Two micro-optimizations attempted under bench gate (≥3% wallclock OR ≥5% alloc on reference); both REVERTED on evidence:
+
+- **G.1 — first-char prefilter on scanWhitespace.** Hypothesis: ~50% of scan calls return empty; precheck `input.charAt(prevEnd)` against whitespace-first-set to skip alloc. Reality: parser positions are always at token-content boundaries (skipWhitespace already advanced), so scan calls have either real whitespace or `from == to`. Existing `from >= to` short-circuit already catches the empty case; new prefilter rejected ~0 calls. Bench: alloc Δ +0.2%, wallclock noise. Reverted.
+
+- **G.2 — alloc tightening on non-empty scan path.** Three changes bundled: lineColAt returns long instead of int[2]; scanWhitespaceFast returns `List.of(single)` for size-1 chunks; combine() short-circuits empty. The combine change was already in place at `76498bf`. Other two micro-saves total ~32 KB out of 77 MB per-op (<0.05%). Bench: alloc Δ -0.4%, wallclock noise. Reverted.
+
+**Verdict: the +30% reference-fixture gap is structural, not micro-fixable.** Cost lives in:
+- Spine rebuild on divergence (List.copyOf of children, NonTerminal record construction)
+- Recursive scanWhitespace per node boundary
+- Per-chunk Trivia node classification
+
+Closing the gap requires structural redesigns (NOT "tightening"):
+1. Skip the post-pass entirely when CST already has correct trivia attribution (gate via engine-side flag)
+2. Persistent immutable lists with structural sharing for trivia lists
+3. Lazy SourceSpan materialization
+
+Each is its own spec. Selfhost (perf-critical) is already faster than legacy (-5%); the reference fixture's small inputs make the post-pass overhead a higher % of total but the absolute cost (~7 ms) is bounded.
+
+ Branch `release-0.5.1` at `0b29c78` — 20 commits past 0.5.1 base. peglib-core 805 tests + 1 pre-existing skipped, all green at the new default (post-pass + StringSpan). **Trivia rework + cleanup state: SHIPPED + bench-validated.** Cumulative selfhost wallclock now **-5% under legacy** (was at parity); reference fixture +30% over legacy (per-NonTerminal scan dominates; future work). 30 new StringSpanTest cases + StringSpan added as `org.pragmatica.peg.tree.StringSpan` (CharSequence view with lazy String materialization). Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: Lever B retry (fallback-rule-bypass blocker remains; trivia-context-loss blocker is RESOLVED) OR Lever C IR unification OR address reference-fixture per-NonTerminal scan cost (cache scanWhitespace, skip NonTerminals with full-coverage children, batch gap-scans).
