@@ -1,8 +1,5 @@
 package org.pragmatica.peg.perf;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.PegParser;
 import org.pragmatica.peg.action.RuleId;
 import org.pragmatica.peg.error.RecoveryStrategy;
@@ -11,6 +8,10 @@ import org.pragmatica.peg.tree.CstNode;
 import org.pragmatica.peg.tree.Trivia;
 
 import java.util.List;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,7 +41,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * </ol>
  */
 class TriviaPostPassFlagTest {
-
     private static final String SIMPLE_GRAMMAR = """
         Number <- < [0-9]+ >
         %whitespace <- [ \\t]*
@@ -61,79 +61,74 @@ class TriviaPostPassFlagTest {
     record Item() implements RuleId {}
 
     private static ParserConfig configOff() {
-        return ParserConfig.parserConfig(true, RecoveryStrategy.BASIC, true);
+        var on = ParserConfig.parserConfig(true, RecoveryStrategy.BASIC, true);
+        return new ParserConfig(on.packratEnabled(),
+                                on.recoveryStrategy(),
+                                on.captureTrivia(),
+                                on.fastTrackFailure(),
+                                on.literalFailureCache(),
+                                on.charClassFailureCache(),
+                                on.bulkAdvanceLiteral(),
+                                on.skipWhitespaceFastPath(),
+                                on.reuseEndLocation(),
+                                on.choiceDispatch(),
+                                on.markResetChildren(),
+                                on.inlineLocations(),
+                                on.selectivePackrat(),
+                                on.packratSkipRules(),
+                                on.mutableParseResult(),
+                                on.tokenFastPath(),
+                                false);
     }
 
     private static ParserConfig configOn() {
-        var off = configOff();
-        return new ParserConfig(
-        off.packratEnabled(),
-        off.recoveryStrategy(),
-        off.captureTrivia(),
-        off.fastTrackFailure(),
-        off.literalFailureCache(),
-        off.charClassFailureCache(),
-        off.bulkAdvanceLiteral(),
-        off.skipWhitespaceFastPath(),
-        off.reuseEndLocation(),
-        off.choiceDispatch(),
-        off.markResetChildren(),
-        off.inlineLocations(),
-        off.selectivePackrat(),
-        off.packratSkipRules(),
-        off.mutableParseResult(),
-        off.tokenFastPath(),
-        true);
+        return ParserConfig.parserConfig(true, RecoveryStrategy.BASIC, true);
     }
 
     // ===================================================================
     // 1. Default-off no-op
     // ===================================================================
-
     @Nested
-    @DisplayName("Default-off no-op")
-    class DefaultOffNoOp {
-
+    @DisplayName("Default-on parity with explicit configOn")
+    class DefaultOnNoOp {
         @Test
-        void defaultConfig_flagOff_returnsEngineCstUnchanged() {
+        void defaultConfig_flagOn_matchesExplicitOnParser() {
             var input = "  42  ";
             var defaultParser = PegParser.fromGrammar(SIMPLE_GRAMMAR)
                                          .unwrap();
-            var explicitOffParser = PegParser.fromGrammar(SIMPLE_GRAMMAR, configOff())
-                                             .unwrap();
-
+            var explicitOnParser = PegParser.fromGrammar(SIMPLE_GRAMMAR,
+                                                         configOn())
+                                            .unwrap();
             var defaultCst = defaultParser.parseCst(input)
                                           .unwrap();
-            var explicitOffCst = explicitOffParser.parseCst(input)
-                                                  .unwrap();
-
-            // Default ParserConfig has triviaPostPass=false, so the two parses
-            // must produce structurally identical trees.
-            assertThat(reconstruct(defaultCst)).isEqualTo(reconstruct(explicitOffCst));
-            assertThat(allTriviaText(defaultCst)).isEqualTo(allTriviaText(explicitOffCst));
-            assertThat(triviaShape(defaultCst)).isEqualTo(triviaShape(explicitOffCst));
+            var explicitOnCst = explicitOnParser.parseCst(input)
+                                                .unwrap();
+            // Default ParserConfig now has triviaPostPass=true, so the
+            // default-config parse must structurally match an explicit
+            // flag-on parse.
+            assertThat(reconstruct(defaultCst)).isEqualTo(reconstruct(explicitOnCst));
+            assertThat(allTriviaText(defaultCst)).isEqualTo(allTriviaText(explicitOnCst));
+            assertThat(triviaShape(defaultCst)).isEqualTo(triviaShape(explicitOnCst));
         }
 
         @Test
-        void defaultParserConfig_hasFlagFalse() {
-            assertThat(ParserConfig.DEFAULT.triviaPostPass()).isFalse();
+        void defaultParserConfig_hasFlagTrue() {
+            assertThat(ParserConfig.DEFAULT.triviaPostPass()).isTrue();
         }
 
         @Test
-        void parserConfigFactory_hasFlagFalse() {
+        void parserConfigFactory_hasFlagTrue() {
             assertThat(ParserConfig.parserConfig(true, RecoveryStrategy.BASIC, true)
-                                   .triviaPostPass()).isFalse();
+                                   .triviaPostPass()).isTrue();
         }
     }
 
     // ===================================================================
     // 2. Flag-on round-trip preservation
     // ===================================================================
-
     @Nested
     @DisplayName("Flag-on round-trip preservation")
     class FlagOnRoundTrip {
-
         @Test
         void simpleNumber_roundTrips() {
             assertRoundTrip(SIMPLE_GRAMMAR, "  42  ");
@@ -160,39 +155,38 @@ class TriviaPostPassFlagTest {
         }
 
         private void assertRoundTrip(String grammar, String input) {
-            var parser = PegParser.fromGrammar(grammar, configOn())
+            var parser = PegParser.fromGrammar(grammar,
+                                               configOn())
                                   .unwrap();
             var cst = parser.parseCst(input)
                             .unwrap();
             assertThat(reconstruct(cst)).as("flag-on round-trip for %s", input)
-                                        .isEqualTo(input);
+                      .isEqualTo(input);
         }
     }
 
     // ===================================================================
     // 3. Flag toggles attribution but preserves trivia text totals
     // ===================================================================
-
     @Nested
     @DisplayName("Flag-on structural divergence with text preservation")
     class StructuralDivergence {
-
         @Test
         void flagOnVsOff_listInput_totalTriviaTextIdentical() {
             var input = "  alpha,\n  beta,\n  gamma  ";
-
-            var off = PegParser.fromGrammar(LIST_GRAMMAR, configOff())
+            var off = PegParser.fromGrammar(LIST_GRAMMAR,
+                                            configOff())
                                .unwrap()
                                .parseCst(input)
                                .unwrap();
-            var on = PegParser.fromGrammar(LIST_GRAMMAR, configOn())
+            var on = PegParser.fromGrammar(LIST_GRAMMAR,
+                                           configOn())
                               .unwrap()
                               .parseCst(input)
                               .unwrap();
-
             // Pure permutation: total trivia text must match.
             assertThat(allTriviaText(on)).as("trivia text totals preserved")
-                                         .isEqualTo(allTriviaText(off));
+                      .isEqualTo(allTriviaText(off));
             // Round-trip preserved on both sides.
             assertThat(reconstruct(off)).isEqualTo(input);
             assertThat(reconstruct(on)).isEqualTo(input);
@@ -223,36 +217,33 @@ class TriviaPostPassFlagTest {
                 %whitespace <- [ \\t\\n]+
                 """;
             var input = "42  ";
-
-            var off = PegParser.fromGrammar(grammar, configOff())
+            var off = PegParser.fromGrammar(grammar,
+                                            configOff())
                                .unwrap()
                                .parseCst(input)
                                .unwrap();
-            var on = PegParser.fromGrammar(grammar, configOn())
+            var on = PegParser.fromGrammar(grammar,
+                                           configOn())
                               .unwrap()
                               .parseCst(input)
                               .unwrap();
-
             assertThat(allTriviaText(on)).as("trivia text totals preserved")
-                                         .isEqualTo(allTriviaText(off));
+                      .isEqualTo(allTriviaText(off));
             assertThat(reconstruct(on)).as("post-pass round-trip")
-                                       .isEqualTo(input);
+                      .isEqualTo(input);
             assertThat(reconstruct(off)).as("engine round-trip")
-                                        .isEqualTo(input);
-            assertThat(triviaShape(off)).as(
-            "post-pass and engine differ on slot for Bug-C' empty-wrapper fixture")
-                                        .isNotEqualTo(triviaShape(on));
+                      .isEqualTo(input);
+            assertThat(triviaShape(off)).as("post-pass and engine differ on slot for Bug-C' empty-wrapper fixture")
+                      .isNotEqualTo(triviaShape(on));
         }
     }
 
     // ===================================================================
     // 4. parseRuleAt with the flag — Lever B unblocker claim
     // ===================================================================
-
     @Nested
     @DisplayName("parseRuleAt honours the flag")
     class ParseRuleAtWithFlag {
-
         /**
          * <b>Lever B unblocker (Step 4 commit 2).</b> When {@code parseRuleAt}
          * is invoked at a non-zero offset, the splice-aware overload {@link
@@ -279,47 +270,45 @@ class TriviaPostPassFlagTest {
             // to the spliced subtree's leading — NOT the leading "  " at
             // [0, 2) which belongs to the document root.
             int spliceOffset = 9;
-
-            var parserOn = PegParser.fromGrammar(LIST_GRAMMAR, configOn())
+            var parserOn = PegParser.fromGrammar(LIST_GRAMMAR,
+                                                 configOn())
                                     .unwrap();
             var partial = parserOn.parseRuleAt(Item.class, input, spliceOffset)
                                   .unwrap();
             var subtree = partial.node();
-
             // The Item rule auto-skips %whitespace before matching, so the
             // matched span starts after the single leading space.
             assertThat(subtree.span()
                               .start()
-                              .offset())
-            .as("subtree span starts after the gap whitespace")
-            .isEqualTo(10);
-
+                              .offset()).as("subtree span starts after the gap whitespace")
+                      .isEqualTo(10);
             // Splice-aware leading: only the gap between spliceOffset (9)
             // and span.start (10) — a single space, NOT the input prefix.
             var leadingText = subtree.leadingTrivia()
                                      .stream()
                                      .map(Trivia::text)
-                                     .reduce("", (a, b) -> a + b);
+                                     .reduce("",
+                                             (a, b) -> a + b);
             assertThat(leadingText).as("leading covers only [spliceOffset, span.start)")
-                                   .isEqualTo(" ");
+                      .isEqualTo(" ");
             assertThat(subtree.leadingTrivia()).hasSize(1);
         }
 
         @Test
         void parseRuleAt_flagOnVsOff_subtreeReconstructionIsConsistent() {
             var input = "alpha";
-            var parserOn = PegParser.fromGrammar(LIST_GRAMMAR, configOn())
+            var parserOn = PegParser.fromGrammar(LIST_GRAMMAR,
+                                                 configOn())
                                     .unwrap();
-            var parserOff = PegParser.fromGrammar(LIST_GRAMMAR, configOff())
+            var parserOff = PegParser.fromGrammar(LIST_GRAMMAR,
+                                                  configOff())
                                      .unwrap();
-
             var on = parserOn.parseRuleAt(Item.class, input, 0)
                              .unwrap()
                              .node();
             var off = parserOff.parseRuleAt(Item.class, input, 0)
                                .unwrap()
                                .node();
-
             // For a clean splice with no leading whitespace, both attributions
             // must agree on round-trip and total trivia text.
             assertThat(reconstruct(on)).isEqualTo(reconstruct(off));
@@ -330,7 +319,6 @@ class TriviaPostPassFlagTest {
     // ===================================================================
     // 5. Step 4 commit 3 — buffer no-op under flag-ON
     // ===================================================================
-
     /**
      * Step 4 commit 3 validation: under flag-ON, the engine's pending-leading
      * trivia buffer ops in {@link org.pragmatica.peg.parser.ParsingContext}
@@ -347,15 +335,14 @@ class TriviaPostPassFlagTest {
     @Nested
     @DisplayName("Buffer no-op under flag-ON (Step 4 commit 3)")
     class BufferNoOpUnderFlagOn {
-
         @Test
         void flagOn_simpleNumber_postPassPopulatesLeadingDespiteBufferNoOp() {
             var input = "  42  ";
-            var parser = PegParser.fromGrammar(SIMPLE_GRAMMAR, configOn())
+            var parser = PegParser.fromGrammar(SIMPLE_GRAMMAR,
+                                               configOn())
                                   .unwrap();
             var cst = parser.parseCst(input)
                             .unwrap();
-
             // Round-trip = bytes preserved => post-pass attributed correctly
             // even though the engine's pending-leading buffer was a no-op.
             assertThat(reconstruct(cst)).isEqualTo(input);
@@ -366,11 +353,11 @@ class TriviaPostPassFlagTest {
         @Test
         void flagOn_listInput_postPassAttributesAllTriviaWithEmptyBuffer() {
             var input = "  alpha,\n  beta,\n  gamma  ";
-            var parser = PegParser.fromGrammar(LIST_GRAMMAR, configOn())
+            var parser = PegParser.fromGrammar(LIST_GRAMMAR,
+                                               configOn())
                                   .unwrap();
             var cst = parser.parseCst(input)
                             .unwrap();
-
             assertThat(reconstruct(cst)).isEqualTo(input);
             // All whitespace is attributed somewhere; commas are literal
             // terminals consumed by Tail and not part of trivia.
@@ -380,21 +367,20 @@ class TriviaPostPassFlagTest {
         @Test
         void flagOn_commentedNumber_postPassClassifiesCommentsWithEmptyBuffer() {
             var input = "// preamble\n42 // trailer\n";
-            var parser = PegParser.fromGrammar(COMMENT_GRAMMAR, configOn())
+            var parser = PegParser.fromGrammar(COMMENT_GRAMMAR,
+                                               configOn())
                                   .unwrap();
             var cst = parser.parseCst(input)
                             .unwrap();
-
             assertThat(reconstruct(cst)).isEqualTo(input);
             assertThat(allTriviaText(cst)).contains("// preamble")
-                                          .contains("// trailer");
+                      .contains("// trailer");
         }
     }
 
     // ===================================================================
     // helpers (mirrors policy from TriviaPostPassTest)
     // ===================================================================
-
     private static String reconstruct(CstNode root) {
         var sb = new StringBuilder();
         emitLeading(sb, root);
@@ -507,5 +493,4 @@ class TriviaPostPassFlagTest {
         return sb.append(']')
                  .toString();
     }
-
 }
