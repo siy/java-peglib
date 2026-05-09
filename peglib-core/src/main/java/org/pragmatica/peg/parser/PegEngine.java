@@ -38,6 +38,12 @@ public final class PegEngine implements Parser {
     private final ParserConfig config;
     private final Map<String, Action> actions;
 
+    // Cleanup A: cached triviaPostPass flag — read once at construction so the
+    // 38 buffer-call sites can short-circuit without re-reading config on every
+    // hit. Under flag-ON, the post-pass overrides all engine-side trivia
+    // attribution; the buffer methods are no-ops, and we avoid the dispatch.
+    private final boolean triviaPostPass;
+
     // Phase-1 optimization: cached first-char set for skipWhitespace fast-path (§6.6).
     // Present iff the grammar has a %whitespace rule whose shape is analyzable.
     // Unconditional-on for the interpreter; no flag gates this.
@@ -68,6 +74,7 @@ public final class PegEngine implements Parser {
     private PegEngine(Grammar grammar, ParserConfig config, Map<String, Action> actions) {
         this.grammar = grammar;
         this.config = config;
+        this.triviaPostPass = config.triviaPostPass();
         this.actions = Map.copyOf(actions);
         this.whitespaceFirstChars = computeWhitespaceFirstChars(grammar);
         this.suggestionVocabulary = computeSuggestionVocabulary(grammar);
@@ -726,7 +733,9 @@ public final class PegEngine implements Parser {
             var entry = cachedEntry.unwrap();
             var result = entry.result();
             if (result instanceof ParseResult.Success success) {
-                var hitCarriedLeading = ctx.takePendingLeadingTrivia();
+                var hitCarriedLeading = triviaPostPass
+                                        ? List.<Trivia>of()
+                                        : ctx.takePendingLeadingTrivia();
                 var hitLocalTrivia = skipWhitespace(ctx);
                 List<Trivia> hitRuleLeading = hitCarriedLeading.isEmpty()
                                               ? hitLocalTrivia
@@ -744,7 +753,9 @@ public final class PegEngine implements Parser {
         // leading whitespace skipped at rule entry. This becomes the rule
         // wrapper's leadingTrivia; children of the body see an empty pending
         // buffer unless the body itself deposits more between its own siblings.
-        var carriedLeading = ctx.takePendingLeadingTrivia();
+        var carriedLeading = triviaPostPass
+                             ? List.<Trivia>of()
+                             : ctx.takePendingLeadingTrivia();
         var localTrivia = skipWhitespace(ctx);
         List<Trivia> ruleLeading = carriedLeading.isEmpty()
                                    ? localTrivia
@@ -784,11 +795,13 @@ public final class PegEngine implements Parser {
         CstNode bodyNode = null;
         if (result instanceof ParseResult.Success success) {
             bodyNode = success.node();
-            var pendingAtExit = ctx.savePendingLeadingTrivia();
-            if (!pendingAtExit.isEmpty()) {
-                ctx.restorePendingLeadingTrivia(List.of());
-                bodyNode = attachTrailingToTail(bodyNode, pendingAtExit);
-                resultForCache = ParseResult.Success.success(bodyNode, success.endLocation());
+            if (!triviaPostPass) {
+                var pendingAtExit = ctx.savePendingLeadingTrivia();
+                if (!pendingAtExit.isEmpty()) {
+                    ctx.restorePendingLeadingTrivia(List.of());
+                    bodyNode = attachTrailingToTail(bodyNode, pendingAtExit);
+                    resultForCache = ParseResult.Success.success(bodyNode, success.endLocation());
+                }
             }
         }
         // Cache the result at START position
@@ -803,7 +816,7 @@ public final class PegEngine implements Parser {
         // Restore position and re-deposit the caller's pending so enclosing
         // backtracking combinators can roll it back to their own snapshots.
         ctx.restoreLocation(startLoc);
-        if (!carriedLeading.isEmpty()) {
+        if (!triviaPostPass && !carriedLeading.isEmpty()) {
             ctx.appendPendingLeadingTrivia(carriedLeading);
         }
         // Use custom error message if available
@@ -871,7 +884,9 @@ public final class PegEngine implements Parser {
                 return result;
             }
             if (result instanceof ParseResult.Success success) {
-                var hitCarriedLeading = ctx.takePendingLeadingTrivia();
+                var hitCarriedLeading = triviaPostPass
+                                        ? List.<Trivia>of()
+                                        : ctx.takePendingLeadingTrivia();
                 var hitLocalTrivia = skipWhitespace(ctx);
                 List<Trivia> hitRuleLeading = hitCarriedLeading.isEmpty()
                                               ? hitLocalTrivia
@@ -887,7 +902,9 @@ public final class PegEngine implements Parser {
         // Claim caller's pending-leading + our own leading whitespace. The
         // trivia snapshot lives across all growth iterations; each iteration
         // re-enters the body at the same post-whitespace position.
-        var carriedLeading = ctx.takePendingLeadingTrivia();
+        var carriedLeading = triviaPostPass
+                             ? List.<Trivia>of()
+                             : ctx.takePendingLeadingTrivia();
         var localTrivia = skipWhitespace(ctx);
         List<Trivia> ruleLeading = carriedLeading.isEmpty()
                                    ? localTrivia
@@ -971,7 +988,7 @@ public final class PegEngine implements Parser {
         // Failure path — restore the original caller state and re-deposit
         // pending-leading so enclosing backtracking combinators can roll back.
         ctx.restoreLocation(startLoc);
-        if (!carriedLeading.isEmpty()) {
+        if (!triviaPostPass && !carriedLeading.isEmpty()) {
             ctx.appendPendingLeadingTrivia(carriedLeading);
         }
         if (rule.hasErrorMessage()) {
@@ -1008,7 +1025,9 @@ public final class PegEngine implements Parser {
         var startLoc = ctx.location();
         // Claim pending-leading (caller deposit) + this rule's leading ws. Same
         // semantics as parseRule; see TRIVIA-ATTRIBUTION.md.
-        var carriedLeading = ctx.takePendingLeadingTrivia();
+        var carriedLeading = triviaPostPass
+                             ? List.<Trivia>of()
+                             : ctx.takePendingLeadingTrivia();
         var localTrivia = skipWhitespace(ctx);
         List<Trivia> ruleLeading = carriedLeading.isEmpty()
                                    ? localTrivia
@@ -1045,7 +1064,7 @@ public final class PegEngine implements Parser {
         }
         if (result.isFailure()) {
             ctx.restoreLocation(startLoc);
-            if (!carriedLeading.isEmpty()) {
+            if (!triviaPostPass && !carriedLeading.isEmpty()) {
                 ctx.appendPendingLeadingTrivia(carriedLeading);
             }
             // Use custom error message if available
@@ -1168,7 +1187,9 @@ public final class PegEngine implements Parser {
                                          span,
                                          ruleName,
                                          text,
-                                         ctx.takePendingLeadingTrivia(),
+                                         triviaPostPass
+                                         ? List.<Trivia>of()
+                                         : ctx.takePendingLeadingTrivia(),
                                          List.of());
             return ParseResult.Success.success(node, ctx.location());
         } finally{
@@ -1244,7 +1265,9 @@ public final class PegEngine implements Parser {
                                         span,
                                         "",
                                         text,
-                                        ctx.takePendingLeadingTrivia(),
+                                        triviaPostPass
+                                        ? List.<Trivia>of()
+                                        : ctx.takePendingLeadingTrivia(),
                                         List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1310,7 +1333,9 @@ public final class PegEngine implements Parser {
                                         span,
                                         "",
                                         matched,
-                                        ctx.takePendingLeadingTrivia(),
+                                        triviaPostPass
+                                        ? List.<Trivia>of()
+                                        : ctx.takePendingLeadingTrivia(),
                                         List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1366,7 +1391,9 @@ public final class PegEngine implements Parser {
                                         span,
                                         "",
                                         String.valueOf(c),
-                                        ctx.takePendingLeadingTrivia(),
+                                        triviaPostPass
+                                        ? List.<Trivia>of()
+                                        : ctx.takePendingLeadingTrivia(),
                                         List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1485,7 +1512,9 @@ public final class PegEngine implements Parser {
                                         span,
                                         "",
                                         String.valueOf(c),
-                                        ctx.takePendingLeadingTrivia(),
+                                        triviaPostPass
+                                        ? List.<Trivia>of()
+                                        : ctx.takePendingLeadingTrivia(),
                                         List.of());
         return new ParseResult.Success(node, endLoc, List.of(), Option.none());
     }
@@ -1511,11 +1540,15 @@ public final class PegEngine implements Parser {
     // === Predicate Parsers ===
     private ParseResult parseAnd(ParsingContext ctx, Expression.And and, String ruleName) {
         var startLoc = ctx.location();
-        var entryPendingSnapshot = ctx.savePendingLeadingTrivia();
+        var entryPendingSnapshot = triviaPostPass
+                                   ? null
+                                   : ctx.savePendingLeadingTrivia();
         var result = parseExpressionWithMode(ctx, and.expression(), ruleName, ParseMode.standard());
         ctx.restoreLocation(startLoc);
         // Always restore - predicates don't consume input nor trivia state.
-        ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+        if (!triviaPostPass) {
+            ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+        }
         if (result.isSuccess()) {
             return new ParseResult.PredicateSuccess(startLoc);
         }
@@ -1524,11 +1557,15 @@ public final class PegEngine implements Parser {
 
     private ParseResult parseNot(ParsingContext ctx, Expression.Not not, String ruleName) {
         var startLoc = ctx.location();
-        var entryPendingSnapshot = ctx.savePendingLeadingTrivia();
+        var entryPendingSnapshot = triviaPostPass
+                                   ? null
+                                   : ctx.savePendingLeadingTrivia();
         var result = parseExpressionWithMode(ctx, not.expression(), ruleName, ParseMode.standard());
         ctx.restoreLocation(startLoc);
         // Always restore - predicates don't consume input nor trivia state.
-        ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+        if (!triviaPostPass) {
+            ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+        }
         if (result.isSuccess()) {
             return ParseResult.Failure.failure(startLoc, "not " + describeExpression(not.expression()));
         }
@@ -1554,7 +1591,9 @@ public final class PegEngine implements Parser {
                                          span,
                                          ruleName,
                                          text,
-                                         ctx.takePendingLeadingTrivia(),
+                                         triviaPostPass
+                                         ? List.<Trivia>of()
+                                         : ctx.takePendingLeadingTrivia(),
                                          List.of());
             return ParseResult.Success.success(node, ctx.location());
         } finally{
@@ -1617,7 +1656,9 @@ public final class PegEngine implements Parser {
                                         span,
                                         "",
                                         text,
-                                        ctx.takePendingLeadingTrivia(),
+                                        triviaPostPass
+                                        ? List.<Trivia>of()
+                                        : ctx.takePendingLeadingTrivia(),
                                         List.of());
         return ParseResult.Success.success(node, ctx.location());
     }
@@ -1727,7 +1768,9 @@ public final class PegEngine implements Parser {
                                               String ruleName,
                                               ParseMode mode) {
         var startLoc = ctx.location();
-        var pendingSnapshot = ctx.savePendingLeadingTrivia();
+        var pendingSnapshot = triviaPostPass
+                              ? null
+                              : ctx.savePendingLeadingTrivia();
         var children = new ArrayList<CstNode>();
         boolean cutEncountered = false;
         for (var element : seq.elements()) {
@@ -1735,19 +1778,27 @@ public final class PegEngine implements Parser {
             // captured trivia is appended to the pending-leading buffer so the
             // following element (leaf or rule) can claim it.
             if (mode.shouldSkipWhitespace() && !isPredicate(element)) {
-                ctx.appendPendingLeadingTrivia(skipWhitespace(ctx));
+                if (triviaPostPass) {
+                    skipWhitespace(ctx);
+                }else {
+                    ctx.appendPendingLeadingTrivia(skipWhitespace(ctx));
+                }
             }
             var result = parseExpressionWithMode(ctx, element, ruleName, mode);
             // Handle failures
             if (result instanceof ParseResult.CutFailure) {
                 // Propagate CutFailure immediately
                 ctx.restoreLocation(startLoc);
-                ctx.restorePendingLeadingTrivia(pendingSnapshot);
+                if (!triviaPostPass) {
+                    ctx.restorePendingLeadingTrivia(pendingSnapshot);
+                }
                 return result;
             }
             if (result instanceof ParseResult.Failure failure) {
                 ctx.restoreLocation(startLoc);
-                ctx.restorePendingLeadingTrivia(pendingSnapshot);
+                if (!triviaPostPass) {
+                    ctx.restorePendingLeadingTrivia(pendingSnapshot);
+                }
                 // If cut was encountered, return CutFailure to prevent backtracking
                 if (cutEncountered) {
                     return ParseResult.CutFailure.cutFailure(failure.location(), failure.expected());
@@ -1781,7 +1832,9 @@ public final class PegEngine implements Parser {
                                             String ruleName,
                                             ParseMode mode) {
         var startLoc = ctx.location();
-        var entryPendingSnapshot = ctx.savePendingLeadingTrivia();
+        var entryPendingSnapshot = triviaPostPass
+                                   ? null
+                                   : ctx.savePendingLeadingTrivia();
         ParseResult lastFailure = null;
         for (var alt : choice.alternatives()) {
             ParseResult result;
@@ -1812,7 +1865,9 @@ public final class PegEngine implements Parser {
             }
             lastFailure = result;
             ctx.restoreLocation(startLoc);
-            ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+            if (!triviaPostPass) {
+                ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+            }
         }
         return lastFailure != null
                ? lastFailure
@@ -1830,9 +1885,15 @@ public final class PegEngine implements Parser {
         var children = new ArrayList<CstNode>();
         while (true) {
             var beforeLoc = ctx.location();
-            var iterPendingSnapshot = ctx.savePendingLeadingTrivia();
+            var iterPendingSnapshot = triviaPostPass
+                                      ? null
+                                      : ctx.savePendingLeadingTrivia();
             if (mode.shouldSkipWhitespace()) {
-                ctx.appendPendingLeadingTrivia(skipWhitespace(ctx));
+                if (triviaPostPass) {
+                    skipWhitespace(ctx);
+                }else {
+                    ctx.appendPendingLeadingTrivia(skipWhitespace(ctx));
+                }
             }
             ParseResult result;
             if (mode.shouldCollectActions()) {
@@ -1857,7 +1918,9 @@ public final class PegEngine implements Parser {
             }
             if (result.isFailure()) {
                 ctx.restoreLocation(beforeLoc);
-                ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                if (!triviaPostPass) {
+                    ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                }
                 break;
             }
             if (result instanceof ParseResult.Success success) {
@@ -1901,9 +1964,15 @@ public final class PegEngine implements Parser {
         // Subsequent matches are optional
         while (true) {
             var beforeLoc = ctx.location();
-            var iterPendingSnapshot = ctx.savePendingLeadingTrivia();
+            var iterPendingSnapshot = triviaPostPass
+                                      ? null
+                                      : ctx.savePendingLeadingTrivia();
             if (mode.shouldSkipWhitespace()) {
-                ctx.appendPendingLeadingTrivia(skipWhitespace(ctx));
+                if (triviaPostPass) {
+                    skipWhitespace(ctx);
+                }else {
+                    ctx.appendPendingLeadingTrivia(skipWhitespace(ctx));
+                }
             }
             ParseResult result;
             if (mode.shouldCollectActions()) {
@@ -1928,7 +1997,9 @@ public final class PegEngine implements Parser {
             }
             if (result.isFailure()) {
                 ctx.restoreLocation(beforeLoc);
-                ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                if (!triviaPostPass) {
+                    ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                }
                 break;
             }
             if (result instanceof ParseResult.Success success) {
@@ -1960,7 +2031,9 @@ public final class PegEngine implements Parser {
                                               String ruleName,
                                               ParseMode mode) {
         var startLoc = ctx.location();
-        var entryPendingSnapshot = ctx.savePendingLeadingTrivia();
+        var entryPendingSnapshot = triviaPostPass
+                                   ? null
+                                   : ctx.savePendingLeadingTrivia();
         var result = parseExpressionWithMode(ctx, opt.expression(), ruleName, mode);
         if (result.isSuccess()) {
             return result;
@@ -1971,7 +2044,9 @@ public final class PegEngine implements Parser {
         }
         // Optional always succeeds - return empty node on no match
         ctx.restoreLocation(startLoc);
-        ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+        if (!triviaPostPass) {
+            ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+        }
         var span = SourceSpan.sourceSpan(startLoc);
         var node = new CstNode.NonTerminal(ctx.idGen()
                                               .next(),
@@ -2000,9 +2075,15 @@ public final class PegEngine implements Parser {
                   : Integer.MAX_VALUE;
         while (count < max) {
             var beforeLoc = ctx.location();
-            var iterPendingSnapshot = ctx.savePendingLeadingTrivia();
+            var iterPendingSnapshot = triviaPostPass
+                                      ? null
+                                      : ctx.savePendingLeadingTrivia();
             if (count > 0 && mode.shouldSkipWhitespace()) {
-                ctx.appendPendingLeadingTrivia(skipWhitespace(ctx));
+                if (triviaPostPass) {
+                    skipWhitespace(ctx);
+                }else {
+                    ctx.appendPendingLeadingTrivia(skipWhitespace(ctx));
+                }
             }
             ParseResult result;
             if (mode.shouldCollectActions()) {
@@ -2027,7 +2108,9 @@ public final class PegEngine implements Parser {
             }
             if (result.isFailure()) {
                 ctx.restoreLocation(beforeLoc);
-                ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                if (!triviaPostPass) {
+                    ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                }
                 break;
             }
             if (result instanceof ParseResult.Success success) {
