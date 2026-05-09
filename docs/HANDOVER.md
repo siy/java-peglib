@@ -628,6 +628,30 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 **Last updated:** 2026-05-09, end of Step 4 trivia rework + cleanup arc A→F.3 + StringSpan + Cleanup G investigation (reference-fixture tightening attempted, REVERTED).
 
+### Lever B retry — attempted, FAILED on bench (2026-05-09)
+
+After the trivia rework removed one of two HANDOVER §6.2 blockers (trivia-context-loss), retried Lever B by wiring the dormant `SafePivotAnalyzer.safePivotRules(Grammar)` into `tryIncrementalReparse`. Gate: only accept rules in safe-pivot set; walk outward otherwise.
+
+**Bench result (IncrementalSessionBench, 1000 edits, Regime B):**
+
+| Metric | Pre-Lever-B | Post-gate |
+|---|---:|---:|
+| Median | 5.0 ms | **21.9 ms (+338%)** |
+| p95 | 11.2 ms | 214.8 ms |
+| % under 16ms | 96.5% | **43.6%** |
+
+Reverted. HEAD unchanged at `46d8a05`.
+
+**Root cause of failure:** SafePivotAnalyzer's "unambiguous literal prefix" criterion is too conservative for Java 25 grammar. Most rules start with character classes (`Identifier <- [a-zA-Z_] ...`) or rule references (`Type <- ClassType / ...`), which the analyzer marks unsafe. Walk-up-find-safe-ancestor strategy lands at root for ~56% of edits → forces full reparse. Parity is preserved but perf is catastrophically worse.
+
+**What this implies:**
+- The existing "OLD walk-up + length check" passes IncrementalParityTest in current form, even without the safe-pivot gate. The §6.2 hypothetical bug ("smallestEnclosing descent strategy bypasses ancestors") doesn't actually fire in the current walk-up algorithm.
+- Lever B retry would need: (a) a smarter analyzer that includes rules with disjoint first-sets (not just literal prefixes), or (b) on-accept structural validation instead of static analysis gate.
+- Both are non-trivial (a few days each) and bench-gated.
+- Until then, the current incremental engine's length-check-only acceptance is the de facto safe state. Median 5.0 ms / p95 11.2 ms is already excellent.
+
+**Defer Lever B retry indefinitely.** The trivia work was the real blocker; the perf is already good enough that strengthening the gate hasn't been worth the analysis investment.
+
 ### Cleanup G — reference-fixture tightening attempted, abandoned (2026-05-09)
 
 Two micro-optimizations attempted under bench gate (≥3% wallclock OR ≥5% alloc on reference); both REVERTED on evidence:
