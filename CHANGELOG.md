@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-10
+
+_Work in progress — clean-slate redesign. See [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md)._
+
+### Architecture (BREAKING)
+
+Major redesign per nine locked decisions: drop interpreter (generator-only with generate-and-compile); two-phase lex → parse with PEG surface preserved; drop runtime actions (replaced by `Visitor<T>` stub); drop AST type (CST is the only tree); pure flat `int[]` CST data layout; trivia as tokens; thin caching incremental layer; one always-on error recovery mechanism; `ParserConfig` deleted (the grammar IS the configuration). Targets parity-with-or-faster-than javac on Java parsing while emitting strictly more output.
+
+Implementation phasing (Phase A through F per spec §7) is in progress.
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [0.5.1] - 2026-05-09
 
 _Unreleased — patch cycle following 0.5.0._
