@@ -391,7 +391,7 @@ The Move B failure tells us **allocation rate is no longer a productive target**
 - **Profile-driven wallclock work** (NEW, highest-ROI suggestion) — `async-profiler` in CPU mode + flame graphs on the reference fixture. Identify the actual hot CPU work post-Tier-1, target that directly. The Move B failure proved alloc-rate metrics can be misleading; CPU samples are the trustworthy signal now. **EXECUTED THIS SESSION — see "Post-rollback profile-driven optimization arc" below for outcomes.**
 - **Char-class bit-packing** — pre-emit ASCII bitmaps; bitwise test instead of range comparisons. **Reassess with care** — same risk class as Move B. Bench wallclock first to confirm range-comparison isn't already JIT-optimized via SIMD/code-motion. Potential ~5-15% on char-class-heavy paths IF measurably hot.
 - **Lever B retry** (incremental engine) — gated on trivia attribution rework. SafePivotAnalyzer + NodeIndex.smallestEnclosing live as dormant infrastructure for the eventual retry. Independent of allocation patterns; unaffected by Move B finding.
-- **Trivia attribution rework** — context-independent attachment. Unblocks Lever B; comparable scope to Lever C. Independent of allocation; unaffected by Move B finding.
+- **Trivia attribution rework** — context-independent attachment. Unblocks Lever B; comparable scope to Lever C. Independent of allocation; unaffected by Move B finding. **STATUS UPDATED 2026-05-09:** investigated through 3 steps (catalog → adversarial corpus → post-pass prototype) on `release-0.5.1`. Prototype lands at `78c4003`. Verdict: **viable; ~6-10 days to production rework**. See "Trivia investigation arc (2026-05-09)" subsection below.
 - **Lever C — IR unification** (spec §4) — multi-week. Eliminates "every fix paid twice" pattern between PegEngine and ParserGenerator emission templates. Reduces 7,440 LOC to ~1,700. Maintainability + complexity reduction primary value, not raw perf.
 
 ### Post-rollback profile-driven optimization arc (this session, 2026-05-08)
@@ -455,6 +455,42 @@ Failed patterns target allocations the JIT already optimizes:
 - **Lever C IR unification** — multi-week, maintainability-first
 - **Re-profile post-`38b6a8e`** — the profile has shifted again; new candidates may emerge or the profile may be flat (no clear next move). Run a third profile pass if pursuing further wallclock work.
 
+### Trivia investigation arc (2026-05-09, on release-0.5.1)
+
+After 0.5.0 ship + tag move + branch creation for 0.5.1 patch cycle, a 3-step investigation arc explored the long-standing trivia attribution issue.
+
+**Background.** Current attribution couples to parse history via the `pendingLeadingTrivia` buffer + 30+ save/restore sites. RoundTripTest 22/22 green on corpus, but partial-reparse (`parseRuleAt`) attributes trivia differently than full reparse — blocking Lever B (incremental engine smaller-pivot optimization). HANDOVER §6.4 cited this as one of two blockers for Lever B.
+
+**Step 1 — context-dependency catalog.** Investigation-only mapping of attribution code in PegEngine + ParserGenerator. Findings:
+
+- Current attribution is *almost* a function of `(input, rule, span)` — buffer machinery is navigational, not algorithmic
+- Bonus latent issue: generator uses size-only `restorePendingLeading(int)` snapshot (`ParserGenerator.java:6768-6776`) vs interpreter's full-list `List.copyOf` (Bug A fix). Asymmetric. Currently passes RoundTripTest by luck — relies on `%whitespace` re-skip after rollback as load-bearing invariant.
+- Bug C' "orphan trivia → deepest leaf" is bookkeeping-context only; could attach to wrapper.trailing instead with same byte-equality.
+- Cost estimate: 6-10 days for production rework, comparable to one release cycle.
+
+**Step 2 — adversarial test corpus** (`test: trivia adversarial corpus + findings` `d2cc6be`). 17 tests across 7 divergence-target classes + 1 fuzz test. Findings:
+
+- 0 definite bugs
+- 2 latent bugs (generator size-only restore "robust-by-luck"; Optional CutFailure pending non-restore — unobservable through CST)
+- 3 robust-by-design (Bug C' nested cases, Predicate symmetry, %whitespace purity)
+
+Suite at `peglib-core/src/test/java/org/pragmatica/peg/perf/TriviaAdversarialTest.java`. Findings: [`docs/incremental/TRIVIA-ADVERSARIAL-FINDINGS.md`](incremental/TRIVIA-ADVERSARIAL-FINDINGS.md).
+
+**Step 3 — post-pass prototype** (`feat: TriviaPostPass — context-independent trivia attribution prototype` `78c4003`). New `org.pragmatica.peg.tree.TriviaPostPass` re-derives leading/trailing for every CST node from `(input, span)` without parse-history dependency. Validation: `TriviaPostPassTest` (16 tests, all passing). Findings:
+
+- **Round-trip preservation: 21/21 corpus + 9/9 adversarial inputs byte-equal**
+- **Total trivia text preserved: 0 text loss across 46,756 nodes inspected**
+- Structural divergence is slot-shifts only (6.4% of nodes; all balanced — leading shifts in both directions across NonTerminals; trailing shrinks only on NonTerminals; no Bug-C' shape in this corpus)
+- **`parseRuleAt` structural parity ACHIEVED under postPass** — context-loss disappears. Load-bearing claim for Lever B.
+
+**Verdict.** Production rework is viable. Recommended path for next session:
+
+1. **Decide leading-attachment policy at sibling boundaries** — engine "carries leading forward through pending"; postPass "attaches leading from previous-sibling-end coordinate". Both coherent; pick one and document.
+2. **Add hash-based parity gate against generated parser on the large 1900-LOC fixture** (Step 3 catalog excluded it for runtime).
+3. **Production rework, multi-commit parity-gated** (per Move B lessons): wire `triviaPostPass=true` flag into `PegParser`, replace 30+ buffer save/restore sites with empty-leading emission + post-pass call. ~6-10 days. Each commit green at TriviaPostPassTest + RoundTripTest + adversarial suite.
+
+After production rework: orthogonal Lever B blockers remain (fallback-rule bypass per §6.2 root cause #1, safe-pivot concept). Trivia rework alone removes ONE of two HANDOVER-cited blockers.
+
 ### Items superseded by this session's work
 
 - §6.2 lever-1 puzzle: dissolved by Path D's stable-id algorithm.
@@ -466,4 +502,4 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 ---
 
-**Last updated:** 2026-05-08, end of profile-driven optimization arc (post-Move-B rollback). Branch `release-0.5.0` at `38b6a8e` — 2 commits past `v0.5.0-candidate` (`e849b63`). peglib-core 705 tests green (includes 6 smoke tests from the 2 shipped commits — CandidateTwoSmokeTest 3, CandidateFourSmokeTest 3); full reactor green via `mvn install`. Cumulative wins this session: -15.6% reference wallclock / -11.2% selfhost wallclock. Reference now under 20 ms. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: re-profile post-`38b6a8e` if pursuing further wallclock; otherwise pivot to trivia attribution rework / Lever B retry / Lever C IR unification.
+**Last updated:** 2026-05-09, end of trivia investigation arc on `release-0.5.1`. 0.5.0 published to Maven Central on 2026-05-08 (5 module artifacts). Branch `release-0.5.1` at `78c4003` — 3 commits past 0.5.1 base (`c9502c5` chore release prep, `d2cc6be` Step 2 adversarial corpus, `78c4003` Step 3 TriviaPostPass prototype). peglib-core 738 tests green + 1 pre-existing skipped (RoundTripTest legacy gap unchanged). Trivia rework verdict: **viable; ~6-10 days to production rework**. Detailed plan in §11 "Trivia investigation arc". Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: production trivia rework OR Lever C IR unification OR deferred char-class bit-packing reassessment.
