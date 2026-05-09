@@ -242,8 +242,8 @@ public final class ParserGenerator {
         }
         for (var skip : config.packratSkipRules()) {
             if (lrRules.contains(skip)) {
-                throw new IllegalArgumentException(
-                "rule '" + skip + "' is left-recursive; cannot be in packratSkipRules");
+                throw new IllegalArgumentException("rule '" + skip
+                                                   + "' is left-recursive; cannot be in packratSkipRules");
             }
         }
     }
@@ -7135,12 +7135,17 @@ public final class ParserGenerator {
                     private static final class CstParseResult {
                         final boolean success;
                         final CstNode node;          // raw nullable
-                        final String text;           // raw nullable
+                        // Cleanup F.2: widen text from String to CharSequence so the
+                        // generator can emit StringSpan into this field in F.3 without
+                        // forcing String materialization. Consumers (textOrEmpty helper,
+                        // CstNode.Terminal/Token construction via wrapWithRuleName) all
+                        // accept CharSequence, so this is a non-breaking widening.
+                        final CharSequence text;     // raw nullable
                         final String expected;       // raw nullable
                         final SourceLocation endLocation; // raw nullable
                         final boolean cutFailed;
 
-                        private CstParseResult(boolean success, CstNode node, String text, String expected, SourceLocation endLocation, boolean cutFailed) {
+                        private CstParseResult(boolean success, CstNode node, CharSequence text, String expected, SourceLocation endLocation, boolean cutFailed) {
                             this.success = success;
                             this.node = node;
                             this.text = text;
@@ -7153,7 +7158,7 @@ public final class ParserGenerator {
                         boolean isFailure() { return !success; }
                         boolean isCutFailure() { return !success && cutFailed; }
 
-                        static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
+                        static CstParseResult success(CstNode node, CharSequence text, SourceLocation endLocation) {
                             return new CstParseResult(true, node, text, null, endLocation, false);
                         }
 
@@ -7163,7 +7168,7 @@ public final class ParserGenerator {
                         // their endLocation field discarded by callers, so skipping the
                         // location() call here removes the dominant SourceLocation allocator
                         // on the self-host fixture.
-                        static CstParseResult successNoLoc(CstNode node, String text) {
+                        static CstParseResult successNoLoc(CstNode node, CharSequence text) {
                             return new CstParseResult(true, node, text, null, null, false);
                         }
 
@@ -7190,12 +7195,16 @@ public final class ParserGenerator {
                     private static final class CstParseResult {
                         final boolean success;
                         final Option<CstNode> node;
-                        final Option<String> text;
+                        // Cleanup F.2: widen text from Option<String> to Option<CharSequence>
+                        // so F.3 can emit StringSpan into this field without forcing
+                        // String materialization. Consumers (textOrEmpty helper) read
+                        // via .or("") which produces CharSequence, accepted everywhere.
+                        final Option<CharSequence> text;
                         final Option<String> expected;
                         final Option<SourceLocation> endLocation;
                         final boolean cutFailed;
 
-                        private CstParseResult(boolean success, Option<CstNode> node, Option<String> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
+                        private CstParseResult(boolean success, Option<CstNode> node, Option<CharSequence> text, Option<String> expected, Option<SourceLocation> endLocation, boolean cutFailed) {
                             this.success = success;
                             this.node = node;
                             this.text = text;
@@ -7208,14 +7217,14 @@ public final class ParserGenerator {
                         boolean isFailure() { return !success; }
                         boolean isCutFailure() { return !success && cutFailed; }
 
-                        static CstParseResult success(CstNode node, String text, SourceLocation endLocation) {
-                            return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.some(endLocation), false);
+                        static CstParseResult success(CstNode node, CharSequence text, SourceLocation endLocation) {
+                            return new CstParseResult(true, Option.option(node), Option.<CharSequence>some(text), Option.none(), Option.some(endLocation), false);
                         }
 
                         // Phase 1.7 (D2): intermediate-result success that omits endLocation.
                         // See mutable variant above for rationale.
-                        static CstParseResult successNoLoc(CstNode node, String text) {
-                            return new CstParseResult(true, Option.option(node), Option.some(text), Option.none(), Option.none(), false);
+                        static CstParseResult successNoLoc(CstNode node, CharSequence text) {
+                            return new CstParseResult(true, Option.option(node), Option.<CharSequence>some(text), Option.none(), Option.none(), false);
                         }
 
                         static CstParseResult failure(String expected) {
