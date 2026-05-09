@@ -6773,31 +6773,60 @@ public final class ParserGenerator {
                 // === Pending-leading trivia helpers ===
                 // See docs/TRIVIA-ATTRIBUTION.md for the attribution rule.
 
-                private void appendPending(List<Trivia> captured) {
-                    if (!captured.isEmpty()) {
-                        pendingLeadingTrivia.addAll(captured);
-                    }
-                }
+            """);
+        // Step 4 commit 5: Under triviaPostPass=true, the post-pass produces correct
+        // attribution from the trivia stream. The buffer machinery is dead work — the
+        // call sites still call these helpers, but the helpers no-op (and the buffer
+        // field stays declared but unused — see PR description for rationale).
+        if (config.triviaPostPass()) {
+            sb.append("""
+                                private void appendPending(List<Trivia> captured) {
+                                    // no-op: triviaPostPass=true; attribution handled by post-pass.
+                                }
 
-                private List<Trivia> takePendingLeading() {
-                    if (pendingLeadingTrivia.isEmpty()) {
-                        return List.of();
-                    }
-                    var snapshot = List.copyOf(pendingLeadingTrivia);
-                    pendingLeadingTrivia.clear();
-                    return snapshot;
-                }
+                                private List<Trivia> takePendingLeading() {
+                                    return List.of();
+                                }
 
-                private int savePendingLeading() {
-                    return pendingLeadingTrivia.size();
-                }
+                                private int savePendingLeading() {
+                                    return 0;
+                                }
 
-                private void restorePendingLeading(int snapshot) {
-                    if (pendingLeadingTrivia.size() > snapshot) {
-                        pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size()).clear();
-                    }
-                }
+                                private void restorePendingLeading(int snapshot) {
+                                    // no-op: triviaPostPass=true; attribution handled by post-pass.
+                                }
 
+                            """);
+        }else {
+            sb.append("""
+                                private void appendPending(List<Trivia> captured) {
+                                    if (!captured.isEmpty()) {
+                                        pendingLeadingTrivia.addAll(captured);
+                                    }
+                                }
+
+                                private List<Trivia> takePendingLeading() {
+                                    if (pendingLeadingTrivia.isEmpty()) {
+                                        return List.of();
+                                    }
+                                    var snapshot = List.copyOf(pendingLeadingTrivia);
+                                    pendingLeadingTrivia.clear();
+                                    return snapshot;
+                                }
+
+                                private int savePendingLeading() {
+                                    return pendingLeadingTrivia.size();
+                                }
+
+                                private void restorePendingLeading(int snapshot) {
+                                    if (pendingLeadingTrivia.size() > snapshot) {
+                                        pendingLeadingTrivia.subList(snapshot, pendingLeadingTrivia.size()).clear();
+                                    }
+                                }
+
+                            """);
+        }
+        sb.append("""
                 private List<Trivia> concatTrivia(List<Trivia> first, List<Trivia> second) {
                     if (first.isEmpty()) return second;
                     if (second.isEmpty()) return first;
