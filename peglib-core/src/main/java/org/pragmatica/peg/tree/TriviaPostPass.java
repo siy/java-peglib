@@ -227,6 +227,12 @@ public final class TriviaPostPass {
      * must reach the deepest-rightmost-leaf descendant — H1 optimization
      * eliminates the post-construction spine rebuild by threading it during
      * recursion.
+     *
+     * <p>Cleanup D fast-path: when the rebuild would produce a node with the
+     * same content as the input (all incoming trivia lists empty AND existing
+     * trivia already empty for leaves), return the input unchanged. For
+     * NonTerminals, the same logic is applied per-child inside
+     * {@link #rebuildNonTerminal}.
      */
     private static CstNode rebuildSelf(String input,
                                        CstNode node,
@@ -243,25 +249,61 @@ public final class TriviaPostPass {
                                                               leading,
                                                               extraTrailing,
                                                               drainExtra);
-            case CstNode.Terminal t -> new CstNode.Terminal(t.id(),
-                                                            t.span(),
-                                                            t.rule(),
-                                                            t.text(),
-                                                            leading,
-                                                            combine(drainExtra, extraTrailing));
-            case CstNode.Token tk -> new CstNode.Token(tk.id(),
-                                                       tk.span(),
-                                                       tk.rule(),
-                                                       tk.text(),
-                                                       leading,
-                                                       combine(drainExtra, extraTrailing));
-            case CstNode.Error e -> new CstNode.Error(e.id(),
-                                                      e.span(),
-                                                      e.skippedText(),
-                                                      e.expected(),
-                                                      leading,
-                                                      combine(drainExtra, extraTrailing));
+            case CstNode.Terminal t -> rebuildTerminal(t, leading, extraTrailing, drainExtra);
+            case CstNode.Token tk -> rebuildToken(tk, leading, extraTrailing, drainExtra);
+            case CstNode.Error e -> rebuildError(e, leading, extraTrailing, drainExtra);
         };
+    }
+
+    /**
+     * Cleanup D: skip allocation when the rebuild would produce a leaf
+     * identical to the input. The leaf result has {@code leading} as
+     * leadingTrivia and {@code combine(drainExtra, extraTrailing)} as
+     * trailing. When all three inputs are empty AND the input leaf already
+     * has empty leading/trailing, the rebuilt node would be content-equal
+     * to the input — return the input reference and avoid allocating.
+     */
+    private static CstNode.Terminal rebuildTerminal(CstNode.Terminal t,
+                                                    List<Trivia> leading,
+                                                    List<Trivia> extraTrailing,
+                                                    List<Trivia> drainExtra) {
+        if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, t.leadingTrivia(), t.trailingTrivia())) {
+            return t;
+        }
+        return new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, combine(drainExtra, extraTrailing));
+    }
+
+    private static CstNode.Token rebuildToken(CstNode.Token tk,
+                                              List<Trivia> leading,
+                                              List<Trivia> extraTrailing,
+                                              List<Trivia> drainExtra) {
+        if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, tk.leadingTrivia(), tk.trailingTrivia())) {
+            return tk;
+        }
+        return new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, combine(drainExtra, extraTrailing));
+    }
+
+    private static CstNode.Error rebuildError(CstNode.Error e,
+                                              List<Trivia> leading,
+                                              List<Trivia> extraTrailing,
+                                              List<Trivia> drainExtra) {
+        if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, e.leadingTrivia(), e.trailingTrivia())) {
+            return e;
+        }
+        return new CstNode.Error(e.id(),
+                                 e.span(),
+                                 e.skippedText(),
+                                 e.expected(),
+                                 leading,
+                                 combine(drainExtra, extraTrailing));
+    }
+
+    private static boolean canSkipLeafRebuild(List<Trivia> leading,
+                                              List<Trivia> extraTrailing,
+                                              List<Trivia> drainExtra,
+                                              List<Trivia> existingLeading,
+                                              List<Trivia> existingTrailing) {
+        return leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty() && existingLeading.isEmpty() && existingTrailing.isEmpty();
     }
 
     /**
@@ -270,6 +312,10 @@ public final class TriviaPostPass {
      * propagated DOWN into the deepest-rightmost descendant of the last
      * child — eliminates the post-construction
      * {@code attachTrailingToTail} spine rebuild (H1).
+     *
+     * <p>Cleanup D fast-path: leaves with no incoming trivia and already-empty
+     * existing trivia are returned unchanged. NonTerminals delegate to
+     * {@link #rebuildNonTerminal}, which has its own skip-when-unchanged path.
      */
     private static CstNode rebuildChild(String input,
                                         CstNode child,
@@ -288,14 +334,9 @@ public final class TriviaPostPass {
                                                               leading,
                                                               List.of(),
                                                               drainExtra);
-            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, drainExtra);
-            case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, drainExtra);
-            case CstNode.Error e -> new CstNode.Error(e.id(),
-                                                      e.span(),
-                                                      e.skippedText(),
-                                                      e.expected(),
-                                                      leading,
-                                                      drainExtra);
+            case CstNode.Terminal t -> rebuildTerminal(t, leading, List.of(), drainExtra);
+            case CstNode.Token tk -> rebuildToken(tk, leading, List.of(), drainExtra);
+            case CstNode.Error e -> rebuildError(e, leading, List.of(), drainExtra);
         };
     }
 
@@ -318,6 +359,12 @@ public final class TriviaPostPass {
             // wrapper-level extraTrailing and any drained extra from outer
             // wrappers (no deeper descendant to absorb it into).
             var internalTrailing = scanWhitespaceFast(input, spanStart, spanEnd, grammar, lineStarts);
+            // Cleanup D: skip allocation if rebuild would yield identical content.
+            if (leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty() && internalTrailing.isEmpty() && nt.leadingTrivia()
+                                                                                                                        .isEmpty() && nt.trailingTrivia()
+                                                                                                                                        .isEmpty()) {
+                return nt;
+            }
             return new CstNode.NonTerminal(nt.id(),
                                            nt.span(),
                                            nt.rule(),
@@ -340,18 +387,46 @@ public final class TriviaPostPass {
         // any drainExtra threaded from an outer wrapper. extraTrailing stays
         // on the wrapper — only post-EOF root trivia uses that slot.
         var lastChildDrain = combine(drainExtra, internalTrailing);
-        var newChildren = new ArrayList<CstNode>(childCount);
+        // Cleanup D: when no incoming trivia and no internal trailing AND existing
+        // wrapper trivia already empty, the rebuild can return nt unchanged IFF
+        // every rebuilt child is reference-equal to its input (i.e. each child
+        // also took its own skip path). Defer the allocation until we discover
+        // the first real change.
+        boolean canSkip = leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty() && internalTrailing.isEmpty() && nt.leadingTrivia()
+                                                                                                                                  .isEmpty() && nt.trailingTrivia()
+                                                                                                                                                  .isEmpty();
+        ArrayList<CstNode> newChildren = null;
         int cursor = spanStart;
         for (int i = 0; i < childCount; i++ ) {
             var c = children.get(i);
             var drainForThis = (i == childCount - 1)
                                ? lastChildDrain
                                : List.<Trivia>of();
-            newChildren.add(rebuildChild(input, c, grammar, lineStarts, cursor, drainForThis));
+            var rebuilt = rebuildChild(input, c, grammar, lineStarts, cursor, drainForThis);
+            if (newChildren == null) {
+                if (rebuilt != c) {
+                    // First divergence: materialize the list with the children
+                    // we have so far (all reference-equal to input) plus this one.
+                    newChildren = new ArrayList<>(childCount);
+                    for (int j = 0; j < i; j++ ) {
+                        newChildren.add(children.get(j));
+                    }
+                    newChildren.add(rebuilt);
+                }
+            }else {
+                newChildren.add(rebuilt);
+            }
             cursor = c.span()
                       .endOffset();
         }
-        return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, extraTrailing);
+        if (newChildren == null && canSkip) {
+            // All children unchanged AND wrapper-level rebuild would be a no-op.
+            return nt;
+        }
+        var finalChildren = newChildren == null
+                            ? children
+                            : List.copyOf(newChildren);
+        return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), finalChildren, leading, extraTrailing);
     }
 
     private static List<Trivia> combine(List<Trivia> a, List<Trivia> b) {

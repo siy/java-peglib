@@ -7386,23 +7386,55 @@ public final class ParserGenerator {
         sb.append("                                           List<Trivia> drainExtra, boolean wrapperSpanIncludesLeading) {\n");
         sb.append("            return switch (node) {\n");
         sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, extraTrailing, drainExtra, wrapperSpanIncludesLeading);\n");
-        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, combine(drainExtra, extraTrailing));\n");
-        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, combine(drainExtra, extraTrailing));\n");
+        sb.append("                case CstNode.Terminal t -> rebuildTerminal(t, leading, extraTrailing, drainExtra);\n");
+        sb.append("                case CstNode.Token tk -> rebuildToken(tk, leading, extraTrailing, drainExtra);\n");
         if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, combine(drainExtra, extraTrailing));\n");
+            sb.append("                case CstNode.Error e -> rebuildError(e, leading, extraTrailing, drainExtra);\n");
         }
         sb.append("            };\n");
         sb.append("        }\n\n");
+        // Cleanup D: leaf rebuild helpers — skip allocation when the rebuild
+        // would yield content-equal nodes (all incoming trivia empty AND
+        // existing trivia already empty).
+        sb.append("        private static boolean canSkipLeafRebuild(List<Trivia> leading, List<Trivia> extraTrailing,\n");
+        sb.append("                                                  List<Trivia> drainExtra,\n");
+        sb.append("                                                  List<Trivia> existingLeading, List<Trivia> existingTrailing) {\n");
+        sb.append("            return leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty()\n");
+        sb.append("                   && existingLeading.isEmpty() && existingTrailing.isEmpty();\n");
+        sb.append("        }\n\n");
+        sb.append("        private static CstNode.Terminal rebuildTerminal(CstNode.Terminal t, List<Trivia> leading,\n");
+        sb.append("                                                        List<Trivia> extraTrailing, List<Trivia> drainExtra) {\n");
+        sb.append("            if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, t.leadingTrivia(), t.trailingTrivia())) {\n");
+        sb.append("                return t;\n");
+        sb.append("            }\n");
+        sb.append("            return new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, combine(drainExtra, extraTrailing));\n");
+        sb.append("        }\n\n");
+        sb.append("        private static CstNode.Token rebuildToken(CstNode.Token tk, List<Trivia> leading,\n");
+        sb.append("                                                  List<Trivia> extraTrailing, List<Trivia> drainExtra) {\n");
+        sb.append("            if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, tk.leadingTrivia(), tk.trailingTrivia())) {\n");
+        sb.append("                return tk;\n");
+        sb.append("            }\n");
+        sb.append("            return new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, combine(drainExtra, extraTrailing));\n");
+        sb.append("        }\n\n");
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("        private static CstNode.Error rebuildError(CstNode.Error e, List<Trivia> leading,\n");
+            sb.append("                                                  List<Trivia> extraTrailing, List<Trivia> drainExtra) {\n");
+            sb.append("            if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, e.leadingTrivia(), e.trailingTrivia())) {\n");
+            sb.append("                return e;\n");
+            sb.append("            }\n");
+            sb.append("            return new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, combine(drainExtra, extraTrailing));\n");
+            sb.append("        }\n\n");
+        }
         sb.append("        private static CstNode rebuildChild(String input, CstNode child, int[] lineStarts, int prevEnd,\n");
         sb.append("                                            List<Trivia> drainExtra, boolean wrapperSpanIncludesLeading) {\n");
         sb.append("            int childStart = child.span().startOffset();\n");
         sb.append("            var leading = scanWhitespace(input, prevEnd, childStart, lineStarts);\n");
         sb.append("            return switch (child) {\n");
         sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, java.util.List.<Trivia>of(), drainExtra, wrapperSpanIncludesLeading);\n");
-        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, drainExtra);\n");
-        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, drainExtra);\n");
+        sb.append("                case CstNode.Terminal t -> rebuildTerminal(t, leading, java.util.List.<Trivia>of(), drainExtra);\n");
+        sb.append("                case CstNode.Token tk -> rebuildToken(tk, leading, java.util.List.<Trivia>of(), drainExtra);\n");
         if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, drainExtra);\n");
+            sb.append("                case CstNode.Error e -> rebuildError(e, leading, java.util.List.<Trivia>of(), drainExtra);\n");
         }
         sb.append("            };\n");
         sb.append("        }\n\n");
@@ -7429,6 +7461,12 @@ public final class ParserGenerator {
         sb.append("                // trailing. Combine with caller-supplied drainExtra (no deeper\n");
         sb.append("                // descendant to absorb it) and extraTrailing.\n");
         sb.append("                var internalTrailing = scanWhitespace(input, cursor, spanEnd, lineStarts);\n");
+        sb.append("                // Cleanup D: skip allocation if rebuild would yield identical content.\n");
+        sb.append("                if (leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty()\n");
+        sb.append("                    && internalTrailing.isEmpty()\n");
+        sb.append("                    && nt.leadingTrivia().isEmpty() && nt.trailingTrivia().isEmpty()) {\n");
+        sb.append("                    return nt;\n");
+        sb.append("                }\n");
         sb.append("                return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), children, leading,\n");
         sb.append("                        combine(combine(drainExtra, internalTrailing), extraTrailing));\n");
         sb.append("            }\n");
@@ -7440,14 +7478,32 @@ public final class ParserGenerator {
         sb.append("            int lastChildEnd = children.get(childCount - 1).span().endOffset();\n");
         sb.append("            var internalTrailing = scanWhitespace(input, lastChildEnd, spanEnd, lineStarts);\n");
         sb.append("            var lastChildDrain = combine(drainExtra, internalTrailing);\n");
-        sb.append("            var newChildren = new ArrayList<CstNode>(childCount);\n");
+        sb.append("            // Cleanup D: defer ArrayList allocation until first child diverges; skip\n");
+        sb.append("            // wrapper-rebuild entirely when no incoming trivia and no internal change.\n");
+        sb.append("            boolean canSkip = leading.isEmpty() && extraTrailing.isEmpty() && drainExtra.isEmpty()\n");
+        sb.append("                              && internalTrailing.isEmpty()\n");
+        sb.append("                              && nt.leadingTrivia().isEmpty() && nt.trailingTrivia().isEmpty();\n");
+        sb.append("            ArrayList<CstNode> newChildren = null;\n");
         sb.append("            for (int i = 0; i < childCount; i++) {\n");
         sb.append("                var c = children.get(i);\n");
         sb.append("                var drainForThis = (i == childCount - 1) ? lastChildDrain : java.util.List.<Trivia>of();\n");
-        sb.append("                newChildren.add(rebuildChild(input, c, lineStarts, cursor, drainForThis, wrapperSpanIncludesLeading));\n");
+        sb.append("                var rebuilt = rebuildChild(input, c, lineStarts, cursor, drainForThis, wrapperSpanIncludesLeading);\n");
+        sb.append("                if (newChildren == null) {\n");
+        sb.append("                    if (rebuilt != c) {\n");
+        sb.append("                        newChildren = new ArrayList<CstNode>(childCount);\n");
+        sb.append("                        for (int j = 0; j < i; j++) newChildren.add(children.get(j));\n");
+        sb.append("                        newChildren.add(rebuilt);\n");
+        sb.append("                    }\n");
+        sb.append("                } else {\n");
+        sb.append("                    newChildren.add(rebuilt);\n");
+        sb.append("                }\n");
         sb.append("                cursor = c.span().endOffset();\n");
         sb.append("            }\n");
-        sb.append("            return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, extraTrailing);\n");
+        sb.append("            if (newChildren == null && canSkip) {\n");
+        sb.append("                return nt;\n");
+        sb.append("            }\n");
+        sb.append("            var finalChildren = newChildren == null ? children : List.copyOf(newChildren);\n");
+        sb.append("            return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), finalChildren, leading, extraTrailing);\n");
         sb.append("        }\n\n");
         sb.append("        private static List<Trivia> combine(List<Trivia> a, List<Trivia> b) {\n");
         sb.append("            if (a.isEmpty()) return b;\n");
