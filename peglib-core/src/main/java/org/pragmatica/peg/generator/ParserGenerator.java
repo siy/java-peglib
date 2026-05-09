@@ -1947,20 +1947,26 @@ public final class ParserGenerator {
                     List<Trivia> leadingTrivia();
                     List<Trivia> trailingTrivia();
 
-                    record Terminal(long id, SourceSpan span, RuleId rule, String text,
+                    record Terminal(long id, SourceSpan span, RuleId rule, StringSpan textSpan,
                                     List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        /** Convenience constructor — wraps a String as a fully-materialized StringSpan. */
+                        public Terminal(long id, SourceSpan span, RuleId rule, String text,
+                                        List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) {
+                            this(id, span, rule, StringSpan.ofString(text), leadingTrivia, trailingTrivia);
+                        }
+                        public String text() { return textSpan.toString(); }
                         @Override
                         public boolean equals(Object other) {
                             return other instanceof Terminal that
                                 && java.util.Objects.equals(span, that.span)
                                 && java.util.Objects.equals(rule, that.rule)
-                                && java.util.Objects.equals(text, that.text)
+                                && java.util.Objects.equals(textSpan, that.textSpan)
                                 && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
                                 && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
                         }
                         @Override
                         public int hashCode() {
-                            return java.util.Objects.hash(Terminal.class, span, rule, text, leadingTrivia, trailingTrivia);
+                            return java.util.Objects.hash(Terminal.class, span, rule, textSpan, leadingTrivia, trailingTrivia);
                         }
                     }
 
@@ -1981,20 +1987,26 @@ public final class ParserGenerator {
                         }
                     }
 
-                    record Token(long id, SourceSpan span, RuleId rule, String text,
+                    record Token(long id, SourceSpan span, RuleId rule, StringSpan textSpan,
                                  List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) implements CstNode {
+                        /** Convenience constructor — wraps a String as a fully-materialized StringSpan. */
+                        public Token(long id, SourceSpan span, RuleId rule, String text,
+                                     List<Trivia> leadingTrivia, List<Trivia> trailingTrivia) {
+                            this(id, span, rule, StringSpan.ofString(text), leadingTrivia, trailingTrivia);
+                        }
+                        public String text() { return textSpan.toString(); }
                         @Override
                         public boolean equals(Object other) {
                             return other instanceof Token that
                                 && java.util.Objects.equals(span, that.span)
                                 && java.util.Objects.equals(rule, that.rule)
-                                && java.util.Objects.equals(text, that.text)
+                                && java.util.Objects.equals(textSpan, that.textSpan)
                                 && java.util.Objects.equals(leadingTrivia, that.leadingTrivia)
                                 && java.util.Objects.equals(trailingTrivia, that.trailingTrivia);
                         }
                         @Override
                         public int hashCode() {
-                            return java.util.Objects.hash(Token.class, span, rule, text, leadingTrivia, trailingTrivia);
+                            return java.util.Objects.hash(Token.class, span, rule, textSpan, leadingTrivia, trailingTrivia);
                         }
                     }
             """);
@@ -2021,6 +2033,80 @@ public final class ParserGenerator {
                 """);
         }
         sb.append("""
+                }
+
+                /**
+                 * View into a substring of the parser input. Defers materialization to a
+                 * Java String until first access via toString(). Cleanup F.3: token text in
+                 * generated parsers flows through StringSpan to avoid eager substring()
+                 * allocation in match helpers, token boundary capture, and DFA fast-path.
+                 *
+                 * <p>Embedded inline so the standalone-parser invariant (depends only on
+                 * pragmatica-lite:core) is preserved.
+                 */
+                public static final class StringSpan implements CharSequence {
+                    private final String source;
+                    private final int start;
+                    private final int end;
+                    private String materialized;
+
+                    public StringSpan(String source, int start, int end) {
+                        this.source = source;
+                        this.start = start;
+                        this.end = end;
+                    }
+
+                    /** Wrap a fully-materialized String with no deferral. */
+                    public static StringSpan ofString(String text) {
+                        var span = new StringSpan(text, 0, text.length());
+                        span.materialized = text;
+                        return span;
+                    }
+
+                    public int start() { return start; }
+                    public int end() { return end; }
+
+                    @Override public int length() { return end - start; }
+                    @Override public char charAt(int i) { return source.charAt(start + i); }
+                    @Override public CharSequence subSequence(int s, int e) {
+                        return new StringSpan(source, start + s, start + e);
+                    }
+
+                    @Override
+                    public String toString() {
+                        var m = materialized;
+                        if (m == null) {
+                            m = source.substring(start, end);
+                            materialized = m;
+                        }
+                        return m;
+                    }
+
+                    @Override
+                    public boolean equals(Object o) {
+                        if (this == o) return true;
+                        if (o instanceof StringSpan that) {
+                            int len = this.length();
+                            if (len != that.length()) return false;
+                            if (this.source == that.source && this.start == that.start && this.end == that.end) return true;
+                            for (int i = 0; i < len; i++) {
+                                if (this.source.charAt(this.start + i) != that.source.charAt(that.start + i)) return false;
+                            }
+                            return true;
+                        }
+                        return false;
+                    }
+
+                    @Override
+                    public int hashCode() {
+                        if (materialized != null) return materialized.hashCode();
+                        int h = 0;
+                        int len = end - start;
+                        for (int i = 0; i < len; i++) {
+                            h = 31 * h + source.charAt(start + i);
+                        }
+                        return h;
+                    }
                 }
 
                 public sealed interface AstNode {
@@ -2519,6 +2605,15 @@ public final class ParserGenerator {
 
                 private String substring(int start, int end) {
                     return input.substring(start, end);
+                }
+
+                /**
+                 * Cleanup F.3: build a StringSpan view over the input without materializing
+                 * a Java String. Used by match helpers and token boundary capture so the
+                 * substring is deferred until a consumer actually needs it.
+                 */
+                private StringSpan substringSpan(int start, int end) {
+                    return new StringSpan(input, start, end);
                 }
 
                 private long cacheKey(int ruleId, int position) {
@@ -5060,12 +5155,13 @@ public final class ParserGenerator {
           .append("        column = fpCol")
           .append(id)
           .append(";\n");
+        // Cleanup F.3: emit StringSpan instead of input.substring(...) to defer
+        // materialization. Note: we use the parser instance's substringSpan()
+        // helper since fpInput is just a local alias for `input`.
         sb.append(pad)
           .append("        var tbText")
           .append(id)
-          .append(" = ")
-          .append(fpInput)
-          .append(".substring(")
+          .append(" = substringSpan(")
           .append(tbStartPos)
           .append(", ")
           .append(fpEnd)
@@ -6332,7 +6428,7 @@ public final class ParserGenerator {
                 sb.append(pad)
                   .append("    var tbText")
                   .append(id)
-                  .append(" = substring(")
+                  .append(" = substringSpan(")
                   .append(tbStartPos)
                   .append(", pos);\n");
                 sb.append(pad)
