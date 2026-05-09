@@ -335,6 +335,9 @@ public final class ParserGenerator {
         generateCstParseMethods(sb);
         generateCstRuleMethods(sb);
         generateCstHelperMethods(sb);
+        if (config.triviaPostPass()) {
+            generateCstTriviaPostPass(sb);
+        }
         generateClassEnd(sb);
         return sb.toString();
     }
@@ -2700,6 +2703,9 @@ public final class ParserGenerator {
         var expectedExpr = config.mutableParseResult()
                            ? "((furthestExpected != null && !furthestExpected.isEmpty()) ? furthestExpected : (result.expected != null ? result.expected : \"valid input\"))"
                            : "furthestExpected.filter(s -> !s.isEmpty()).or(result.expected.or(\"valid input\"))";
+        var postPassParseLine = config.triviaPostPass()
+                                ? "                    rootNode = TriviaPostPass.assignTrivia(input, rootNode, 0);\n"
+                                : "";
         sb.append("""
                 // === Public Parse Methods ===
 
@@ -2718,7 +2724,7 @@ public final class ParserGenerator {
                     }
                     // Attach trailing trivia to root node
                     var rootNode = attachTrailingTrivia(%s, trailingTrivia);
-                    return Result.success(rootNode);
+                %s    return Result.success(rootNode);
                 }
 
                 /**
@@ -2741,8 +2747,19 @@ public final class ParserGenerator {
                     };
                 }
 
-            """.formatted(sanitizedName, furthestFailureOrLoc, expectedExpr, furthestFailureOrLoc, resultNodeUnwrapExpr));
+            """.formatted(sanitizedName,
+                          furthestFailureOrLoc,
+                          expectedExpr,
+                          furthestFailureOrLoc,
+                          resultNodeUnwrapExpr,
+                          postPassParseLine));
         if (errorReporting == ErrorReporting.ADVANCED) {
+            var postPassDiagBranchLine = config.triviaPostPass()
+                                         ? "                            rootNode = TriviaPostPass.assignTrivia(input, rootNode, 0);\n"
+                                         : "";
+            var postPassDiagSuccessLine = config.triviaPostPass()
+                                          ? "                        rootNode = TriviaPostPass.assignTrivia(input, rootNode, 0);\n"
+                                          : "";
             sb.append("""
                     /**
                      * Parse with advanced error recovery and Rust-style diagnostics.
@@ -2781,11 +2798,11 @@ public final class ParserGenerator {
 
                             // Attach error node to result
                             var rootNode = attachTrailingTrivia(%s, trailingTrivia);
-                            return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
+                %s            return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
                         }
 
                         var rootNode = attachTrailingTrivia(%s, trailingTrivia);
-                        if (diagnostics.isEmpty()) {
+                %s        if (diagnostics.isEmpty()) {
                             return ParseResultWithDiagnostics.success(rootNode, input);
                         }
                         return ParseResultWithDiagnostics.withErrors(Option.some(rootNode), diagnostics, input);
@@ -2796,7 +2813,9 @@ public final class ParserGenerator {
                               expectedExpr,
                               furthestFailureOrLoc,
                               resultNodeUnwrapExpr,
-                              resultNodeUnwrapExpr));
+                              postPassDiagBranchLine,
+                              resultNodeUnwrapExpr,
+                              postPassDiagSuccessLine));
         }
         generateCstParseRuleAt(sb);
     }
@@ -2887,7 +2906,7 @@ public final class ParserGenerator {
                         var expected = __EXPECTED_EXPR__;
                         return Result.failure(new ParseError(errorLoc, "expected " + expected));
                     }
-                    return Result.success(new PartialParse(__RESULT_NODE__, pos));
+                    return Result.success(new PartialParse(__POST_PASS_WRAP__, pos));
                 }
 
                 /**
@@ -2911,9 +2930,13 @@ public final class ParserGenerator {
                 }
 
             """);
+        var postPassWrapExpr = config.triviaPostPass()
+                               ? "TriviaPostPass.assignTrivia(input, " + resultNodeUnwrapExpr + ", offset)"
+                               : resultNodeUnwrapExpr;
         sb.append(ruleAtBlock.toString()
                              .replace("__FURTHEST_FAILURE_OR_LOC__", furthestFailureOrLoc)
                              .replace("__EXPECTED_EXPR__", expectedExpr)
+                             .replace("__POST_PASS_WRAP__", postPassWrapExpr)
                              .replace("__RESULT_NODE__", resultNodeUnwrapExpr));
     }
 
@@ -7009,6 +7032,600 @@ public final class ParserGenerator {
                     }
                 """);
         }
+    }
+
+    // === Step 4 commit 4: embedded TriviaPostPass (flag-ON only) ===
+    /**
+     * Emit a {@code private static final class TriviaPostPass} embedded in the
+     * generated parser. Provides {@code assignTrivia(input, cst, leadingScanFrom)}
+     * with the same semantics as
+     * {@link org.pragmatica.peg.tree.TriviaPostPass#assignTrivia(String, CstNode, org.pragmatica.peg.grammar.Grammar, int)}.
+     *
+     * <p>The embedded class is fully self-contained: it depends only on the
+     * generated parser's own embedded {@code CstNode}, {@code Trivia}, and
+     * {@code SourceSpan} types (which themselves depend only on
+     * {@code pragmatica-lite:core}). It never imports any peglib runtime class,
+     * preserving the standalone-parser invariant.
+     *
+     * <p>The whitespace matcher is generated from the grammar's
+     * {@code %whitespace} expression at generation time, walking the expression
+     * tree and emitting Java code per Expression subtype. This avoids needing
+     * the runtime {@code Grammar} object at parse time.
+     */
+    private void generateCstTriviaPostPass(StringBuilder sb) {
+        var hasWhitespace = grammar.whitespace()
+                                   .isPresent();
+        sb.append("    // === Embedded TriviaPostPass (Step 4 commit 4 — flag-ON) ===\n");
+        sb.append("    /**\n");
+        sb.append("     * Re-derive leading/trailing trivia attribution from\n");
+        sb.append("     * (input, span, %whitespace) after the engine returns its CST.\n");
+        sb.append("     * Mirrors org.pragmatica.peg.tree.TriviaPostPass at the runtime.\n");
+        sb.append("     */\n");
+        sb.append("    private static final class TriviaPostPass {\n");
+        sb.append("        private TriviaPostPass() {}\n\n");
+        sb.append("        static CstNode assignTrivia(String input, CstNode cst, int leadingScanFrom) {\n");
+        sb.append("            int rootStart = cst.span().startOffset();\n");
+        sb.append("            if (leadingScanFrom < 0 || leadingScanFrom > rootStart) {\n");
+        sb.append("                // Generator span semantics: rootStart may be 0 (span includes\n");
+        sb.append("                // leading whitespace). Clamp leadingScanFrom rather than reject.\n");
+        sb.append("                if (leadingScanFrom > 0 && rootStart == 0) {\n");
+        sb.append("                    leadingScanFrom = 0;\n");
+        sb.append("                } else {\n");
+        sb.append("                    throw new IllegalArgumentException(\n");
+        sb.append("                        \"leadingScanFrom \" + leadingScanFrom + \" out of range [0, \" + rootStart + \"]\");\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("            return rebuildRoot(input, cst, leadingScanFrom);\n");
+        sb.append("        }\n\n");
+        sb.append("        static List<Trivia> scanWhitespace(String input, int from, int to) {\n");
+        sb.append("            if (from >= to) return List.of();\n");
+        if (!hasWhitespace) {
+            sb.append("            return List.of();\n");
+        }else {
+            sb.append("            var trivia = new ArrayList<Trivia>();\n");
+            sb.append("            int pos = from;\n");
+            sb.append("            while (pos < to) {\n");
+            sb.append("                int matched = matchWsInner(input, pos, to);\n");
+            sb.append("                if (matched < 0 || matched == pos) break;\n");
+            sb.append("                var text = input.substring(pos, matched);\n");
+            sb.append("                var span = computeSpan(input, pos, matched);\n");
+            sb.append("                trivia.add(classify(span, text));\n");
+            sb.append("                pos = matched;\n");
+            sb.append("            }\n");
+            sb.append("            return List.copyOf(trivia);\n");
+        }
+        sb.append("        }\n\n");
+        // === Tree rebuild ===
+        // Span-semantics adapter: the generated parser's rule wrappers may use
+        // a span whose startOffset INCLUDES leading whitespace (rule entry
+        // captures startOffset BEFORE skipWhitespace, then the leading trivia
+        // is attached as the wrapper's leadingTrivia). The runtime engine, by
+        // contrast, captures startOffset AFTER skipWhitespace. Detect this by
+        // measuring whether the root's existing leadingTrivia text overlaps
+        // [rootStart, rootStart + leadingLen). If so, use rootStart as the
+        // "leading-end" boundary AND leadingScanFrom + (rootStart - leadingScanFrom)
+        // = rootStart for the leading scan. Otherwise (runtime semantics),
+        // scan up to rootStart as the runtime post-pass does.
+        sb.append("        private static CstNode rebuildRoot(String input, CstNode root, int leadingScanFrom) {\n");
+        sb.append("            int rootStart = root.span().startOffset();\n");
+        sb.append("            int rootEnd = root.span().endOffset();\n");
+        sb.append("            int leadingTextLen = totalTriviaLength(root.leadingTrivia());\n");
+        sb.append("            // Generator semantics: span includes leading WS. The actual content\n");
+        sb.append("            // begins at (rootStart + leadingTextLen), and the leading WS lives\n");
+        sb.append("            // in [rootStart, rootStart + leadingTextLen).\n");
+        sb.append("            // Runtime semantics: span excludes leading WS. leadingTextLen is in\n");
+        sb.append("            // the gap [leadingScanFrom, rootStart). We distinguish by checking\n");
+        sb.append("            // whether scanning the pre-rootStart gap yields the leading.\n");
+        sb.append("            int leadingScanEnd;\n");
+        sb.append("            if (leadingTextLen > 0 && rootStart + leadingTextLen <= input.length()) {\n");
+        sb.append("                // Hypothesis: generator semantics — leading occupies [rootStart, rootStart + leadingTextLen).\n");
+        sb.append("                // Verify by re-scanning [rootStart, rootStart + leadingTextLen) and checking it consumes exactly that range.\n");
+        sb.append("                int probeEnd = rootStart + leadingTextLen;\n");
+        sb.append("                var probe = scanWhitespace(input, rootStart, probeEnd);\n");
+        sb.append("                if (totalTriviaLength(probe) == leadingTextLen) {\n");
+        sb.append("                    leadingScanEnd = probeEnd;\n");
+        sb.append("                } else {\n");
+        sb.append("                    leadingScanEnd = rootStart;\n");
+        sb.append("                }\n");
+        sb.append("            } else {\n");
+        sb.append("                leadingScanEnd = rootStart;\n");
+        sb.append("            }\n");
+        sb.append("            var leading = scanWhitespace(input, leadingScanFrom, leadingScanEnd);\n");
+        sb.append("            var trailingExternal = scanWhitespace(input, rootEnd, input.length());\n");
+        sb.append("            return rebuildSelf(input, root, leading, trailingExternal);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static int totalTriviaLength(List<Trivia> trivia) {\n");
+        sb.append("            int total = 0;\n");
+        sb.append("            for (var t : trivia) total += t.text().length();\n");
+        sb.append("            return total;\n");
+        sb.append("        }\n\n");
+        sb.append("        private static CstNode rebuildSelf(String input, CstNode node,\n");
+        sb.append("                                           List<Trivia> leading, List<Trivia> extraTrailing) {\n");
+        sb.append("            return switch (node) {\n");
+        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, leading, extraTrailing);\n");
+        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, extraTrailing);\n");
+        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, extraTrailing);\n");
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, extraTrailing);\n");
+        }
+        sb.append("            };\n");
+        sb.append("        }\n\n");
+        sb.append("        private static CstNode rebuildChild(String input, CstNode child, int prevEnd) {\n");
+        sb.append("            int childStart = child.span().startOffset();\n");
+        sb.append("            var leading = scanWhitespace(input, prevEnd, childStart);\n");
+        sb.append("            return switch (child) {\n");
+        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, leading, List.of());\n");
+        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, List.of());\n");
+        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, List.of());\n");
+        if (errorReporting == ErrorReporting.ADVANCED) {
+            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, List.of());\n");
+        }
+        sb.append("            };\n");
+        sb.append("        }\n\n");
+        sb.append("        private static CstNode.NonTerminal rebuildNonTerminal(String input, CstNode.NonTerminal nt,\n");
+        sb.append("                                                              List<Trivia> leading, List<Trivia> extraTrailing) {\n");
+        sb.append("            int spanStart = nt.span().startOffset();\n");
+        sb.append("            int spanEnd = nt.span().endOffset();\n");
+        sb.append("            var newChildren = new ArrayList<CstNode>(nt.children().size());\n");
+        sb.append("            int cursor = spanStart;\n");
+        sb.append("            for (var c : nt.children()) {\n");
+        sb.append("                var rebuilt = rebuildChild(input, c, cursor);\n");
+        sb.append("                newChildren.add(rebuilt);\n");
+        sb.append("                cursor = c.span().endOffset();\n");
+        sb.append("            }\n");
+        sb.append("            var internalTrailing = scanWhitespace(input, cursor, spanEnd);\n");
+        sb.append("            var trailing = combine(internalTrailing, extraTrailing);\n");
+        sb.append("            return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, trailing);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static List<Trivia> combine(List<Trivia> a, List<Trivia> b) {\n");
+        sb.append("            if (a.isEmpty()) return b;\n");
+        sb.append("            if (b.isEmpty()) return a;\n");
+        sb.append("            var combined = new ArrayList<Trivia>(a.size() + b.size());\n");
+        sb.append("            combined.addAll(a);\n");
+        sb.append("            combined.addAll(b);\n");
+        sb.append("            return List.copyOf(combined);\n");
+        sb.append("        }\n\n");
+        sb.append("        private static Trivia classify(SourceSpan span, String text) {\n");
+        sb.append("            if (text.startsWith(\"//\")) {\n");
+        sb.append("                return new Trivia.LineComment(span, text);\n");
+        sb.append("            } else if (text.startsWith(\"/*\")) {\n");
+        sb.append("                return new Trivia.BlockComment(span, text);\n");
+        sb.append("            } else {\n");
+        sb.append("                return new Trivia.Whitespace(span, text);\n");
+        sb.append("            }\n");
+        sb.append("        }\n\n");
+        // Static copy of matchesPattern for char-class matching inside the post-pass.
+        // Mirrors the instance-method MATCHES_PATTERN_METHOD emitted elsewhere; kept
+        // as a separate static copy because the embedded class cannot reach instance
+        // methods of the enclosing parser.
+        sb.append("        private static boolean matchesPattern(char c, String pattern, boolean caseInsensitive) {\n");
+        sb.append("            char testChar = caseInsensitive ? Character.toLowerCase(c) : c;\n");
+        sb.append("            int i = 0;\n");
+        sb.append("            while (i < pattern.length()) {\n");
+        sb.append("                char start = pattern.charAt(i);\n");
+        sb.append("                if (start == '\\\\' && i + 1 < pattern.length()) {\n");
+        sb.append("                    char escaped = pattern.charAt(i + 1);\n");
+        sb.append("                    int consumed = 2;\n");
+        sb.append("                    char expected = switch (escaped) {\n");
+        sb.append("                        case 'n' -> '\\n';\n");
+        sb.append("                        case 'r' -> '\\r';\n");
+        sb.append("                        case 't' -> '\\t';\n");
+        sb.append("                        case '\\\\' -> '\\\\';\n");
+        sb.append("                        case ']' -> ']';\n");
+        sb.append("                        case '-' -> '-';\n");
+        sb.append("                        case 'x' -> {\n");
+        sb.append("                            if (i + 4 <= pattern.length()) {\n");
+        sb.append("                                try {\n");
+        sb.append("                                    var hex = pattern.substring(i + 2, i + 4);\n");
+        sb.append("                                    consumed = 4;\n");
+        sb.append("                                    yield (char) Integer.parseInt(hex, 16);\n");
+        sb.append("                                } catch (NumberFormatException e) { yield 'x'; }\n");
+        sb.append("                            }\n");
+        sb.append("                            yield 'x';\n");
+        sb.append("                        }\n");
+        sb.append("                        case 'u' -> {\n");
+        sb.append("                            if (i + 6 <= pattern.length()) {\n");
+        sb.append("                                try {\n");
+        sb.append("                                    var hex = pattern.substring(i + 2, i + 6);\n");
+        sb.append("                                    consumed = 6;\n");
+        sb.append("                                    yield (char) Integer.parseInt(hex, 16);\n");
+        sb.append("                                } catch (NumberFormatException e) { yield 'u'; }\n");
+        sb.append("                            }\n");
+        sb.append("                            yield 'u';\n");
+        sb.append("                        }\n");
+        sb.append("                        default -> escaped;\n");
+        sb.append("                    };\n");
+        sb.append("                    if (caseInsensitive) expected = Character.toLowerCase(expected);\n");
+        sb.append("                    if (testChar == expected) return true;\n");
+        sb.append("                    i += consumed;\n");
+        sb.append("                    continue;\n");
+        sb.append("                }\n");
+        sb.append("                if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {\n");
+        sb.append("                    char end = pattern.charAt(i + 2);\n");
+        sb.append("                    if (caseInsensitive) {\n");
+        sb.append("                        start = Character.toLowerCase(start);\n");
+        sb.append("                        end = Character.toLowerCase(end);\n");
+        sb.append("                    }\n");
+        sb.append("                    if (testChar >= start && testChar <= end) return true;\n");
+        sb.append("                    i += 3;\n");
+        sb.append("                } else {\n");
+        sb.append("                    if (caseInsensitive) start = Character.toLowerCase(start);\n");
+        sb.append("                    if (testChar == start) return true;\n");
+        sb.append("                    i++;\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
+        sb.append("            return false;\n");
+        sb.append("        }\n\n");
+        sb.append("        private static SourceSpan computeSpan(String input, int from, int to) {\n");
+        sb.append("            int line = 1, col = 1;\n");
+        sb.append("            for (int i = 0; i < from; i++) {\n");
+        sb.append("                if (input.charAt(i) == '\\n') { line++; col = 1; } else { col++; }\n");
+        sb.append("            }\n");
+        sb.append("            int startLine = line, startCol = col;\n");
+        sb.append("            for (int i = from; i < to; i++) {\n");
+        sb.append("                if (input.charAt(i) == '\\n') { line++; col = 1; } else { col++; }\n");
+        sb.append("            }\n");
+        sb.append("            return new SourceSpan(startLine, startCol, from, line, col, to);\n");
+        sb.append("        }\n\n");
+        // Emit per-expression matcher methods.
+        if (hasWhitespace) {
+            var wsExpr = grammar.whitespace()
+                                .unwrap();
+            var inner = ExpressionShape.extractInnerExpression(wsExpr);
+            var ctx = new TriviaPostPassEmitContext();
+            // Reserve method id 0 for the entry point.
+            int entryId = ctx.allocate(inner);
+            // Emit the entry method as `matchWsInner`; rename later via direct emission.
+            sb.append("        private static int matchWsInner(String input, int pos, int limit) {\n");
+            sb.append("            return ")
+              .append(ctx.callName(entryId))
+              .append("(input, pos, limit);\n");
+            sb.append("        }\n\n");
+            // Emit all queued methods.
+            while (ctx.hasPending()) {
+                var entry = ctx.nextPending();
+                emitTriviaPostPassMatcher(sb, entry.expr(), entry.id(), ctx);
+            }
+        }
+        sb.append("    }\n\n");
+    }
+
+    /**
+     * Per-emission state for the embedded TriviaPostPass matcher generation.
+     * Allocates unique method ids per expression, deduplicating identical
+     * Reference targets and queueing each newly seen expression for emission.
+     */
+    private static final class TriviaPostPassEmitContext {
+        private final java.util.IdentityHashMap<Expression, Integer> idByExpr = new java.util.IdentityHashMap<>();
+        private final java.util.HashMap<String, Integer> idByRule = new java.util.HashMap<>();
+        private final java.util.ArrayDeque<TriviaPostPassEntry> queue = new java.util.ArrayDeque<>();
+        private int nextId = 0;
+
+        int allocate(Expression expr) {
+            var existing = idByExpr.get(expr);
+            if (existing != null) return existing;
+            int id = nextId++ ;
+            idByExpr.put(expr, id);
+            queue.add(new TriviaPostPassEntry(id, expr));
+            return id;
+        }
+
+        int allocateForRule(String ruleName, Expression body) {
+            var existing = idByRule.get(ruleName);
+            if (existing != null) return existing;
+            int id = allocate(body);
+            idByRule.put(ruleName, id);
+            return id;
+        }
+
+        boolean hasPending() {
+            return !queue.isEmpty();
+        }
+
+        TriviaPostPassEntry nextPending() {
+            return queue.removeFirst();
+        }
+
+        String callName(int id) {
+            return "matchWs_" + id;
+        }
+    }
+
+    private record TriviaPostPassEntry(int id, Expression expr) {}
+
+    /**
+     * Emit a single matcher method for {@code expr} into {@code sb}, naming it
+     * {@code matchWs_<id>(String input, int pos, int limit)}. Returns the next
+     * absolute offset on a successful match or {@code -1} on failure. Sub-
+     * expressions are queued via {@link TriviaPostPassEmitContext#allocate} and
+     * emitted in subsequent iterations.
+     */
+    private void emitTriviaPostPassMatcher(StringBuilder sb, Expression expr, int id, TriviaPostPassEmitContext ctx) {
+        sb.append("        private static int ")
+          .append(ctx.callName(id))
+          .append("(String input, int pos, int limit) {\n");
+        emitTriviaPostPassMatchBody(sb, expr, ctx, "            ");
+        sb.append("        }\n\n");
+    }
+
+    /**
+     * Emit the body of a matcher method for {@code expr}. The body must
+     * {@code return} an int value (next position or -1) on every control path.
+     */
+    private void emitTriviaPostPassMatchBody(StringBuilder sb,
+                                             Expression expr,
+                                             TriviaPostPassEmitContext ctx,
+                                             String indent) {
+        switch (expr) {
+            case Expression.Literal lit -> emitTppLiteral(sb, lit, indent);
+            case Expression.CharClass cc -> emitTppCharClass(sb, cc, indent);
+            case Expression.Any ignored -> {
+                sb.append(indent)
+                  .append("return pos < limit ? pos + 1 : -1;\n");
+            }
+            case Expression.Reference ref -> emitTppReference(sb, ref, ctx, indent);
+            case Expression.Sequence seq -> emitTppSequence(sb, seq, ctx, indent);
+            case Expression.Choice ch -> emitTppChoice(sb, ch, ctx, indent);
+            case Expression.ZeroOrMore zom -> emitTppZeroOrMore(sb, zom.expression(), ctx, indent);
+            case Expression.OneOrMore oom -> emitTppOneOrMore(sb, oom.expression(), ctx, indent);
+            case Expression.Optional opt -> emitTppOptional(sb, opt.expression(), ctx, indent);
+            case Expression.Repetition rep -> emitTppRepetition(sb, rep, ctx, indent);
+            case Expression.And and -> {
+                int sub = ctx.allocate(and.expression());
+                sb.append(indent)
+                  .append("return ")
+                  .append(ctx.callName(sub))
+                  .append("(input, pos, limit) >= 0 ? pos : -1;\n");
+            }
+            case Expression.Not not -> {
+                int sub = ctx.allocate(not.expression());
+                sb.append(indent)
+                  .append("return ")
+                  .append(ctx.callName(sub))
+                  .append("(input, pos, limit) < 0 ? pos : -1;\n");
+            }
+            case Expression.Group g -> emitTriviaPostPassMatchBody(sb, g.expression(), ctx, indent);
+            case Expression.TokenBoundary tb -> emitTriviaPostPassMatchBody(sb, tb.expression(), ctx, indent);
+            case Expression.Ignore ig -> emitTriviaPostPassMatchBody(sb, ig.expression(), ctx, indent);
+            case Expression.Capture cap -> emitTriviaPostPassMatchBody(sb, cap.expression(), ctx, indent);
+            case Expression.CaptureScope cs -> emitTriviaPostPassMatchBody(sb, cs.expression(), ctx, indent);
+            case Expression.BackReference ignored -> sb.append(indent)
+                                                       .append("return -1;\n");
+            case Expression.Dictionary ignored -> sb.append(indent)
+                                                    .append("return -1;\n");
+            case Expression.Cut ignored -> sb.append(indent)
+                                             .append("return pos;\n");
+        }
+    }
+
+    private void emitTppLiteral(StringBuilder sb, Expression.Literal lit, String indent) {
+        var literalStr = lit.text();
+        sb.append(indent)
+          .append("String text = ")
+          .append(quoteJavaString(literalStr))
+          .append(";\n");
+        sb.append(indent)
+          .append("int len = text.length();\n");
+        sb.append(indent)
+          .append("if (pos + len > limit) return -1;\n");
+        if (lit.caseInsensitive()) {
+            sb.append(indent)
+              .append("for (int i = 0; i < len; i++) {\n");
+            sb.append(indent)
+              .append("    if (Character.toLowerCase(input.charAt(pos + i)) != Character.toLowerCase(text.charAt(i))) return -1;\n");
+            sb.append(indent)
+              .append("}\n");
+        }else {
+            sb.append(indent)
+              .append("for (int i = 0; i < len; i++) {\n");
+            sb.append(indent)
+              .append("    if (input.charAt(pos + i) != text.charAt(i)) return -1;\n");
+            sb.append(indent)
+              .append("}\n");
+        }
+        sb.append(indent)
+          .append("return pos + len;\n");
+    }
+
+    private void emitTppCharClass(StringBuilder sb, Expression.CharClass cc, String indent) {
+        sb.append(indent)
+          .append("if (pos >= limit) return -1;\n");
+        sb.append(indent)
+          .append("char c = input.charAt(pos);\n");
+        sb.append(indent)
+          .append("boolean inClass = matchesPattern(c, ")
+          .append(quoteJavaString(cc.pattern()))
+          .append(", ")
+          .append(cc.caseInsensitive())
+          .append(");\n");
+        sb.append(indent)
+          .append("boolean ok = ")
+          .append(cc.negated()
+                  ? "!inClass"
+                  : "inClass")
+          .append(";\n");
+        sb.append(indent)
+          .append("return ok ? pos + 1 : -1;\n");
+    }
+
+    private void emitTppReference(StringBuilder sb,
+                                  Expression.Reference ref,
+                                  TriviaPostPassEmitContext ctx,
+                                  String indent) {
+        var ruleOpt = grammar.rule(ref.ruleName());
+        if (ruleOpt.isEmpty()) {
+            sb.append(indent)
+              .append("return -1;\n");
+            return;
+        }
+        int sub = ctx.allocateForRule(ref.ruleName(),
+                                      ruleOpt.unwrap()
+                                             .expression());
+        sb.append(indent)
+          .append("return ")
+          .append(ctx.callName(sub))
+          .append("(input, pos, limit);\n");
+    }
+
+    private void emitTppSequence(StringBuilder sb,
+                                 Expression.Sequence seq,
+                                 TriviaPostPassEmitContext ctx,
+                                 String indent) {
+        sb.append(indent)
+          .append("int cursor = pos;\n");
+        for (var elt : seq.elements()) {
+            int sub = ctx.allocate(elt);
+            sb.append(indent)
+              .append("cursor = ")
+              .append(ctx.callName(sub))
+              .append("(input, cursor, limit);\n");
+            sb.append(indent)
+              .append("if (cursor < 0) return -1;\n");
+        }
+        sb.append(indent)
+          .append("return cursor;\n");
+    }
+
+    private void emitTppChoice(StringBuilder sb, Expression.Choice ch, TriviaPostPassEmitContext ctx, String indent) {
+        for (var alt : ch.alternatives()) {
+            int sub = ctx.allocate(alt);
+            sb.append(indent)
+              .append("{\n");
+            sb.append(indent)
+              .append("    int r = ")
+              .append(ctx.callName(sub))
+              .append("(input, pos, limit);\n");
+            sb.append(indent)
+              .append("    if (r >= 0) return r;\n");
+            sb.append(indent)
+              .append("}\n");
+        }
+        sb.append(indent)
+          .append("return -1;\n");
+    }
+
+    private void emitTppZeroOrMore(StringBuilder sb, Expression body, TriviaPostPassEmitContext ctx, String indent) {
+        int sub = ctx.allocate(body);
+        sb.append(indent)
+          .append("int cursor = pos;\n");
+        sb.append(indent)
+          .append("while (true) {\n");
+        sb.append(indent)
+          .append("    int next = ")
+          .append(ctx.callName(sub))
+          .append("(input, cursor, limit);\n");
+        sb.append(indent)
+          .append("    if (next < 0 || next == cursor) break;\n");
+        sb.append(indent)
+          .append("    cursor = next;\n");
+        sb.append(indent)
+          .append("}\n");
+        sb.append(indent)
+          .append("return cursor;\n");
+    }
+
+    private void emitTppOneOrMore(StringBuilder sb, Expression body, TriviaPostPassEmitContext ctx, String indent) {
+        int sub = ctx.allocate(body);
+        sb.append(indent)
+          .append("int first = ")
+          .append(ctx.callName(sub))
+          .append("(input, pos, limit);\n");
+        sb.append(indent)
+          .append("if (first < 0 || first == pos) return -1;\n");
+        sb.append(indent)
+          .append("int cursor = first;\n");
+        sb.append(indent)
+          .append("while (true) {\n");
+        sb.append(indent)
+          .append("    int next = ")
+          .append(ctx.callName(sub))
+          .append("(input, cursor, limit);\n");
+        sb.append(indent)
+          .append("    if (next < 0 || next == cursor) break;\n");
+        sb.append(indent)
+          .append("    cursor = next;\n");
+        sb.append(indent)
+          .append("}\n");
+        sb.append(indent)
+          .append("return cursor;\n");
+    }
+
+    private void emitTppOptional(StringBuilder sb, Expression body, TriviaPostPassEmitContext ctx, String indent) {
+        int sub = ctx.allocate(body);
+        sb.append(indent)
+          .append("int next = ")
+          .append(ctx.callName(sub))
+          .append("(input, pos, limit);\n");
+        sb.append(indent)
+          .append("return next < 0 ? pos : next;\n");
+    }
+
+    private void emitTppRepetition(StringBuilder sb,
+                                   Expression.Repetition rep,
+                                   TriviaPostPassEmitContext ctx,
+                                   String indent) {
+        int sub = ctx.allocate(rep.expression());
+        var maxExpr = rep.max()
+                         .isPresent()
+                      ? String.valueOf(rep.max()
+                                          .unwrap())
+                      : "Integer.MAX_VALUE";
+        sb.append(indent)
+          .append("int cursor = pos;\n");
+        sb.append(indent)
+          .append("int count = 0;\n");
+        sb.append(indent)
+          .append("int max = ")
+          .append(maxExpr)
+          .append(";\n");
+        sb.append(indent)
+          .append("while (count < max) {\n");
+        sb.append(indent)
+          .append("    int next = ")
+          .append(ctx.callName(sub))
+          .append("(input, cursor, limit);\n");
+        sb.append(indent)
+          .append("    if (next < 0 || next == cursor) break;\n");
+        sb.append(indent)
+          .append("    cursor = next;\n");
+        sb.append(indent)
+          .append("    count++;\n");
+        sb.append(indent)
+          .append("}\n");
+        sb.append(indent)
+          .append("return count >= ")
+          .append(rep.min())
+          .append(" ? cursor : -1;\n");
+    }
+
+    /**
+     * Quote a string for embedding into Java source, escaping special chars.
+     * Mirrors the conventions used elsewhere in {@code ParserGenerator}.
+     */
+    private static String quoteJavaString(String s) {
+        var out = new StringBuilder(s.length() + 8);
+        out.append('"');
+        for (int i = 0; i < s.length(); i++ ) {
+            char c = s.charAt(i);
+            switch (c) {
+                case'"' -> out.append("\\\"");
+                case'\\' -> out.append("\\\\");
+                case'\n' -> out.append("\\n");
+                case'\r' -> out.append("\\r");
+                case'\t' -> out.append("\\t");
+                case'\b' -> out.append("\\b");
+                case'\f' -> out.append("\\f");
+                default -> {
+                    if (c < 0x20 || c == 0x7f) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    }else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+        out.append('"');
+        return out.toString();
     }
 
     // === Match-method emitters (phase 1 perf flags) ===
