@@ -491,6 +491,35 @@ Suite at `peglib-core/src/test/java/org/pragmatica/peg/perf/TriviaAdversarialTes
 
 After production rework: orthogonal Lever B blockers remain (fallback-rule bypass per §6.2 root cause #1, safe-pivot concept). Trivia rework alone removes ONE of two HANDOVER-cited blockers.
 
+### Step 4 production rework — commits 1-4 landed (2026-05-09)
+
+After Step 3 verdict, the production rework arc executed in the same session. Branch `release-0.5.1` advanced from `51144a6` to `dcd146f` (4 commits + 1 docs commit).
+
+| Commit | Description |
+|---|---|
+| `318f5cf` | feat: triviaPostPass flag wires TriviaPostPass as post-parse hook (Step 4 commit 1) |
+| `d7b3496` | feat: TriviaPostPass splice-offset overload for parseRuleAt subtree leading (Step 4 commit 2) |
+| `605327b` | perf: ParsingContext buffer ops no-op under triviaPostPass flag (Step 4 commit 3) |
+| `dcd146f` | feat: ParserGenerator emits embedded TriviaPostPass under flag-ON (Step 4 commit 4) |
+
+**Functional state:** the trivia rework is COMPLETE through commit 4. Under `triviaPostPass=true`:
+
+- **Interpreter** (`PegEngine`): buffer ops no-op via `ParsingContext` early-outs (38 call sites neutralized without source changes); post-pass produces correct attribution. Optimal — no wasted CPU.
+- **Generator** (`ParserGenerator`): generated parsers embed an inline `TriviaPostPass` (preserves standalone-parser invariant — generated parsers depend only on `pragmatica-lite:core`); `parseCst` calls the embedded post-pass after the body parse. Correct attribution; **suboptimal CPU** because buffer machinery still runs and is overwritten (commit 5 territory).
+- **`parseRuleAt`** honors splice offset (4-arg overload `assignTrivia(input, cst, grammar, leadingScanFrom)`); body subtree structurally identical to corresponding subtree of full reparse — Lever B unblocker validated in tests.
+
+**Test coverage:** 768 peglib-core tests + 1 pre-existing skip. `TriviaPostPassFlagTest` (12 tests across 4 nested classes), `TriviaPostPassSpliceOffsetTest` (7 tests), `GeneratedParserTriviaPostPassTest` (8 tests), `TriviaPostPassTest` (16 tests), `TriviaAdversarialTest` (16 enabled). All green under both flag-OFF (default) and flag-ON.
+
+**Default behavior (flag-OFF) unchanged** — every pre-existing test passes byte-for-byte identically. Adoption is opt-in via `PegParser.builder(grammar).triviaPostPass(true).build()` or constructing `ParserConfig` with the flag set.
+
+### Outstanding Step 4 work (next session)
+
+- **Commit 5: strip buffer machinery from generator emission under flag-ON.** Mirror commit 3 for the generator side. ~30 emission sites in `ParserGenerator.java` need flag-conditional skipping (don't emit appendPending/takePending/save/restore at combinators when gen-time flag is on). Pure CPU optimization; correctness already there. Bench A/B should show flag-ON generator wallclock improvement after this commit.
+- **Commit 6: default flip the flag.** Migration concern — tests that pin specific attribution layouts may shift (Step 3 prototype showed 6.4% of nodes have different attribution under post-pass; total trivia text preserved). Survey downstream impact before flipping.
+- **Bench impact study:** measure post-pass overhead on full-parse vs current attribution. Step 3 prototype was non-invasive (overlay); the rework wins back the buffer work but pays for the post-pass scan. Net likely positive but unmeasured.
+
+After commits 5-6, Lever B can be retried: `parseRuleAt` + post-pass produces structurally identical subtrees, removing the trivia-context-loss blocker. The orthogonal fallback-rule-bypass blocker (§6.2 root cause #1) still requires separate work.
+
 ### Items superseded by this session's work
 
 - §6.2 lever-1 puzzle: dissolved by Path D's stable-id algorithm.
@@ -502,4 +531,4 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 ---
 
-**Last updated:** 2026-05-09, end of trivia investigation arc on `release-0.5.1`. 0.5.0 published to Maven Central on 2026-05-08 (5 module artifacts). Branch `release-0.5.1` at `78c4003` — 3 commits past 0.5.1 base (`c9502c5` chore release prep, `d2cc6be` Step 2 adversarial corpus, `78c4003` Step 3 TriviaPostPass prototype). peglib-core 738 tests green + 1 pre-existing skipped (RoundTripTest legacy gap unchanged). Trivia rework verdict: **viable; ~6-10 days to production rework**. Detailed plan in §11 "Trivia investigation arc". Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: production trivia rework OR Lever C IR unification OR deferred char-class bit-packing reassessment.
+**Last updated:** 2026-05-09, end of Step 4 commits 1-4 of trivia production rework on `release-0.5.1`. 0.5.0 published to Maven Central on 2026-05-08 (5 module artifacts). Branch `release-0.5.1` at `dcd146f` — 8 commits past 0.5.1 base (chore release prep + 3 investigation commits + 4 rework commits). peglib-core 768 tests green + 1 pre-existing skipped. Trivia rework state: **functionally complete under `triviaPostPass=true` flag (opt-in)**. Default behavior unchanged. Outstanding: commit 5 (strip generator emission under flag-ON; pure CPU win), commit 6 (default flip with migration concern). Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: complete Step 4 (commits 5-6) OR pivot to Lever C IR unification OR Lever B retry now that trivia-context-loss blocker is gone (orthogonal fallback-bypass blocker remains).

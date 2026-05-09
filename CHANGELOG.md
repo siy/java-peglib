@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.1] - 2026-05-09
 
-_Unreleased — patch cycle following 0.5.0. Use this section to log fixes / minor perf tweaks / docs updates accumulated post-release._
+_Unreleased — patch cycle following 0.5.0._
 
 ### Added
 
+- **Trivia investigation arc — Steps 1-3** (2026-05-09): catalog of context-dependencies in current attribution, 17-test adversarial corpus targeting 7 divergence categories, post-pass prototype validating context-independent attribution. Round-trip preservation confirmed on 21/21 corpus + 9/9 adversarial inputs; 0 text loss across 46,756 nodes; `parseRuleAt` structural parity achievable under post-pass (load-bearing claim for incremental engine Lever B). Findings: [`docs/incremental/TRIVIA-ADVERSARIAL-FINDINGS.md`](docs/incremental/TRIVIA-ADVERSARIAL-FINDINGS.md). Verdict in HANDOVER §11.
+- **Trivia rework Step 4 commits 1-4** (production rework, foundational): opt-in `triviaPostPass` flag on `ParserConfig` (default `false` — zero behavior change). When enabled: post-parse hook applies `TriviaPostPass.assignTrivia(input, cst, grammar)` overriding buffer-driven attribution with context-independent re-derivation from `(input, span)` coordinates. `parseRuleAt` honors splice offset (4-arg overload `assignTrivia(input, cst, grammar, leadingScanFrom)`) — body subtree is structurally identical to corresponding subtree of full reparse, removing one of two HANDOVER §6.4 blockers for incremental engine Lever B. Generator-emitted parsers embed an inline post-pass equivalent (preserves standalone-parser invariant).
+- **`org.pragmatica.peg.tree.TriviaPostPass`** (new public API): pure function `(input, cst, grammar) → CstNode` that re-derives leading/trailing trivia from coordinates without parse-history dependency. 4-arg overload supports splice scenarios.
+
 ### Changed
+
+- `ParsingContext` pending-trivia methods (`appendPendingLeadingTrivia`, `takePendingLeadingTrivia`, `savePendingLeadingTrivia`, `restorePendingLeadingTrivia`) early-out when `config.triviaPostPass()=true` — buffer becomes dead weight under the flag and is skipped (38 call sites in `PegEngine` no-op without source changes).
 
 ### Fixed
 
