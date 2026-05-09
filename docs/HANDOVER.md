@@ -512,7 +512,11 @@ After Step 3 verdict, the production rework arc executed in the same session. Br
 
 **Default behavior (flag-OFF) unchanged** — every pre-existing test passes byte-for-byte identically. Adoption is opt-in via `PegParser.builder(grammar).triviaPostPass(true).build()` or constructing `ParserConfig` with the flag set.
 
-### Step 4 commit 5 landed; commit 6 attempted and reverted (BUG DISCOVERED)
+### Step 4 COMPLETE — all commits 1-7 shipped including default flip
+
+(historical note: commit 6 was attempted, reverted, and successfully retried after commit 7 fixed the underlying bug — see commits 6 → 7 → 6-redo sequence below)
+
+### Step 4 commit 5 landed; commit 6 attempted and reverted (BUG DISCOVERED — later fixed in commit 7)
 
 **Commit 5 (`4ed1cf5`)** — ParserGenerator emits no-op buffer methods under flag-ON. Pure CPU optimization parallel to commit 3 for the interpreter. Tests stay at 768 + 1 skip. Generated parser under flag-ON is now lean (no dead buffer work) AND correct (post-pass produces attribution).
 
@@ -554,6 +558,34 @@ This contradicts the post-pass spec doc claim: *"Total trivia text is preserved 
 
 After bug fix + commit 6, Lever B can be retried: `parseRuleAt` + post-pass produces structurally identical subtrees, removing the trivia-context-loss blocker. The orthogonal fallback-rule-bypass blocker (§6.2 root cause #1) still requires separate work.
 
+### Step 4 commit 7 — bug fix shipped (`612fbea`)
+
+After the diagnosis identified two distinct bugs in the post-pass implementation, commit 7 fixed both:
+
+1. **Bug C' drain compensation** — TriviaPostPass.rebuildNonTerminal now mirrors engine's `attachTrailingToTail`: orphan trivia drains into deepest-rightmost-leaf descendant instead of being placed on the wrapper's trailingTrivia. `CstReconstruct.emit` correctly emits leaf trailings on every walk path; the wrapper-trailing was invisible for non-last-wrapper-children. ~70 lines in `TriviaPostPass.java` runtime + ~30 lines in the embedded version emitted by `ParserGenerator.java`.
+
+2. **Generator-semantics cursor adjustment** — separately discovered: the generated parser's `wrapWithRuleName` produces wrappers whose span INCLUDES their own leading trivia (`startOffset` captured BEFORE `skipWhitespace`). The post-pass's child-walk at first-child time was double-emitting the wrapper's leading bytes via the first child's leading scan. Fix: `rebuildNonTerminal` probe-scans `[spanStart, spanStart+leadingLen)` and, if it matches the caller-supplied leading exactly, advances the cursor past it. Symmetric to existing `rebuildRoot` adapter; only kicks in for generator-semantics CSTs.
+
+Validation: RoundTripTest 22/22 under flag-ON (was 2/22 pre-fix). All 768 peglib-core tests + 1 skip green at flag-OFF default.
+
+**Honest scope note (from agent report):** two bugs were fixed under one commit message. Could have split into 7a/7b, but both touch the same `rebuildNonTerminal` method and same root cause family (post-pass not mirroring engine span/trivia coupling). The cursor-adjustment hunk is cleanly separable in the diff if retrospective splitting is desired.
+
+### Step 4 commit 6 — default flip succeeded (`3b372af`)
+
+After commit 7 fixed the bugs, commit 6 was retried: `ParserConfig.DEFAULT.triviaPostPass` and the `parserConfig(...)` factory both flipped from `false` to `true`. Two sentinel tests in `TriviaPostPassFlagTest` inverted (DefaultOffNoOp → DefaultOnNoOp; assert-false → assert-true).
+
+**Result: 0 test failures, 0 errors, 0 surprises.** No Tier-A/B/C cascade. The 8 `Phase{1,2}*ParityTest` files (which explicitly pass `triviaPostPass=false`) provide the legacy-attribution regression net. Other tests in the project use the default and are bit-for-bit identical under post-pass attribution thanks to the fix.
+
+**End-state for 0.5.1:** post-pass attribution is the default; legacy buffer-driven attribution is opt-out via explicit `new ParserConfig(..., triviaPostPass=false, ...)`. The trivia issue that motivated this multi-session investigation is **closed**: attribution is now context-independent, parseRuleAt produces structurally identical subtrees to full-reparse (Lever B trivia-context-loss blocker is RESOLVED), and the buffer machinery still functions for backward-compat.
+
+**Lever B retry:** the trivia-context-loss blocker is gone. The orthogonal fallback-rule-bypass blocker (§6.2 root cause #1) still requires separate work — that's the next-session entry point if pursuing incremental engine optimization.
+
+### Outstanding work (post-Step-4)
+
+- **Bench impact study** — measure post-pass overhead vs current attribution. Step 3 prototype was non-invasive (overlay); the rework wins back the buffer work but pays for the post-pass scan. Net likely positive but unmeasured. JMH bench A/B with `phase1_allStructural_mutableResult_autoSkipPackrat` variant under flag-ON vs flag-OFF on reference + selfhost fixtures would close this gap.
+- **Lever B retry** — fallback-rule-bypass blocker work (orthogonal to trivia, separately scoped).
+- **Lever C IR unification** — multi-week, maintainability-first.
+
 ### Items superseded by this session's work
 
 - §6.2 lever-1 puzzle: dissolved by Path D's stable-id algorithm.
@@ -565,4 +597,4 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 ---
 
-**Last updated:** 2026-05-09, end of Step 4 commits 1-5 of trivia production rework on `release-0.5.1` + commit 6 attempt with REVERT (bug discovered). Branch `release-0.5.1` at `4ed1cf5` — 9 commits past 0.5.1 base. peglib-core 768 tests green + 1 pre-existing skipped. Trivia rework state: **flag-ON path FUNCTIONAL on small grammars + adversarial inputs; KNOWN BUG on production Java 25 corpus (trivia text loss, not slot-shift). Default flip BLOCKED until bug fix.** Opt-in flag is shippable. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: diagnose + fix the embedded post-pass bug on Java 25 fixtures (likely in ParserGenerator's embedded TriviaPostPass emission, ~617 lines added in commit 4). Then reattempt commit 6.
+**Last updated:** 2026-05-09, end of Step 4 trivia production rework — COMPLETE. Branch `release-0.5.1` at `3b372af` — 12 commits past 0.5.1 base. peglib-core 768 tests + 1 pre-existing skipped, all green at the new default (post-pass attribution). Trivia rework state: **SHIPPED. `triviaPostPass=true` is the default in 0.5.1. Legacy buffer-driven attribution is opt-out.** Bug discovered in commit 6 attempt was diagnosed (commit 6 reverted) and fixed (commit 7); commit 6 retried successfully. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: bench impact study (post-pass vs buffer-driven; both fixtures), Lever B retry now that trivia-context-loss blocker is RESOLVED, OR Lever C IR unification.

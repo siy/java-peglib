@@ -20,11 +20,10 @@ _Unreleased — patch cycle following 0.5.0._
 - `ParsingContext` pending-trivia methods (`appendPendingLeadingTrivia`, `takePendingLeadingTrivia`, `savePendingLeadingTrivia`, `restorePendingLeadingTrivia`) early-out when `config.triviaPostPass()=true` — buffer becomes dead weight under the flag and is skipped (38 call sites in `PegEngine` no-op without source changes).
 - **Trivia rework Step 4 commit 5** (`4ed1cf5`): `ParserGenerator` emits no-op buffer methods under flag-ON. Mirror of commit 3 for the generator side — pure CPU optimization; correctness already from commit 4. Generated parsers under flag-ON no longer do dead-work buffer maintenance.
 
-### Known Issues
-
-- **`triviaPostPass=true` flag has a known bug on production Java 25 corpus** (discovered 2026-05-09 during Step 4 commit 6 attempt). Round-trip reconstruction LOSES trivia text — not just slot-shifts attribution but actual character loss. 20 of 22 RoundTripTest fixtures fail under flag-ON via the generated parser path: `void allCompoundAssignments` becomes `voidallCompoundAssignments` etc. Bug likely lives in the embedded TriviaPostPass emission (~617 lines added to ParserGenerator in commit 4). The flag remains **opt-in only**; the default is `false`. Validation gap: Step 3 prototype tests excluded the `/large/` fixture and used small grammars only. Track work: HANDOVER §11 "Step 4 commit 5 landed; commit 6 attempted and reverted (BUG DISCOVERED)".
-
 ### Fixed
+
+- **Trivia post-pass orphan-trivia placement matches engine's Bug C' compensation** (`612fbea`). Earlier commit 6 attempt revealed text-loss on Java 25 corpus (`void m()` → `voidm()`). Root cause: post-pass attached orphan trivia to wrapper.trailingTrivia, but `CstReconstruct.emit` only emits trailing for last-child of a wrapper — non-last-wrapper-trailing was invisible during reconstruction. Fix mirrors engine's `attachTrailingToTail` — drains orphan trivia into deepest-rightmost-leaf descendant. Plus a generator-semantics adapter: `rebuildNonTerminal` probe-scans for caller-supplied leading and skips it to prevent license-header double-emission on fixtures whose wrappers' spans include their own leading trivia. RoundTripTest 22/22 under flag-ON across all 22 corpus fixtures including `large/FactoryClassGenerator.java.txt`.
+- **`triviaPostPass` default flipped to `true`** (`3b372af`). After the fix, the default-flip succeeded with 0 test failures. Two sentinel tests in `TriviaPostPassFlagTest` inverted (DefaultOffNoOp → DefaultOnNoOp). Phase1/Phase2 parity tests insulated (explicitly pass `triviaPostPass=false`). The 8 fixture-pinning tests for the previous (buffer-driven) attribution remain green via explicit-OFF construction. **End-state for 0.5.1: post-pass attribution is the default; legacy buffer-driven attribution is opt-out via `new ParserConfig(..., triviaPostPass=false, ...)`.**
 
 ### Removed
 
