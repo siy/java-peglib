@@ -580,11 +580,40 @@ After commit 7 fixed the bugs, commit 6 was retried: `ParserConfig.DEFAULT.trivi
 
 **Lever B retry:** the trivia-context-loss blocker is gone. The orthogonal fallback-rule-bypass blocker (§6.2 root cause #1) still requires separate work — that's the next-session entry point if pursuing incremental engine optimization.
 
-### Outstanding work (post-Step-4)
+### Bench impact study (2026-05-09) — DONE; one bug fixed in flight
 
-- **Bench impact study** — measure post-pass overhead vs current attribution. Step 3 prototype was non-invasive (overlay); the rework wins back the buffer work but pays for the post-pass scan. Net likely positive but unmeasured. JMH bench A/B with `phase1_allStructural_mutableResult_autoSkipPackrat` variant under flag-ON vs flag-OFF on reference + selfhost fixtures would close this gap.
-- **Lever B retry** — fallback-rule-bypass blocker work (orthogonal to trivia, separately scoped).
+After Step 4 default flip, A/B bench (reference + selfhost, JMH 5/3, gc profile) revealed a critical regression:
+
+| Fixture | Buffer-driven | Post-pass (default) | Δ% |
+|---|---:|---:|---:|
+| Reference (1900 LOC) | 19.78 ms | **418 ms** | +2,013% |
+| Selfhost (37k LOC) | 934.7 ms | **198,679 ms** | +21,162% |
+
+Investigation: `computeSpan(input, from, to)` re-scanned `[0, from)` from offset 0 on every trivia chunk → O(K · N) → O(N²). Empirical exponent 1.88 at N=32000. RoundTripTest's correctness gate didn't catch this because tests run to completion without time limits.
+
+**Fix shipped** at `6675479` — line-start table approach. O(N) one-shot precompute + O(log N) binary search per chunk. Both runtime and emitted versions updated.
+
+Post-fix bench:
+
+| Fixture | Buffer-driven | Post-pass (post-fix) | Δ% |
+|---|---:|---:|---:|
+| Reference (1900 LOC) | 19.78 ms | 26.87 ms | +35.8% |
+| Selfhost (37k LOC) | 934.7 ms | 943.6 ms | +0.95% (within noise) |
+
+Reference is 36% slower than legacy; selfhost is at parity. The post-pass overhead is real on small inputs (one tree-walk) but amortizes for large inputs where buffer save/restore dominated. **Acceptable as default**; opt-out remains available via explicit `ParserConfig` constructor.
+
+Allocation rate is essentially flat (within ~16% of legacy on selfhost; line-start table + per-call int[2] tuples cost some bytes but no longer drive wallclock).
+
+**Lessons banked:**
+- Correctness tests should NOT be the only guard against perf regressions. RoundTripTest passed all 22 fixtures under flag-ON before the bench revealed the problem.
+- Bench A/B mandatory before any default-changing commit.
+- The diagnosis approach (read code → identify suspected hotspot → empirical timing harness → confirm with magnitude analysis) generalized well: the smoking gun was found in 30 minutes; the fix was 30 LOC.
+
+### Outstanding work (post-Step-4 + bench-fix)
+
+- **Lever B retry** — fallback-rule-bypass blocker work (orthogonal to trivia, separately scoped). The trivia-context-loss blocker is now fully RESOLVED.
 - **Lever C IR unification** — multi-week, maintainability-first.
+- **Tighten reference fixture overhead** — post-pass is 36% slower on small inputs. If important, address H1 (`attachTrailingToTail` spine rebuild) and/or H4 (probe-scan in rebuildNonTerminal). Probably not worth chasing; selfhost (the actual perf-critical workload) is at parity.
 
 ### Items superseded by this session's work
 
@@ -597,4 +626,4 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 ---
 
-**Last updated:** 2026-05-09, end of Step 4 trivia production rework — COMPLETE. Branch `release-0.5.1` at `3b372af` — 12 commits past 0.5.1 base. peglib-core 768 tests + 1 pre-existing skipped, all green at the new default (post-pass attribution). Trivia rework state: **SHIPPED. `triviaPostPass=true` is the default in 0.5.1. Legacy buffer-driven attribution is opt-out.** Bug discovered in commit 6 attempt was diagnosed (commit 6 reverted) and fixed (commit 7); commit 6 retried successfully. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: bench impact study (post-pass vs buffer-driven; both fixtures), Lever B retry now that trivia-context-loss blocker is RESOLVED, OR Lever C IR unification.
+**Last updated:** 2026-05-09, end of Step 4 trivia production rework + bench impact study + O(n²) fix. Branch `release-0.5.1` at `6675479` — 14 commits past 0.5.1 base. peglib-core 768 tests + 1 pre-existing skipped, all green at the new default (post-pass attribution). **Trivia rework state: SHIPPED + bench-validated.** `triviaPostPass=true` is default; selfhost wallclock at parity with legacy (within 1%); reference 36% slower (acceptable). Legacy buffer-driven attribution is opt-out. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: Lever B retry (fallback-rule-bypass blocker remains; trivia-context-loss blocker is RESOLVED) OR Lever C IR unification.
