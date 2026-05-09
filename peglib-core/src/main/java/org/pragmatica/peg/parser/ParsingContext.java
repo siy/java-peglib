@@ -487,8 +487,16 @@ public final class ParsingContext {
      * Append captured trivia to the pending-leading buffer. Called at sites
      * between sibling sequence elements (sequence, zero-or-more, one-or-more,
      * repetition) so the following sibling's leaf or rule can claim it.
+     *
+     * <p>Step 4 commit 3: when {@code config.triviaPostPass()} is true, the
+     * post-pass overrides all leading/trailing attribution after the main
+     * parse, so any work done by this buffer is discarded. Early-out to
+     * eliminate the wasted CPU.
      */
     public void appendPendingLeadingTrivia(List<Trivia> captured) {
+        if (config.triviaPostPass()) {
+            return;
+        }
         if (!captured.isEmpty()) {
             pendingLeadingTrivia.addAll(captured);
         }
@@ -499,8 +507,15 @@ public final class ParsingContext {
      * CstNode that owns {@code leadingTrivia} — leaf terminals, token
      * boundaries, or rule wrappers. Returns the previously-pending list; the
      * buffer is reset to empty.
+     *
+     * <p>Step 4 commit 3: under {@code config.triviaPostPass()=true}, returns
+     * an empty list without touching state — the post-pass will reattribute
+     * trivia regardless.
      */
     public List<Trivia> takePendingLeadingTrivia() {
+        if (config.triviaPostPass()) {
+            return List.of();
+        }
         if (pendingLeadingTrivia.isEmpty()) {
             return List.of();
         }
@@ -522,8 +537,15 @@ public final class ParsingContext {
      * branch later fails, restoring just the size cannot recover the consumed
      * items. The full-list snapshot guarantees byte-identical buffer state
      * regardless of intermediate drains.</p>
+     *
+     * <p>Step 4 commit 3: under {@code config.triviaPostPass()=true}, returns
+     * an empty sentinel list — the matching {@code restorePendingLeadingTrivia}
+     * is also a no-op, so the snapshot value is irrelevant.
      */
     public List<Trivia> savePendingLeadingTrivia() {
+        if (config.triviaPostPass()) {
+            return List.of();
+        }
         return List.copyOf(pendingLeadingTrivia);
     }
 
@@ -532,8 +554,15 @@ public final class ParsingContext {
      * Replaces all current contents with those from {@code snapshot},
      * recovering items that may have been drained by inner operations
      * inside a now-failed branch.
+     *
+     * <p>Step 4 commit 3: under {@code config.triviaPostPass()=true}, no-op —
+     * the buffer is never written under the flag, so there is nothing to
+     * restore.
      */
     public void restorePendingLeadingTrivia(List<Trivia> snapshot) {
+        if (config.triviaPostPass()) {
+            return;
+        }
         pendingLeadingTrivia.clear();
         pendingLeadingTrivia.addAll(snapshot);
     }

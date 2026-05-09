@@ -313,6 +313,70 @@ class TriviaPostPassFlagTest {
     }
 
     // ===================================================================
+    // 5. Step 4 commit 3 — buffer no-op under flag-ON
+    // ===================================================================
+
+    /**
+     * Step 4 commit 3 validation: under flag-ON, the engine's pending-leading
+     * trivia buffer ops in {@link org.pragmatica.peg.parser.ParsingContext}
+     * (append/take/save/restore) early-out — the buffer never accumulates
+     * state. The post-pass must still produce correct leading/trailing
+     * attribution because it derives the gap entirely from the raw input plus
+     * span offsets, independent of the now-empty intermediate buffer.
+     *
+     * <p>Indirect validation: if the buffer machinery were the source of the
+     * post-pass's correct attribution (it isn't), the early-out would break
+     * round-trip. The test asserts the same round-trip + leading-trivia
+     * properties as commit 2 with the buffer paths effectively disabled.
+     */
+    @Nested
+    @DisplayName("Buffer no-op under flag-ON (Step 4 commit 3)")
+    class BufferNoOpUnderFlagOn {
+
+        @Test
+        void flagOn_simpleNumber_postPassPopulatesLeadingDespiteBufferNoOp() {
+            var input = "  42  ";
+            var parser = PegParser.fromGrammar(SIMPLE_GRAMMAR, configOn())
+                                  .unwrap();
+            var cst = parser.parseCst(input)
+                            .unwrap();
+
+            // Round-trip = bytes preserved => post-pass attributed correctly
+            // even though the engine's pending-leading buffer was a no-op.
+            assertThat(reconstruct(cst)).isEqualTo(input);
+            // Total trivia text preserved.
+            assertThat(allTriviaText(cst)).isEqualTo("    ");
+        }
+
+        @Test
+        void flagOn_listInput_postPassAttributesAllTriviaWithEmptyBuffer() {
+            var input = "  alpha,\n  beta,\n  gamma  ";
+            var parser = PegParser.fromGrammar(LIST_GRAMMAR, configOn())
+                                  .unwrap();
+            var cst = parser.parseCst(input)
+                            .unwrap();
+
+            assertThat(reconstruct(cst)).isEqualTo(input);
+            // All whitespace is attributed somewhere; commas are literal
+            // terminals consumed by Tail and not part of trivia.
+            assertThat(allTriviaText(cst)).isEqualTo("  \n  \n    ");
+        }
+
+        @Test
+        void flagOn_commentedNumber_postPassClassifiesCommentsWithEmptyBuffer() {
+            var input = "// preamble\n42 // trailer\n";
+            var parser = PegParser.fromGrammar(COMMENT_GRAMMAR, configOn())
+                                  .unwrap();
+            var cst = parser.parseCst(input)
+                            .unwrap();
+
+            assertThat(reconstruct(cst)).isEqualTo(input);
+            assertThat(allTriviaText(cst)).contains("// preamble")
+                                          .contains("// trailer");
+        }
+    }
+
+    // ===================================================================
     // helpers (mirrors policy from TriviaPostPassTest)
     // ===================================================================
 
