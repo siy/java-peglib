@@ -21,6 +21,7 @@ import org.pragmatica.peg.tree.IdGenerator;
 import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
 import org.pragmatica.peg.tree.Trivia;
+import org.pragmatica.peg.tree.TriviaPostPass;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -286,7 +287,22 @@ public final class PegEngine implements Parser {
         var success = (ParseResult.Success) result;
         // Attach trailing trivia to root node
         var rootNode = attachTrailingTrivia(success.node(), trailingTrivia);
-        return Result.success(rootNode);
+        return Result.success(applyTriviaPostPass(input, rootNode));
+    }
+
+    /**
+     * Step 4 commit 1 (0.5.1): when {@code config.triviaPostPass()} is on,
+     * re-derive trivia attribution from {@code (input, span, grammar.whitespace())}
+     * via {@link TriviaPostPass#assignTrivia(String, CstNode, Grammar)}. The
+     * total trivia text is preserved (round-trip stays byte-equal); only the
+     * leading/trailing slot can shift. Off by default — bit-for-bit identical
+     * to prior releases when the flag is false.
+     */
+    private CstNode applyTriviaPostPass(String input, CstNode root) {
+        if (!config.triviaPostPass()) {
+            return root;
+        }
+        return TriviaPostPass.assignTrivia(input, root, grammar);
     }
 
     @Override
@@ -436,7 +452,7 @@ public final class PegEngine implements Parser {
                    .result();
         }
         var success = (ParseResult.Success) result;
-        return Result.success(new PartialParse(success.node(), ctx.pos()));
+        return Result.success(new PartialParse(applyTriviaPostPass(input, success.node()), ctx.pos()));
     }
 
     /**

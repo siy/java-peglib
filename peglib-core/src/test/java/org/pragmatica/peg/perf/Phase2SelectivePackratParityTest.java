@@ -54,7 +54,8 @@ class Phase2SelectivePackratParityTest {
         /* selectivePackrat       */ true,
         /* packratSkipRules       */ Set.of("Identifier", "QualifiedName", "Type"),
         /* mutableParseResult     */ false,
-        /* tokenFastPath          */ true
+        /* tokenFastPath          */ true,
+        /* triviaPostPass         */ false
     );
 
     static Stream<Path> corpusFiles() throws IOException {

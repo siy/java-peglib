@@ -60,6 +60,18 @@ import java.util.Set;
  *     left-recursive rules are excluded. Pass a non-empty explicit set to
  *     override the auto-detection with caller-curated rule names (the
  *     traditional 0.2.9 behaviour, retained verbatim for that case).
+ * @param triviaPostPass when {@code true}, the interpreter's {@code parseCst}
+ *     and {@code parseRuleAt} entry points apply
+ *     {@code TriviaPostPass.assignTrivia(input, cst, grammar)} to the
+ *     successful CST before returning it. The post-pass replaces the trivia
+ *     attribution computed by the engine's buffer/save/restore machinery with
+ *     a context-independent attribution derived solely from
+ *     {@code (input, span, grammar.whitespace())}. Total trivia text is
+ *     preserved (round-trip reconstruction is byte-equal); only the
+ *     leading/trailing slot in which a given trivia chunk lives can differ.
+ *     Default: {@code false} (Step 4 commit 1 of trivia rework — flag-off
+ *     behaviour is bit-for-bit identical to prior releases). When
+ *     {@code false}, no post-pass is invoked.
  */
 public record ParserConfig(
  boolean packratEnabled,
@@ -77,7 +89,8 @@ public record ParserConfig(
  boolean selectivePackrat,
  Set<String> packratSkipRules,
  boolean mutableParseResult,
- boolean tokenFastPath) {
+ boolean tokenFastPath,
+ boolean triviaPostPass) {
     public static final ParserConfig DEFAULT = new ParserConfig(
     true,
     RecoveryStrategy.BASIC,
@@ -94,7 +107,8 @@ public record ParserConfig(
     true,
     Set.of(),
     false,
-    true);
+    true,
+    false);
 
     /**
      * Convenience factory for the three-field runtime configuration. Phase 1
@@ -122,6 +136,7 @@ public record ParserConfig(
         true,
         Set.of(),
         false,
-        true);
+        true,
+        false);
     }
 }

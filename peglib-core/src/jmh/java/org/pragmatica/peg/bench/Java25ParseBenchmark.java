@@ -195,7 +195,8 @@ public class Java25ParseBenchmark {
                 false,                      // selectivePackrat
                 Set.of(),                   // packratSkipRules
                 false,                      // mutableParseResult
-                false);                     // tokenFastPath
+                false,                      // tokenFastPath
+                false);                     // triviaPostPass
     }
 
     /**
@@ -242,7 +243,8 @@ public class Java25ParseBenchmark {
                 selectivePackrat,
                 Set.copyOf(packratSkipRules),
                 mutableParseResult,
-                tokenFastPath);             // phase 1.9 (DFA spike)
+                tokenFastPath,              // phase 1.9 (DFA spike)
+                false);                     // triviaPostPass (Step 4 commit 1)
     }
 
     static String loadResource(String resourcePath) throws Exception {

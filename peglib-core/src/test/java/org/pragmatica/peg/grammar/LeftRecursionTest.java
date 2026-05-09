@@ -227,7 +227,8 @@ class LeftRecursionTest {
             /* selectivePackrat       */ true,
             /* packratSkipRules       */ Set.of("Expr"),
             /* mutableParseResult     */ false,
-            /* tokenFastPath          */ true);
+            /* tokenFastPath          */ true,
+            /* triviaPostPass         */ false);
 
             var result = PegParser.fromGrammar("""
                 Expr <- Expr '+' Term / Term

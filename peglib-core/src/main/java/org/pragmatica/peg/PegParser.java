@@ -243,6 +243,7 @@ public final class PegParser {
         private boolean packratEnabled = true;
         private RecoveryStrategy recoveryStrategy = RecoveryStrategy.BASIC;
         private boolean captureTrivia = true;
+        private boolean triviaPostPass = false;
 
         private Builder(String grammarText) {
             this.grammarText = grammarText;
@@ -263,8 +264,37 @@ public final class PegParser {
             return this;
         }
 
+        /**
+         * 0.5.1 (Step 4 commit 1) — enable the post-parse trivia attribution
+         * pass. When on, the parser re-derives leading/trailing trivia from
+         * {@code (input, span, grammar.whitespace())} after the engine
+         * returns its CST. Default: off.
+         */
+        public Builder triviaPostPass(boolean enabled) {
+            this.triviaPostPass = enabled;
+            return this;
+        }
+
         public Result<Parser> build() {
-            var config = ParserConfig.parserConfig(packratEnabled, recoveryStrategy, captureTrivia);
+            var base = ParserConfig.parserConfig(packratEnabled, recoveryStrategy, captureTrivia);
+            var config = new ParserConfig(
+            base.packratEnabled(),
+            base.recoveryStrategy(),
+            base.captureTrivia(),
+            base.fastTrackFailure(),
+            base.literalFailureCache(),
+            base.charClassFailureCache(),
+            base.bulkAdvanceLiteral(),
+            base.skipWhitespaceFastPath(),
+            base.reuseEndLocation(),
+            base.choiceDispatch(),
+            base.markResetChildren(),
+            base.inlineLocations(),
+            base.selectivePackrat(),
+            base.packratSkipRules(),
+            base.mutableParseResult(),
+            base.tokenFastPath(),
+            triviaPostPass);
             return fromGrammar(grammarText, config);
         }
     }
