@@ -7336,6 +7336,12 @@ public final class ParserGenerator {
         // "leading-end" boundary AND leadingScanFrom + (rootStart - leadingScanFrom)
         // = rootStart for the leading scan. Otherwise (runtime semantics),
         // scan up to rootStart as the runtime post-pass does.
+        // H2 (Cleanup B): the wrapper-span semantics decision (does the rule
+        // wrapper's span INCLUDE its leading whitespace?) is a property of the
+        // GENERATED parser globally, not of an individual node. Detect it once
+        // at the root and propagate the boolean through the recursion so each
+        // NonTerminal can advance the child-cursor past leadingLen without
+        // re-probing scanWhitespace per node.
         sb.append("        private static CstNode rebuildRoot(String input, CstNode root, int[] lineStarts, int leadingScanFrom) {\n");
         sb.append("            int rootStart = root.span().startOffset();\n");
         sb.append("            int rootEnd = root.span().endOffset();\n");
@@ -7347,6 +7353,7 @@ public final class ParserGenerator {
         sb.append("            // the gap [leadingScanFrom, rootStart). We distinguish by checking\n");
         sb.append("            // whether scanning the pre-rootStart gap yields the leading.\n");
         sb.append("            int leadingScanEnd;\n");
+        sb.append("            boolean wrapperSpanIncludesLeading = false;\n");
         sb.append("            if (leadingTextLen > 0 && rootStart + leadingTextLen <= input.length()) {\n");
         sb.append("                // Hypothesis: generator semantics — leading occupies [rootStart, rootStart + leadingTextLen).\n");
         sb.append("                // Verify by re-scanning [rootStart, rootStart + leadingTextLen) and checking it consumes exactly that range.\n");
@@ -7354,6 +7361,7 @@ public final class ParserGenerator {
         sb.append("                var probe = scanWhitespace(input, rootStart, probeEnd, lineStarts);\n");
         sb.append("                if (totalTriviaLength(probe) == leadingTextLen) {\n");
         sb.append("                    leadingScanEnd = probeEnd;\n");
+        sb.append("                    wrapperSpanIncludesLeading = true;\n");
         sb.append("                } else {\n");
         sb.append("                    leadingScanEnd = rootStart;\n");
         sb.append("                }\n");
@@ -7362,91 +7370,84 @@ public final class ParserGenerator {
         sb.append("            }\n");
         sb.append("            var leading = scanWhitespace(input, leadingScanFrom, leadingScanEnd, lineStarts);\n");
         sb.append("            var trailingExternal = scanWhitespace(input, rootEnd, input.length(), lineStarts);\n");
-        sb.append("            return rebuildSelf(input, root, lineStarts, leading, trailingExternal);\n");
+        sb.append("            return rebuildSelf(input, root, lineStarts, leading, trailingExternal, java.util.List.<Trivia>of(), wrapperSpanIncludesLeading);\n");
         sb.append("        }\n\n");
         sb.append("        private static int totalTriviaLength(List<Trivia> trivia) {\n");
         sb.append("            int total = 0;\n");
         sb.append("            for (var t : trivia) total += t.text().length();\n");
         sb.append("            return total;\n");
         sb.append("        }\n\n");
+        // rebuildSelf: extraTrailing sticks on this node's own trailing slot
+        // (root post-EOF only). drainExtra propagates DOWN into the
+        // deepest-rightmost-leaf — H1 eliminates the post-construction
+        // attachTrailingToTail spine rebuild.
         sb.append("        private static CstNode rebuildSelf(String input, CstNode node, int[] lineStarts,\n");
-        sb.append("                                           List<Trivia> leading, List<Trivia> extraTrailing) {\n");
+        sb.append("                                           List<Trivia> leading, List<Trivia> extraTrailing,\n");
+        sb.append("                                           List<Trivia> drainExtra, boolean wrapperSpanIncludesLeading) {\n");
         sb.append("            return switch (node) {\n");
-        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, extraTrailing);\n");
-        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, extraTrailing);\n");
-        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, extraTrailing);\n");
+        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, extraTrailing, drainExtra, wrapperSpanIncludesLeading);\n");
+        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, combine(drainExtra, extraTrailing));\n");
+        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, combine(drainExtra, extraTrailing));\n");
         if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, extraTrailing);\n");
+            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, combine(drainExtra, extraTrailing));\n");
         }
         sb.append("            };\n");
         sb.append("        }\n\n");
-        sb.append("        private static CstNode rebuildChild(String input, CstNode child, int[] lineStarts, int prevEnd) {\n");
+        sb.append("        private static CstNode rebuildChild(String input, CstNode child, int[] lineStarts, int prevEnd,\n");
+        sb.append("                                            List<Trivia> drainExtra, boolean wrapperSpanIncludesLeading) {\n");
         sb.append("            int childStart = child.span().startOffset();\n");
         sb.append("            var leading = scanWhitespace(input, prevEnd, childStart, lineStarts);\n");
         sb.append("            return switch (child) {\n");
-        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, List.of());\n");
-        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, List.of());\n");
-        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, List.of());\n");
+        sb.append("                case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, lineStarts, leading, java.util.List.<Trivia>of(), drainExtra, wrapperSpanIncludesLeading);\n");
+        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, drainExtra);\n");
+        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, drainExtra);\n");
         if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, List.of());\n");
+            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), leading, drainExtra);\n");
         }
         sb.append("            };\n");
         sb.append("        }\n\n");
         sb.append("        private static CstNode.NonTerminal rebuildNonTerminal(String input, CstNode.NonTerminal nt, int[] lineStarts,\n");
-        sb.append("                                                              List<Trivia> leading, List<Trivia> extraTrailing) {\n");
+        sb.append("                                                              List<Trivia> leading, List<Trivia> extraTrailing,\n");
+        sb.append("                                                              List<Trivia> drainExtra, boolean wrapperSpanIncludesLeading) {\n");
         sb.append("            int spanStart = nt.span().startOffset();\n");
         sb.append("            int spanEnd = nt.span().endOffset();\n");
-        sb.append("            // Generator semantics adapter: the wrapper's span may INCLUDE its\n");
-        sb.append("            // own leading trivia (rule entry captures startOffset BEFORE\n");
-        sb.append("            // skipWhitespace). If the caller-supplied leading occupies\n");
-        sb.append("            // [spanStart, spanStart+leadingLen), advance cursor past it so the\n");
-        sb.append("            // first child's leading scan does not re-emit the same trivia.\n");
-        sb.append("            int leadingLen = totalTriviaLength(leading);\n");
+        sb.append("            // H2: span-semantics decided once at the root. When wrapper span\n");
+        sb.append("            // includes its own leading WS, advance cursor past leadingLen so the\n");
+        sb.append("            // first child's leading scan does not re-emit the same trivia. No\n");
+        sb.append("            // per-node probe scan.\n");
         sb.append("            int cursor = spanStart;\n");
-        sb.append("            if (leadingLen > 0 && spanStart + leadingLen <= input.length()) {\n");
-        sb.append("                var probe = scanWhitespace(input, spanStart, spanStart + leadingLen, lineStarts);\n");
-        sb.append("                if (totalTriviaLength(probe) == leadingLen) {\n");
+        sb.append("            if (wrapperSpanIncludesLeading) {\n");
+        sb.append("                int leadingLen = totalTriviaLength(leading);\n");
+        sb.append("                if (leadingLen > 0 && spanStart + leadingLen <= input.length()) {\n");
         sb.append("                    cursor = spanStart + leadingLen;\n");
         sb.append("                }\n");
         sb.append("            }\n");
-        sb.append("            var newChildren = new ArrayList<CstNode>(nt.children().size());\n");
-        sb.append("            for (var c : nt.children()) {\n");
-        sb.append("                var rebuilt = rebuildChild(input, c, lineStarts, cursor);\n");
-        sb.append("                newChildren.add(rebuilt);\n");
+        sb.append("            var children = nt.children();\n");
+        sb.append("            int childCount = children.size();\n");
+        sb.append("            if (childCount == 0) {\n");
+        sb.append("                // No children: gap [cursor, spanEnd) is the wrapper's internal\n");
+        sb.append("                // trailing. Combine with caller-supplied drainExtra (no deeper\n");
+        sb.append("                // descendant to absorb it) and extraTrailing.\n");
+        sb.append("                var internalTrailing = scanWhitespace(input, cursor, spanEnd, lineStarts);\n");
+        sb.append("                return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), children, leading,\n");
+        sb.append("                        combine(combine(drainExtra, internalTrailing), extraTrailing));\n");
+        sb.append("            }\n");
+        sb.append("            // H1: thread orphan trailing INTO the last child's rebuildChild as\n");
+        sb.append("            // drainExtra instead of rebuilding the spine afterwards. Mirrors\n");
+        sb.append("            // PegEngine.attachTrailingToTail (Bug C' compensation): the orphan\n");
+        sb.append("            // trivia ends up in the deepest-rightmost-leaf's trailing slot,\n");
+        sb.append("            // matching CstReconstruct.emit's last-child-only emission.\n");
+        sb.append("            int lastChildEnd = children.get(childCount - 1).span().endOffset();\n");
+        sb.append("            var internalTrailing = scanWhitespace(input, lastChildEnd, spanEnd, lineStarts);\n");
+        sb.append("            var lastChildDrain = combine(drainExtra, internalTrailing);\n");
+        sb.append("            var newChildren = new ArrayList<CstNode>(childCount);\n");
+        sb.append("            for (int i = 0; i < childCount; i++) {\n");
+        sb.append("                var c = children.get(i);\n");
+        sb.append("                var drainForThis = (i == childCount - 1) ? lastChildDrain : java.util.List.<Trivia>of();\n");
+        sb.append("                newChildren.add(rebuildChild(input, c, lineStarts, cursor, drainForThis, wrapperSpanIncludesLeading));\n");
         sb.append("                cursor = c.span().endOffset();\n");
         sb.append("            }\n");
-        sb.append("            // Bug C' compensation — drain orphan trailing into the last terminal\n");
-        sb.append("            // descendant so CstReconstruct.emit (last-child-trailing-only) stays\n");
-        sb.append("            // byte-equal even when this wrapper is not its parent's last child.\n");
-        sb.append("            var internalTrailing = scanWhitespace(input, cursor, spanEnd, lineStarts);\n");
-        sb.append("            List<Trivia> wrapperTrailing = extraTrailing;\n");
-        sb.append("            if (!internalTrailing.isEmpty() && !newChildren.isEmpty()) {\n");
-        sb.append("                int lastIdx = newChildren.size() - 1;\n");
-        sb.append("                newChildren.set(lastIdx, postPassAttachTrailingToTail(newChildren.get(lastIdx), internalTrailing));\n");
-        sb.append("            } else {\n");
-        sb.append("                wrapperTrailing = combine(internalTrailing, extraTrailing);\n");
-        sb.append("            }\n");
-        sb.append("            return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, wrapperTrailing);\n");
-        sb.append("        }\n\n");
-        sb.append("        private static CstNode postPassAttachTrailingToTail(CstNode node, List<Trivia> extra) {\n");
-        sb.append("            if (extra.isEmpty()) return node;\n");
-        sb.append("            return switch (node) {\n");
-        sb.append("                case CstNode.NonTerminal nt -> {\n");
-        sb.append("                    var children = nt.children();\n");
-        sb.append("                    if (children.isEmpty()) {\n");
-        sb.append("                        yield new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), children, nt.leadingTrivia(), combine(nt.trailingTrivia(), extra));\n");
-        sb.append("                    }\n");
-        sb.append("                    var newChildren = new ArrayList<CstNode>(children);\n");
-        sb.append("                    int lastIdx = newChildren.size() - 1;\n");
-        sb.append("                    newChildren.set(lastIdx, postPassAttachTrailingToTail(newChildren.get(lastIdx), extra));\n");
-        sb.append("                    yield new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), nt.leadingTrivia(), nt.trailingTrivia());\n");
-        sb.append("                }\n");
-        sb.append("                case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), t.leadingTrivia(), combine(t.trailingTrivia(), extra));\n");
-        sb.append("                case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), tk.leadingTrivia(), combine(tk.trailingTrivia(), extra));\n");
-        if (errorReporting == ErrorReporting.ADVANCED) {
-            sb.append("                case CstNode.Error e -> new CstNode.Error(e.id(), e.span(), e.skippedText(), e.expected(), e.leadingTrivia(), combine(e.trailingTrivia(), extra));\n");
-        }
-        sb.append("            };\n");
+        sb.append("            return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, extraTrailing);\n");
         sb.append("        }\n\n");
         sb.append("        private static List<Trivia> combine(List<Trivia> a, List<Trivia> b) {\n");
         sb.append("            if (a.isEmpty()) return b;\n");

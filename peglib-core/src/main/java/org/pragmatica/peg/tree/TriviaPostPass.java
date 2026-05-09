@@ -216,53 +216,86 @@ public final class TriviaPostPass {
         // Root trailing covers the gap from rootEnd to end-of-input (matches
         // current engine behaviour: top-level wrapper carries post-EOF trivia).
         var trailingExternal = scanWhitespaceFast(input, rootEnd, input.length(), grammar, lineStarts);
-        return rebuildSelf(input, root, grammar, lineStarts, leading, trailingExternal);
+        return rebuildSelf(input, root, grammar, lineStarts, leading, trailingExternal, List.of());
     }
 
     /**
      * Rebuild a node with explicit leading/extra-trailing computed by the
-     * caller. The "extra-trailing" is appended after the node's own
-     * within-span trailing (used only at the root to capture post-EOF
-     * trivia).
+     * caller. {@code extraTrailing} sticks on this node's own trailing slot
+     * (used only at the root to capture post-EOF trivia). {@code drainExtra}
+     * is the orphan-internal-trailing drained from an outer wrapper that
+     * must reach the deepest-rightmost-leaf descendant — H1 optimization
+     * eliminates the post-construction spine rebuild by threading it during
+     * recursion.
      */
     private static CstNode rebuildSelf(String input,
                                        CstNode node,
                                        Grammar grammar,
                                        int[] lineStarts,
                                        List<Trivia> leading,
-                                       List<Trivia> extraTrailing) {
+                                       List<Trivia> extraTrailing,
+                                       List<Trivia> drainExtra) {
         return switch (node) {
-            case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, grammar, lineStarts, leading, extraTrailing);
-            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, extraTrailing);
-            case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, extraTrailing);
+            case CstNode.NonTerminal nt -> rebuildNonTerminal(input,
+                                                              nt,
+                                                              grammar,
+                                                              lineStarts,
+                                                              leading,
+                                                              extraTrailing,
+                                                              drainExtra);
+            case CstNode.Terminal t -> new CstNode.Terminal(t.id(),
+                                                            t.span(),
+                                                            t.rule(),
+                                                            t.text(),
+                                                            leading,
+                                                            combine(drainExtra, extraTrailing));
+            case CstNode.Token tk -> new CstNode.Token(tk.id(),
+                                                       tk.span(),
+                                                       tk.rule(),
+                                                       tk.text(),
+                                                       leading,
+                                                       combine(drainExtra, extraTrailing));
             case CstNode.Error e -> new CstNode.Error(e.id(),
                                                       e.span(),
                                                       e.skippedText(),
                                                       e.expected(),
                                                       leading,
-                                                      extraTrailing);
+                                                      combine(drainExtra, extraTrailing));
         };
     }
 
-    /** Rebuild a non-root child given its preceding sibling's end offset. */
+    /**
+     * Rebuild a non-root child given its preceding sibling's end offset.
+     * {@code drainExtra} is the orphan-internal-trailing of THIS wrapper
+     * propagated DOWN into the deepest-rightmost descendant of the last
+     * child — eliminates the post-construction
+     * {@code attachTrailingToTail} spine rebuild (H1).
+     */
     private static CstNode rebuildChild(String input,
                                         CstNode child,
                                         Grammar grammar,
                                         int[] lineStarts,
-                                        int prevEnd) {
+                                        int prevEnd,
+                                        List<Trivia> drainExtra) {
         int childStart = child.span()
                               .startOffset();
         var leading = scanWhitespaceFast(input, prevEnd, childStart, grammar, lineStarts);
         return switch (child) {
-            case CstNode.NonTerminal nt -> rebuildNonTerminal(input, nt, grammar, lineStarts, leading, List.of());
-            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, List.of());
-            case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, List.of());
+            case CstNode.NonTerminal nt -> rebuildNonTerminal(input,
+                                                              nt,
+                                                              grammar,
+                                                              lineStarts,
+                                                              leading,
+                                                              List.of(),
+                                                              drainExtra);
+            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, drainExtra);
+            case CstNode.Token tk -> new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, drainExtra);
             case CstNode.Error e -> new CstNode.Error(e.id(),
                                                       e.span(),
                                                       e.skippedText(),
                                                       e.expected(),
                                                       leading,
-                                                      List.of());
+                                                      drainExtra);
         };
     }
 
@@ -271,90 +304,54 @@ public final class TriviaPostPass {
                                                           Grammar grammar,
                                                           int[] lineStarts,
                                                           List<Trivia> leading,
-                                                          List<Trivia> extraTrailing) {
+                                                          List<Trivia> extraTrailing,
+                                                          List<Trivia> drainExtra) {
         int spanStart = nt.span()
                           .startOffset();
         int spanEnd = nt.span()
                         .endOffset();
-        var newChildren = new ArrayList<CstNode>(nt.children()
-                                                   .size());
+        var children = nt.children();
+        int childCount = children.size();
+        if (childCount == 0) {
+            // No children: the gap between spanStart and spanEnd is internal
+            // trailing of this wrapper. Combine with both caller-supplied
+            // wrapper-level extraTrailing and any drained extra from outer
+            // wrappers (no deeper descendant to absorb it into).
+            var internalTrailing = scanWhitespaceFast(input, spanStart, spanEnd, grammar, lineStarts);
+            return new CstNode.NonTerminal(nt.id(),
+                                           nt.span(),
+                                           nt.rule(),
+                                           children,
+                                           leading,
+                                           combine(combine(drainExtra, internalTrailing), extraTrailing));
+        }
+        // H1: drained orphan trailing flows DOWN through rebuildChild instead
+        // of bubbling UP via a second-pass spine rebuild. The wrapper itself
+        // keeps only its caller-supplied extraTrailing (post-EOF for root,
+        // empty for everyone else). Mirrors PegEngine.attachTrailingToTail
+        // (Bug C' compensation): the orphan trivia ends up in the
+        // deepest-rightmost-leaf's trailing slot, matching CstReconstruct.emit's
+        // last-child-only emission semantics.
+        int lastChildEnd = children.get(childCount - 1)
+                                   .span()
+                                   .endOffset();
+        var internalTrailing = scanWhitespaceFast(input, lastChildEnd, spanEnd, grammar, lineStarts);
+        // The last child's drainExtra is THIS wrapper's internalTrailing plus
+        // any drainExtra threaded from an outer wrapper. extraTrailing stays
+        // on the wrapper — only post-EOF root trivia uses that slot.
+        var lastChildDrain = combine(drainExtra, internalTrailing);
+        var newChildren = new ArrayList<CstNode>(childCount);
         int cursor = spanStart;
-        for (var c : nt.children()) {
-            var rebuilt = rebuildChild(input, c, grammar, lineStarts, cursor);
-            newChildren.add(rebuilt);
+        for (int i = 0; i < childCount; i++ ) {
+            var c = children.get(i);
+            var drainForThis = (i == childCount - 1)
+                               ? lastChildDrain
+                               : List.<Trivia>of();
+            newChildren.add(rebuildChild(input, c, grammar, lineStarts, cursor, drainForThis));
             cursor = c.span()
                       .endOffset();
         }
-        // Internal trailing — gap between last child end and the wrapper's
-        // span end. Mirrors PegEngine.attachTrailingToTail (Bug C'
-        // compensation): when the wrapper has children, drain the orphan
-        // trivia into the last child's tail so reconstruction visits it via
-        // the wrapper's last-child trailing slot. Without this, a wrapper
-        // that is itself a non-last sibling would lose its trailing during
-        // CstReconstruct.emit.
-        var internalTrailing = scanWhitespaceFast(input, cursor, spanEnd, grammar, lineStarts);
-        List<Trivia> wrapperTrailing = extraTrailing;
-        if (!internalTrailing.isEmpty() && !newChildren.isEmpty()) {
-            int lastIdx = newChildren.size() - 1;
-            newChildren.set(lastIdx, attachTrailingToTail(newChildren.get(lastIdx), internalTrailing));
-        }else {
-            wrapperTrailing = combine(internalTrailing, extraTrailing);
-        }
-        return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, wrapperTrailing);
-    }
-
-    /**
-     * Recursively drain {@code extra} trivia into the deepest-rightmost-leaf
-     * of {@code node}, mirroring {@code PegEngine.attachTrailingToTail}
-     * (Bug C' compensation). Used by {@link #rebuildNonTerminal} to place
-     * orphan trivia consumed before a zero-width tail element into the
-     * trailing slot that {@code CstReconstruct.emit} actually visits — the
-     * last terminal descendant — instead of the wrapper non-terminal's own
-     * trailing slot, which is invisible during reconstruction when the
-     * wrapper is not the last child of its parent.
-     */
-    private static CstNode attachTrailingToTail(CstNode node, List<Trivia> extra) {
-        if (extra.isEmpty()) return node;
-        return switch (node) {
-            case CstNode.NonTerminal nt -> {
-                var children = nt.children();
-                if (children.isEmpty()) {
-                    yield new CstNode.NonTerminal(nt.id(),
-                                                  nt.span(),
-                                                  nt.rule(),
-                                                  children,
-                                                  nt.leadingTrivia(),
-                                                  combine(nt.trailingTrivia(), extra));
-                }
-                var newChildren = new ArrayList<CstNode>(children);
-                int lastIdx = newChildren.size() - 1;
-                newChildren.set(lastIdx, attachTrailingToTail(newChildren.get(lastIdx), extra));
-                yield new CstNode.NonTerminal(nt.id(),
-                                              nt.span(),
-                                              nt.rule(),
-                                              List.copyOf(newChildren),
-                                              nt.leadingTrivia(),
-                                              nt.trailingTrivia());
-            }
-            case CstNode.Terminal t -> new CstNode.Terminal(t.id(),
-                                                            t.span(),
-                                                            t.rule(),
-                                                            t.text(),
-                                                            t.leadingTrivia(),
-                                                            combine(t.trailingTrivia(), extra));
-            case CstNode.Token tk -> new CstNode.Token(tk.id(),
-                                                       tk.span(),
-                                                       tk.rule(),
-                                                       tk.text(),
-                                                       tk.leadingTrivia(),
-                                                       combine(tk.trailingTrivia(), extra));
-            case CstNode.Error e -> new CstNode.Error(e.id(),
-                                                      e.span(),
-                                                      e.skippedText(),
-                                                      e.expected(),
-                                                      e.leadingTrivia(),
-                                                      combine(e.trailingTrivia(), extra));
-        };
+        return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, extraTrailing);
     }
 
     private static List<Trivia> combine(List<Trivia> a, List<Trivia> b) {
