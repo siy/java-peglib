@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-05-09
+
+_Unreleased — patch cycle following 0.5.0. Use this section to log fixes / minor perf tweaks / docs updates accumulated post-release._
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [0.5.0] - 2026-05-06
 
 _Work in progress — incremental-native architectural rework. See `docs/incremental/ARCHITECTURE-0.5.0.md`._
