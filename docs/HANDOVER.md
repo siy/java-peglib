@@ -626,7 +626,22 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 ---
 
-**Last updated:** 2026-05-09, end of Step 4 trivia rework + cleanup arc A→F.3 + StringSpan + Cleanup G investigation (reference-fixture tightening attempted, REVERTED).
+**Last updated:** 2026-05-09, end of Step 4 trivia rework + cleanup arc A→F.3 + StringSpan + Cleanup G + Lever B retry attempt + skip-postPass deferral.
+
+### Skip postPass for full parses — deferred (2026-05-09)
+
+After Cleanup G abandoned the +30% reference gap as structural, considered the cleaner architectural fix: under flag-ON, run the buffer machinery for full parses (`parseCst`) and run postPass only for `parseRuleAt`. That preserves both the buffer's free-attribution-during-parse property AND the postPass's structural-parity-for-splice property.
+
+**Cost-benefit assessment (deferred for that reason):**
+
+- **Implementation cost:** several days. Cleanup A's call-site short-circuit (38 sites in PegEngine + parallel emit sites) needs to be REVERSED selectively for full-parse path. Generator must emit two parse-paths (full vs partial). Adds a `parseMode` parameter / context flag throughout. Bench-gated to validate buffer path didn't regress since Cleanup A.
+- **Workloads that would benefit:**
+  - IDE plugin uses `parseRuleAt` (incremental), not `parseCst` — **no benefit** (postPass is mandatory for splice parity)
+  - Self-host workload — already at parity / faster than legacy — **no benefit**
+  - One-shot CLI / Maven plugin parsing — 25 ms vs 19 ms is **academic** at sub-frame budget
+- **Workloads that would NOT benefit:** the perf-critical paths.
+
+The +30% reference gap is therefore academic for current workloads. Documented as available-if-needed; not pursued.
 
 ### Lever B retry — attempted, FAILED on bench (2026-05-09)
 
