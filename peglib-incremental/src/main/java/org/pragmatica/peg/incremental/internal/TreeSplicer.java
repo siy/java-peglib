@@ -169,14 +169,14 @@ public final class TreeSplicer {
             t.id(),
             span,
             t.rule(),
-            t.text(),
+            t.textSpan(),
             shiftTriviaAll(t.leadingTrivia(), delta),
             shiftTriviaAll(t.trailingTrivia(), delta));
             case CstNode.Token t -> new CstNode.Token(
             t.id(),
             span,
             t.rule(),
-            t.text(),
+            t.textSpan(),
             shiftTriviaAll(t.leadingTrivia(), delta),
             shiftTriviaAll(t.trailingTrivia(), delta));
             case CstNode.Error e -> new CstNode.Error(

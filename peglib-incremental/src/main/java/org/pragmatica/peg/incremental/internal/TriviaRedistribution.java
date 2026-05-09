@@ -328,8 +328,8 @@ public final class TriviaRedistribution {
         var newLeading = shiftTriviaListAfter(node.leadingTrivia(), delta, editEnd);
         var newTrailing = shiftTriviaListAfter(node.trailingTrivia(), delta, editEnd);
         return switch (node) {
-            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), newSpan, t.rule(), t.text(), newLeading, newTrailing);
-            case CstNode.Token t -> new CstNode.Token(t.id(), newSpan, t.rule(), t.text(), newLeading, newTrailing);
+            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), newSpan, t.rule(), t.textSpan(), newLeading, newTrailing);
+            case CstNode.Token t -> new CstNode.Token(t.id(), newSpan, t.rule(), t.textSpan(), newLeading, newTrailing);
             case CstNode.Error e -> new CstNode.Error(e.id(),
                                                       newSpan,
                                                       e.skippedText(),
@@ -429,8 +429,8 @@ public final class TriviaRedistribution {
             ownerSpan = owner.span();
         }
         return switch (owner) {
-            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), ownerSpan, t.rule(), t.text(), leading, trailing);
-            case CstNode.Token t -> new CstNode.Token(t.id(), ownerSpan, t.rule(), t.text(), leading, trailing);
+            case CstNode.Terminal t -> new CstNode.Terminal(t.id(), ownerSpan, t.rule(), t.textSpan(), leading, trailing);
+            case CstNode.Token t -> new CstNode.Token(t.id(), ownerSpan, t.rule(), t.textSpan(), leading, trailing);
             case CstNode.Error e -> new CstNode.Error(e.id(),
                                                       ownerSpan,
                                                       e.skippedText(),

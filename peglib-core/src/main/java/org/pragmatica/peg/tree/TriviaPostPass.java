@@ -270,7 +270,12 @@ public final class TriviaPostPass {
         if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, t.leadingTrivia(), t.trailingTrivia())) {
             return t;
         }
-        return new CstNode.Terminal(t.id(), t.span(), t.rule(), t.text(), leading, combine(drainExtra, extraTrailing));
+        return new CstNode.Terminal(t.id(),
+                                    t.span(),
+                                    t.rule(),
+                                    t.textSpan(),
+                                    leading,
+                                    combine(drainExtra, extraTrailing));
     }
 
     private static CstNode.Token rebuildToken(CstNode.Token tk,
@@ -280,7 +285,12 @@ public final class TriviaPostPass {
         if (canSkipLeafRebuild(leading, extraTrailing, drainExtra, tk.leadingTrivia(), tk.trailingTrivia())) {
             return tk;
         }
-        return new CstNode.Token(tk.id(), tk.span(), tk.rule(), tk.text(), leading, combine(drainExtra, extraTrailing));
+        return new CstNode.Token(tk.id(),
+                                 tk.span(),
+                                 tk.rule(),
+                                 tk.textSpan(),
+                                 leading,
+                                 combine(drainExtra, extraTrailing));
     }
 
     private static CstNode.Error rebuildError(CstNode.Error e,

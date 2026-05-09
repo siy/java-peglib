@@ -7,6 +7,7 @@ import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.tree.IdGenerator;
 import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
+import org.pragmatica.peg.tree.StringSpan;
 import org.pragmatica.peg.tree.Trivia;
 
 import java.util.ArrayList;
@@ -190,6 +191,15 @@ public final class ParsingContext {
 
     public String substring(int start, int end) {
         return input.substring(start, end);
+    }
+
+    /**
+     * Cleanup E (v0.5.1): produce a {@link StringSpan} view over a slice of the
+     * input without materializing a {@link String}. Used by Terminal/Token
+     * construction to defer substring allocation.
+     */
+    public StringSpan substringSpan(int start, int end) {
+        return new StringSpan(input, start, end);
     }
 
     public String remainingInput() {
