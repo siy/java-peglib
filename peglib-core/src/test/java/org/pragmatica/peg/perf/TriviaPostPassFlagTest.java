@@ -239,58 +239,55 @@ class TriviaPostPassFlagTest {
     class ParseRuleAtWithFlag {
 
         /**
-         * <b>Lever B finding (Step 4 commit 1).</b> When {@code parseRuleAt}
-         * is invoked at a non-zero offset, the {@link
-         * org.pragmatica.peg.tree.TriviaPostPass#assignTrivia} prototype
-         * scans {@code [0, span.start)} as leading trivia for the returned
-         * subtree — it does not know about the splice context. The subtree's
-         * leading slot therefore contains the entire trivia run from input
-         * offset 0 (split into chunks per the inner-expression matcher),
-         * <em>not</em> just the gap between the previous sibling's end and
-         * the splice offset. The latter is what a full parse (post-pass)
-         * attributes to the same node.
+         * <b>Lever B unblocker (Step 4 commit 2).</b> When {@code parseRuleAt}
+         * is invoked at a non-zero offset, the splice-aware overload {@link
+         * org.pragmatica.peg.tree.TriviaPostPass#assignTrivia(String,
+         * org.pragmatica.peg.tree.CstNode,
+         * org.pragmatica.peg.grammar.Grammar, int)} scans
+         * {@code [spliceOffset, span.start)} as leading trivia for the
+         * returned subtree — i.e. only the gap between the previous sibling's
+         * end and the matched span's start, NOT the whole input prefix.
          *
-         * <p>This test pins the current behaviour: the partial subtree
-         * round-trips, and its leading trivia covers offsets {@code [0,
-         * spliceOffset)}. Step 4 commit 2+ will need a splice-aware variant
-         * (e.g. {@code TriviaPostPass.assignTrivia(input, cst, grammar,
-         * spliceOffset)}) for IncrementalSession to splice cleanly.
+         * <p>For input {@code "  alpha , beta  "} and splice offset 9 (the
+         * comma's end-position), the {@code Item} rule consumes the single
+         * space at offset 9 as leading whitespace and matches {@code "beta"}
+         * starting at offset 10. The subtree's leading trivia therefore
+         * covers exactly {@code [9, 10)} — one space — NOT the two spaces
+         * at the input start.
          */
         @Test
-        void parseRuleAt_flagOn_subtreeLeading_coversInputBeforeSpliceOffset() {
+        void parseRuleAt_flagOn_subtreeLeading_coversOnlySpliceGap() {
             var input = "  alpha , beta  ";
-            // 0123456789012345
-            int offset = 10;
+            // index:    0123456789012345
+            // The previous Item ('alpha') ends at offset 7, the ',' at 8.
+            // Splicing at offset 9 should attribute only the space at [9,10)
+            // to the spliced subtree's leading — NOT the leading "  " at
+            // [0, 2) which belongs to the document root.
+            int spliceOffset = 9;
 
             var parserOn = PegParser.fromGrammar(LIST_GRAMMAR, configOn())
                                     .unwrap();
-            var partial = parserOn.parseRuleAt(Item.class, input, offset)
+            var partial = parserOn.parseRuleAt(Item.class, input, spliceOffset)
                                   .unwrap();
             var subtree = partial.node();
 
-            // Subtree span starts at the requested offset.
+            // The Item rule auto-skips %whitespace before matching, so the
+            // matched span starts after the single leading space.
             assertThat(subtree.span()
                               .start()
-                              .offset()).isEqualTo(offset);
+                              .offset())
+            .as("subtree span starts after the gap whitespace")
+            .isEqualTo(10);
 
-            // Documented Lever B gap: subtree's leading trivia text equals
-            // input.substring(0, offset) projected through the %whitespace
-            // matcher — i.e. the leading run of whitespace from input
-            // offset 0, not the gap before the splice point.
-            //
-            // For input "  alpha , beta  " and the inner expression
-            // [ \t\n], scanWhitespace([0,10)) produces only the leading two
-            // spaces (offsets 0..2) — matching stops at 'a' (offset 2).
-            // The two spaces are emitted as separate single-char chunks
-            // because the inner expression is a single-char class.
+            // Splice-aware leading: only the gap between spliceOffset (9)
+            // and span.start (10) — a single space, NOT the input prefix.
             var leadingText = subtree.leadingTrivia()
                                      .stream()
                                      .map(Trivia::text)
                                      .reduce("", (a, b) -> a + b);
-            assertThat(leadingText).as("leading covers input prefix")
-                                   .isEqualTo("  ");
-            // Two single-char chunks because inner expression is one char.
-            assertThat(subtree.leadingTrivia()).hasSize(2);
+            assertThat(leadingText).as("leading covers only [spliceOffset, span.start)")
+                                   .isEqualTo(" ");
+            assertThat(subtree.leadingTrivia()).hasSize(1);
         }
 
         @Test

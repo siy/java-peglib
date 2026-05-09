@@ -70,6 +70,9 @@ public final class TriviaPostPass {
      * <p>If {@code grammar.whitespace()} is empty (no {@code %whitespace}
      * directive), all trivia lists in the result are empty.
      *
+     * <p>Equivalent to {@link #assignTrivia(String, CstNode, Grammar, int)}
+     * with {@code leadingScanFrom = 0} (full-document scan).
+     *
      * @param input   full source text
      * @param cst     root CST node from a previous parse
      * @param grammar the grammar that produced {@code cst}; used only to
@@ -78,7 +81,44 @@ public final class TriviaPostPass {
      * @return new CST with re-attributed trivia
      */
     public static CstNode assignTrivia(String input, CstNode cst, Grammar grammar) {
-        return rebuildRoot(input, cst, grammar);
+        return assignTrivia(input, cst, grammar, 0);
+    }
+
+    /**
+     * Same as {@link #assignTrivia(String, CstNode, Grammar)} but constrains
+     * the leading-trivia scan window of the root CST to start at
+     * {@code leadingScanFrom} instead of 0.
+     *
+     * <p>Use this overload when {@code cst} represents a partial-reparse
+     * subtree and the caller knows the splice point: scanning from offset 0
+     * would attribute all preceding trivia to the subtree's leading slot.
+     * Supplying the splice offset clamps the scan window to
+     * {@code [leadingScanFrom, root.span.start)}, matching the gap between
+     * the previous sibling and the spliced subtree.
+     *
+     * <p>Inner-node leading scans (between siblings inside the subtree) use
+     * the standard previous-sibling-end coordinate and are not affected by
+     * this argument. The root's trailing-trivia scan (post-EOF window) is
+     * also unaffected.
+     *
+     * @param input            the source text the parse was performed against
+     * @param cst              the parsed CST (full or partial-reparse subtree)
+     * @param grammar          grammar (for {@code %whitespace} access)
+     * @param leadingScanFrom  offset where root-level leading scan begins;
+     *                         must satisfy
+     *                         {@code 0 <= leadingScanFrom <= cst.span().startOffset()}
+     * @return new CST with re-attributed trivia
+     * @throws IllegalArgumentException when {@code leadingScanFrom} is
+     *         negative or greater than the root span's start offset
+     */
+    public static CstNode assignTrivia(String input, CstNode cst, Grammar grammar, int leadingScanFrom) {
+        int rootStart = cst.span()
+                           .startOffset();
+        if (leadingScanFrom < 0 || leadingScanFrom > rootStart) {
+            throw new IllegalArgumentException(
+            "leadingScanFrom " + leadingScanFrom + " out of range [0, " + rootStart + "]");
+        }
+        return rebuildRoot(input, cst, grammar, leadingScanFrom);
     }
 
     /**
@@ -110,12 +150,12 @@ public final class TriviaPostPass {
     }
 
     // === Tree rebuild ===
-    private static CstNode rebuildRoot(String input, CstNode root, Grammar grammar) {
+    private static CstNode rebuildRoot(String input, CstNode root, Grammar grammar, int leadingScanFrom) {
         int rootStart = root.span()
                             .startOffset();
         int rootEnd = root.span()
                           .endOffset();
-        var leading = scanWhitespace(input, 0, rootStart, grammar);
+        var leading = scanWhitespace(input, leadingScanFrom, rootStart, grammar);
         // Root trailing covers the gap from rootEnd to end-of-input (matches
         // current engine behaviour: top-level wrapper carries post-EOF trivia).
         var trailingExternal = scanWhitespace(input, rootEnd, input.length(), grammar);

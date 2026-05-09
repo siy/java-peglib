@@ -297,12 +297,29 @@ public final class PegEngine implements Parser {
      * total trivia text is preserved (round-trip stays byte-equal); only the
      * leading/trailing slot can shift. Off by default — bit-for-bit identical
      * to prior releases when the flag is false.
+     *
+     * <p>Full-parse callers ({@code parseCst}) treat the root as a document
+     * root and scan leading trivia from offset 0.
      */
     private CstNode applyTriviaPostPass(String input, CstNode root) {
+        return applyTriviaPostPass(input, root, 0);
+    }
+
+    /**
+     * Step 4 commit 2 (0.5.1): splice-aware overload used by
+     * {@link #parseRuleAt(Class, String, int, IdGenerator)}. The
+     * {@code leadingScanFrom} parameter clamps the root subtree's leading
+     * trivia scan window to {@code [leadingScanFrom, root.span.start)},
+     * matching the gap between the previous sibling and the spliced subtree
+     * during incremental reparse. Without this clamp the post-pass would
+     * attribute the entire input prefix {@code [0, root.span.start)} to the
+     * subtree's leading slot.
+     */
+    private CstNode applyTriviaPostPass(String input, CstNode root, int leadingScanFrom) {
         if (!config.triviaPostPass()) {
             return root;
         }
-        return TriviaPostPass.assignTrivia(input, root, grammar);
+        return TriviaPostPass.assignTrivia(input, root, grammar, leadingScanFrom);
     }
 
     @Override
@@ -452,7 +469,7 @@ public final class PegEngine implements Parser {
                    .result();
         }
         var success = (ParseResult.Success) result;
-        return Result.success(new PartialParse(applyTriviaPostPass(input, success.node()), ctx.pos()));
+        return Result.success(new PartialParse(applyTriviaPostPass(input, success.node(), offset), ctx.pos()));
     }
 
     /**
