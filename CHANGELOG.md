@@ -18,6 +18,11 @@ _Unreleased — patch cycle following 0.5.0._
 ### Changed
 
 - `ParsingContext` pending-trivia methods (`appendPendingLeadingTrivia`, `takePendingLeadingTrivia`, `savePendingLeadingTrivia`, `restorePendingLeadingTrivia`) early-out when `config.triviaPostPass()=true` — buffer becomes dead weight under the flag and is skipped (38 call sites in `PegEngine` no-op without source changes).
+- **Trivia rework Step 4 commit 5** (`4ed1cf5`): `ParserGenerator` emits no-op buffer methods under flag-ON. Mirror of commit 3 for the generator side — pure CPU optimization; correctness already from commit 4. Generated parsers under flag-ON no longer do dead-work buffer maintenance.
+
+### Known Issues
+
+- **`triviaPostPass=true` flag has a known bug on production Java 25 corpus** (discovered 2026-05-09 during Step 4 commit 6 attempt). Round-trip reconstruction LOSES trivia text — not just slot-shifts attribution but actual character loss. 20 of 22 RoundTripTest fixtures fail under flag-ON via the generated parser path: `void allCompoundAssignments` becomes `voidallCompoundAssignments` etc. Bug likely lives in the embedded TriviaPostPass emission (~617 lines added to ParserGenerator in commit 4). The flag remains **opt-in only**; the default is `false`. Validation gap: Step 3 prototype tests excluded the `/large/` fixture and used small grammars only. Track work: HANDOVER §11 "Step 4 commit 5 landed; commit 6 attempted and reverted (BUG DISCOVERED)".
 
 ### Fixed
 

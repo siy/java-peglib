@@ -512,13 +512,47 @@ After Step 3 verdict, the production rework arc executed in the same session. Br
 
 **Default behavior (flag-OFF) unchanged** — every pre-existing test passes byte-for-byte identically. Adoption is opt-in via `PegParser.builder(grammar).triviaPostPass(true).build()` or constructing `ParserConfig` with the flag set.
 
-### Outstanding Step 4 work (next session)
+### Step 4 commit 5 landed; commit 6 attempted and reverted (BUG DISCOVERED)
 
-- **Commit 5: strip buffer machinery from generator emission under flag-ON.** Mirror commit 3 for the generator side. ~30 emission sites in `ParserGenerator.java` need flag-conditional skipping (don't emit appendPending/takePending/save/restore at combinators when gen-time flag is on). Pure CPU optimization; correctness already there. Bench A/B should show flag-ON generator wallclock improvement after this commit.
-- **Commit 6: default flip the flag.** Migration concern — tests that pin specific attribution layouts may shift (Step 3 prototype showed 6.4% of nodes have different attribution under post-pass; total trivia text preserved). Survey downstream impact before flipping.
-- **Bench impact study:** measure post-pass overhead on full-parse vs current attribution. Step 3 prototype was non-invasive (overlay); the rework wins back the buffer work but pays for the post-pass scan. Net likely positive but unmeasured.
+**Commit 5 (`4ed1cf5`)** — ParserGenerator emits no-op buffer methods under flag-ON. Pure CPU optimization parallel to commit 3 for the interpreter. Tests stay at 768 + 1 skip. Generated parser under flag-ON is now lean (no dead buffer work) AND correct (post-pass produces attribution).
 
-After commits 5-6, Lever B can be retried: `parseRuleAt` + post-pass produces structurally identical subtrees, removing the trivia-context-loss blocker. The orthogonal fallback-rule-bypass blocker (§6.2 root cause #1) still requires separate work.
+**Commit 6 attempted — REVERTED. Real bug surfaced in post-pass implementation.**
+
+Flipping `triviaPostPass` default to `true` triggered **20 RoundTripTest failures on the Java 25 corpus** — *not* slot-shifts but actual trivia text LOSS:
+
+- `void allCompoundAssignments` → `voidallCompoundAssignments` (lost whitespace between tokens)
+- `int r;` → `intr;`
+- `int b = 0;` → `intb = 0;`
+- Reconstructed lengths 1-2059 chars shorter than originals across 20 of 22 RoundTripTest fixtures (`Annotations.java`, `BlankLines.java`, `ChainAlignment.java`, `ClassLiterals.java`, `Comments.java`, `CompoundAssignments.java`, `Enums.java`, `ExhaustiveSwitchPatterns.java`, `Imports.java`, `KeywordPrefixedIdentifiers.java`, `Lambdas.java`, `LineWrapping.java`, `MultilineArguments.java`, `MultilineParameters.java`, `Records.java`, `SwitchExpressions.java`, `TernaryOperators.java`, `TextBlocks.java`, `large/FactoryClassGenerator.java.txt`, `flow-format-examples/BlankLineRules.java`)
+
+This contradicts the post-pass spec doc claim: *"Total trivia text is preserved (round-trip reconstruction is byte-equal); only the leading/trailing slot in which a given trivia chunk lives can differ."* The bug is REAL TEXT LOSS on production-realistic Java 25 inputs, not just attribution permutation.
+
+**Test coverage gap that masked the bug:**
+- Step 3 prototype's `TriviaPostPassTest` round-trip claim ("21/21 corpus") used the **smaller fixture set under perf-corpus**, EXCLUDING the `/large/` directory which has the realistic 1900-LOC `FactoryClassGenerator.java.txt`.
+- `TriviaAdversarialTest` (16 tests) uses small focused grammars — JSON-like, not full Java 25.
+- `GeneratedParserTriviaPostPassTest` (8 tests) uses 5 small grammars (parity, leading, trailing, comment, unchanged).
+- The full `RoundTripTest` corpus (22 Java 25 fixtures) was never run under flag-ON until commit 6 attempt.
+
+**Bug location:** The generator path is materially affected. `GeneratedJava25Parser.ensureLoaded()` calls `PegParser.generateCstParser(...)` with no explicit config → picks up `ParserConfig.DEFAULT` → flag-flip flips the generator's emission. Whether the interpreter-only path has the same bug is unverified (could be tested by setting flag-ON on Phase1ParityTest variants).
+
+**Next-session work needed (BEFORE default flip can be reattempted):**
+
+1. **Reproduce the bug in isolation** — create a focused test case that fails under flag-ON. Minimal Java 25 sub-fixture; goal is a 5-line input that loses trivia text under flag-ON.
+2. **Diagnose the embedded post-pass implementation** in the generated parser. `ParserGenerator.java`'s `embedded TriviaPostPass` (added in commit 4, ~617 lines) emits an inline post-pass. The bug likely lives there — possibly:
+   - Whitespace re-scan logic in the embedded post-pass mismatches the parser's own `skipWhitespace` semantics
+   - The embedded post-pass's coordinate-walking misses whitespace between tokens (specifically `(prev_node_end, this_node_start)` where the gap is a token-boundary rather than a sibling-boundary)
+   - Cache-hit interaction (Bug B fix is in the parser; the embedded post-pass might re-derive trivia for nodes whose body came from cache and lose context)
+3. **Fix the embedded post-pass** OR extend `TriviaPostPass` (runtime) similarly. Re-run RoundTripTest under flag-ON; should be 22/22.
+4. **Run full coverage under flag-ON** before reattempting commit 6: every existing test class set to flag-ON, measure failures, fix incrementally. NOT a default-flip until the bug is gone.
+5. **Bench impact study** (deferred from original plan — still relevant after bug fix).
+
+**What's still valuable from Steps 1-5:**
+- The flag is functional for SMALL grammars + adversarial inputs (validated)
+- `parseRuleAt` splice-offset overload is correct and unblocks Lever B's trivia-context-loss problem in principle
+- Buffer no-op infrastructure in both interpreter and generator is clean and ready
+- Commits 1-5 are SHIPPABLE; the flag is opt-in only
+
+After bug fix + commit 6, Lever B can be retried: `parseRuleAt` + post-pass produces structurally identical subtrees, removing the trivia-context-loss blocker. The orthogonal fallback-rule-bypass blocker (§6.2 root cause #1) still requires separate work.
 
 ### Items superseded by this session's work
 
@@ -531,4 +565,4 @@ Do NOT pursue further allocation reduction in the 0.4.x interpreter — old guid
 
 ---
 
-**Last updated:** 2026-05-09, end of Step 4 commits 1-4 of trivia production rework on `release-0.5.1`. 0.5.0 published to Maven Central on 2026-05-08 (5 module artifacts). Branch `release-0.5.1` at `dcd146f` — 8 commits past 0.5.1 base (chore release prep + 3 investigation commits + 4 rework commits). peglib-core 768 tests green + 1 pre-existing skipped. Trivia rework state: **functionally complete under `triviaPostPass=true` flag (opt-in)**. Default behavior unchanged. Outstanding: commit 5 (strip generator emission under flag-ON; pure CPU win), commit 6 (default flip with migration concern). Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: complete Step 4 (commits 5-6) OR pivot to Lever C IR unification OR Lever B retry now that trivia-context-loss blocker is gone (orthogonal fallback-bypass blocker remains).
+**Last updated:** 2026-05-09, end of Step 4 commits 1-5 of trivia production rework on `release-0.5.1` + commit 6 attempt with REVERT (bug discovered). Branch `release-0.5.1` at `4ed1cf5` — 9 commits past 0.5.1 base. peglib-core 768 tests green + 1 pre-existing skipped. Trivia rework state: **flag-ON path FUNCTIONAL on small grammars + adversarial inputs; KNOWN BUG on production Java 25 corpus (trivia text loss, not slot-shift). Default flip BLOCKED until bug fix.** Opt-in flag is shippable. Move B post-mortem: [`docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) §11. Next session: diagnose + fix the embedded post-pass bug on Java 25 fixtures (likely in ParserGenerator's embedded TriviaPostPass emission, ~617 lines added in commit 4). Then reattempt commit 6.
