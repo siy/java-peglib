@@ -23,17 +23,18 @@ import java.util.List;
  * <h2>Attribution policy</h2>
  *
  * <p>The post-pass uses a single policy: <em>leading trivia is the gap before
- * a node; trailing trivia is the gap after the last child of a non-terminal
- * within its own span; terminals never own trailing.</em>
+ * a node; trailing trivia drains into the last-terminal descendant of a
+ * non-terminal, matching the engine's Bug C' compensation; terminals never
+ * own trailing unless they receive drained orphan trivia.</em>
  *
- * <p>This differs from the current engine attribution in one documented way:
+ * <p>The structural shape of the post-pass CST therefore matches the engine:
  * orphan trivia consumed before a zero-width tail element (empty
- * {@code ZeroOrMore} / {@code Optional}) lands on the <b>enclosing rule
- * wrapper's trailingTrivia</b> here, whereas the engine drains it into the
- * <b>last terminal child's trailingTrivia</b> (Bug C' compensation via
- * {@code attachTrailingToTail}). Both policies preserve byte-equal round-trip
- * reconstruction; the structural shape of the CST differs only in which slot
- * the trivia lives in.
+ * {@code ZeroOrMore} / {@code Optional}) is drained into the <b>last
+ * terminal descendant's trailingTrivia</b> via the recursive helper
+ * {@link #attachTrailingToTail}, mirroring {@code PegEngine.attachTrailingToTail}.
+ * This keeps {@code CstReconstruct.emit} (which only emits trailing for the
+ * last child of a wrapper) byte-equal to the original input even when the
+ * orphan-bearing wrapper is not the rightmost child of its parent.
  *
  * <h2>Whitespace scanning</h2>
  *
@@ -222,10 +223,76 @@ public final class TriviaPostPass {
             cursor = c.span()
                       .endOffset();
         }
-        // Internal trailing — gap between last child end and the wrapper's span end.
+        // Internal trailing — gap between last child end and the wrapper's
+        // span end. Mirrors PegEngine.attachTrailingToTail (Bug C'
+        // compensation): when the wrapper has children, drain the orphan
+        // trivia into the last child's tail so reconstruction visits it via
+        // the wrapper's last-child trailing slot. Without this, a wrapper
+        // that is itself a non-last sibling would lose its trailing during
+        // CstReconstruct.emit.
         var internalTrailing = scanWhitespace(input, cursor, spanEnd, grammar);
-        var trailing = combine(internalTrailing, extraTrailing);
-        return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, trailing);
+        List<Trivia> wrapperTrailing = extraTrailing;
+        if (!internalTrailing.isEmpty() && !newChildren.isEmpty()) {
+            int lastIdx = newChildren.size() - 1;
+            newChildren.set(lastIdx, attachTrailingToTail(newChildren.get(lastIdx), internalTrailing));
+        }else {
+            wrapperTrailing = combine(internalTrailing, extraTrailing);
+        }
+        return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), List.copyOf(newChildren), leading, wrapperTrailing);
+    }
+
+    /**
+     * Recursively drain {@code extra} trivia into the deepest-rightmost-leaf
+     * of {@code node}, mirroring {@code PegEngine.attachTrailingToTail}
+     * (Bug C' compensation). Used by {@link #rebuildNonTerminal} to place
+     * orphan trivia consumed before a zero-width tail element into the
+     * trailing slot that {@code CstReconstruct.emit} actually visits — the
+     * last terminal descendant — instead of the wrapper non-terminal's own
+     * trailing slot, which is invisible during reconstruction when the
+     * wrapper is not the last child of its parent.
+     */
+    private static CstNode attachTrailingToTail(CstNode node, List<Trivia> extra) {
+        if (extra.isEmpty()) return node;
+        return switch (node) {
+            case CstNode.NonTerminal nt -> {
+                var children = nt.children();
+                if (children.isEmpty()) {
+                    yield new CstNode.NonTerminal(nt.id(),
+                                                  nt.span(),
+                                                  nt.rule(),
+                                                  children,
+                                                  nt.leadingTrivia(),
+                                                  combine(nt.trailingTrivia(), extra));
+                }
+                var newChildren = new ArrayList<CstNode>(children);
+                int lastIdx = newChildren.size() - 1;
+                newChildren.set(lastIdx, attachTrailingToTail(newChildren.get(lastIdx), extra));
+                yield new CstNode.NonTerminal(nt.id(),
+                                              nt.span(),
+                                              nt.rule(),
+                                              List.copyOf(newChildren),
+                                              nt.leadingTrivia(),
+                                              nt.trailingTrivia());
+            }
+            case CstNode.Terminal t -> new CstNode.Terminal(t.id(),
+                                                            t.span(),
+                                                            t.rule(),
+                                                            t.text(),
+                                                            t.leadingTrivia(),
+                                                            combine(t.trailingTrivia(), extra));
+            case CstNode.Token tk -> new CstNode.Token(tk.id(),
+                                                       tk.span(),
+                                                       tk.rule(),
+                                                       tk.text(),
+                                                       tk.leadingTrivia(),
+                                                       combine(tk.trailingTrivia(), extra));
+            case CstNode.Error e -> new CstNode.Error(e.id(),
+                                                      e.span(),
+                                                      e.skippedText(),
+                                                      e.expected(),
+                                                      e.leadingTrivia(),
+                                                      combine(e.trailingTrivia(), extra));
+        };
     }
 
     private static List<Trivia> combine(List<Trivia> a, List<Trivia> b) {

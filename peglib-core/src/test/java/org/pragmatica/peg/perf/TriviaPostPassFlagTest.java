@@ -201,10 +201,21 @@ class TriviaPostPassFlagTest {
         @Test
         void flagOnVsOff_optionalTailGrammar_attributionDiffers() {
             // Bug-C' fixture: a grammar whose top-level rule has an optional
-            // tail. The engine drains orphan trivia consumed by the empty
-            // ZeroOrMore into the last terminal child's trailing slot;
-            // the post-pass leaves it on the wrapper non-terminal instead.
-            // Total trivia text is identical — only the slot shifts.
+            // tail. The engine consumes inter-element whitespace BEFORE
+            // attempting the empty {@code Tail*} wrapper and drains the
+            // orphan into the wrapper's trailing slot via
+            // {@code attachTrailingToTail}. The post-pass instead derives
+            // the gap as leading of the empty wrapper from coordinates.
+            // Both attributions are valid (Doc's last child is the empty
+            // wrapper, so {@code CstReconstruct.emit} visits BOTH leading
+            // and trailing) — round-trip is byte-equal in both paths. Only
+            // the slot shifts. Structural divergence on THIS minimal
+            // fixture is genuine and permanent; the Step 4 commit 7
+            // {@code attachTrailingToTail} drain in {@link
+            // org.pragmatica.peg.tree.TriviaPostPass#rebuildNonTerminal}
+            // only kicks in when the wrapper has non-empty children, which
+            // is what fixes the corpus-scale RoundTripTest divergence
+            // (wrapper-as-non-last-sibling).
             var grammar = """
                 Doc <- Number Tail*
                 Tail <- ',' Number
@@ -224,8 +235,12 @@ class TriviaPostPassFlagTest {
 
             assertThat(allTriviaText(on)).as("trivia text totals preserved")
                                          .isEqualTo(allTriviaText(off));
+            assertThat(reconstruct(on)).as("post-pass round-trip")
+                                       .isEqualTo(input);
+            assertThat(reconstruct(off)).as("engine round-trip")
+                                        .isEqualTo(input);
             assertThat(triviaShape(off)).as(
-            "post-pass and engine differ on at least one slot for Bug-C' fixture")
+            "post-pass and engine differ on slot for Bug-C' empty-wrapper fixture")
                                         .isNotEqualTo(triviaShape(on));
         }
     }
