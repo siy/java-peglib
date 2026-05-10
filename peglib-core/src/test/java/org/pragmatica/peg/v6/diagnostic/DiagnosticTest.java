@@ -28,35 +28,9 @@ class DiagnosticTest {
             assertEquals("", d.found());
         }
 
-        @Test
-        void constructor_rejectsNegativeOffset() {
-            assertThrows(IllegalArgumentException.class, () -> new Diagnostic(Severity.ERROR, - 1, 0, "m", "", ""));
-        }
-
-        @Test
-        void constructor_rejectsNegativeLength() {
-            assertThrows(IllegalArgumentException.class, () -> new Diagnostic(Severity.ERROR, 0, - 1, "m", "", ""));
-        }
-
-        @Test
-        void constructor_rejectsNullSeverity() {
-            assertThrows(NullPointerException.class, () -> new Diagnostic(null, 0, 0, "m", "", ""));
-        }
-
-        @Test
-        void constructor_rejectsNullMessage() {
-            assertThrows(NullPointerException.class, () -> new Diagnostic(Severity.ERROR, 0, 0, null, "", ""));
-        }
-
-        @Test
-        void constructor_rejectsNullExpected() {
-            assertThrows(NullPointerException.class, () -> new Diagnostic(Severity.ERROR, 0, 0, "m", null, ""));
-        }
-
-        @Test
-        void constructor_rejectsNullFound() {
-            assertThrows(NullPointerException.class, () -> new Diagnostic(Severity.ERROR, 0, 0, "m", "", null));
-        }
+        // Defensive null/range checks removed from Diagnostic as part of the
+        // JBCT conformance refactor — callers (parser/lexer codegen) supply
+        // validated values.
     }
 
     @Nested

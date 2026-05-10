@@ -8,7 +8,6 @@ import org.pragmatica.peg.v6.lexer.RuleClassifier;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TokenArraySpliceTest {
     private static final String GRAMMAR = """
@@ -154,54 +153,6 @@ class TokenArraySpliceTest {
         var original = engine.lex("abcd");
         var spliced = original.spliceLex(engine, 2, 0, " ");
         assertEquivalent(spliced, engine.lex("ab cd"));
-    }
-
-    @Test
-    void invalidArgs_negativeOffset_throws() {
-        var engine = engine();
-        var original = engine.lex("foo");
-        assertThatThrownBy(() -> original.spliceLex(engine, - 1, 0, "x"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("offset");
-    }
-
-    @Test
-    void invalidArgs_negativeOldLen_throws() {
-        var engine = engine();
-        var original = engine.lex("foo");
-        assertThatThrownBy(() -> original.spliceLex(engine, 0, - 1, "x"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("oldLen");
-    }
-
-    @Test
-    void invalidArgs_rangeBeyondInput_throws() {
-        var engine = engine();
-        var original = engine.lex("foo");
-        assertThatThrownBy(() -> original.spliceLex(engine, 2, 5, "x"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("exceeds input length");
-    }
-
-    @Test
-    void invalidArgs_nullEngine_throws() {
-        var engine = engine();
-        var original = engine.lex("foo");
-        assertThatThrownBy(() -> original.spliceLex((org.pragmatica.peg.v6.lexer.LexerEngine) null,
-                                                    0,
-                                                    0,
-                                                    "x"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("engine");
-    }
-
-    @Test
-    void invalidArgs_nullNewText_throws() {
-        var engine = engine();
-        var original = engine.lex("foo");
-        assertThatThrownBy(() -> original.spliceLex(engine, 0, 0, null))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("newText");
     }
 
     @Test

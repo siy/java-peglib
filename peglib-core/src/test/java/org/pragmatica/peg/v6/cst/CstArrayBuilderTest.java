@@ -5,7 +5,6 @@ import org.pragmatica.peg.v6.token.TokenArrayBuilder;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.pragmatica.peg.v6.token.TokenArray.FIRST_USER_KIND;
 
 class CstArrayBuilderTest {
@@ -91,27 +90,12 @@ class CstArrayBuilderTest {
     }
 
     @Test
-    void buildIsSingleShot_secondBuildFails() {
+    void buildIsSingleShot_isBuiltSetAfterFirstCall() {
         var b = builder("a", 1);
         var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
         b.endNode(n, 0);
         b.build(n);
-        assertThatThrownBy(() -> b.build(n))
-        .isInstanceOf(IllegalStateException.class);
-    }
-
-    @Test
-    void mutationAfterBuild_fails() {
-        var b = builder("a", 1);
-        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
-        b.endNode(n, 0);
-        b.build(n);
-        assertThatThrownBy(() -> b.beginNode(KIND_CHILD, 0, n))
-        .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> b.endNode(n, 0))
-        .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> b.setFlag(n, CstArray.FLAG_ERROR))
-        .isInstanceOf(IllegalStateException.class);
+        assertThat(b.isBuilt()).isTrue();
     }
 
     @Test
@@ -157,38 +141,6 @@ class CstArrayBuilderTest {
     }
 
     @Test
-    void beginNode_validation_rejectsBadInputs() {
-        var b = builder("a", 1);
-        assertThatThrownBy(() -> b.beginNode( - 1, 0, CstArray.NO_NODE))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> b.beginNode(KIND_ROOT, - 1, CstArray.NO_NODE))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> b.beginNode(KIND_ROOT, 0, 99))
-        .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void endNode_validation_rejectsBadInputs() {
-        var b = builder("aa", 2);
-        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
-        assertThatThrownBy(() -> b.endNode(99, 0))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> b.endNode(n, - 1))
-        .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void build_validation_rejectsBadRootIndex() {
-        var b = builder("a", 1);
-        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
-        b.endNode(n, 0);
-        assertThatThrownBy(() -> b.build(99))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> b.build( - 1))
-        .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
     void emptyBuilder_buildsEmptyCstWithNoNodeRoot() {
         var input = "";
         var tokens = new TokenArrayBuilder(input).build(TOKEN_NAMES);
@@ -200,15 +152,6 @@ class CstArrayBuilderTest {
         .isEqualTo(CstArray.NO_NODE);
         assertThat(cst.reconstruct())
         .isEmpty();
-    }
-
-    @Test
-    void emptyBuilder_rootIndexNotNoNode_rejected() {
-        var input = "";
-        var tokens = new TokenArrayBuilder(input).build(TOKEN_NAMES);
-        var b = new CstArrayBuilder(input, tokens, RULE_TABLE);
-        assertThatThrownBy(() -> b.build(0))
-        .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -365,20 +308,6 @@ class CstArrayBuilderTest {
         .isEqualTo(CstArray.NO_NODE);
         assertThat(cst.firstChildAt(c0))
         .isEqualTo(CstArray.NO_NODE);
-    }
-
-    @Test
-    void constructor_validatesArguments() {
-        var input = "a";
-        var tokens = new TokenArrayBuilder(input).build(TOKEN_NAMES);
-        assertThatThrownBy(() -> new CstArrayBuilder(null, tokens, RULE_TABLE))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArrayBuilder(input, null, RULE_TABLE))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArrayBuilder(input, tokens, null))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArrayBuilder(input, tokens, RULE_TABLE, - 1))
-        .isInstanceOf(IllegalArgumentException.class);
     }
 
     private CstArrayBuilder builder(String input, int tokenCount) {

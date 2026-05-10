@@ -6,7 +6,6 @@ import org.pragmatica.peg.v6.token.TokenArray;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LexerEngineTest {
     private static LexerEngine engineFor(String grammarText) {
@@ -185,23 +184,34 @@ class LexerEngineTest {
     }
 
     @Test
-    void noMatch_throwsWithOffsetAndCharacter() {
+    void noMatch_emitsSyntheticWhitespaceToken() {
         var grammar = "Number <- [0-9]+\n";
         var engine = engineFor(grammar);
-        assertThatThrownBy(() -> engine.lex("12@45"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("offset 2")
-        .hasMessageContaining("'@'");
+        // Phase A.6 (post-JBCT refactor): the lexer no longer throws on a no-transition
+        // stall; it emits a 1-char synthetic WHITESPACE token to make progress so the
+        // parser can surface the bad input as a trailing-input diagnostic instead.
+        var tokens = engine.lex("12@45");
+        assertThat(tokens.count()).isGreaterThanOrEqualTo(3);
+        // The '@' becomes a single-char trivia token.
+        boolean foundAt = false;
+        for (int i = 0; i < tokens.count(); i++) {
+            if (tokens.startAt(i) == 2 && tokens.endAt(i) == 3) {
+                foundAt = true;
+                assertThat(tokens.kindAt(i)).isEqualTo(TokenArray.KIND_WHITESPACE);
+            }
+        }
+        assertThat(foundAt).isTrue();
     }
 
     @Test
-    void noMatch_atStart_reportsOffsetZero() {
+    void noMatch_atStart_emitsSyntheticTokenAtZero() {
         var grammar = "Number <- [0-9]+\n";
         var engine = engineFor(grammar);
-        assertThatThrownBy(() -> engine.lex("@"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("offset 0")
-        .hasMessageContaining("'@'");
+        var tokens = engine.lex("@");
+        assertThat(tokens.count()).isEqualTo(1);
+        assertThat(tokens.kindAt(0)).isEqualTo(TokenArray.KIND_WHITESPACE);
+        assertThat(tokens.startAt(0)).isZero();
+        assertThat(tokens.endAt(0)).isEqualTo(1);
     }
 
     @Test
@@ -252,13 +262,14 @@ class LexerEngineTest {
     }
 
     @Test
-    void emptyMatchingRule_failsAtLexTime() {
+    void emptyMatchingRule_emitsSyntheticToken() {
         // [a-z]* matches empty -> DFA start state is accepting -> longest match
-        // is zero-length on a non-matching char like '!', which we detect and throw.
+        // is zero-length on a non-matching char like '!'. After the JBCT refactor
+        // the lexer emits a synthetic WHITESPACE token rather than throwing.
         var grammar = "Word <- [a-z]*\n";
         var engine = engineFor(grammar);
-        assertThatThrownBy(() -> engine.lex("!"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("offset 0");
+        var tokens = engine.lex("!");
+        assertThat(tokens.count()).isEqualTo(1);
+        assertThat(tokens.kindAt(0)).isEqualTo(TokenArray.KIND_WHITESPACE);
     }
 }

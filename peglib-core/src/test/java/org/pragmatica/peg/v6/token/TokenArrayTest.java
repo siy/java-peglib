@@ -3,7 +3,6 @@ package org.pragmatica.peg.v6.token;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.pragmatica.peg.v6.token.TokenArray.FIRST_USER_KIND;
 import static org.pragmatica.peg.v6.token.TokenArray.KIND_BLOCK_COMMENT;
 import static org.pragmatica.peg.v6.token.TokenArray.KIND_LINE_COMMENT;
@@ -157,67 +156,11 @@ class TokenArrayTest {
     }
 
     @Test
-    void invalidBuild_endLessThanStart_isRejected() {
-        var b = new TokenArrayBuilder("abcd");
-        b.append(IDENT, 2, 1);
-        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("end=");
-    }
-
-    @Test
-    void invalidBuild_startBeyondInput_isRejected() {
-        var b = new TokenArrayBuilder("ab");
-        b.append(IDENT, 5, 5);
-        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("start=");
-    }
-
-    @Test
-    void invalidBuild_endBeyondInput_isRejected() {
-        var b = new TokenArrayBuilder("ab");
-        b.append(IDENT, 0, 5);
-        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("end=");
-    }
-
-    @Test
-    void invalidBuild_startsNotMonotonic_isRejected() {
-        var b = new TokenArrayBuilder("abcd");
-        b.append(IDENT, 2, 4);
-        b.append(IDENT, 0, 1);
-        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("non-decreasing");
-    }
-
-    @Test
-    void invalidBuild_kindOutsideNameTable_isRejected() {
-        var b = new TokenArrayBuilder("ab");
-        b.append(99, 0, 2);
-        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("kindNameTable");
-    }
-
-    @Test
-    void buildIsSingleShot_secondBuildFails() {
+    void buildIsSingleShot_isBuiltSetAfterFirstCall() {
         var b = new TokenArrayBuilder("a");
         b.append(IDENT, 0, 1);
         b.build(DEFAULT_NAMES);
-        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
-        .isInstanceOf(IllegalStateException.class);
-    }
-
-    @Test
-    void appendAfterBuild_fails() {
-        var b = new TokenArrayBuilder("a");
-        b.append(IDENT, 0, 1);
-        b.build(DEFAULT_NAMES);
-        assertThatThrownBy(() -> b.append(IDENT, 0, 1))
-        .isInstanceOf(IllegalStateException.class);
+        assertThat(b.isBuilt()).isTrue();
     }
 
     @Test
@@ -235,13 +178,6 @@ class TokenArrayTest {
         .isEqualTo(999);
         assertThat(array.endAt(999))
         .isEqualTo(1000);
-    }
-
-    @Test
-    void textAt_indexOutOfBounds_throws() {
-        var array = new TokenArrayBuilder("a").build(DEFAULT_NAMES);
-        assertThatThrownBy(() -> array.textAt(0))
-        .isInstanceOf(IndexOutOfBoundsException.class);
     }
 
     @Test

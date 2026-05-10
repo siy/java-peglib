@@ -7,7 +7,6 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.pragmatica.peg.v6.token.TokenArray.FIRST_USER_KIND;
 
 /**
@@ -187,11 +186,4 @@ class FindCheckpointAncestorTest {
         .isEqualTo(CstArray.NO_NODE);
     }
 
-    @Test
-    void nullCheckpointRules_throws() {
-        var built = build();
-        assertThatThrownBy(() -> built.cst.findCheckpointAncestor(0, null))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("checkpointRules");
-    }
 }

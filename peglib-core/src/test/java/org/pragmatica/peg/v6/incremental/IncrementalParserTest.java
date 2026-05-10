@@ -9,7 +9,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Phase D.2 — coverage for {@link IncrementalParser}.
@@ -193,49 +192,6 @@ class IncrementalParserTest {
     }
 
     @Test
-    void editOutOfBounds_negativeOffset_throws() {
-        var ip = new IncrementalParser(parser, "foo");
-        assertThatThrownBy(() -> ip.edit( - 1, 0, "x"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("out of bounds");
-    }
-
-    @Test
-    void editOutOfBounds_negativeOldLen_throws() {
-        var ip = new IncrementalParser(parser, "foo");
-        assertThatThrownBy(() -> ip.edit(0, - 1, "x"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("out of bounds");
-    }
-
-    @Test
-    void editOutOfBounds_rangeBeyondInput_throws() {
-        var ip = new IncrementalParser(parser, "foo");
-        assertThatThrownBy(() -> ip.edit(2, 5, "x"))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("out of bounds");
-    }
-
-    @Test
-    void edit_nullNewText_throws() {
-        var ip = new IncrementalParser(parser, "foo");
-        assertThatThrownBy(() -> ip.edit(0, 0, null))
-        .isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    void constructor_nullParser_throws() {
-        assertThatThrownBy(() -> new IncrementalParser(null, "foo"))
-        .isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
-    void constructor_nullInitialInput_throws() {
-        assertThatThrownBy(() -> new IncrementalParser(parser, null))
-        .isInstanceOf(NullPointerException.class);
-    }
-
-    @Test
     void parserAccessor_returnsConstructedParser() {
         var ip = new IncrementalParser(parser, "foo");
         assertThat(ip.parser())
@@ -280,12 +236,6 @@ class IncrementalParserTest {
         var ip = new IncrementalParser(parser, "foo", custom);
         assertThat(ip.checkpointRules())
         .isEqualTo(custom);
-    }
-
-    @Test
-    void constructor_nullCheckpointRules_throws() {
-        assertThatThrownBy(() -> new IncrementalParser(parser, "foo", null))
-        .isInstanceOf(NullPointerException.class);
     }
 
     @Test

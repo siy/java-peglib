@@ -363,27 +363,9 @@ class CstArrayTest {
         .isEqualTo(input);
     }
 
-    @Test
-    void constructor_validatesArguments() {
-        var tokens = new TokenArrayBuilder("a").build(TOKEN_NAMES);
-        var oneNode = new int[CstArray.NODE_STRIDE];
-        assertThatThrownBy(() -> new CstArray(null, tokens, oneNode, 1, RULE_TABLE, 0))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArray("a", null, oneNode, 1, RULE_TABLE, 0))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArray("a", tokens, null, 1, RULE_TABLE, 0))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArray("a", tokens, oneNode, 1, null, 0))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArray("a", tokens, oneNode, - 1, RULE_TABLE, 0))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArray("a", tokens, new int[1], 1, RULE_TABLE, 0))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArray("a", tokens, oneNode, 1, RULE_TABLE, 99))
-        .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new CstArray("a", tokens, new int[0], 0, RULE_TABLE, 0))
-        .isInstanceOf(IllegalArgumentException.class);
-    }
+    // constructor_validatesArguments removed: defensive null/range checks were
+    // dropped from CstArray as part of the JBCT conformance refactor — the
+    // constructor is package-internal and trusts callers (CstArrayBuilder).
 
     @Test
     void accessors_indexOutOfBounds_throw() {

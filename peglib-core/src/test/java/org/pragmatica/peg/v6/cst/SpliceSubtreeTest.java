@@ -5,7 +5,6 @@ import org.pragmatica.peg.v6.token.TokenArrayBuilder;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.pragmatica.peg.v6.token.TokenArray.FIRST_USER_KIND;
 
 /**
@@ -298,48 +297,7 @@ class SpliceSubtreeTest {
         .isEqualTo(newTokens.input());
     }
 
-    @Test
-    void nullNewSubtree_throws() {
-        var baseline = buildBaseline();
-        var newTokens = buildPostSpliceTokens(0, 1, 2);
-        assertThatThrownBy(() -> baseline.cst.spliceSubtree(baseline.block1, null, newTokens, 0))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("newSubtree");
-    }
-
-    @Test
-    void nullNewTokens_throws() {
-        var baseline = buildBaseline();
-        var sub = buildSubtree(2, KIND_REPLACED);
-        assertThatThrownBy(() -> baseline.cst.spliceSubtree(baseline.block1, sub.cst, null, 0))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("newTokens");
-    }
-
-    @Test
-    void outOfBoundsNodeIdx_throws() {
-        var baseline = buildBaseline();
-        var sub = buildSubtree(2, KIND_REPLACED);
-        var newTokens = buildPostSpliceTokens(0, 1, 2);
-        assertThatThrownBy(() -> baseline.cst.spliceSubtree(999, sub.cst, newTokens, 0))
-        .isInstanceOf(IndexOutOfBoundsException.class);
-    }
-
-    @Test
-    void mismatchedRuleTable_throws() {
-        var baseline = buildBaseline();
-        var input = "xx";
-        var tb = new TokenArrayBuilder(input);
-        tb.append(TOK, 0, 2);
-        var tokens = tb.build(TOKEN_NAMES);
-        var differentTable = new String[] {"AAA", "BBB"};
-        var b = new CstArrayBuilder(input, tokens, differentTable);
-        var root = b.beginNode(0, 0, CstArray.NO_NODE);
-        b.endNode(root, 0);
-        var foreignSub = b.build(root);
-        var newTokens = buildPostSpliceTokens(0, 1, 1);
-        assertThatThrownBy(() -> baseline.cst.spliceSubtree(baseline.block1, foreignSub, newTokens, - 1))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ruleTable");
-    }
+    // null/range/ruleTable validation tests removed: defensive validation in
+    // CstArray.spliceSubtree was dropped as part of the JBCT conformance refactor.
+    // Callers (IncrementalParser, tests) supply validated inputs.
 }

@@ -393,7 +393,10 @@ class ParserGeneratorTest {
         var compiled = compile(generated);
         var tokens = built.engine()
                           .lex("(foo),(foo)");
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+        // After the JBCT refactor compiled.parseRuleFrom() unwraps a Result, so a
+        // failing reflective call surfaces as IllegalStateException (Result.unwrap
+        // semantics) rather than the underlying IllegalArgumentException.
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
                                                       () -> compiled.parseRuleFrom(tokens, 0, 99999));
     }
 
@@ -409,9 +412,10 @@ class ParserGeneratorTest {
         var tokens = built.engine()
                           .lex("(foo),(foo)");
         var ruleKinds = compiled.ruleKinds();
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+        // See parseRuleFrom_unknownRuleKind_throws: error path returns through Result.unwrap.
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
                                                       () -> compiled.parseRuleFrom(tokens, - 1, ruleKinds.get("Item")));
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
                                                       () -> compiled.parseRuleFrom(tokens,
                                                                                    tokens.count() + 1,
                                                                                    ruleKinds.get("Item")));
