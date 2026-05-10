@@ -2,6 +2,7 @@ package org.pragmatica.peg.v6.generator;
 
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Result;
+import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
@@ -49,59 +50,49 @@ public final class ParserGenerator {
      * is best-effort and a missing entry simply means recovery falls through to
      * the next sync token (or EOF).
      */
-    private static final List<String>DEFAULT_SYNC_LITERALS = List.of(";", ",", "}", ")", "]");
+    private static final List<String> DEFAULT_SYNC_LITERALS = List.of(";", ",", "}", ")", "]");
 
     private ParserGenerator() {}
 
-    public sealed interface ParserGenerationError extends Cause
-    permits ParserGenerationError.InvalidIdentifier,
+    public sealed interface ParserGenerationError extends Cause permits ParserGenerationError.InvalidIdentifier,
     ParserGenerationError.NoStartRule,
     ParserGenerationError.StartRuleNotParser,
     ParserGenerationError.UnsupportedExpression,
     ParserGenerationError.UnknownLiteral,
     ParserGenerationError.UnknownReference {
         record InvalidIdentifier(String component, String value) implements ParserGenerationError {
-            @Override
-            public String message() {
+            @Override public String message() {
                 return "Invalid Java identifier for " + component + ": '" + value + "'";
             }
         }
 
         record NoStartRule() implements ParserGenerationError {
-            @Override
-            public String message() {
+            @Override public String message() {
                 return "Grammar has no rules; cannot determine start rule";
             }
         }
 
         record StartRuleNotParser(String name, RuleKind actual) implements ParserGenerationError {
-            @Override
-            public String message() {
-                return "Start rule '" + name + "' is classified as " + actual
-                       + " (expected PARSER or MIXED); generated parser cannot dispatch into it";
+            @Override public String message() {
+                return "Start rule '" + name + "' is classified as " + actual + " (expected PARSER or MIXED); generated parser cannot dispatch into it";
             }
         }
 
         record UnsupportedExpression(String ruleName, String expressionKind, String detail)
         implements ParserGenerationError {
-            @Override
-            public String message() {
-                return "Cannot emit parser for rule '" + ruleName + "': unsupported expression " + expressionKind
-                       + " (" + detail + ")";
+            @Override public String message() {
+                return "Cannot emit parser for rule '" + ruleName + "': unsupported expression " + expressionKind + " (" + detail + ")";
             }
         }
 
         record UnknownLiteral(String ruleName, String literalText) implements ParserGenerationError {
-            @Override
-            public String message() {
-                return "Rule '" + ruleName + "' references inline literal '" + literalText
-                       + "' that has no allocated token kind — DFA build inconsistent";
+            @Override public String message() {
+                return "Rule '" + ruleName + "' references inline literal '" + literalText + "' that has no allocated token kind — DFA build inconsistent";
             }
         }
 
         record UnknownReference(String ruleName, String referencedRule) implements ParserGenerationError {
-            @Override
-            public String message() {
+            @Override public String message() {
                 return "Rule '" + ruleName + "' references undefined rule '" + referencedRule + "'";
             }
         }
@@ -120,25 +111,18 @@ public final class ParserGenerator {
                                                    DfaBuilder.TokenKindAssignment kinds,
                                                    String packageName,
                                                    String className) {
-        if (grammar == null || classification == null || kinds == null) {
-            throw new IllegalArgumentException("grammar/classification/kinds must not be null");
-        }
-        if (!isValidQualifiedPackage(packageName)) {
-            return new ParserGenerationError.InvalidIdentifier("packageName", String.valueOf(packageName)).result();
-        }
-        if (!isValidIdentifier(className)) {
-            return new ParserGenerationError.InvalidIdentifier("className", String.valueOf(className)).result();
-        }
+        // Internal entry: callers are PegParser/tests with validated inputs.
+        if ( !isValidQualifiedPackage(packageName)) {
+        return new ParserGenerationError.InvalidIdentifier("packageName", String.valueOf(packageName)).result();}
+        if ( !isValidIdentifier(className)) {
+        return new ParserGenerationError.InvalidIdentifier("className", String.valueOf(className)).result();}
         var startRuleOpt = grammar.effectiveStartRule();
-        if (startRuleOpt.isEmpty()) {
-            return new ParserGenerationError.NoStartRule().result();
-        }
+        if ( startRuleOpt.isEmpty()) {
+        return new ParserGenerationError.NoStartRule().result();}
         var startRule = startRuleOpt.unwrap();
-        var startKind = classification.kinds()
-                                      .get(startRule.name());
-        if (startKind != RuleKind.PARSER && startKind != RuleKind.MIXED) {
-            return new ParserGenerationError.StartRuleNotParser(startRule.name(), startKind).result();
-        }
+        var startKind = classification.kinds().get(startRule.name());
+        if ( startKind != RuleKind.PARSER && startKind != RuleKind.MIXED) {
+        return new ParserGenerationError.StartRuleNotParser(startRule.name(), startKind).result();}
         return new Renderer(grammar, classification, kinds, packageName, className).render();
     }
 
@@ -175,9 +159,8 @@ public final class ParserGenerator {
             // Phase E.1 — share the kind allocation with VisitorGenerator via the
             // public static helper so both generators agree on RULE_*_KIND indices.
             this.parserRuleKinds = allocateParserRuleKinds(grammar, classification);
-            this.ruleTable = parserRules.stream()
-                                        .map(Rule::name)
-                                        .toArray(String[]::new);
+            this.ruleTable = parserRules.stream().map(Rule::name)
+                                               .toArray(String[]::new);
             this.usedTokenKinds = new LinkedHashSet<>();
             this.aliasArrays = new LinkedHashSet<>();
         }
@@ -187,11 +170,10 @@ public final class ParserGenerator {
             // bodies before stitching the source so the header (KIND constants) can
             // include only kinds that are actually referenced.
             var bodies = new ArrayList<String>(parserRules.size());
-            for (var rule : parserRules) {
+            for ( var rule : parserRules) {
                 var bodyResult = renderRuleBody(rule);
-                if (!bodyResult.isSuccess()) {
-                    return bodyResult.map(__ -> (GeneratedParser) null);
-                }
+                if ( !bodyResult.isSuccess()) {
+                return bodyResult.map(__ -> (GeneratedParser) null);}
                 bodies.add(bodyResult.unwrap());
             }
             // Phase B.4 — compute the default sync-set token kinds. We look up each
@@ -206,41 +188,35 @@ public final class ParserGenerator {
             // only); the lookup is keyed on the start rule for now.
             var inlineLiterals = kinds.inlineLiteralToKind();
             var syncKindSet = new TreeSet<Integer>();
-            var startRuleName = grammar.effectiveStartRule()
-                                       .unwrap()
-                                       .name();
-            var ruleRecoverSet = grammar.recoverSets()
-                                        .get(startRuleName);
-            if (ruleRecoverSet != null && !ruleRecoverSet.isEmpty()) {
-                for (var ch : ruleRecoverSet) {
-                    var k = inlineLiterals.get(String.valueOf(ch) + "/cs");
-                    if (k != null) {
-                        syncKindSet.add(k);
-                        usedTokenKinds.add(k);
-                    }
+            var startRuleName = grammar.effectiveStartRule().unwrap()
+                                                          .name();
+            var ruleRecoverSet = grammar.recoverSets().get(startRuleName);
+            if ( ruleRecoverSet != null && !ruleRecoverSet.isEmpty()) {
+            for ( var ch : ruleRecoverSet) {
+                var k = inlineLiterals.get(String.valueOf(ch) + "/cs");
+                if ( k != null) {
+                    syncKindSet.add(k);
+                    usedTokenKinds.add(k);
                 }
-            }else {
-                for (var literal : DEFAULT_SYNC_LITERALS) {
-                    var k = inlineLiterals.get(literal + "/cs");
-                    if (k != null) {
-                        syncKindSet.add(k);
-                        usedTokenKinds.add(k);
-                    }
+            }} else
+            {
+            for ( var literal : DEFAULT_SYNC_LITERALS) {
+                var k = inlineLiterals.get(literal + "/cs");
+                if ( k != null) {
+                    syncKindSet.add(k);
+                    usedTokenKinds.add(k);
                 }
-            }
-            var syncKinds = syncKindSet.stream()
-                                       .mapToInt(Integer::intValue)
-                                       .toArray();
+            }}
+            var syncKinds = syncKindSet.stream().mapToInt(Integer::intValue)
+                                              .toArray();
             // ERROR sentinel kind sits at index ruleTable.length (one past the user
             // rules); we append "ERROR" to the emitted RULE_TABLE so kindNameAt
             // resolves it.
             var errorKindIndex = ruleTable.length;
             var sb = new StringBuilder(8 * 1024);
-            if (!packageName.isEmpty()) {
-                sb.append("package ")
-                  .append(packageName)
-                  .append(";\n\n");
-            }
+            if ( !packageName.isEmpty()) {
+            sb.append("package ").append(packageName)
+                     .append(";\n\n");}
             sb.append("import java.util.ArrayList;\n");
             sb.append("import java.util.LinkedHashMap;\n");
             sb.append("import java.util.List;\n");
@@ -250,81 +226,67 @@ public final class ParserGenerator {
             sb.append("import org.pragmatica.peg.v6.cst.CstArrayBuilder;\n");
             sb.append("import org.pragmatica.peg.v6.cst.ParseResult;\n");
             sb.append("import org.pragmatica.peg.v6.diagnostic.Diagnostic;\n\n");
-            sb.append("public final class ")
-              .append(className)
-              .append(" {\n\n");
+            sb.append("public final class ").append(className)
+                     .append(" {\n\n");
             // RULE_TABLE — names, used by CstArray for kindNameAt. The trailing
             // "ERROR" entry is the sentinel kind for recovery-emitted nodes; the
             // very last entry "_ROOT" is the synthetic-root sentinel under which
             // the start-rule call(s) and any recovery Error nodes are attached.
             sb.append("    private static final String[] RULE_TABLE = {");
-            for (var i = 0; i < ruleTable.length; i++ ) {
-                if (i > 0) {
-                    sb.append(", ");
-                }
-                sb.append('"')
-                  .append(escapeJavaString(ruleTable[i]))
-                  .append('"');
+            for ( var i = 0; i < ruleTable.length; i++) {
+                if ( i > 0) {
+                sb.append(", ");}
+                sb.append('"').append(escapeJavaString(ruleTable[i]))
+                         .append('"');
             }
-            if (ruleTable.length > 0) {
-                sb.append(", ");
-            }
+            if ( ruleTable.length > 0) {
+            sb.append(", ");}
             sb.append("\"ERROR\", \"_ROOT\"};\n\n");
             // Per-rule kind constants.
-            for (var entry : parserRuleKinds.entrySet()) {
-                sb.append("    private static final int RULE_")
-                  .append(entry.getKey())
-                  .append("_KIND = ")
-                  .append(entry.getValue())
-                  .append(";\n");
-            }
-            sb.append("    private static final int RULE_ERROR_KIND = ")
-              .append(errorKindIndex)
-              .append(";\n");
-            sb.append("    private static final int RULE_ROOT_KIND = ")
-              .append(errorKindIndex + 1)
-              .append(";\n");
+            for ( var entry : parserRuleKinds.entrySet()) {
+            sb.append("    private static final int RULE_").append(entry.getKey())
+                     .append("_KIND = ")
+                     .append(entry.getValue())
+                     .append(";\n");}
+            sb.append("    private static final int RULE_ERROR_KIND = ").append(errorKindIndex)
+                     .append(";\n");
+            sb.append("    private static final int RULE_ROOT_KIND = ").append(errorKindIndex + 1)
+                     .append(";\n");
             sb.append("\n");
             // Per-token-kind constants — referenced by parse methods.
             // Use kindNameTable for stable, debuggable names.
             var nameTable = kinds.kindNameTable();
-            for (var k : usedTokenKinds) {
-                if (k < 0 || k >= nameTable.length) {
-                    continue;
-                }
-                sb.append("    private static final int KIND_")
-                  .append(sanitize(nameTable[k]))
-                  .append(" = ")
-                  .append(k)
-                  .append(";\n");
+            for ( var k : usedTokenKinds) {
+                if ( k < 0 || k >= nameTable.length) {
+                continue;}
+                sb.append("    private static final int KIND_").append(sanitize(nameTable[k]))
+                         .append(" = ")
+                         .append(k)
+                         .append(";\n");
             }
             sb.append("\n");
             // Sync-set: sorted ascending so we can use binarySearch for contains-check.
             sb.append("    private static final int[] DEFAULT_SYNC = new int[] {");
-            for (var i = 0; i < syncKinds.length; i++ ) {
-                if (i > 0) {
-                    sb.append(", ");
-                }
+            for ( var i = 0; i < syncKinds.length; i++) {
+                if ( i > 0) {
+                sb.append(", ");}
                 sb.append(syncKinds[i]);
             }
             sb.append("};\n\n");
             // Phase B.5 — emit per-rule sorted alias arrays for binarySearch path.
             // Linear-OR alias guards (≤4 entries) inline their kinds and don't need
             // an array.
-            if (!aliasArrays.isEmpty()) {
+            if ( !aliasArrays.isEmpty()) {
                 var aliasMap = kinds.ruleNameToAliasKinds();
-                for (var ruleName : aliasArrays) {
+                for ( var ruleName : aliasArrays) {
                     var aliasKinds = aliasMap.get(ruleName);
-                    if (aliasKinds == null) {
-                        continue;
-                    }
-                    sb.append("    private static final int[] ALIAS_")
-                      .append(sanitize(ruleName))
-                      .append(" = new int[] {");
-                    for (var i = 0; i < aliasKinds.length; i++ ) {
-                        if (i > 0) {
-                            sb.append(", ");
-                        }
+                    if ( aliasKinds == null) {
+                    continue;}
+                    sb.append("    private static final int[] ALIAS_").append(sanitize(ruleName))
+                             .append(" = new int[] {");
+                    for ( var i = 0; i < aliasKinds.length; i++) {
+                        if ( i > 0) {
+                        sb.append(", ");}
                         sb.append(aliasKinds[i]);
                     }
                     sb.append("};\n");
@@ -343,9 +305,8 @@ public final class ParserGenerator {
             sb.append("    private String expected;\n");
             sb.append("    private int found;\n\n");
             // Constructor.
-            sb.append("    private ")
-              .append(className)
-              .append("(TokenArray tokens) {\n");
+            sb.append("    private ").append(className)
+                     .append("(TokenArray tokens) {\n");
             sb.append("        this.tokens = tokens;\n");
             sb.append("        this.cst = new CstArrayBuilder(tokens.input(), tokens, RULE_TABLE);\n");
             sb.append("        this.diagnostics = new ArrayList<>();\n");
@@ -355,18 +316,16 @@ public final class ParserGenerator {
             sb.append("        this.found = -1;\n");
             sb.append("    }\n\n");
             // Public entry point — Phase B.4 returns ParseResult unconditionally.
-            var startName = grammar.effectiveStartRule()
-                                   .unwrap()
-                                   .name();
+            var startName = grammar.effectiveStartRule().unwrap()
+                                                      .name();
             sb.append("    public static ParseResult parse(TokenArray tokens) {\n");
             sb.append("        if (tokens == null) {\n");
             sb.append("            throw new IllegalArgumentException(\"tokens must not be null\");\n");
             sb.append("        }\n");
-            sb.append("        ")
-              .append(className)
-              .append(" p = new ")
-              .append(className)
-              .append("(tokens);\n");
+            sb.append("        ").append(className)
+                     .append(" p = new ")
+                     .append(className)
+                     .append("(tokens);\n");
             sb.append("        int rootIdx = p.parseWithRecovery();\n");
             sb.append("        CstArray cstArr = p.cst.build(rootIdx);\n");
             sb.append("        return new ParseResult(cstArr, p.diagnostics);\n");
@@ -384,11 +343,10 @@ public final class ParserGenerator {
             sb.append("            throw new IllegalArgumentException(\n");
             sb.append("                \"fromTokenIdx out of bounds: \" + fromTokenIdx + \" (count=\" + tokens.count() + \")\");\n");
             sb.append("        }\n");
-            sb.append("        ")
-              .append(className)
-              .append(" p = new ")
-              .append(className)
-              .append("(tokens);\n");
+            sb.append("        ").append(className)
+                     .append(" p = new ")
+                     .append(className)
+                     .append("(tokens);\n");
             sb.append("        p.pos = tokens.nextNonTrivia(fromTokenIdx);\n");
             sb.append("        int rootFirstTok = p.pos < tokens.count() ? p.pos : (tokens.count() == 0 ? 0 : tokens.count() - 1);\n");
             sb.append("        int rootIdx = p.cst.beginNode(RULE_ROOT_KIND, rootFirstTok, -1);\n");
@@ -422,17 +380,14 @@ public final class ParserGenerator {
             sb.append("    }\n\n");
             // Switch table for partial-parse dispatch: maps rule-kind constant to
             // the corresponding parseFoo invocation.
-            sb.append("    private static boolean parseByKind(")
-              .append(className)
-              .append(" p, int kind, int parent) {\n");
+            sb.append("    private static boolean parseByKind(").append(className)
+                     .append(" p, int kind, int parent) {\n");
             sb.append("        switch (kind) {\n");
-            for (var entry : parserRuleKinds.entrySet()) {
-                sb.append("            case RULE_")
-                  .append(entry.getKey())
-                  .append("_KIND: return p.parse")
-                  .append(entry.getKey())
-                  .append("(parent);\n");
-            }
+            for ( var entry : parserRuleKinds.entrySet()) {
+            sb.append("            case RULE_").append(entry.getKey())
+                     .append("_KIND: return p.parse")
+                     .append(entry.getKey())
+                     .append("(parent);\n");}
             sb.append("            default: throw new IllegalArgumentException(\"unknown rule kind: \" + kind);\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
@@ -441,13 +396,11 @@ public final class ParserGenerator {
             // rule by name without reading the generated source.
             sb.append("    public static Map<String, Integer> ruleKinds() {\n");
             sb.append("        Map<String, Integer> m = new LinkedHashMap<>();\n");
-            for (var entry : parserRuleKinds.entrySet()) {
-                sb.append("        m.put(\"")
-                  .append(escapeJavaString(entry.getKey()))
-                  .append("\", RULE_")
-                  .append(entry.getKey())
-                  .append("_KIND);\n");
-            }
+            for ( var entry : parserRuleKinds.entrySet()) {
+            sb.append("        m.put(\"").append(escapeJavaString(entry.getKey()))
+                     .append("\", RULE_")
+                     .append(entry.getKey())
+                     .append("_KIND);\n");}
             sb.append("        return m;\n");
             sb.append("    }\n\n");
             // Phase B.3.1 — full-consumption recovery loop.
@@ -482,8 +435,7 @@ public final class ParserGenerator {
             sb.append("                    // know the parse couldn't even attempt the start rule.\n");
             sb.append("                    int off = tokens.count() == 0 ? 0 : tokens.startAt(0);\n");
             sb.append("                    diagnostics.add(Diagnostic.error(off, 1,\n");
-            sb.append("                        \"empty input\", \"start of " + escapeJavaString(startName)
-                      + "\", \"<end-of-input>\"));\n");
+            sb.append("                        \"empty input\", \"start of " + escapeJavaString(startName) + "\", \"<end-of-input>\"));\n");
             sb.append("                }\n");
             sb.append("                break;\n");
             sb.append("            }\n");
@@ -495,9 +447,8 @@ public final class ParserGenerator {
             sb.append("            errorPos = -1;\n");
             sb.append("            expected = null;\n");
             sb.append("            found = -1;\n");
-            sb.append("            boolean parsedOk = parse")
-              .append(startName)
-              .append("(root);\n");
+            sb.append("            boolean parsedOk = parse").append(startName)
+                     .append("(root);\n");
             sb.append("            if (!parsedOk) {\n");
             sb.append("                // Roll back any partial CST built by the failed start-rule call.\n");
             sb.append("                cst.truncate(beforeNodes);\n");
@@ -634,7 +585,7 @@ public final class ParserGenerator {
             sb.append("        return false;\n");
             sb.append("    }\n\n");
             // Per-rule methods.
-            for (var i = 0; i < parserRules.size(); i++ ) {
+            for ( var i = 0; i < parserRules.size(); i++) {
                 sb.append(bodies.get(i));
                 sb.append("\n");
             }
@@ -648,9 +599,8 @@ public final class ParserGenerator {
             // opened up-front; on failure the saved state is restored (which
             // truncates the CST back, dropping {@code self} as well). Callers
             // do not need the node index, only success/failure.
-            sb.append("    private boolean parse")
-              .append(rule.name())
-              .append("(int parent) {\n");
+            sb.append("    private boolean parse").append(rule.name())
+                     .append("(int parent) {\n");
             // pos at entry must be a non-trivia token (callers ensure this; constructor
             // also seeds pos that way). The first-token of the new node is the current
             // pos. If the rule body matches zero tokens, lastToken stays = firstToken
@@ -658,14 +608,12 @@ public final class ParserGenerator {
             sb.append("        int firstTok = pos;\n");
             sb.append("        int savedPos = pos;\n");
             sb.append("        int savedNodes = cst.currentNodeCount();\n");
-            sb.append("        int self = cst.beginNode(RULE_")
-              .append(rule.name())
-              .append("_KIND, firstTok, parent);\n");
+            sb.append("        int self = cst.beginNode(RULE_").append(rule.name())
+                     .append("_KIND, firstTok, parent);\n");
             var ctx = new EmitContext(rule.name(), 1, sb);
             var bodyResult = emitExpression(rule.expression(), ctx);
-            if (!bodyResult.isSuccess()) {
-                return bodyResult.map(__ -> "");
-            }
+            if ( !bodyResult.isSuccess()) {
+            return bodyResult.map(__ -> "");}
             // lastToken = pos - 1 if any token consumed, else firstTok (zero-width match).
             sb.append("        int lastTok = pos > firstTok ? pos - 1 : firstTok;\n");
             sb.append("        if (lastTok >= tokens.count()) lastTok = tokens.count() - 1;\n");
@@ -685,95 +633,78 @@ public final class ParserGenerator {
          * or {@code pos = savedPos; cst.truncate(savedNodes); return false;} at
          * the rule-body root.
          */
-        private Result<Void> emitExpression(Expression expr, EmitContext ctx) {
-            return switch (expr) {
-                case Expression.Reference ref -> emitReference(ref, ctx);
-                case Expression.Literal lit -> emitLiteral(lit, ctx);
-                case Expression.Sequence seq -> emitSequence(seq, ctx);
-                case Expression.Choice ch -> emitChoice(ch, ctx);
-                case Expression.ZeroOrMore zom -> emitZeroOrMore(zom.expression(), ctx);
-                case Expression.OneOrMore oom -> emitOneOrMore(oom.expression(), ctx);
-                case Expression.Optional opt -> emitOptional(opt.expression(), ctx);
-                case Expression.Repetition rep -> emitRepetition(rep, ctx);
-                case Expression.And a -> isCharLevelOnly(a.expression())
-                                         ? emitParseTimeNoop(ctx,
-                                                             "and-predicate over char-level expression — handled by lexer")
-                                         : emitAnd(a.expression(), ctx);
-                case Expression.Not n -> isCharLevelOnly(n.expression())
-                                         ? emitParseTimeNoop(ctx,
-                                                             "not-predicate over char-level expression — handled by lexer")
-                                         : emitNot(n.expression(), ctx);
-                case Expression.TokenBoundary tb -> emitExpression(tb.expression(), ctx);
-                case Expression.Ignore ig -> emitExpression(ig.expression(), ctx);
-                case Expression.Capture cap -> emitExpression(cap.expression(), ctx);
-                case Expression.CaptureScope cs -> emitExpression(cs.expression(), ctx);
-                case Expression.Group g -> emitExpression(g.expression(), ctx);
-                case Expression.Cut __ -> emitCut(ctx);
-                case Expression.Any __ -> emitAnyToken(ctx);
-                case Expression.CharClass cc -> emitParseTimeNoop(ctx,
-                                                                  "char-class '" + cc.pattern()
-                                                                  + "' inside parser rule — handled by lexer (Phase B.3 no-op)");
-                case Expression.BackReference br -> emitParseTimeNoop(ctx,
-                                                                      "BackReference '" + br.name()
-                                                                      + "' (Phase B.3 no-op)");
-                case Expression.Dictionary __ -> emitParseTimeNoop(ctx, "Dictionary (Phase B.3 no-op)");
-            };
+        private Result<Unit> emitExpression(Expression expr, EmitContext ctx) {
+            return switch (expr) {case Expression.Reference ref -> emitReference(ref, ctx);case Expression.Literal lit -> emitLiteral(lit,
+                                                                                                                                      ctx);case Expression.Sequence seq -> emitSequence(seq,
+                                                                                                                                                                                        ctx);case Expression.Choice ch -> emitChoice(ch,
+                                                                                                                                                                                                                                     ctx);case Expression.ZeroOrMore zom -> emitZeroOrMore(zom.expression(),
+                                                                                                                                                                                                                                                                                           ctx);case Expression.OneOrMore oom -> emitOneOrMore(oom.expression(),
+                                                                                                                                                                                                                                                                                                                                               ctx);case Expression.Optional opt -> emitOptional(opt.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                 ctx);case Expression.Repetition rep -> emitRepetition(rep,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                       ctx);case Expression.And a -> isCharLevelOnly(a.expression())
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ? emitParseTimeNoop(ctx,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        "and-predicate over char-level expression — handled by lexer")
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    : emitAnd(a.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Not n -> isCharLevelOnly(n.expression())
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           ? emitParseTimeNoop(ctx,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               "not-predicate over char-level expression — handled by lexer")
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           : emitNot(n.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     ctx);case Expression.TokenBoundary tb -> emitExpression(tb.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ctx);case Expression.Ignore ig -> emitExpression(ig.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Capture cap -> emitExpression(cap.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ctx);case Expression.CaptureScope cs -> emitExpression(cs.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ctx);case Expression.Group g -> emitExpression(g.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       ctx);case Expression.Cut __ -> emitCut(ctx);case Expression.Any __ -> emitAnyToken(ctx);case Expression.CharClass cc -> emitParseTimeNoop(ctx,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 "char-class '" + cc.pattern() + "' inside parser rule — handled by lexer (Phase B.3 no-op)");case Expression.BackReference br -> emitParseTimeNoop(ctx,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    "BackReference '" + br.name() + "' (Phase B.3 no-op)");case Expression.Dictionary __ -> emitParseTimeNoop(ctx,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              "Dictionary (Phase B.3 no-op)");};
         }
 
-        private Result<Void> emitReference(Expression.Reference ref, EmitContext ctx) {
+        private Result<Unit> emitReference(Expression.Reference ref, EmitContext ctx) {
             var referenced = ruleMap.get(ref.ruleName());
-            if (referenced == null) {
-                return new ParserGenerationError.UnknownReference(ctx.ruleName, ref.ruleName()).result();
-            }
-            var refKind = classification.kinds()
-                                        .get(ref.ruleName());
-            if (refKind == RuleKind.PARSER || refKind == RuleKind.MIXED) {
+            if ( referenced == null) {
+            return new ParserGenerationError.UnknownReference(ctx.ruleName, ref.ruleName()).result();}
+            var refKind = classification.kinds().get(ref.ruleName());
+            if ( refKind == RuleKind.PARSER || refKind == RuleKind.MIXED) {
                 // Phase B.5 — a MIXED rule whose body simplifies to literals is also
                 // aliased. Prefer the alias path (one token of any matching kind) over
                 // recursing into a parser method that would emit char-level no-ops.
-                var aliasKindsForMixed = kinds.ruleNameToAliasKinds()
-                                              .get(ref.ruleName());
-                if (aliasKindsForMixed != null && aliasKindsForMixed.length > 0) {
+                var aliasKindsForMixed = kinds.ruleNameToAliasKinds().get(ref.ruleName());
+                if ( aliasKindsForMixed != null && aliasKindsForMixed.length > 0) {
                     emitAliasMatch(ref.ruleName(), aliasKindsForMixed, ctx);
-                    return Result.success(null);
+                    return Result.unitResult();
                 }
-                ctx.sb.append(indent(ctx.depth))
-                   .append("if (!parse")
-                   .append(ref.ruleName())
-                   .append("(self)) { ")
-                   .append(ctx.failAction)
-                   .append(" }\n");
-                return Result.success(null);
+                ctx.sb.append(indent(ctx.depth)).append("if (!parse")
+                             .append(ref.ruleName())
+                             .append("(self)) { ")
+                             .append(ctx.failAction)
+                             .append(" }\n");
+                return Result.unitResult();
             }
             // Phase B.5 — LEXER rule that aliases to a set of inline literals.
             // Accept any of the alias kinds; no separate DFA accept state exists.
-            var aliasKinds = kinds.ruleNameToAliasKinds()
-                                  .get(ref.ruleName());
-            if (aliasKinds != null && aliasKinds.length > 0) {
+            var aliasKinds = kinds.ruleNameToAliasKinds().get(ref.ruleName());
+            if ( aliasKinds != null && aliasKinds.length > 0) {
                 emitAliasMatch(ref.ruleName(), aliasKinds, ctx);
-                return Result.success(null);
+                return Result.unitResult();
             }
             // LEXER reference — consume one token of the matching kind.
-            var kind = kinds.ruleNameToKind()
-                            .get(ref.ruleName());
-            if (kind == null) {
-                // Rule was demoted to LEXER but DFA didn't pick it up (e.g. skipped).
-                // Fall back to ANY_CHAR or report.
-                return new ParserGenerationError.UnknownReference(ctx.ruleName, ref.ruleName()).result();
-            }
+            var kind = kinds.ruleNameToKind().get(ref.ruleName());
+            if ( kind == null) {
+            // Rule was demoted to LEXER but DFA didn't pick it up (e.g. skipped).
+            // Fall back to ANY_CHAR or report.
+            return new ParserGenerationError.UnknownReference(ctx.ruleName, ref.ruleName()).result();}
             usedTokenKinds.add(kind);
             var kindConst = "KIND_" + sanitize(kinds.kindNameTable() [kind]);
-            ctx.sb.append(indent(ctx.depth))
-               .append("if (peek() != ")
-               .append(kindConst)
-               .append(") { fail(\"")
-               .append(escapeJavaString(ref.ruleName()))
-               .append("\"); ")
-               .append(ctx.failAction)
-               .append(" }\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("advance();\n");
-            return Result.success(null);
+            ctx.sb.append(indent(ctx.depth)).append("if (peek() != ")
+                         .append(kindConst)
+                         .append(") { fail(\"")
+                         .append(escapeJavaString(ref.ruleName()))
+                         .append("\"); ")
+                         .append(ctx.failAction)
+                         .append(" }\n");
+            ctx.sb.append(indent(ctx.depth)).append("advance();\n");
+            return Result.unitResult();
         }
 
         /**
@@ -783,87 +714,77 @@ public final class ParserGenerator {
          * sorted constant array {@code ALIAS_<RuleName>}.
          */
         private void emitAliasMatch(String ruleName, int[] aliasKinds, EmitContext ctx) {
-            for (var k : aliasKinds) {
-                usedTokenKinds.add(k);
-            }
+            for ( var k : aliasKinds) {
+            usedTokenKinds.add(k);}
             var indent = indent(ctx.depth);
-            if (aliasKinds.length <= 4) {
+            if ( aliasKinds.length <= 4) {
                 var sb = new StringBuilder();
-                sb.append(indent)
-                  .append("{ int __k = peek(); if (");
-                for (int i = 0; i < aliasKinds.length; i++ ) {
-                    if (i > 0) {
-                        sb.append(" && ");
-                    }
-                    sb.append("__k != KIND_")
-                      .append(sanitize(kinds.kindNameTable() [aliasKinds[i]]));
+                sb.append(indent).append("{ int __k = peek(); if (");
+                for ( int i = 0; i < aliasKinds.length; i++) {
+                    if ( i > 0) {
+                    sb.append(" && ");}
+                    sb.append("__k != KIND_").append(sanitize(kinds.kindNameTable() [aliasKinds[i]]));
                 }
-                sb.append(") { fail(\"")
-                  .append(escapeJavaString(ruleName))
-                  .append("\"); ")
-                  .append(ctx.failAction)
-                  .append(" } }\n");
+                sb.append(") { fail(\"").append(escapeJavaString(ruleName))
+                         .append("\"); ")
+                         .append(ctx.failAction)
+                         .append(" } }\n");
                 ctx.sb.append(sb);
-            }else {
+            } else
+
+
+
+            {
                 aliasArrays.add(ruleName);
-                ctx.sb.append(indent)
-                   .append("if (java.util.Arrays.binarySearch(ALIAS_")
-                   .append(sanitize(ruleName))
-                   .append(", peek()) < 0) { fail(\"")
-                   .append(escapeJavaString(ruleName))
-                   .append("\"); ")
-                   .append(ctx.failAction)
-                   .append(" }\n");
+                ctx.sb.append(indent).append("if (java.util.Arrays.binarySearch(ALIAS_")
+                             .append(sanitize(ruleName))
+                             .append(", peek()) < 0) { fail(\"")
+                             .append(escapeJavaString(ruleName))
+                             .append("\"); ")
+                             .append(ctx.failAction)
+                             .append(" }\n");
             }
-            ctx.sb.append(indent)
-               .append("advance();\n");
+            ctx.sb.append(indent).append("advance();\n");
         }
 
-        private Result<Void> emitLiteral(Expression.Literal lit, EmitContext ctx) {
+        private Result<Unit> emitLiteral(Expression.Literal lit, EmitContext ctx) {
             var key = lit.text() + (lit.caseInsensitive()
                                     ? "/i"
                                     : "/cs");
-            var kind = kinds.inlineLiteralToKind()
-                            .get(key);
-            if (kind == null) {
-                return new ParserGenerationError.UnknownLiteral(ctx.ruleName, lit.text()).result();
-            }
+            var kind = kinds.inlineLiteralToKind().get(key);
+            if ( kind == null) {
+            return new ParserGenerationError.UnknownLiteral(ctx.ruleName, lit.text()).result();}
             usedTokenKinds.add(kind);
             var kindConst = "KIND_" + sanitize(kinds.kindNameTable() [kind]);
-            ctx.sb.append(indent(ctx.depth))
-               .append("if (peek() != ")
-               .append(kindConst)
-               .append(") { fail(\"'")
-               .append(escapeJavaString(lit.text()))
-               .append("'\"); ")
-               .append(ctx.failAction)
-               .append(" }\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("advance();\n");
-            return Result.success(null);
+            ctx.sb.append(indent(ctx.depth)).append("if (peek() != ")
+                         .append(kindConst)
+                         .append(") { fail(\"'")
+                         .append(escapeJavaString(lit.text()))
+                         .append("'\"); ")
+                         .append(ctx.failAction)
+                         .append(" }\n");
+            ctx.sb.append(indent(ctx.depth)).append("advance();\n");
+            return Result.unitResult();
         }
 
-        private Result<Void> emitAnyToken(EmitContext ctx) {
-            ctx.sb.append(indent(ctx.depth))
-               .append("if (peek() < 0) { fail(\"<any token>\"); ")
-               .append(ctx.failAction)
-               .append(" }\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("advance();\n");
-            return Result.success(null);
+        private Result<Unit> emitAnyToken(EmitContext ctx) {
+            ctx.sb.append(indent(ctx.depth)).append("if (peek() < 0) { fail(\"<any token>\"); ")
+                         .append(ctx.failAction)
+                         .append(" }\n");
+            ctx.sb.append(indent(ctx.depth)).append("advance();\n");
+            return Result.unitResult();
         }
 
-        private Result<Void> emitSequence(Expression.Sequence seq, EmitContext ctx) {
-            for (var element : seq.elements()) {
+        private Result<Unit> emitSequence(Expression.Sequence seq, EmitContext ctx) {
+            for ( var element : seq.elements()) {
                 var r = emitExpression(element, ctx);
-                if (!r.isSuccess()) {
-                    return r;
-                }
+                if ( !r.isSuccess()) {
+                return r;}
             }
-            return Result.success(null);
+            return Result.unitResult();
         }
 
-        private Result<Void> emitChoice(Expression.Choice ch, EmitContext ctx) {
+        private Result<Unit> emitChoice(Expression.Choice ch, EmitContext ctx) {
             // Phase 0.6.0-perf — boolean ordered-alternative backtracking. Each
             // alternative runs inside its own do { ... } while (false) loop;
             // leaf failures inside the alt body emit "break;" to exit the loop,
@@ -879,83 +800,64 @@ public final class ParserGenerator {
             // commit to this alternative; failure here fails the whole Choice).
             var label = "alt_" + ctx.nextLabelId();
             var cutFlag = "cutHit_" + label;
-            ctx.sb.append(indent(ctx.depth))
-               .append("// choice: ")
-               .append(label)
-               .append("\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("{\n");
+            ctx.sb.append(indent(ctx.depth)).append("// choice: ")
+                         .append(label)
+                         .append("\n");
+            ctx.sb.append(indent(ctx.depth)).append("{\n");
             var inner = ctx.indented();
             var alternatives = ch.alternatives();
-            ctx.sb.append(indent(inner.depth))
-               .append("int savedPos_")
-               .append(label)
-               .append(" = pos;\n");
-            ctx.sb.append(indent(inner.depth))
-               .append("int savedNodes_")
-               .append(label)
-               .append(" = cst.currentNodeCount();\n");
-            ctx.sb.append(indent(inner.depth))
-               .append("boolean matched_")
-               .append(label)
-               .append(" = false;\n");
-            ctx.sb.append(indent(inner.depth))
-               .append("boolean ")
-               .append(cutFlag)
-               .append(" = false;\n");
-            for (var i = 0; i < alternatives.size(); i++ ) {
-                ctx.sb.append(indent(inner.depth))
-                   .append("if (!matched_")
-                   .append(label)
-                   .append(" && !")
-                   .append(cutFlag)
-                   .append(") {\n");
+            ctx.sb.append(indent(inner.depth)).append("int savedPos_")
+                         .append(label)
+                         .append(" = pos;\n");
+            ctx.sb.append(indent(inner.depth)).append("int savedNodes_")
+                         .append(label)
+                         .append(" = cst.currentNodeCount();\n");
+            ctx.sb.append(indent(inner.depth)).append("boolean matched_")
+                         .append(label)
+                         .append(" = false;\n");
+            ctx.sb.append(indent(inner.depth)).append("boolean ")
+                         .append(cutFlag)
+                         .append(" = false;\n");
+            for ( var i = 0; i < alternatives.size(); i++) {
+                ctx.sb.append(indent(inner.depth)).append("if (!matched_")
+                             .append(label)
+                             .append(" && !")
+                             .append(cutFlag)
+                             .append(") {\n");
                 var altCtx = inner.indented();
-                ctx.sb.append(indent(altCtx.depth))
-                   .append("do {\n");
-                var altBody = altCtx.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION)
-                                    .withCutFlag(cutFlag);
+                ctx.sb.append(indent(altCtx.depth)).append("do {\n");
+                var altBody = altCtx.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION).withCutFlag(cutFlag);
                 var r = emitExpression(alternatives.get(i), altBody);
-                if (!r.isSuccess()) {
-                    return r;
-                }
-                ctx.sb.append(indent(altBody.depth))
-                   .append("matched_")
-                   .append(label)
-                   .append(" = true;\n");
-                ctx.sb.append(indent(altCtx.depth))
-                   .append("} while (false);\n");
-                ctx.sb.append(indent(altCtx.depth))
-                   .append("if (!matched_")
-                   .append(label)
-                   .append(") {\n");
-                ctx.sb.append(indent(altCtx.depth + 1))
-                   .append("pos = savedPos_")
-                   .append(label)
-                   .append(";\n");
-                ctx.sb.append(indent(altCtx.depth + 1))
-                   .append("cst.truncate(savedNodes_")
-                   .append(label)
-                   .append(");\n");
-                ctx.sb.append(indent(altCtx.depth))
-                   .append("}\n");
-                ctx.sb.append(indent(inner.depth))
-                   .append("}\n");
+                if ( !r.isSuccess()) {
+                return r;}
+                ctx.sb.append(indent(altBody.depth)).append("matched_")
+                             .append(label)
+                             .append(" = true;\n");
+                ctx.sb.append(indent(altCtx.depth)).append("} while (false);\n");
+                ctx.sb.append(indent(altCtx.depth)).append("if (!matched_")
+                             .append(label)
+                             .append(") {\n");
+                ctx.sb.append(indent(altCtx.depth + 1)).append("pos = savedPos_")
+                             .append(label)
+                             .append(";\n");
+                ctx.sb.append(indent(altCtx.depth + 1)).append("cst.truncate(savedNodes_")
+                             .append(label)
+                             .append(");\n");
+                ctx.sb.append(indent(altCtx.depth)).append("}\n");
+                ctx.sb.append(indent(inner.depth)).append("}\n");
             }
             // All alternatives failed — record a furthest-failure entry then
             // dispatch the parent's failAction (e.g. "break;" for nested
             // contexts, or "return false;" for the rule body). fail() already
             // tracks furthest failure across nested calls. Also fires when
             // cut was hit but the committed alternative failed.
-            ctx.sb.append(indent(inner.depth))
-               .append("if (!matched_")
-               .append(label)
-               .append(") { fail(\"<choice>\"); ")
-               .append(ctx.failAction)
-               .append(" }\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("}\n");
-            return Result.success(null);
+            ctx.sb.append(indent(inner.depth)).append("if (!matched_")
+                         .append(label)
+                         .append(") { fail(\"<choice>\"); ")
+                         .append(ctx.failAction)
+                         .append(" }\n");
+            ctx.sb.append(indent(ctx.depth)).append("}\n");
+            return Result.unitResult();
         }
 
         /**
@@ -970,283 +872,220 @@ public final class ParserGenerator {
          * no alternation to suppress. This matches the spec's "enclosing Choice"
          * scoping and is consistent with PEG convention.
          */
-        private Result<Void> emitCut(EmitContext ctx) {
-            if (ctx.cutFlag != null) {
-                ctx.sb.append(indent(ctx.depth))
-                   .append(ctx.cutFlag)
-                   .append(" = true;\n");
-            }else {
-                ctx.sb.append(indent(ctx.depth))
-                   .append("// cut: no enclosing Choice — no-op\n");
-            }
-            return Result.success(null);
+        private Result<Unit> emitCut(EmitContext ctx) {
+            if ( ctx.cutFlag != null) {
+            ctx.sb.append(indent(ctx.depth)).append(ctx.cutFlag)
+                         .append(" = true;\n");} else
+            {
+            ctx.sb.append(indent(ctx.depth)).append("// cut: no enclosing Choice — no-op\n");}
+            return Result.unitResult();
         }
 
-        private Result<Void> emitZeroOrMore(Expression inner, EmitContext ctx) {
+        private Result<Unit> emitZeroOrMore(Expression inner, EmitContext ctx) {
             // Phase 0.6.0-perf — boolean iteration. Each attempt runs in its own
             // do { ... } while (false) loop; on inner failure we restore saved
             // state and break the outer "while (true)" loop. Successful iteration
             // is signalled by setting an "iterOk_*" flag before the do/while exit;
             // a zero-width successful match also breaks (else infinite loop).
             var label = "rep_" + ctx.nextLabelId();
-            ctx.sb.append(indent(ctx.depth))
-               .append("// zero-or-more: ")
-               .append(label)
-               .append("\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("while (true) {\n");
+            ctx.sb.append(indent(ctx.depth)).append("// zero-or-more: ")
+                         .append(label)
+                         .append("\n");
+            ctx.sb.append(indent(ctx.depth)).append("while (true) {\n");
             var body = ctx.indented();
-            ctx.sb.append(indent(body.depth))
-               .append("int savedPos_")
-               .append(label)
-               .append(" = pos;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("int savedNodes_")
-               .append(label)
-               .append(" = cst.currentNodeCount();\n");
-            ctx.sb.append(indent(body.depth))
-               .append("boolean iterOk_")
-               .append(label)
-               .append(" = false;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("do {\n");
+            ctx.sb.append(indent(body.depth)).append("int savedPos_")
+                         .append(label)
+                         .append(" = pos;\n");
+            ctx.sb.append(indent(body.depth)).append("int savedNodes_")
+                         .append(label)
+                         .append(" = cst.currentNodeCount();\n");
+            ctx.sb.append(indent(body.depth)).append("boolean iterOk_")
+                         .append(label)
+                         .append(" = false;\n");
+            ctx.sb.append(indent(body.depth)).append("do {\n");
             var inner2 = body.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION);
             var r = emitExpression(inner, inner2);
-            if (!r.isSuccess()) {
-                return r;
-            }
-            ctx.sb.append(indent(inner2.depth))
-               .append("iterOk_")
-               .append(label)
-               .append(" = true;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("} while (false);\n");
-            ctx.sb.append(indent(body.depth))
-               .append("if (!iterOk_")
-               .append(label)
-               .append(") {\n");
-            ctx.sb.append(indent(inner2.depth))
-               .append("pos = savedPos_")
-               .append(label)
-               .append(";\n");
-            ctx.sb.append(indent(inner2.depth))
-               .append("cst.truncate(savedNodes_")
-               .append(label)
-               .append(");\n");
-            ctx.sb.append(indent(inner2.depth))
-               .append("break;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("}\n");
-            ctx.sb.append(indent(body.depth))
-               .append("if (pos == savedPos_")
-               .append(label)
-               .append(") break; // guard against infinite loops on zero-width matches\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("}\n");
-            return Result.success(null);
+            if ( !r.isSuccess()) {
+            return r;}
+            ctx.sb.append(indent(inner2.depth)).append("iterOk_")
+                         .append(label)
+                         .append(" = true;\n");
+            ctx.sb.append(indent(body.depth)).append("} while (false);\n");
+            ctx.sb.append(indent(body.depth)).append("if (!iterOk_")
+                         .append(label)
+                         .append(") {\n");
+            ctx.sb.append(indent(inner2.depth)).append("pos = savedPos_")
+                         .append(label)
+                         .append(";\n");
+            ctx.sb.append(indent(inner2.depth)).append("cst.truncate(savedNodes_")
+                         .append(label)
+                         .append(");\n");
+            ctx.sb.append(indent(inner2.depth)).append("break;\n");
+            ctx.sb.append(indent(body.depth)).append("}\n");
+            ctx.sb.append(indent(body.depth)).append("if (pos == savedPos_")
+                         .append(label)
+                         .append(") break; // guard against infinite loops on zero-width matches\n");
+            ctx.sb.append(indent(ctx.depth)).append("}\n");
+            return Result.unitResult();
         }
 
-        private Result<Void> emitOneOrMore(Expression inner, EmitContext ctx) {
+        private Result<Unit> emitOneOrMore(Expression inner, EmitContext ctx) {
             // One mandatory iteration, then zero-or-more.
             var r = emitExpression(inner, ctx);
-            if (!r.isSuccess()) {
-                return r;
-            }
+            if ( !r.isSuccess()) {
+            return r;}
             return emitZeroOrMore(inner, ctx);
         }
 
-        private Result<Void> emitOptional(Expression inner, EmitContext ctx) {
+        private Result<Unit> emitOptional(Expression inner, EmitContext ctx) {
             // Phase 0.6.0-perf — boolean optional. Failure inside the inner body
             // simply breaks out of the do/while and we restore saved state. Optional
             // always "succeeds" from the caller's perspective.
             var label = "opt_" + ctx.nextLabelId();
-            ctx.sb.append(indent(ctx.depth))
-               .append("// optional: ")
-               .append(label)
-               .append("\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("{\n");
+            ctx.sb.append(indent(ctx.depth)).append("// optional: ")
+                         .append(label)
+                         .append("\n");
+            ctx.sb.append(indent(ctx.depth)).append("{\n");
             var body = ctx.indented();
-            ctx.sb.append(indent(body.depth))
-               .append("int savedPos_")
-               .append(label)
-               .append(" = pos;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("int savedNodes_")
-               .append(label)
-               .append(" = cst.currentNodeCount();\n");
-            ctx.sb.append(indent(body.depth))
-               .append("boolean optOk_")
-               .append(label)
-               .append(" = false;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("do {\n");
+            ctx.sb.append(indent(body.depth)).append("int savedPos_")
+                         .append(label)
+                         .append(" = pos;\n");
+            ctx.sb.append(indent(body.depth)).append("int savedNodes_")
+                         .append(label)
+                         .append(" = cst.currentNodeCount();\n");
+            ctx.sb.append(indent(body.depth)).append("boolean optOk_")
+                         .append(label)
+                         .append(" = false;\n");
+            ctx.sb.append(indent(body.depth)).append("do {\n");
             var inner2 = body.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION);
             var r = emitExpression(inner, inner2);
-            if (!r.isSuccess()) {
-                return r;
-            }
-            ctx.sb.append(indent(inner2.depth))
-               .append("optOk_")
-               .append(label)
-               .append(" = true;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("} while (false);\n");
-            ctx.sb.append(indent(body.depth))
-               .append("if (!optOk_")
-               .append(label)
-               .append(") {\n");
-            ctx.sb.append(indent(inner2.depth))
-               .append("pos = savedPos_")
-               .append(label)
-               .append(";\n");
-            ctx.sb.append(indent(inner2.depth))
-               .append("cst.truncate(savedNodes_")
-               .append(label)
-               .append(");\n");
-            ctx.sb.append(indent(body.depth))
-               .append("}\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("}\n");
-            return Result.success(null);
+            if ( !r.isSuccess()) {
+            return r;}
+            ctx.sb.append(indent(inner2.depth)).append("optOk_")
+                         .append(label)
+                         .append(" = true;\n");
+            ctx.sb.append(indent(body.depth)).append("} while (false);\n");
+            ctx.sb.append(indent(body.depth)).append("if (!optOk_")
+                         .append(label)
+                         .append(") {\n");
+            ctx.sb.append(indent(inner2.depth)).append("pos = savedPos_")
+                         .append(label)
+                         .append(";\n");
+            ctx.sb.append(indent(inner2.depth)).append("cst.truncate(savedNodes_")
+                         .append(label)
+                         .append(");\n");
+            ctx.sb.append(indent(body.depth)).append("}\n");
+            ctx.sb.append(indent(ctx.depth)).append("}\n");
+            return Result.unitResult();
         }
 
-        private Result<Void> emitRepetition(Expression.Repetition rep, EmitContext ctx) {
+        private Result<Unit> emitRepetition(Expression.Repetition rep, EmitContext ctx) {
             // min copies, then either ZeroOrMore (max < 0) or (max - min) optionals.
-            for (var i = 0; i < rep.min(); i++ ) {
+            for ( var i = 0; i < rep.min(); i++) {
                 var r = emitExpression(rep.expression(), ctx);
-                if (!r.isSuccess()) {
-                    return r;
-                }
+                if ( !r.isSuccess()) {
+                return r;}
             }
             var maxOpt = rep.max();
-            if (maxOpt.isEmpty()) {
-                return emitZeroOrMore(rep.expression(), ctx);
-            }
+            if ( maxOpt.isEmpty()) {
+            return emitZeroOrMore(rep.expression(), ctx);}
             var max = maxOpt.unwrap();
-            for (var i = rep.min(); i < max; i++ ) {
+            for ( var i = rep.min(); i < max; i++) {
                 var r = emitOptional(rep.expression(), ctx);
-                if (!r.isSuccess()) {
-                    return r;
-                }
+                if ( !r.isSuccess()) {
+                return r;}
             }
-            return Result.success(null);
+            return Result.unitResult();
         }
 
-        private Result<Void> emitAnd(Expression inner, EmitContext ctx) {
+        private Result<Unit> emitAnd(Expression inner, EmitContext ctx) {
             // Phase 0.6.0-perf — and-predicate. Inner runs in a do/while; on
             // failure it breaks out and we propagate the parent's failAction
             // (and-predicate fails if its inner fails). On success we restore
             // pos/CST (predicate is non-consuming) and continue.
             var label = "and_" + ctx.nextLabelId();
-            ctx.sb.append(indent(ctx.depth))
-               .append("// and-predicate: ")
-               .append(label)
-               .append("\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("{\n");
+            ctx.sb.append(indent(ctx.depth)).append("// and-predicate: ")
+                         .append(label)
+                         .append("\n");
+            ctx.sb.append(indent(ctx.depth)).append("{\n");
             var body = ctx.indented();
-            ctx.sb.append(indent(body.depth))
-               .append("int savedPos_")
-               .append(label)
-               .append(" = pos;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("int savedNodes_")
-               .append(label)
-               .append(" = cst.currentNodeCount();\n");
-            ctx.sb.append(indent(body.depth))
-               .append("boolean andOk_")
-               .append(label)
-               .append(" = false;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("do {\n");
+            ctx.sb.append(indent(body.depth)).append("int savedPos_")
+                         .append(label)
+                         .append(" = pos;\n");
+            ctx.sb.append(indent(body.depth)).append("int savedNodes_")
+                         .append(label)
+                         .append(" = cst.currentNodeCount();\n");
+            ctx.sb.append(indent(body.depth)).append("boolean andOk_")
+                         .append(label)
+                         .append(" = false;\n");
+            ctx.sb.append(indent(body.depth)).append("do {\n");
             var inner2 = body.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION);
             var r = emitExpression(inner, inner2);
-            if (!r.isSuccess()) {
-                return r;
-            }
-            ctx.sb.append(indent(inner2.depth))
-               .append("andOk_")
-               .append(label)
-               .append(" = true;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("} while (false);\n");
+            if ( !r.isSuccess()) {
+            return r;}
+            ctx.sb.append(indent(inner2.depth)).append("andOk_")
+                         .append(label)
+                         .append(" = true;\n");
+            ctx.sb.append(indent(body.depth)).append("} while (false);\n");
             // Always restore saved state: and-predicate is non-consuming.
-            ctx.sb.append(indent(body.depth))
-               .append("pos = savedPos_")
-               .append(label)
-               .append(";\n");
-            ctx.sb.append(indent(body.depth))
-               .append("cst.truncate(savedNodes_")
-               .append(label)
-               .append(");\n");
-            ctx.sb.append(indent(body.depth))
-               .append("if (!andOk_")
-               .append(label)
-               .append(") { fail(\"&<predicate>\"); ")
-               .append(ctx.failAction)
-               .append(" }\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("}\n");
-            return Result.success(null);
+            ctx.sb.append(indent(body.depth)).append("pos = savedPos_")
+                         .append(label)
+                         .append(";\n");
+            ctx.sb.append(indent(body.depth)).append("cst.truncate(savedNodes_")
+                         .append(label)
+                         .append(");\n");
+            ctx.sb.append(indent(body.depth)).append("if (!andOk_")
+                         .append(label)
+                         .append(") { fail(\"&<predicate>\"); ")
+                         .append(ctx.failAction)
+                         .append(" }\n");
+            ctx.sb.append(indent(ctx.depth)).append("}\n");
+            return Result.unitResult();
         }
 
-        private Result<Void> emitNot(Expression inner, EmitContext ctx) {
+        private Result<Unit> emitNot(Expression inner, EmitContext ctx) {
             // Phase 0.6.0-perf — not-predicate. Inner runs in a do/while; if it
             // matches we set notMatched=true and bail out via the parent's
             // failAction. If it fails (breaks the do/while) the predicate
             // succeeds. Always restore saved state: not-predicate is
             // non-consuming.
             var label = "not_" + ctx.nextLabelId();
-            ctx.sb.append(indent(ctx.depth))
-               .append("// not-predicate: ")
-               .append(label)
-               .append("\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("{\n");
+            ctx.sb.append(indent(ctx.depth)).append("// not-predicate: ")
+                         .append(label)
+                         .append("\n");
+            ctx.sb.append(indent(ctx.depth)).append("{\n");
             var body = ctx.indented();
-            ctx.sb.append(indent(body.depth))
-               .append("int savedPos_")
-               .append(label)
-               .append(" = pos;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("int savedNodes_")
-               .append(label)
-               .append(" = cst.currentNodeCount();\n");
-            ctx.sb.append(indent(body.depth))
-               .append("boolean notMatched_")
-               .append(label)
-               .append(" = false;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("do {\n");
+            ctx.sb.append(indent(body.depth)).append("int savedPos_")
+                         .append(label)
+                         .append(" = pos;\n");
+            ctx.sb.append(indent(body.depth)).append("int savedNodes_")
+                         .append(label)
+                         .append(" = cst.currentNodeCount();\n");
+            ctx.sb.append(indent(body.depth)).append("boolean notMatched_")
+                         .append(label)
+                         .append(" = false;\n");
+            ctx.sb.append(indent(body.depth)).append("do {\n");
             var inner2 = body.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION);
             var r = emitExpression(inner, inner2);
-            if (!r.isSuccess()) {
-                return r;
-            }
-            ctx.sb.append(indent(inner2.depth))
-               .append("notMatched_")
-               .append(label)
-               .append(" = true;\n");
-            ctx.sb.append(indent(body.depth))
-               .append("} while (false);\n");
-            ctx.sb.append(indent(body.depth))
-               .append("pos = savedPos_")
-               .append(label)
-               .append(";\n");
-            ctx.sb.append(indent(body.depth))
-               .append("cst.truncate(savedNodes_")
-               .append(label)
-               .append(");\n");
-            ctx.sb.append(indent(body.depth))
-               .append("if (notMatched_")
-               .append(label)
-               .append(") { fail(\"!<predicate>\"); ")
-               .append(ctx.failAction)
-               .append(" }\n");
-            ctx.sb.append(indent(ctx.depth))
-               .append("}\n");
-            return Result.success(null);
+            if ( !r.isSuccess()) {
+            return r;}
+            ctx.sb.append(indent(inner2.depth)).append("notMatched_")
+                         .append(label)
+                         .append(" = true;\n");
+            ctx.sb.append(indent(body.depth)).append("} while (false);\n");
+            ctx.sb.append(indent(body.depth)).append("pos = savedPos_")
+                         .append(label)
+                         .append(";\n");
+            ctx.sb.append(indent(body.depth)).append("cst.truncate(savedNodes_")
+                         .append(label)
+                         .append(");\n");
+            ctx.sb.append(indent(body.depth)).append("if (notMatched_")
+                         .append(label)
+                         .append(") { fail(\"!<predicate>\"); ")
+                         .append(ctx.failAction)
+                         .append(" }\n");
+            ctx.sb.append(indent(ctx.depth)).append("}\n");
+            return Result.unitResult();
         }
 
         private static <T> Result<T> unsupported(String ruleName, String kind, String detail) {
@@ -1261,29 +1100,9 @@ public final class ParserGenerator {
          * lexer already disambiguated.
          */
         private static boolean isCharLevelOnly(Expression expr) {
-            return switch (expr) {
-                case Expression.CharClass __ -> true;
-                case Expression.Any __ -> true;
-                case Expression.Sequence seq -> seq.elements()
-                                                   .stream()
-                                                   .allMatch(Renderer::isCharLevelOnly);
-                case Expression.Choice ch -> ch.alternatives()
-                                               .stream()
-                                               .allMatch(Renderer::isCharLevelOnly);
-                case Expression.ZeroOrMore z -> isCharLevelOnly(z.expression());
-                case Expression.OneOrMore o -> isCharLevelOnly(o.expression());
-                case Expression.Optional o -> isCharLevelOnly(o.expression());
-                case Expression.Repetition r -> isCharLevelOnly(r.expression());
-                case Expression.And a -> isCharLevelOnly(a.expression());
-                case Expression.Not n -> isCharLevelOnly(n.expression());
-                case Expression.TokenBoundary tb -> isCharLevelOnly(tb.expression());
-                case Expression.Ignore ig -> isCharLevelOnly(ig.expression());
-                case Expression.Capture c -> isCharLevelOnly(c.expression());
-                case Expression.CaptureScope cs -> isCharLevelOnly(cs.expression());
-                case Expression.Group g -> isCharLevelOnly(g.expression());
-                case Expression.Cut __ -> true;
-                default -> false;
-            };
+            return switch (expr) {case Expression.CharClass __ -> true;case Expression.Any __ -> true;case Expression.Sequence seq -> seq.elements().stream()
+                                                                                                                                                  .allMatch(Renderer::isCharLevelOnly);case Expression.Choice ch -> ch.alternatives().stream()
+                                                                                                                                                                                                                                   .allMatch(Renderer::isCharLevelOnly);case Expression.ZeroOrMore z -> isCharLevelOnly(z.expression());case Expression.OneOrMore o -> isCharLevelOnly(o.expression());case Expression.Optional o -> isCharLevelOnly(o.expression());case Expression.Repetition r -> isCharLevelOnly(r.expression());case Expression.And a -> isCharLevelOnly(a.expression());case Expression.Not n -> isCharLevelOnly(n.expression());case Expression.TokenBoundary tb -> isCharLevelOnly(tb.expression());case Expression.Ignore ig -> isCharLevelOnly(ig.expression());case Expression.Capture c -> isCharLevelOnly(c.expression());case Expression.CaptureScope cs -> isCharLevelOnly(cs.expression());case Expression.Group g -> isCharLevelOnly(g.expression());case Expression.Cut __ -> true;default -> false;};
         }
 
         /**
@@ -1293,12 +1112,11 @@ public final class ParserGenerator {
          * disambiguated; eliding them at parse time matches the token-level
          * semantics. Phase B.4+ may add per-rule char-level fallbacks.
          */
-        private static Result<Void> emitParseTimeNoop(EmitContext ctx, String detail) {
-            ctx.sb.append(indent(ctx.depth))
-               .append("// no-op: ")
-               .append(detail)
-               .append("\n");
-            return Result.success(null);
+        private static Result<Unit> emitParseTimeNoop(EmitContext ctx, String detail) {
+            ctx.sb.append(indent(ctx.depth)).append("// no-op: ")
+                         .append(detail)
+                         .append("\n");
+            return Result.unitResult();
         }
     }
 
@@ -1380,12 +1198,10 @@ public final class ParserGenerator {
 
     private static List<Rule> collectParserRules(Grammar grammar, RuleClassifier.Classification classification) {
         var out = new ArrayList<Rule>();
-        for (var rule : grammar.rules()) {
-            var k = classification.kinds()
-                                  .get(rule.name());
-            if (k == RuleKind.PARSER || k == RuleKind.MIXED) {
-                out.add(rule);
-            }
+        for ( var rule : grammar.rules()) {
+            var k = classification.kinds().get(rule.name());
+            if ( k == RuleKind.PARSER || k == RuleKind.MIXED) {
+            out.add(rule);}
         }
         return out;
     }
@@ -1402,11 +1218,9 @@ public final class ParserGenerator {
                                                                RuleClassifier.Classification classification) {
         var rules = collectParserRules(grammar, classification);
         var map = new LinkedHashMap<String, Integer>();
-        for (var i = 0; i < rules.size(); i++ ) {
-            map.put(rules.get(i)
-                         .name(),
-                    i);
-        }
+        for ( var i = 0; i < rules.size(); i++) {
+        map.put(rules.get(i).name(),
+                i);}
         return map;
     }
 
@@ -1422,41 +1236,37 @@ public final class ParserGenerator {
      */
     private static String sanitize(String name) {
         var sb = new StringBuilder(name.length());
-        for (var i = 0; i < name.length(); i++ ) {
+        for ( var i = 0; i < name.length(); i++) {
             var c = name.charAt(i);
-            if (Character.isJavaIdentifierPart(c)) {
-                sb.append(c);
-            }else {
-                sb.append('_');
-            }
+            if ( Character.isJavaIdentifierPart(c)) {
+            sb.append(c);} else
+            {
+            sb.append('_');}
         }
         // KIND_NAMES may contain entries starting with a digit (none observed but
         // be safe) — prepend underscore.
-        if (sb.length() > 0 && !Character.isJavaIdentifierStart(sb.charAt(0))) {
-            sb.insert(0, '_');
-        }
-        return sb.toString()
-                 .toUpperCase(Locale.ROOT);
+        if ( sb.length() > 0 && !Character.isJavaIdentifierStart(sb.charAt(0))) {
+        sb.insert(0, '_');}
+        return sb.toString().toUpperCase(Locale.ROOT);
     }
 
     private static String escapeJavaString(String s) {
         var out = new StringBuilder(s.length() + 4);
-        for (var i = 0; i < s.length(); i++ ) {
+        for ( var i = 0; i < s.length(); i++) {
             var c = s.charAt(i);
-            switch (c) {
-                case'\\' -> out.append("\\\\");
-                case'"' -> out.append("\\\"");
-                case'\n' -> out.append("\\n");
-                case'\r' -> out.append("\\r");
-                case'\t' -> out.append("\\t");
-                case'\b' -> out.append("\\b");
-                case'\f' -> out.append("\\f");
+            switch ( c) {
+                case '\\' -> out.append("\\\\");
+                case '"' -> out.append("\\\"");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                case '\b' -> out.append("\\b");
+                case '\f' -> out.append("\\f");
                 default -> {
-                    if (c < 0x20 || c == 0x7f) {
-                        out.append(String.format("\\u%04x", (int) c));
-                    }else {
-                        out.append(c);
-                    }
+                    if ( c < 0x20 || c == 0x7f) {
+                    out.append(String.format("\\u%04x", (int) c));} else
+                    {
+                    out.append(c);}
                 }
             }
         }
@@ -1464,32 +1274,24 @@ public final class ParserGenerator {
     }
 
     private static boolean isValidIdentifier(String s) {
-        if (s == null || s.isEmpty()) {
-            return false;
-        }
-        if (!Character.isJavaIdentifierStart(s.charAt(0))) {
-            return false;
-        }
-        for (var i = 1; i < s.length(); i++ ) {
-            if (!Character.isJavaIdentifierPart(s.charAt(i))) {
-                return false;
-            }
-        }
+        if ( s == null || s.isEmpty()) {
+        return false;}
+        if ( !Character.isJavaIdentifierStart(s.charAt(0))) {
+        return false;}
+        for ( var i = 1; i < s.length(); i++) {
+        if ( !Character.isJavaIdentifierPart(s.charAt(i))) {
+        return false;}}
         return true;
     }
 
     private static boolean isValidQualifiedPackage(String s) {
-        if (s == null) {
-            return false;
-        }
-        if (s.isEmpty()) {
-            return true;
-        }
-        for (var part : s.split("\\.", - 1)) {
-            if (!isValidIdentifier(part)) {
-                return false;
-            }
-        }
+        if ( s == null) {
+        return false;}
+        if ( s.isEmpty()) {
+        return true;}
+        for ( var part : s.split("\\.", - 1)) {
+        if ( !isValidIdentifier(part)) {
+        return false;}}
         return true;
     }
 }

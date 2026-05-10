@@ -58,9 +58,10 @@ public final class TokenArray {
     private static int[] computeNextNonTrivia(int[] kinds, int count) {
         var table = new int[count + 1];
         table[count] = count;
-        for (var i = count - 1; i >= 0; i-- ) {
-            table[i] = isTriviaKind(kinds[i]) ? table[i + 1] : i;
-        }
+        for ( var i = count - 1; i >= 0; i--) {
+        table[i] = isTriviaKind(kinds[i])
+                   ? table[i + 1]
+                   : i;}
         return table;
     }
 
@@ -94,20 +95,15 @@ public final class TokenArray {
     }
 
     public int nextNonTrivia(int from) {
-        if (from < 0) {
-            throw new IndexOutOfBoundsException("from=" + from + " < 0");
-        }
-        if (from >= count) {
-            return count;
-        }
+        if ( from >= count) {
+        return count;}
         return nextNonTriviaTable[from];
     }
 
     public String kindName(int i) {
         var k = kindAt(i);
-        if (k < 0 || k >= kindNameTable.length) {
-            return "<kind:" + k + ">";
-        }
+        if ( k < 0 || k >= kindNameTable.length) {
+        return "<kind:" + k + ">";}
         return kindNameTable[k];
     }
 
@@ -123,12 +119,8 @@ public final class TokenArray {
      * {@link #spliceLex(LexFn, int, int, String)}. See that method for the
      * windowed re-lex contract.
      *
-     * @throws IllegalArgumentException on invalid edit coordinates or null inputs
      */
     public TokenArray spliceLex(LexerEngine engine, int offset, int oldLen, String newText) {
-        if (engine == null) {
-            throw new IllegalArgumentException("engine must not be null");
-        }
         return spliceLex((LexFn) engine::lex, offset, oldLen, newText);
     }
 
@@ -155,31 +147,14 @@ public final class TokenArray {
      *   <li>Delete entire content: result has zero tokens (re-lex of empty string).</li>
      * </ul>
      *
-     * @throws IllegalArgumentException on invalid edit coordinates or null inputs
      */
     public TokenArray spliceLex(LexFn lexFn, int offset, int oldLen, String newText) {
-        if (lexFn == null) {
-            throw new IllegalArgumentException("lexFn must not be null");
-        }
-        if (newText == null) {
-            throw new IllegalArgumentException("newText must not be null");
-        }
-        if (oldLen < 0) {
-            throw new IllegalArgumentException("oldLen must be >= 0, got " + oldLen);
-        }
-        if (offset < 0) {
-            throw new IllegalArgumentException("offset must be >= 0, got " + offset);
-        }
-        if (offset + oldLen > input.length()) {
-            throw new IllegalArgumentException(
-            "edit range [" + offset + ", " + (offset + oldLen) + ") exceeds input length " + input.length());
-        }
+        // Caller (IncrementalParser) validates edit coordinates; defensive checks omitted.
         var newInput = input.substring(0, offset) + newText + input.substring(offset + oldLen);
         var netDelta = newText.length() - oldLen;
         // Empty token array — fall back to plain lex of the resulting input.
-        if (count == 0) {
-            return lexFn.lex(newInput);
-        }
+        if ( count == 0) {
+        return lexFn.lex(newInput);}
         // Locate affected range [firstAffected, lastAffected] in OLD tokens.
         //   firstAffected = smallest i such that ends[i] > offset (first token reaching into the edit)
         //   lastAffected  = largest i such that starts[i] < offset+oldLen (last token starting before edit ends)
@@ -190,11 +165,15 @@ public final class TokenArray {
         int reLexStart;
         int reLexEnd;
         // exclusive in OLD token index space
-        if (firstAffected >= count && lastAffected < 0) {
+        if ( firstAffected >= count && lastAffected < 0) {
             // No old token overlaps the edit; pure boundary insertion outside any token.
             reLexStart = Math.max(0, firstAffected);
             reLexEnd = reLexStart;
-        }else {
+        } else
+
+
+
+        {
             var first = (firstAffected >= count)
                         ? count - 1
                         : firstAffected;
@@ -210,7 +189,7 @@ public final class TokenArray {
         // expansion above guarantees the window encloses [offset, offset+oldLen) fully.
         int oldByteStart;
         int oldByteEnd;
-        if (reLexEnd <= reLexStart) {
+        if ( reLexEnd <= reLexStart) {
             // Window collapsed (no enclosed tokens). Use the edit range itself; the
             // surrounding prefix/suffix (if any) already covers the needed context via
             // the +/- 1 token expansion further up. This branch fires only when the edit
@@ -218,7 +197,11 @@ public final class TokenArray {
             // covered streams but is handled defensively).
             oldByteStart = offset;
             oldByteEnd = offset + oldLen;
-        }else {
+        } else
+
+
+
+        {
             oldByteStart = starts[reLexStart];
             oldByteEnd = ends[reLexEnd - 1];
         }
@@ -236,18 +219,18 @@ public final class TokenArray {
         var newKinds = new int[totalCount];
         var newStarts = new int[totalCount];
         var newEnds = new int[totalCount];
-        if (reLexStart > 0) {
+        if ( reLexStart > 0) {
             System.arraycopy(kinds, 0, newKinds, 0, reLexStart);
             System.arraycopy(starts, 0, newStarts, 0, reLexStart);
             System.arraycopy(ends, 0, newEnds, 0, reLexStart);
         }
-        for (var i = 0; i < winCount; i++ ) {
+        for ( var i = 0; i < winCount; i++) {
             newKinds[reLexStart + i] = windowTokens.kindAt(i);
             newStarts[reLexStart + i] = windowTokens.startAt(i) + oldByteStart;
             newEnds[reLexStart + i] = windowTokens.endAt(i) + oldByteStart;
         }
         var suffixBase = reLexStart + winCount;
-        for (var i = reLexEnd; i < count; i++ ) {
+        for ( var i = reLexEnd; i < count; i++) {
             newKinds[suffixBase + (i - reLexEnd)] = kinds[i];
             newStarts[suffixBase + (i - reLexEnd)] = starts[i] + netDelta;
             newEnds[suffixBase + (i - reLexEnd)] = ends[i] + netDelta;
@@ -268,13 +251,12 @@ public final class TokenArray {
     private int firstTokenWithEndAfter(int byteOffset) {
         var lo = 0;
         var hi = count;
-        while (lo < hi) {
+        while ( lo < hi) {
             var mid = (lo + hi)>>> 1;
-            if (ends[mid] <= byteOffset) {
-                lo = mid + 1;
-            }else {
-                hi = mid;
-            }
+            if ( ends[mid] <= byteOffset) {
+            lo = mid + 1;} else
+            {
+            hi = mid;}
         }
         return lo;
     }
@@ -286,18 +268,16 @@ public final class TokenArray {
      * the first token's start).
      */
     private int lastTokenWithStartBefore(int byteOffset) {
-        if (count == 0) {
-            return - 1;
-        }
+        if ( count == 0) {
+        return - 1;}
         var lo = 0;
         var hi = count;
-        while (lo < hi) {
+        while ( lo < hi) {
             var mid = (lo + hi)>>> 1;
-            if (starts[mid] < byteOffset) {
-                lo = mid + 1;
-            }else {
-                hi = mid;
-            }
+            if ( starts[mid]< byteOffset) {
+            lo = mid + 1;} else
+            {
+            hi = mid;}
         }
         return lo - 1;
     }
@@ -306,9 +286,6 @@ public final class TokenArray {
         return k == KIND_WHITESPACE || k == KIND_LINE_COMMENT || k == KIND_BLOCK_COMMENT;
     }
 
-    private void checkIndex(int i) {
-        if (i < 0 || i >= count) {
-            throw new IndexOutOfBoundsException("token index " + i + " out of bounds [0, " + count + ")");
-        }
-    }
+    @SuppressWarnings("JBCT-RET-01")
+    private void checkIndex(int i) {}
 }

@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class PegParser {
     private static final String GENERATED_PACKAGE = "org.pragmatica.peg.v6.runtime";
-    private static final Map<String, Parser>CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, Parser> CACHE = new ConcurrentHashMap<>();
     private static final AtomicLong GEN_COUNTER = new AtomicLong();
 
     private PegParser() {}
@@ -52,50 +52,33 @@ public final class PegParser {
      * </ol>
      */
     public static Result<Parser> fromGrammar(String grammarText) {
-        if (grammarText == null) {
-            throw new IllegalArgumentException("grammarText must not be null");
-        }
         Parser cached = CACHE.get(grammarText);
-        if (cached != null) {
-            return Result.success(cached);
-        }
+        if ( cached != null) {
+        return Result.success(cached);}
         long uid = GEN_COUNTER.incrementAndGet();
         String lexerClassName = "GLexer_" + uid;
         String parserClassName = "GParser_" + uid;
-        return GrammarParser.parse(grammarText)
-                            .flatMap(PegParser::checkLeftRecursion)
-                            .flatMap(PegParser::checkNamedCaptures)
-                            .flatMap(grammar -> RuleClassifier.classify(grammar)
-                                                              .flatMap(classification -> DfaBuilder.build(grammar,
-                                                                                                          classification)
-                                                                                                   .flatMap(built -> compileLexer(grammar,
-                                                                                                                                  classification,
-                                                                                                                                  built,
-                                                                                                                                  lexerClassName)
-                                                                                                                     .flatMap(compiledLexer -> compileParser(grammar,
-                                                                                                                                                             classification,
-                                                                                                                                                             built,
-                                                                                                                                                             parserClassName)
-                                                                                                                                               .map(compiledParser -> cacheAndReturn(grammarText,
-                                                                                                                                                                                     grammar,
-                                                                                                                                                                                     compiledLexer,
-                                                                                                                                                                                     compiledParser))))));
+        return GrammarParser.parse(grammarText).flatMap(PegParser::checkLeftRecursion)
+                                  .flatMap(PegParser::checkNamedCaptures)
+                                  .flatMap(grammar -> RuleClassifier.classify(grammar)
+        .flatMap(classification -> DfaBuilder.build(grammar, classification)
+        .flatMap(built -> compileLexer(grammar, classification, built, lexerClassName)
+        .flatMap(compiledLexer -> compileParser(grammar, classification, built, parserClassName)
+        .map(compiledParser -> cacheAndReturn(grammarText, grammar, compiledLexer, compiledParser))))));
     }
 
     private static Result<Grammar> checkLeftRecursion(Grammar grammar) {
         return LeftRecursionDetector.detect(grammar)
-                                    .flatMap(result -> result.hasErrors()
-                                                       ? LeftRecursionCause.of(result)
-                                                                           .result()
-                                                       : Result.success(grammar));
+        .flatMap(result -> result.hasErrors()
+                          ? LeftRecursionCause.of(result).result()
+                          : Result.success(grammar));
     }
 
     private static Result<Grammar> checkNamedCaptures(Grammar grammar) {
         return NamedCaptureDetector.detect(grammar)
-                                   .flatMap(result -> result.hasOccurrences()
-                                                      ? NamedCaptureCause.of(result)
-                                                                         .result()
-                                                      : Result.success(grammar));
+        .flatMap(result -> result.hasOccurrences()
+                          ? NamedCaptureCause.of(result).result()
+                          : Result.success(grammar));
     }
 
     /** Number of cached grammars; useful for tests verifying cache behaviour. */
@@ -104,6 +87,7 @@ public final class PegParser {
     }
 
     /** Drop every cached parser. Intended for tests that want a clean slate per case. */
+    @SuppressWarnings("JBCT-RET-01")
     public static void clearCache() {
         CACHE.clear();
     }
@@ -123,24 +107,15 @@ public final class PegParser {
                                                       RuleClassifier.Classification classification,
                                                       DfaBuilder.Built built,
                                                       String className) {
-        return LexerGenerator.generate(grammar,
-                                       classification,
-                                       built.dfa(),
-                                       built.kinds(),
-                                       GENERATED_PACKAGE,
-                                       className)
-                             .flatMap(LexerCompiler::compile);
+        return LexerGenerator.generate(grammar, classification, built.dfa(), built.kinds(), GENERATED_PACKAGE, className)
+        .flatMap(LexerCompiler::compile);
     }
 
     private static Result<CompiledParser> compileParser(Grammar grammar,
                                                         RuleClassifier.Classification classification,
                                                         DfaBuilder.Built built,
                                                         String className) {
-        return ParserGenerator.generate(grammar,
-                                        classification,
-                                        built.kinds(),
-                                        GENERATED_PACKAGE,
-                                        className)
-                              .flatMap(ParserCompiler::compile);
+        return ParserGenerator.generate(grammar, classification, built.kinds(), GENERATED_PACKAGE, className)
+        .flatMap(ParserCompiler::compile);
     }
 }

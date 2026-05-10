@@ -13,7 +13,7 @@ import java.util.Objects;
  * {@link CstArray#FLAG_ERROR}). The {@code diagnostics} list is defensively copied at
  * construction so the result is fully immutable.
  */
-public record ParseResult(CstArray cst, List<Diagnostic> diagnostics) {
+public record ParseResult( CstArray cst, List<Diagnostic> diagnostics) {
     public ParseResult {
         Objects.requireNonNull(cst, "cst");
         Objects.requireNonNull(diagnostics, "diagnostics");
@@ -25,7 +25,6 @@ public record ParseResult(CstArray cst, List<Diagnostic> diagnostics) {
     }
 
     public boolean hasErrors() {
-        return diagnostics.stream()
-                          .anyMatch(d -> d.severity() == Severity.ERROR);
+        return diagnostics.stream().anyMatch(d -> d.severity() == Severity.ERROR);
     }
 }

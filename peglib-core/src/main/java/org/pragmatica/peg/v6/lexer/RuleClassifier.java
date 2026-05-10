@@ -1,5 +1,6 @@
 package org.pragmatica.peg.v6.lexer;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
@@ -55,7 +56,7 @@ import java.util.Set;
 public final class RuleClassifier {
     private RuleClassifier() {}
 
-    public record Warning(String ruleName, String reason) {}
+    public record Warning(String ruleName, String reason){}
 
     /**
      * Phase B.0 — describes a rule that matches the skip-prefix pattern
@@ -67,11 +68,11 @@ public final class RuleClassifier {
      * @param keywordRuleName name of the rule referenced by the leading {@code !}
      * @param bodyExpression  rest of the sequence after the {@code !Reference} head
      */
-    public record KeywordSkipInfo(String keywordRuleName, Expression bodyExpression) {}
+    public record KeywordSkipInfo(String keywordRuleName, Expression bodyExpression){}
 
     public record Classification(Map<String, RuleKind> kinds,
                                  Map<String, KeywordSkipInfo> keywordSkip,
-                                 List<Warning> warnings) {}
+                                 List<Warning> warnings){}
 
     /**
      * Classify every rule in {@code grammar}. Always succeeds: the result wraps
@@ -80,23 +81,22 @@ public final class RuleClassifier {
      */
     public static Result<Classification> classify(Grammar grammar) {
         var rules = grammar.rules();
-        if (rules.isEmpty()) {
-            return Result.success(new Classification(Map.of(), Map.of(), List.of()));
-        }
+        if ( rules.isEmpty()) {
+        return Result.success(new Classification(Map.of(), Map.of(), List.of()));}
         var properties = collectProperties(rules);
         var kinds = initialLabelling(properties);
         runFixedPointDemotion(properties, kinds);
         var keywordSkip = detectSkipPrefixRules(grammar, properties, kinds);
         var warnings = collectWarnings(rules, properties, kinds);
-        return Result.success(new Classification(
-        Collections.unmodifiableMap(kinds), Map.copyOf(keywordSkip), List.copyOf(warnings)));
+        return Result.success(new Classification(Collections.unmodifiableMap(kinds),
+                                                 Map.copyOf(keywordSkip),
+                                                 List.copyOf(warnings)));
     }
 
     private static Map<String, RuleProperties> collectProperties(List<Rule> rules) {
         var map = new LinkedHashMap<String, RuleProperties>();
-        for (var rule : rules) {
-            map.put(rule.name(), analyse(rule.expression()));
-        }
+        for ( var rule : rules) {
+        map.put(rule.name(), analyse(rule.expression()));}
         return map;
     }
 
@@ -116,15 +116,13 @@ public final class RuleClassifier {
      */
     private static Map<String, RuleKind> initialLabelling(Map<String, RuleProperties> properties) {
         var kinds = new HashMap<String, RuleKind>();
-        for (var entry : properties.entrySet()) {
+        for ( var entry : properties.entrySet()) {
             var p = entry.getValue();
-            if (!p.usesOnlyLexicalConstructs) {
-                kinds.put(entry.getKey(), RuleKind.PARSER);
-            }else if (p.referencesAnyRule && p.hasTerminals) {
-                kinds.put(entry.getKey(), RuleKind.PARSER);
-            }else {
-                kinds.put(entry.getKey(), RuleKind.LEXER);
-            }
+            if ( !p.usesOnlyLexicalConstructs) {
+            kinds.put(entry.getKey(), RuleKind.PARSER);} else
+            if ( p.referencesAnyRule && p.hasTerminals) {
+            kinds.put(entry.getKey(), RuleKind.PARSER);} else {
+            kinds.put(entry.getKey(), RuleKind.LEXER);}
         }
         return kinds;
     }
@@ -140,32 +138,26 @@ public final class RuleClassifier {
                                               Map<String, RuleKind> kinds) {
         var reverseDeps = buildReverseDependencies(properties);
         var worklist = new ArrayList<String>();
-        for (var entry : kinds.entrySet()) {
-            if (entry.getValue() != RuleKind.LEXER) {
-                worklist.add(entry.getKey());
-            }
-        }
-        while (!worklist.isEmpty()) {
+        for ( var entry : kinds.entrySet()) {
+        if ( entry.getValue() != RuleKind.LEXER) {
+        worklist.add(entry.getKey());}}
+        while ( !worklist.isEmpty()) {
             var demoted = worklist.removeLast();
             var dependents = reverseDeps.getOrDefault(demoted, Set.of());
-            for (var dep : dependents) {
-                if (kinds.get(dep) == RuleKind.LEXER) {
-                    kinds.put(dep, RuleKind.PARSER);
-                    worklist.add(dep);
-                }
-            }
+            for ( var dep : dependents) {
+            if ( kinds.get(dep) == RuleKind.LEXER) {
+                kinds.put(dep, RuleKind.PARSER);
+                worklist.add(dep);
+            }}
         }
     }
 
     private static Map<String, Set<String>> buildReverseDependencies(Map<String, RuleProperties> properties) {
         var reverse = new HashMap<String, Set<String>>();
-        for (var entry : properties.entrySet()) {
+        for ( var entry : properties.entrySet()) {
             var referencer = entry.getKey();
-            for (var referenced : entry.getValue().referencedRules) {
-                reverse.computeIfAbsent(referenced,
-                                        k -> new HashSet<>())
-                       .add(referencer);
-            }
+            for ( var referenced : entry.getValue().referencedRules) {
+            reverse.computeIfAbsent(referenced, k -> new HashSet<>()).add(referencer);}
         }
         return reverse;
     }
@@ -174,14 +166,13 @@ public final class RuleClassifier {
                                                  Map<String, RuleProperties> properties,
                                                  Map<String, RuleKind> kinds) {
         var warnings = new ArrayList<Warning>();
-        for (var rule : rules) {
+        for ( var rule : rules) {
             var name = rule.name();
             var p = properties.get(name);
-            if (kinds.get(name) == RuleKind.PARSER && p.usesCharLevelConstructs && p.referencesAnyRule) {
+            if ( kinds.get(name) == RuleKind.PARSER && p.usesCharLevelConstructs && p.referencesAnyRule) {
                 kinds.put(name, RuleKind.MIXED);
                 warnings.add(new Warning(name,
-                                         "rule combines rule references with character-level constructs (., [..], or char-level &/!); "
-                                         + "consider splitting into a lexer rule and a parser rule"));
+                                         "rule combines rule references with character-level constructs (., [..], or char-level &/!); " + "consider splitting into a lexer rule and a parser rule"));
             }
         }
         return warnings;
@@ -204,17 +195,14 @@ public final class RuleClassifier {
                                                                       Map<String, RuleKind> kinds) {
         var result = new LinkedHashMap<String, KeywordSkipInfo>();
         var ruleMap = grammar.ruleMap();
-        for (var rule : grammar.rules()) {
+        for ( var rule : grammar.rules()) {
             var info = detectSkipPrefix(rule.expression(), ruleMap);
-            if (info.isEmpty()) {
-                continue;
-            }
-            var bodyProps = analyse(info.get()
-                                        .bodyExpression());
+            if ( info.isEmpty()) {
+            continue;}
+            var bodyProps = analyse(info.get().bodyExpression());
             // Body must itself be pure-lexical (no rule references, no back-references, no dictionaries).
-            if (!bodyProps.usesOnlyLexicalConstructs() || bodyProps.referencesAnyRule()) {
-                continue;
-            }
+            if ( !bodyProps.usesOnlyLexicalConstructs() || bodyProps.referencesAnyRule()) {
+            continue;}
             // Force LEXER classification so DFA picks it up.
             kinds.put(rule.name(), RuleKind.LEXER);
             result.put(rule.name(), info.get());
@@ -226,28 +214,22 @@ public final class RuleClassifier {
 
     private static Optional<KeywordSkipInfo> detectSkipPrefix(Expression expr, Map<String, Rule> ruleMap) {
         var unwrapped = unwrapWrappers(expr);
-        if (! (unwrapped instanceof Expression.Sequence seq)) {
-            return Optional.empty();
-        }
+        if ( ! (unwrapped instanceof Expression.Sequence seq)) {
+        return Optional.empty();}
         var elements = seq.elements();
-        if (elements.size() < 2) {
-            return Optional.empty();
-        }
+        if ( elements.size() < 2) {
+        return Optional.empty();}
         var head = unwrapWrappers(elements.get(0));
-        if (! (head instanceof Expression.Not not)) {
-            return Optional.empty();
-        }
+        if ( ! (head instanceof Expression.Not not)) {
+        return Optional.empty();}
         var notInner = unwrapWrappers(not.expression());
-        if (! (notInner instanceof Expression.Reference ref)) {
-            return Optional.empty();
-        }
+        if ( ! (notInner instanceof Expression.Reference ref)) {
+        return Optional.empty();}
         var referenced = ruleMap.get(ref.ruleName());
-        if (referenced == null) {
-            return Optional.empty();
-        }
-        if (!isLiteralSetRule(referenced.expression())) {
-            return Optional.empty();
-        }
+        if ( referenced == null) {
+        return Optional.empty();}
+        if ( !isLiteralSetRule(referenced.expression())) {
+        return Optional.empty();}
         var rest = elements.subList(1, elements.size());
         Expression body = rest.size() == 1
                           ? rest.get(0)
@@ -261,17 +243,16 @@ public final class RuleClassifier {
      */
     private static Expression unwrapWrappers(Expression expr) {
         Expression cur = expr;
-        while (true) {
-            switch (cur) {
-                case Expression.Group g -> cur = g.expression();
-                case Expression.TokenBoundary tb -> cur = tb.expression();
-                case Expression.Capture cap -> cur = cap.expression();
-                case Expression.CaptureScope cs -> cur = cs.expression();
-                default -> {
-                    return cur;
-                }
+        while ( true) {
+        switch ( cur) {
+            case Expression.Group g -> cur = g.expression();
+            case Expression.TokenBoundary tb -> cur = tb.expression();
+            case Expression.Capture cap -> cur = cap.expression();
+            case Expression.CaptureScope cs -> cur = cs.expression();
+            default -> {
+                return cur;
             }
-        }
+        }}
     }
 
     /**
@@ -286,26 +267,18 @@ public final class RuleClassifier {
     static boolean isLiteralSetRule(Expression expr) {
         var unwrapped = unwrapWrappers(expr);
         Expression choiceCandidate = unwrapped;
-        if (unwrapped instanceof Expression.Sequence seq) {
-            if (seq.elements()
-                   .isEmpty()) {
-                return false;
-            }
-            choiceCandidate = unwrapWrappers(seq.elements()
-                                                .get(0));
+        if ( unwrapped instanceof Expression.Sequence seq) {
+            if ( seq.elements().isEmpty()) {
+            return false;}
+            choiceCandidate = unwrapWrappers(seq.elements().get(0));
         }
-        if (! (choiceCandidate instanceof Expression.Choice choice)) {
-            return false;
-        }
-        if (choice.alternatives()
-                  .isEmpty()) {
-            return false;
-        }
-        for (var alt : choice.alternatives()) {
-            if (extractLeadingLiteral(alt) == null) {
-                return false;
-            }
-        }
+        if ( ! (choiceCandidate instanceof Expression.Choice choice)) {
+        return false;}
+        if ( choice.alternatives().isEmpty()) {
+        return false;}
+        for ( var alt : choice.alternatives()) {
+        if ( extractLeadingLiteral(alt).isEmpty()) {
+        return false;}}
         return true;
     }
 
@@ -317,60 +290,49 @@ public final class RuleClassifier {
     static List<String> extractLiteralSet(Expression expr) {
         var unwrapped = unwrapWrappers(expr);
         Expression choiceCandidate = unwrapped;
-        if (unwrapped instanceof Expression.Sequence seq) {
-            if (seq.elements()
-                   .isEmpty()) {
-                return List.of();
-            }
-            choiceCandidate = unwrapWrappers(seq.elements()
-                                                .get(0));
+        if ( unwrapped instanceof Expression.Sequence seq) {
+            if ( seq.elements().isEmpty()) {
+            return List.of();}
+            choiceCandidate = unwrapWrappers(seq.elements().get(0));
         }
-        if (! (choiceCandidate instanceof Expression.Choice choice)) {
-            return List.of();
-        }
-        var out = new ArrayList<String>(choice.alternatives()
-                                              .size());
-        for (var alt : choice.alternatives()) {
-            var lit = extractLeadingLiteral(alt);
-            if (lit == null) {
-                return List.of();
-            }
-            out.add(lit);
+        if ( ! (choiceCandidate instanceof Expression.Choice choice)) {
+        return List.of();}
+        var out = new ArrayList<String>(choice.alternatives().size());
+        for ( var alt : choice.alternatives()) {
+            var litOpt = extractLeadingLiteral(alt);
+            if ( litOpt.isEmpty()) {
+            return List.of();}
+            out.add(litOpt.unwrap());
         }
         return List.copyOf(out);
     }
 
-    private static String extractLeadingLiteral(Expression alt) {
+    private static Option<String> extractLeadingLiteral(Expression alt) {
         var unwrapped = unwrapWrappers(alt);
-        if (unwrapped instanceof Expression.Literal lit) {
-            return lit.text();
+        if ( unwrapped instanceof Expression.Literal lit) {
+        return Option.some(lit.text());}
+        if ( unwrapped instanceof Expression.Sequence seq && !seq.elements().isEmpty()) {
+            var first = unwrapWrappers(seq.elements().get(0));
+            if ( first instanceof Expression.Literal lit) {
+            return Option.some(lit.text());}
         }
-        if (unwrapped instanceof Expression.Sequence seq && !seq.elements()
-                                                                .isEmpty()) {
-            var first = unwrapWrappers(seq.elements()
-                                          .get(0));
-            if (first instanceof Expression.Literal lit) {
-                return lit.text();
-            }
-        }
-        return null;
+        return Option.none();
     }
 
     private record RuleProperties(boolean referencesAnyRule,
                                   boolean usesOnlyLexicalConstructs,
                                   boolean usesCharLevelConstructs,
                                   boolean hasTerminals,
-                                  Set<String> referencedRules) {}
+                                  Set<String> referencedRules){}
 
     private static RuleProperties analyse(Expression expr) {
         var visitor = new PropertyVisitor();
         visitor.walk(expr);
-        return new RuleProperties(
-        visitor.referencesAnyRule,
-        visitor.usesOnlyLexicalConstructs,
-        visitor.usesCharLevelConstructs,
-        visitor.hasTerminals,
-        Set.copyOf(visitor.referencedRules));
+        return new RuleProperties(visitor.referencesAnyRule,
+                                  visitor.usesOnlyLexicalConstructs,
+                                  visitor.usesCharLevelConstructs,
+                                  visitor.hasTerminals,
+                                  Set.copyOf(visitor.referencedRules));
     }
 
     private static final class PropertyVisitor {
@@ -381,7 +343,7 @@ public final class RuleClassifier {
         final Set<String> referencedRules = new HashSet<>();
 
         void walk(Expression expr) {
-            switch (expr) {
+            switch ( expr) {
                 case Expression.Literal __ -> hasTerminals = true;
                 case Expression.CharClass __ -> {
                     hasTerminals = true;
@@ -399,10 +361,8 @@ public final class RuleClassifier {
                 }
                 case Expression.BackReference __ -> usesOnlyLexicalConstructs = false;
                 case Expression.Dictionary __ -> usesOnlyLexicalConstructs = false;
-                case Expression.Sequence seq -> seq.elements()
-                                                   .forEach(this::walk);
-                case Expression.Choice ch -> ch.alternatives()
-                                               .forEach(this::walk);
+                case Expression.Sequence seq -> seq.elements().forEach(this::walk);
+                case Expression.Choice ch -> ch.alternatives().forEach(this::walk);
                 case Expression.ZeroOrMore z -> walk(z.expression());
                 case Expression.OneOrMore o -> walk(o.expression());
                 case Expression.Optional o -> walk(o.expression());

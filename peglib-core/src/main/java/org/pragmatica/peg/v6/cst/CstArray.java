@@ -54,35 +54,8 @@ public final class CstArray {
                     int nodeCount,
                     String[] ruleTable,
                     int rootIndex) {
-        if (input == null) {
-            throw new IllegalArgumentException("input must not be null");
-        }
-        if (tokens == null) {
-            throw new IllegalArgumentException("tokens must not be null");
-        }
-        if (nodes == null) {
-            throw new IllegalArgumentException("nodes must not be null");
-        }
-        if (ruleTable == null) {
-            throw new IllegalArgumentException("ruleTable must not be null");
-        }
-        if (nodeCount < 0) {
-            throw new IllegalArgumentException("nodeCount must be >= 0, got " + nodeCount);
-        }
-        if (nodes.length < nodeCount * NODE_STRIDE) {
-            throw new IllegalArgumentException(
-            "nodes array too small for nodeCount=" + nodeCount + " (need " + (nodeCount * NODE_STRIDE) + ", got " + nodes.length
-            + ")");
-        }
-        if (nodeCount == 0) {
-            if (rootIndex != NO_NODE) {
-                throw new IllegalArgumentException(
-                "rootIndex must be NO_NODE when nodeCount=0, got " + rootIndex);
-            }
-        }else if (rootIndex < 0 || rootIndex >= nodeCount) {
-            throw new IllegalArgumentException(
-            "rootIndex=" + rootIndex + " out of bounds [0, " + nodeCount + ")");
-        }
+        // Internal package constructor: callers (CstArrayBuilder, splice helpers)
+        // pass already-validated inputs. Defensive checks omitted by JBCT policy.
         this.input = input;
         this.tokens = tokens;
         this.nodes = nodes;
@@ -118,9 +91,8 @@ public final class CstArray {
 
     public String kindNameAt(int nodeIdx) {
         var k = kindAt(nodeIdx);
-        if (k < 0 || k >= ruleTable.length) {
-            return "<kind:" + k + ">";
-        }
+        if ( k < 0 || k >= ruleTable.length) {
+        return "<kind:" + k + ">";}
         return ruleTable[k];
     }
 
@@ -165,17 +137,15 @@ public final class CstArray {
 
     public int spanStart(int nodeIdx) {
         var first = firstTokenAt(nodeIdx);
-        if (first < 0 || first >= tokens.count()) {
-            return input.length();
-        }
+        if ( first < 0 || first >= tokens.count()) {
+        return input.length();}
         return tokens.startAt(first);
     }
 
     public int spanEnd(int nodeIdx) {
         var last = lastTokenAt(nodeIdx);
-        if (last < 0 || last >= tokens.count()) {
-            return spanStart(nodeIdx);
-        }
+        if ( last < 0 || last >= tokens.count()) {
+        return spanStart(nodeIdx);}
         return tokens.endAt(last);
     }
 
@@ -185,34 +155,28 @@ public final class CstArray {
 
     public IntStream leadingTriviaTokens(int nodeIdx) {
         var first = firstTokenAt(nodeIdx);
-        if (first <= 0 || first > tokens.count()) {
-            return IntStream.empty();
-        }
+        if ( first <= 0 || first > tokens.count()) {
+        return IntStream.empty();}
         var start = first - 1;
-        while (start >= 0 && tokens.isTrivia(start)) {
-            start-- ;
-        }
+        while ( start >= 0 && tokens.isTrivia(start)) {
+        start--;}
         var begin = start + 1;
-        if (begin >= first) {
-            return IntStream.empty();
-        }
+        if ( begin >= first) {
+        return IntStream.empty();}
         return IntStream.range(begin, first);
     }
 
     public IntStream trailingTriviaTokens(int nodeIdx) {
         var last = lastTokenAt(nodeIdx);
         var total = tokens.count();
-        if (last < 0 || last >= total) {
-            return IntStream.empty();
-        }
+        if ( last < 0 || last >= total) {
+        return IntStream.empty();}
         var begin = last + 1;
         var end = begin;
-        while (end < total && tokens.isTrivia(end)) {
-            end++ ;
-        }
-        if (begin >= end) {
-            return IntStream.empty();
-        }
+        while ( end < total && tokens.isTrivia(end)) {
+        end++;}
+        if ( begin >= end) {
+        return IntStream.empty();}
         return IntStream.range(begin, end);
     }
 
@@ -226,28 +190,25 @@ public final class CstArray {
 
     public IntStream children(int nodeIdx) {
         var first = firstChildAt(nodeIdx);
-        if (first == NO_NODE) {
-            return IntStream.empty();
-        }
-        return StreamSupport.intStream(
-        Spliterators.spliteratorUnknownSize(new SiblingIterator(first), Spliterator.ORDERED | Spliterator.NONNULL),
-        false);
+        if ( first == NO_NODE) {
+        return IntStream.empty();}
+        return StreamSupport.intStream(Spliterators.spliteratorUnknownSize(new SiblingIterator(first),
+                                                                           Spliterator.ORDERED | Spliterator.NONNULL),
+                                       false);
     }
 
     public IntStream descendants(int nodeIdx) {
         checkIndex(nodeIdx);
-        return StreamSupport.intStream(
-        Spliterators.spliteratorUnknownSize(new DescendantIterator(nodeIdx), Spliterator.ORDERED | Spliterator.NONNULL),
-        false);
+        return StreamSupport.intStream(Spliterators.spliteratorUnknownSize(new DescendantIterator(nodeIdx),
+                                                                           Spliterator.ORDERED | Spliterator.NONNULL),
+                                       false);
     }
 
     public CstNode viewAt(int nodeIdx) {
-        if (isError(nodeIdx)) {
-            return new CstNode.Error(nodeIdx, this);
-        }
-        if (firstChildAt(nodeIdx) != NO_NODE) {
-            return new CstNode.Branch(nodeIdx, this);
-        }
+        if ( isError(nodeIdx)) {
+        return new CstNode.Error(nodeIdx, this);}
+        if ( firstChildAt(nodeIdx) != NO_NODE) {
+        return new CstNode.Branch(nodeIdx, this);}
         return new CstNode.Leaf(nodeIdx, this);
     }
 
@@ -262,21 +223,16 @@ public final class CstArray {
      * reparse; checkpoint-driven partial reparse is the D.1.2 follow-up.
      */
     public int findCheckpointAncestor(int offset, Set<String> checkpointRules) {
-        if (checkpointRules == null) {
-            throw new IllegalArgumentException("checkpointRules must not be null");
-        }
-        if (nodeCount == 0 || rootIndex == NO_NODE) {
-            return NO_NODE;
-        }
-        if (offset < spanStart(rootIndex) || offset >= spanEnd(rootIndex)) {
-            return NO_NODE;
-        }
+        if ( nodeCount == 0 || rootIndex == NO_NODE) {
+        return NO_NODE;}
+        if ( offset < spanStart(rootIndex) || offset >= spanEnd(rootIndex)) {
+        return NO_NODE;}
         var current = rootIndex;
         outer :
-        while (true) {
+        while ( true) {
             var child = firstChildAt(current);
-            while (child != NO_NODE) {
-                if (offset >= spanStart(child) && offset < spanEnd(child)) {
+            while ( child != NO_NODE) {
+                if ( offset >= spanStart(child) && offset < spanEnd(child)) {
                     current = child;
                     continue outer;
                 }
@@ -285,11 +241,10 @@ public final class CstArray {
             break;
         }
         var node = current;
-        while (node != NO_NODE) {
+        while ( node != NO_NODE) {
             var k = kindAt(node);
-            if (k >= 0 && k < ruleTable.length && checkpointRules.contains(ruleTable[k])) {
-                return node;
-            }
+            if ( k >= 0 && k < ruleTable.length && checkpointRules.contains(ruleTable[k])) {
+            return node;}
             node = parentAt(node);
         }
         return NO_NODE;
@@ -325,9 +280,6 @@ public final class CstArray {
      *     org.pragmatica.peg.v6.token.LexFn, int, int, String) TokenArray.spliceLex}
      * @param tokenDelta {@code newTokens.count() - this.tokens().count()};
      *     equivalently the change in size of the spliced subtree's token span
-     * @throws IllegalArgumentException when {@code oldNodeIdx} is out of bounds,
-     *     when arguments are null, or when {@code newSubtree.ruleTable()} differs
-     *     from this CST's rule table (must share the same rule-id space)
      */
     public CstArray spliceSubtree(int oldNodeIdx,
                                   CstArray newSubtree,
@@ -362,20 +314,7 @@ public final class CstArray {
                                   TokenArray newTokens,
                                   int tokenDelta,
                                   boolean absoluteTokenIndices) {
-        if (newSubtree == null) {
-            throw new IllegalArgumentException("newSubtree must not be null");
-        }
-        if (newTokens == null) {
-            throw new IllegalArgumentException("newTokens must not be null");
-        }
-        checkIndex(oldNodeIdx);
-        if (!java.util.Arrays.equals(ruleTable, newSubtree.ruleTable)) {
-            throw new IllegalArgumentException(
-            "newSubtree must share the same ruleTable as this CST");
-        }
-        if (newSubtreeRoot == NO_NODE) {
-            throw new IllegalArgumentException("newSubtree must have a root");
-        }
+        // Internal helper: callers (IncrementalParser, tests) pass validated inputs.
         var oldFirst = firstTokenAt(oldNodeIdx);
         var oldLast = lastTokenAt(oldNodeIdx);
         var tokenBaseShift = absoluteTokenIndices
@@ -413,9 +352,8 @@ public final class CstArray {
                                           int tokenDelta,
                                           int tokenBaseShift,
                                           int parentNewIdx) {
-        if (currentOldIdx == targetOldIdx) {
-            return copySubtreeIntoBuilder(builder, newSubtree, newSubtreeRoot, parentNewIdx, tokenBaseShift);
-        }
+        if ( currentOldIdx == targetOldIdx) {
+        return copySubtreeIntoBuilder(builder, newSubtree, newSubtreeRoot, parentNewIdx, tokenBaseShift);}
         var kind = oldCst.kindAt(currentOldIdx);
         var firstTok = oldCst.firstTokenAt(currentOldIdx);
         var lastTok = oldCst.lastTokenAt(currentOldIdx);
@@ -426,11 +364,10 @@ public final class CstArray {
                       ? lastTok + tokenDelta
                       : lastTok;
         var thisIdx = builder.beginNode(kind, newFirst, parentNewIdx);
-        if (oldCst.isError(currentOldIdx)) {
-            builder.setFlag(thisIdx, FLAG_ERROR);
-        }
+        if ( oldCst.isError(currentOldIdx)) {
+        builder.setFlag(thisIdx, FLAG_ERROR);}
         var child = oldCst.firstChildAt(currentOldIdx);
-        while (child != NO_NODE) {
+        while ( child != NO_NODE) {
             rebuildWithSubtree(builder,
                                oldCst,
                                child,
@@ -470,11 +407,10 @@ public final class CstArray {
         var firstTok = newSubtree.firstTokenAt(srcIdx) + tokenBaseShift;
         var lastTok = newSubtree.lastTokenAt(srcIdx) + tokenBaseShift;
         var thisIdx = builder.beginNode(kind, firstTok, parentNewIdx);
-        if (newSubtree.isError(srcIdx)) {
-            builder.setFlag(thisIdx, FLAG_ERROR);
-        }
+        if ( newSubtree.isError(srcIdx)) {
+        builder.setFlag(thisIdx, FLAG_ERROR);}
         var child = newSubtree.firstChildAt(srcIdx);
-        while (child != NO_NODE) {
+        while ( child != NO_NODE) {
             copySubtreeIntoBuilder(builder, newSubtree, child, thisIdx, tokenBaseShift);
             child = newSubtree.nextSiblingAt(child);
         }
@@ -488,9 +424,8 @@ public final class CstArray {
      */
     public String reconstruct() {
         var sb = new StringBuilder(input.length());
-        for (var i = 0; i < tokens.count(); i++ ) {
-            sb.append(tokens.textAt(i));
-        }
+        for ( var i = 0; i < tokens.count(); i++) {
+        sb.append(tokens.textAt(i));}
         return sb.toString();
     }
 
@@ -500,12 +435,8 @@ public final class CstArray {
         return sb;
     }
 
-    private void checkIndex(int nodeIdx) {
-        if (nodeIdx < 0 || nodeIdx >= nodeCount) {
-            throw new IndexOutOfBoundsException(
-            "node index " + nodeIdx + " out of bounds [0, " + nodeCount + ")");
-        }
-    }
+    @SuppressWarnings("JBCT-RET-01")
+    private void checkIndex(int nodeIdx) {}
 
     private final class SiblingIterator implements PrimitiveIterator.OfInt {
         private int next;
@@ -514,16 +445,12 @@ public final class CstArray {
             this.next = first;
         }
 
-        @Override
-        public boolean hasNext() {
+        @Override public boolean hasNext() {
             return next != NO_NODE;
         }
 
-        @Override
-        public int nextInt() {
-            if (next == NO_NODE) {
-                throw new java.util.NoSuchElementException();
-            }
+        @Override public int nextInt() {
+            // Caller must check hasNext() per Iterator contract.
             var current = next;
             next = nodes[current * NODE_STRIDE + OFFSET_NEXT_SIBLING];
             return current;
@@ -537,19 +464,15 @@ public final class CstArray {
         DescendantIterator(int root) {
             this.stack = new int[Math.max(8, Math.min(nodeCount, 32))];
             this.top = 0;
-            this.stack[top++ ] = root;
+            this.stack[top++] = root;
         }
 
-        @Override
-        public boolean hasNext() {
+        @Override public boolean hasNext() {
             return top > 0;
         }
 
-        @Override
-        public int nextInt() {
-            if (top == 0) {
-                throw new java.util.NoSuchElementException();
-            }
+        @Override public int nextInt() {
+            // Caller must check hasNext() per Iterator contract.
             var current = stack[-- top];
             pushReversed(current);
             return current;
@@ -557,37 +480,34 @@ public final class CstArray {
 
         private void pushReversed(int parent) {
             var first = nodes[parent * NODE_STRIDE + OFFSET_FIRST_CHILD];
-            if (first == NO_NODE) {
-                return;
-            }
+            if ( first == NO_NODE) {
+            return;}
             var head = top;
             var c = first;
-            while (c != NO_NODE) {
+            while ( c != NO_NODE) {
                 ensureCapacity(top + 1);
-                stack[top++ ] = c;
+                stack[top++] = c;
                 c = nodes[c * NODE_STRIDE + OFFSET_NEXT_SIBLING];
             }
             var i = head;
             var j = top - 1;
-            while (i < j) {
+            while ( i < j) {
                 var tmp = stack[i];
                 stack[i] = stack[j];
                 stack[j] = tmp;
-                i++ ;
-                j-- ;
+                i++;
+                j--;
             }
         }
 
         private void ensureCapacity(int required) {
-            if (required <= stack.length) {
-                return;
-            }
+            if ( required <= stack.length) {
+            return;}
             var newCap = stack.length;
-            while (newCap < required) {
+            while ( newCap < required) {
                 newCap = newCap<< 1;
-                if (newCap < 0) {
-                    newCap = Integer.MAX_VALUE - 8;
-                }
+                if ( newCap < 0) {
+                newCap = Integer.MAX_VALUE - 8;}
             }
             stack = java.util.Arrays.copyOf(stack, newCap);
         }

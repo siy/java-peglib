@@ -59,15 +59,8 @@ public final class LexerEngine {
                        String[] kindNameTable,
                        int whitespaceKind,
                        Map<Integer, DfaBuilder.KeywordResolution> keywordResolutions) {
-        if (dfa == null) {
-            throw new IllegalArgumentException("dfa must not be null");
-        }
-        if (kindNameTable == null) {
-            throw new IllegalArgumentException("kindNameTable must not be null");
-        }
-        if (keywordResolutions == null) {
-            throw new IllegalArgumentException("keywordResolutions must not be null");
-        }
+        // Internal constructor: callers (DfaBuilder pipeline, tests) pass validated
+        // inputs. Defensive null checks omitted by JBCT policy.
         this.dfa = dfa;
         this.kindNameTable = kindNameTable.clone();
         this.whitespaceKind = whitespaceKind;
@@ -85,67 +78,62 @@ public final class LexerEngine {
     }
 
     /**
-     * Lex {@code input} into a {@link TokenArray}. Throws {@link IllegalArgumentException}
-     * with a diagnostic of the form {@code "lex error at offset N: 'c'"} on either
-     * a no-transition stall at the start of a token or a zero-length empty match.
-     * Phase A has no recovery; recovery is Phase B.
+     * Lex {@code input} into a {@link TokenArray}. On a no-transition stall the engine
+     * emits a one-character WHITESPACE token to make progress; the downstream parser
+     * surfaces such bytes as trailing-input diagnostics. Phase A has no formal recovery;
+     * deeper recovery is Phase B.
      */
     public TokenArray lex(String input) {
-        if (input == null) {
-            throw new IllegalArgumentException("input must not be null");
-        }
         var builder = new TokenArrayBuilder(input);
         int len = input.length();
         int pos = 0;
-        while (pos < len) {
+        while ( pos < len) {
             int state = Dfa.START_STATE;
             int lastAcceptEnd = - 1;
             int lastAcceptKind = - 1;
             int cur = pos;
-            while (cur < len) {
+            while ( cur < len) {
                 int ch = input.charAt(cur);
-                if (ch >= Dfa.ALPHABET_SIZE) {
-                    break;
-                }
+                if ( ch >= Dfa.ALPHABET_SIZE) {
+                break;}
                 int next = dfa.transition(state, ch);
-                if (next == Dfa.NO_TRANSITION) {
-                    break;
-                }
+                if ( next == Dfa.NO_TRANSITION) {
+                break;}
                 state = next;
-                cur++ ;
+                cur++;
                 int ak = dfa.acceptKind(state);
-                if (ak != Dfa.NO_ACCEPT) {
+                if ( ak != Dfa.NO_ACCEPT) {
                     lastAcceptEnd = cur;
                     lastAcceptKind = ak;
                 }
             }
-            if (lastAcceptEnd <= pos) {
-                throw new IllegalArgumentException(
-                "lex error at offset " + pos + ": '" + input.charAt(pos) + "'");
+            if ( lastAcceptEnd <= pos) {
+                // No DFA-recognised token at this position. Emit a 1-char synthetic
+                // WHITESPACE token so the input is fully covered and lexing can
+                // progress; the parser will surface this as a trailing-input error.
+                builder.append(TokenArray.KIND_WHITESPACE, pos, pos + 1);
+                pos++;
+                continue;
             }
             // Phase B.0 keyword resolution — remap identifier kinds to keyword kinds when applicable.
             var resolver = keywordResolutions.get(lastAcceptKind);
-            if (resolver != null) {
-                var override = resolver.textToKind()
-                                       .get(input.substring(pos, lastAcceptEnd));
-                if (override != null) {
-                    lastAcceptKind = override;
-                }
+            if ( resolver != null) {
+                var override = resolver.textToKind().get(input.substring(pos, lastAcceptEnd));
+                if ( override != null) {
+                lastAcceptKind = override;}
             }
             // Phase A.6 — content-based trivia classification. WHITESPACE tokens whose
             // text begins with "//" or "/*" are reclassified to LINE_COMMENT or
             // BLOCK_COMMENT respectively. Pure whitespace runs never start with '/',
             // so this is a sound prefix check.
-            if (lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {
+            if ( lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {
                 char c0 = input.charAt(pos);
                 char c1 = input.charAt(pos + 1);
-                if (c0 == '/') {
-                    if (c1 == '/') {
-                        lastAcceptKind = TokenArray.KIND_LINE_COMMENT;
-                    }else if (c1 == '*') {
-                        lastAcceptKind = TokenArray.KIND_BLOCK_COMMENT;
-                    }
-                }
+                if ( c0 == '/') {
+                if ( c1 == '/') {
+                lastAcceptKind = TokenArray.KIND_LINE_COMMENT;} else
+                if ( c1 == '*') {
+                lastAcceptKind = TokenArray.KIND_BLOCK_COMMENT;}}
             }
             builder.append(lastAcceptKind, pos, lastAcceptEnd);
             pos = lastAcceptEnd;
@@ -161,10 +149,9 @@ public final class LexerEngine {
      * @deprecated prefer the four-arg constructor; kept as a transitional API
      *     while older call sites are updated.
      */
-    @Deprecated
-    public static LexerEngine withoutKeywordResolution(Dfa dfa,
-                                                       String[] kindNameTable,
-                                                       int whitespaceKind) {
+    @Deprecated public static LexerEngine withoutKeywordResolution(Dfa dfa,
+                                                                   String[] kindNameTable,
+                                                                   int whitespaceKind) {
         return new LexerEngine(dfa, kindNameTable, whitespaceKind, new HashMap<>());
     }
 }

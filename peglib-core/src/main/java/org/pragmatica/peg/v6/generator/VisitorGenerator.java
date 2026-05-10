@@ -22,11 +22,9 @@ import java.util.Map;
 public final class VisitorGenerator {
     private VisitorGenerator() {}
 
-    public sealed interface VisitorGenerationError extends Cause
-    permits VisitorGenerationError.InvalidIdentifier {
+    public sealed interface VisitorGenerationError extends Cause permits VisitorGenerationError.InvalidIdentifier {
         record InvalidIdentifier(String component, String value) implements VisitorGenerationError {
-            @Override
-            public String message() {
+            @Override public String message() {
                 return "Invalid Java identifier for " + component + ": '" + value + "'";
             }
         }
@@ -44,51 +42,40 @@ public final class VisitorGenerator {
                                                     RuleClassifier.Classification classification,
                                                     String packageName,
                                                     String className) {
-        if (grammar == null || classification == null) {
-            throw new IllegalArgumentException("grammar/classification must not be null");
-        }
-        if (!isValidQualifiedPackage(packageName)) {
-            return new VisitorGenerationError.InvalidIdentifier("packageName", String.valueOf(packageName)).result();
-        }
-        if (!isValidIdentifier(className)) {
-            return new VisitorGenerationError.InvalidIdentifier("className", String.valueOf(className)).result();
-        }
+        // Internal entry: callers are PegParser/tests with validated inputs.
+        if ( !isValidQualifiedPackage(packageName)) {
+        return new VisitorGenerationError.InvalidIdentifier("packageName", String.valueOf(packageName)).result();}
+        if ( !isValidIdentifier(className)) {
+        return new VisitorGenerationError.InvalidIdentifier("className", String.valueOf(className)).result();}
         var ruleKinds = ParserGenerator.allocateParserRuleKinds(grammar, classification);
         return Result.success(new GeneratedVisitor(packageName, className, render(packageName, className, ruleKinds)));
     }
 
     private static String render(String packageName, String className, Map<String, Integer> ruleKinds) {
         var sb = new StringBuilder(2 * 1024 + ruleKinds.size() * 96);
-        if (!packageName.isEmpty()) {
-            sb.append("package ")
-              .append(packageName)
-              .append(";\n\n");
-        }
+        if ( !packageName.isEmpty()) {
+        sb.append("package ").append(packageName)
+                 .append(";\n\n");}
         sb.append("import org.pragmatica.peg.v6.cst.CstArray;\n\n");
-        sb.append("public abstract class ")
-          .append(className)
-          .append("<T> {\n\n");
+        sb.append("public abstract class ").append(className)
+                 .append("<T> {\n\n");
         // Per-rule kind constants — mirror parser's RULE_<Name>_KIND so dispatch
         // matches the generated CST kinds exactly.
-        for (var e : ruleKinds.entrySet()) {
-            sb.append("    protected static final int RULE_")
-              .append(e.getKey())
-              .append("_KIND = ")
-              .append(e.getValue())
-              .append(";\n");
-        }
+        for ( var e : ruleKinds.entrySet()) {
+        sb.append("    protected static final int RULE_").append(e.getKey())
+                 .append("_KIND = ")
+                 .append(e.getValue())
+                 .append(";\n");}
         sb.append("\n");
         // Dispatch entry point.
         sb.append("    public T visit(CstArray cst, int nodeIdx) {\n");
         sb.append("        int kind = cst.kindAt(nodeIdx);\n");
         sb.append("        return switch (kind) {\n");
-        for (var e : ruleKinds.entrySet()) {
-            sb.append("            case RULE_")
-              .append(e.getKey())
-              .append("_KIND -> visit")
-              .append(e.getKey())
-              .append("(cst, nodeIdx);\n");
-        }
+        for ( var e : ruleKinds.entrySet()) {
+        sb.append("            case RULE_").append(e.getKey())
+                 .append("_KIND -> visit")
+                 .append(e.getKey())
+                 .append("(cst, nodeIdx);\n");}
         sb.append("            default -> defaultResult();\n");
         sb.append("        };\n");
         sb.append("    }\n\n");
@@ -106,10 +93,9 @@ public final class VisitorGenerator {
         sb.append("    protected T defaultResult() { return null; }\n\n");
         sb.append("    protected T aggregateResult(T agg, T next) { return next; }\n\n");
         // Per-rule visit stubs.
-        for (var name : ruleKinds.keySet()) {
-            sb.append("    public T visit")
-              .append(name)
-              .append("(CstArray cst, int nodeIdx) {\n");
+        for ( var name : ruleKinds.keySet()) {
+            sb.append("    public T visit").append(name)
+                     .append("(CstArray cst, int nodeIdx) {\n");
             sb.append("        return visitChildren(cst, nodeIdx);\n");
             sb.append("    }\n\n");
         }
@@ -118,32 +104,24 @@ public final class VisitorGenerator {
     }
 
     private static boolean isValidIdentifier(String s) {
-        if (s == null || s.isEmpty()) {
-            return false;
-        }
-        if (!Character.isJavaIdentifierStart(s.charAt(0))) {
-            return false;
-        }
-        for (var i = 1; i < s.length(); i++ ) {
-            if (!Character.isJavaIdentifierPart(s.charAt(i))) {
-                return false;
-            }
-        }
+        if ( s == null || s.isEmpty()) {
+        return false;}
+        if ( !Character.isJavaIdentifierStart(s.charAt(0))) {
+        return false;}
+        for ( var i = 1; i < s.length(); i++) {
+        if ( !Character.isJavaIdentifierPart(s.charAt(i))) {
+        return false;}}
         return true;
     }
 
     private static boolean isValidQualifiedPackage(String s) {
-        if (s == null) {
-            return false;
-        }
-        if (s.isEmpty()) {
-            return true;
-        }
-        for (var part : s.split("\\.", - 1)) {
-            if (!isValidIdentifier(part)) {
-                return false;
-            }
-        }
+        if ( s == null) {
+        return false;}
+        if ( s.isEmpty()) {
+        return true;}
+        for ( var part : s.split("\\.", - 1)) {
+        if ( !isValidIdentifier(part)) {
+        return false;}}
         return true;
     }
 }

@@ -34,10 +34,7 @@ public final class NamedCaptureDetector {
     /** Single offending occurrence — either a named capture or a back-reference. */
     public record Occurrence(String ruleName, Kind kind, String name) {
         public String message() {
-            return switch (kind) {
-                case NAMED_CAPTURE -> "Rule '" + ruleName + "' uses named capture '$" + name + "<...>'";
-                case BACK_REFERENCE -> "Rule '" + ruleName + "' uses back-reference '$" + name + "'";
-            };
+            return switch (kind) {case NAMED_CAPTURE -> "Rule '" + ruleName + "' uses named capture '$" + name + "<...>'";case BACK_REFERENCE -> "Rule '" + ruleName + "' uses back-reference '$" + name + "'";};
         }
     }
 
@@ -48,23 +45,20 @@ public final class NamedCaptureDetector {
 
     public record DetectionResult(List<Occurrence> occurrences) {
         public boolean hasOccurrences() {
-            return !occurrences.isEmpty();
+            return ! occurrences.isEmpty();
         }
     }
 
     public static Result<DetectionResult> detect(Grammar grammar) {
-        if (grammar == null) {
-            throw new IllegalArgumentException("grammar must not be null");
-        }
+        // Internal entry: callers (PegParser/tests) pass validated inputs.
         var occurrences = new ArrayList<Occurrence>();
-        for (var rule : grammar.rules()) {
-            walk(rule.name(), rule.expression(), occurrences);
-        }
+        for ( var rule : grammar.rules()) {
+        walk(rule.name(), rule.expression(), occurrences);}
         return Result.success(new DetectionResult(Collections.unmodifiableList(occurrences)));
     }
 
     private static void walk(String ruleName, Expression expr, List<Occurrence> out) {
-        switch (expr) {
+        switch ( expr) {
             case Expression.Capture cap -> {
                 out.add(new Occurrence(ruleName, Kind.NAMED_CAPTURE, cap.name()));
                 walk(ruleName, cap.expression(), out);
@@ -72,10 +66,8 @@ public final class NamedCaptureDetector {
             case Expression.BackReference br ->
             out.add(new Occurrence(ruleName, Kind.BACK_REFERENCE, br.name()));
             case Expression.CaptureScope cs -> walk(ruleName, cs.expression(), out);
-            case Expression.Sequence seq -> seq.elements()
-                                               .forEach(e -> walk(ruleName, e, out));
-            case Expression.Choice ch -> ch.alternatives()
-                                           .forEach(e -> walk(ruleName, e, out));
+            case Expression.Sequence seq -> seq.elements().forEach(e -> walk(ruleName, e, out));
+            case Expression.Choice ch -> ch.alternatives().forEach(e -> walk(ruleName, e, out));
             case Expression.ZeroOrMore z -> walk(ruleName, z.expression(), out);
             case Expression.OneOrMore o -> walk(ruleName, o.expression(), out);
             case Expression.Optional o -> walk(ruleName, o.expression(), out);

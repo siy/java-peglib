@@ -31,33 +31,29 @@ import java.util.Map;
 public final class ParserCompiler {
     private ParserCompiler() {}
 
-    public sealed interface ParserCompileError extends Cause
-    permits ParserCompileError.NoCompilerAvailable,
+    public sealed interface ParserCompileError extends Cause permits ParserCompileError.NoCompilerAvailable,
     ParserCompileError.CompilationFailed,
     ParserCompileError.LoadFailed {
         record NoCompilerAvailable() implements ParserCompileError {
-            @Override
-            public String message() {
+            @Override public String message() {
                 return "No Java compiler available — run with a JDK, not a JRE";
             }
         }
 
         record CompilationFailed(String diagnostics) implements ParserCompileError {
-            @Override
-            public String message() {
+            @Override public String message() {
                 return "Generated parser compilation failed:\n" + diagnostics;
             }
         }
 
         record LoadFailed(String className, Throwable cause) implements ParserCompileError {
-            @Override
-            public String message() {
+            @Override public String message() {
                 return "Failed to load generated parser '" + className + "': " + cause;
             }
         }
     }
 
-    public record CompiledParser(Class< ? > parserClass,
+    public record CompiledParser(Class<?> parserClass,
                                  Method parseMethod,
                                  Method parseRuleFromMethod,
                                  Method ruleKindsMethod) {
@@ -68,13 +64,9 @@ public final class ParserCompiler {
          * malformed inputs no longer raise an exception to the caller.
          */
         public ParseResult parse(TokenArray tokens) {
-            try{
-                return (ParseResult) parseMethod.invoke(null, tokens);
-            } catch (InvocationTargetException e) {
-                throw rethrow(e);
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
-            }
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+                               () -> (ParseResult) parseMethod.invoke(null, tokens))
+            .unwrap();
         }
 
         /**
@@ -85,13 +77,9 @@ public final class ParserCompiler {
          * the {@code _ROOT}'s first child into a larger CST.
          */
         public ParseResult parseRuleFrom(TokenArray tokens, int fromTokenIdx, int ruleKind) {
-            try{
-                return (ParseResult) parseRuleFromMethod.invoke(null, tokens, fromTokenIdx, ruleKind);
-            } catch (InvocationTargetException e) {
-                throw rethrow(e);
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
-            }
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+                               () -> (ParseResult) parseRuleFromMethod.invoke(null, tokens, fromTokenIdx, ruleKind))
+            .unwrap();
         }
 
         /**
@@ -101,13 +89,9 @@ public final class ParserCompiler {
          */
         @SuppressWarnings("unchecked")
         public Map<String, Integer> ruleKinds() {
-            try{
-                return (Map<String, Integer>) ruleKindsMethod.invoke(null);
-            } catch (InvocationTargetException e) {
-                throw rethrow(e);
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
-            }
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+                               () -> (Map<String, Integer>) ruleKindsMethod.invoke(null))
+            .unwrap();
         }
 
         /**
@@ -115,32 +99,21 @@ public final class ParserCompiler {
          * input is well-formed. Equivalent to {@code parse(tokens).cst()}.
          */
         public CstArray parseCst(TokenArray tokens) {
-            return parse(tokens)
-                   .cst();
+            return parse(tokens).cst();
         }
 
-        private static RuntimeException rethrow(InvocationTargetException e) {
-            var cause = e.getCause();
-            if (cause instanceof RuntimeException re) {
-                return re;
-            }
-            if (cause instanceof Error err) {
-                throw err;
-            }
-            return new RuntimeException(cause);
+        private static Throwable unwrapCause(Throwable t) {
+            return t instanceof InvocationTargetException ite && ite.getCause() != null
+                   ? ite.getCause()
+                   : t;
         }
     }
 
     public static Result<CompiledParser> compile(ParserGenerator.GeneratedParser source) {
-        if (source == null) {
-            throw new IllegalArgumentException("source must not be null");
-        }
         var compiler = ToolProvider.getSystemJavaCompiler();
-        if (compiler == null) {
-            return new ParserCompileError.NoCompilerAvailable().result();
-        }
-        return runCompilation(compiler, source)
-               .flatMap(ParserCompiler::loadParserClass);
+        if ( compiler == null) {
+        return new ParserCompileError.NoCompilerAvailable().result();}
+        return runCompilation(compiler, source).flatMap(ParserCompiler::loadParserClass);
     }
 
     private static Result<CompiledClass> runCompilation(JavaCompiler compiler, ParserGenerator.GeneratedParser source) {
@@ -155,17 +128,20 @@ public final class ParserCompiler {
                                         List.of("--release", "25"),
                                         null,
                                         List.of(fileObject));
-            if (!task.call()) {
-                return new ParserCompileError.CompilationFailed(diagnostics.toString()).result();
-            }
+            if ( !task.call()) {
+            return new ParserCompileError.CompilationFailed(diagnostics.toString()).result();}
             return Result.success(new CompiledClass(fqcn, fileManager));
-        } catch (Exception e) {
+        }
+
+
+
+        catch (Exception e) {
             return new ParserCompileError.LoadFailed(fqcn, e).result();
         }
     }
 
     private static Result<CompiledParser> loadParserClass(CompiledClass compiled) {
-        try{
+        try {
             var classLoader = new InMemoryClassLoader(compiled.fileManager(), ParserCompiler.class.getClassLoader());
             var clazz = classLoader.loadClass(compiled.fullyQualifiedName());
             var method = clazz.getDeclaredMethod("parse", TokenArray.class);
@@ -175,12 +151,16 @@ public final class ParserCompiler {
             var ruleKinds = clazz.getDeclaredMethod("ruleKinds");
             ruleKinds.setAccessible(true);
             return Result.success(new CompiledParser(clazz, method, parseRuleFrom, ruleKinds));
-        } catch (ClassNotFoundException | NoSuchMethodException e) {
+        }
+
+
+
+        catch (ClassNotFoundException | NoSuchMethodException e) {
             return new ParserCompileError.LoadFailed(compiled.fullyQualifiedName(), e).result();
         }
     }
 
-    private record CompiledClass(String fullyQualifiedName, InMemoryFileManager fileManager) {}
+    private record CompiledClass(String fullyQualifiedName, InMemoryFileManager fileManager){}
 
     private static final class StringJavaFileObject extends SimpleJavaFileObject {
         private final String code;
@@ -191,8 +171,7 @@ public final class ParserCompiler {
             this.code = code;
         }
 
-        @Override
-        public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+        @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
             return code;
         }
     }
@@ -205,14 +184,10 @@ public final class ParserCompiler {
                   Kind.CLASS);
         }
 
-        @Override
-        public OutputStream openOutputStream() {
-            return new ByteArrayOutputStream() {
-                @Override
-                public void close() {
-                    bytes = toByteArray();
-                }
-            };
+        @Override public OutputStream openOutputStream() {
+            return new ByteArrayOutputStream() {@Override@SuppressWarnings("JBCT-RET-01") public void close() {
+                bytes = toByteArray();
+            }};
         }
 
         byte[] bytes() {
@@ -227,19 +202,17 @@ public final class ParserCompiler {
             super(delegate);
         }
 
-        @Override
-        public JavaFileObject getJavaFileForOutput(Location location,
-                                                   String className,
-                                                   JavaFileObject.Kind kind,
-                                                   javax.tools.FileObject sibling) {
+        @Override public JavaFileObject getJavaFileForOutput(Location location,
+                                                             String className,
+                                                             JavaFileObject.Kind kind,
+                                                             javax.tools.FileObject sibling) {
             var fileObject = new ByteArrayJavaFileObject(className);
             classFiles.put(className, fileObject);
             return fileObject;
         }
 
-        Option<byte[] > classBytes(String className) {
-            return Option.option(classFiles.get(className))
-                         .map(ByteArrayJavaFileObject::bytes);
+        Option<byte[]> classBytes(String className) {
+            return Option.option(classFiles.get(className)).map(ByteArrayJavaFileObject::bytes);
         }
     }
 
@@ -251,12 +224,14 @@ public final class ParserCompiler {
             this.fileManager = fileManager;
         }
 
+        // ClassLoader.findClass JDK API mandates a ClassNotFoundException throws
+        // clause; suppress JBCT-EX-01 because the contract is dictated by the JDK.
         @Override
-        protected Class< ? > findClass(String name) throws ClassNotFoundException {
+        @SuppressWarnings("JBCT-EX-01")
+        protected Class<?> findClass(String name) throws ClassNotFoundException {
             var bytesOpt = fileManager.classBytes(name);
-            if (bytesOpt.isEmpty()) {
-                throw new ClassNotFoundException(name);
-            }
+            if ( bytesOpt.isEmpty()) {
+            throw new ClassNotFoundException(name);}
             var bytes = bytesOpt.unwrap();
             return defineClass(name, bytes, 0, bytes.length);
         }

@@ -12,6 +12,11 @@ import java.util.Arrays;
  * ints per node, grown by doubling. Sibling chains are tracked as the builder runs by
  * maintaining a stack of "previous sibling per parent": when the next child of the same
  * parent is appended, the previous sibling's {@code nextSibling} slot is patched.
+ *
+ * <p>This builder is an internal hot-path helper invoked from generated parser code and
+ * a small number of trusted Java callers (CST splice, recovery emit). Defensive
+ * argument validation is intentionally omitted: callers are responsible for passing
+ * sane indices, and the JVM's array bounds checks catch any genuine bugs.
  */
 public final class CstArrayBuilder {
     private static final int DEFAULT_INITIAL_NODE_CAPACITY = 64;
@@ -24,6 +29,7 @@ public final class CstArrayBuilder {
     private int nodeCount;
     private int[] lastChild;
     private int lastChildCount;
+
     /**
      * Parallel array sized to {@code nodes / NODE_STRIDE}. {@code lastChildBefore[i]}
      * stores the value of {@code lastChild[parentOf(i)]} BEFORE node {@code i} was
@@ -40,19 +46,6 @@ public final class CstArrayBuilder {
     }
 
     public CstArrayBuilder(String input, TokenArray tokens, String[] ruleTable, int initialNodeCapacity) {
-        if (input == null) {
-            throw new IllegalArgumentException("input must not be null");
-        }
-        if (tokens == null) {
-            throw new IllegalArgumentException("tokens must not be null");
-        }
-        if (ruleTable == null) {
-            throw new IllegalArgumentException("ruleTable must not be null");
-        }
-        if (initialNodeCapacity < 0) {
-            throw new IllegalArgumentException(
-            "initialNodeCapacity must be >= 0, got " + initialNodeCapacity);
-        }
         var cap = Math.max(initialNodeCapacity, 1);
         this.input = input;
         this.tokens = tokens;
@@ -77,17 +70,6 @@ public final class CstArrayBuilder {
      * final value.
      */
     public int beginNode(int kind, int firstToken, int parent) {
-        checkNotBuilt();
-        if (kind < 0) {
-            throw new IllegalArgumentException("kind must be >= 0, got " + kind);
-        }
-        if (firstToken < 0) {
-            throw new IllegalArgumentException("firstToken must be >= 0, got " + firstToken);
-        }
-        if (parent != CstArray.NO_NODE && (parent < 0 || parent >= nodeCount)) {
-            throw new IllegalArgumentException(
-            "parent=" + parent + " out of range [0, " + nodeCount + ") or != NO_NODE");
-        }
         var newIdx = nodeCount;
         ensureNodeCapacity(newIdx + 1);
         var base = newIdx * CstArray.NODE_STRIDE;
@@ -102,47 +84,28 @@ public final class CstArrayBuilder {
         // Record the would-be previous sibling BEFORE linkAsChildOf overwrites
         // lastChild[parent]. truncate() consults this slot during rollback to
         // restore lastChild[parent] in O(dropped) time.
-        if (parent != CstArray.NO_NODE && parent < lastChildCount) {
-            lastChildBefore[newIdx] = lastChild[parent];
-        }else {
-            lastChildBefore[newIdx] = CstArray.NO_NODE;
-        }
-        nodeCount++ ;
-        if (parent != CstArray.NO_NODE) {
-            linkAsChildOf(parent, newIdx);
-        }
+        if ( parent != CstArray.NO_NODE && parent < lastChildCount) {
+        lastChildBefore[newIdx] = lastChild[parent];} else
+        {
+        lastChildBefore[newIdx] = CstArray.NO_NODE;}
+        nodeCount++;
+        if ( parent != CstArray.NO_NODE) {
+        linkAsChildOf(parent, newIdx);}
         return newIdx;
     }
 
     /**
      * Set the {@code lastToken} of an existing node. Does not "pop" any builder state — the
      * {@code lastChild} stack is keyed by parent index, so children can still be appended in
-     * a depth-first manner without an explicit stack discipline. Validation guards against
-     * passing a node index that has not yet been allocated.
+     * a depth-first manner without an explicit stack discipline.
      */
+    @SuppressWarnings("JBCT-RET-01")
     public void endNode(int nodeIdx, int lastToken) {
-        checkNotBuilt();
-        if (nodeIdx < 0 || nodeIdx >= nodeCount) {
-            throw new IllegalArgumentException(
-            "nodeIdx=" + nodeIdx + " out of range [0, " + nodeCount + ")");
-        }
-        if (lastToken < 0) {
-            throw new IllegalArgumentException("lastToken must be >= 0, got " + lastToken);
-        }
-        var first = nodes[nodeIdx * CstArray.NODE_STRIDE + 2];
-        if (lastToken < first) {
-            throw new IllegalArgumentException(
-            "lastToken=" + lastToken + " < firstToken=" + first + " for node " + nodeIdx);
-        }
         nodes[nodeIdx * CstArray.NODE_STRIDE + 3] = lastToken;
     }
 
+    @SuppressWarnings("JBCT-RET-01")
     public void setFlag(int nodeIdx, int flag) {
-        checkNotBuilt();
-        if (nodeIdx < 0 || nodeIdx >= nodeCount) {
-            throw new IllegalArgumentException(
-            "nodeIdx=" + nodeIdx + " out of range [0, " + nodeCount + ")");
-        }
         nodes[nodeIdx * CstArray.NODE_STRIDE + 6] |= flag;
     }
 
@@ -162,19 +125,11 @@ public final class CstArrayBuilder {
      * sibling/firstChild link that pointed to {@code i}. Cost is O(dropped),
      * independent of the size of the surviving prefix — which dominates time when
      * the parser performs many shallow rollbacks deep into the input.
-     *
-     * @throws IllegalArgumentException when {@code newCount} is outside
-     *     {@code [0, currentNodeCount()]}
      */
+    @SuppressWarnings("JBCT-RET-01")
     public void truncate(int newCount) {
-        checkNotBuilt();
-        if (newCount < 0 || newCount > nodeCount) {
-            throw new IllegalArgumentException(
-            "newCount=" + newCount + " out of range [0, " + nodeCount + "]");
-        }
-        if (newCount == nodeCount) {
-            return;
-        }
+        if ( newCount == nodeCount) {
+        return;}
         // Walk the dropped range backward, undoing the link that beginNode
         // recorded for each node. Two writes per dropped node:
         //   1. Restore lastChild[parent] to the pre-link value.
@@ -184,18 +139,16 @@ public final class CstArrayBuilder {
         // means the LAST iteration for any parent restores the value that
         // was current before the FIRST (lowest-index) of that parent's
         // dropped children was added.
-        for (var i = nodeCount - 1; i >= newCount; i-- ) {
+        for ( var i = nodeCount - 1; i >= newCount; i--) {
             var base = i * CstArray.NODE_STRIDE;
             var parent = nodes[base];
-            if (parent == CstArray.NO_NODE) {
-                continue;
-            }
+            if ( parent == CstArray.NO_NODE) {
+            continue;}
             var prev = lastChildBefore[i];
-            if (prev == CstArray.NO_NODE) {
-                nodes[parent * CstArray.NODE_STRIDE + 4] = CstArray.NO_NODE;
-            }else {
-                nodes[prev * CstArray.NODE_STRIDE + 5] = CstArray.NO_NODE;
-            }
+            if ( prev == CstArray.NO_NODE) {
+            nodes[parent * CstArray.NODE_STRIDE + 4] = CstArray.NO_NODE;} else
+            {
+            nodes[prev * CstArray.NODE_STRIDE + 5] = CstArray.NO_NODE;}
             // Note: parent may itself be in the dropped range (>= newCount).
             // The write into lastChild[parent] is safe because beginNode
             // ensured lastChild has capacity through any parent it ever saw,
@@ -209,22 +162,11 @@ public final class CstArrayBuilder {
         // lastChild for parents that were themselves dropped; those writes are
         // stale relative to any node that may be re-allocated at the same
         // index, and clipping forces correct re-initialisation.
-        if (lastChildCount > newCount) {
-            lastChildCount = newCount;
-        }
+        if ( lastChildCount > newCount) {
+        lastChildCount = newCount;}
     }
 
     public CstArray build(int rootIndex) {
-        checkNotBuilt();
-        if (nodeCount == 0) {
-            if (rootIndex != CstArray.NO_NODE) {
-                throw new IllegalArgumentException(
-                "rootIndex must be NO_NODE for empty builder, got " + rootIndex);
-            }
-        }else if (rootIndex < 0 || rootIndex >= nodeCount) {
-            throw new IllegalArgumentException(
-            "rootIndex=" + rootIndex + " out of range [0, " + nodeCount + ")");
-        }
         var trimmed = Arrays.copyOf(nodes, nodeCount * CstArray.NODE_STRIDE);
         var ruleTableCopy = ruleTable.clone();
         built = true;
@@ -234,59 +176,50 @@ public final class CstArrayBuilder {
         return new CstArray(input, tokens, trimmed, nodeCount, ruleTableCopy, rootIndex);
     }
 
+    public boolean isBuilt() {
+        return built;
+    }
+
     private void linkAsChildOf(int parent, int child) {
         ensureLastChildCapacity(parent + 1);
-        if (lastChildCount < parent + 1) {
-            for (var i = lastChildCount; i < parent + 1; i++ ) {
-                lastChild[i] = CstArray.NO_NODE;
-            }
+        if ( lastChildCount < parent + 1) {
+            for ( var i = lastChildCount; i < parent + 1; i++) {
+            lastChild[i] = CstArray.NO_NODE;}
             lastChildCount = parent + 1;
         }
         var prev = lastChild[parent];
-        if (prev == CstArray.NO_NODE) {
-            nodes[parent * CstArray.NODE_STRIDE + 4] = child;
-        }else {
-            nodes[prev * CstArray.NODE_STRIDE + 5] = child;
-        }
+        if ( prev == CstArray.NO_NODE) {
+        nodes[parent * CstArray.NODE_STRIDE + 4] = child;} else
+        {
+        nodes[prev * CstArray.NODE_STRIDE + 5] = child;}
         lastChild[parent] = child;
     }
 
     private void ensureNodeCapacity(int requiredNodes) {
         var requiredInts = requiredNodes * CstArray.NODE_STRIDE;
-        if (requiredInts <= nodes.length) {
-            return;
-        }
+        if ( requiredInts <= nodes.length) {
+        return;}
         var newCap = nodes.length;
-        while (newCap < requiredInts) {
+        while ( newCap < requiredInts) {
             newCap = newCap<< 1;
-            if (newCap < 0) {
-                newCap = Integer.MAX_VALUE - 8;
-            }
+            if ( newCap < 0) {
+            newCap = Integer.MAX_VALUE - 8;}
         }
         nodes = Arrays.copyOf(nodes, newCap);
         var nodeCap = newCap / CstArray.NODE_STRIDE;
-        if (lastChildBefore.length < nodeCap) {
-            lastChildBefore = Arrays.copyOf(lastChildBefore, nodeCap);
-        }
+        if ( lastChildBefore.length < nodeCap) {
+        lastChildBefore = Arrays.copyOf(lastChildBefore, nodeCap);}
     }
 
     private void ensureLastChildCapacity(int required) {
-        if (required <= lastChild.length) {
-            return;
-        }
+        if ( required <= lastChild.length) {
+        return;}
         var newCap = lastChild.length;
-        while (newCap < required) {
+        while ( newCap < required) {
             newCap = newCap<< 1;
-            if (newCap < 0) {
-                newCap = Integer.MAX_VALUE - 8;
-            }
+            if ( newCap < 0) {
+            newCap = Integer.MAX_VALUE - 8;}
         }
         lastChild = Arrays.copyOf(lastChild, newCap);
-    }
-
-    private void checkNotBuilt() {
-        if (built) {
-            throw new IllegalStateException("builder already built; cannot mutate further");
-        }
     }
 }

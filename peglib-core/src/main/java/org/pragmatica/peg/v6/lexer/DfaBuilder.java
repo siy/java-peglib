@@ -1,6 +1,7 @@
 package org.pragmatica.peg.v6.lexer;
 
 import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
@@ -49,7 +50,6 @@ import java.util.Set;
  * </ol>
  */
 public final class DfaBuilder {
-
     public static final int KIND_WHITESPACE = 0;
     public static final int KIND_LINE_COMMENT = 1;
     public static final int KIND_BLOCK_COMMENT = 2;
@@ -71,7 +71,7 @@ public final class DfaBuilder {
      * @param textToKind  matched text → keyword kind (existing inline-literal kind,
      *                    existing dedicated KW rule kind, or a freshly synthesised kind)
      */
-    public record KeywordResolution(int identKind, Map<String, Integer> textToKind) {}
+    public record KeywordResolution(int identKind, Map<String, Integer> textToKind){}
 
     /**
      * Phase B.5 — token kind assignment, extended with rule-to-alias mapping.
@@ -90,24 +90,21 @@ public final class DfaBuilder {
                                       Map<Integer, KeywordResolution> keywordResolutions,
                                       Map<String, int[]> ruleNameToAliasKinds,
                                       int anyCharKind,
-                                      String[] kindNameTable) {}
+                                      String[] kindNameTable){}
 
-    public record SkippedRule(String ruleName, String reason) {}
+    public record SkippedRule(String ruleName, String reason){}
 
-    public record Built(Dfa dfa, TokenKindAssignment kinds, List<SkippedRule> skipped) {}
+    public record Built(Dfa dfa, TokenKindAssignment kinds, List<SkippedRule> skipped){}
 
     public sealed interface DfaBuildError extends Cause {
         record UnsupportedExpression(String ruleName, String expressionKind, String detail) implements DfaBuildError {
-            @Override
-            public String message() {
-                return "Cannot compile rule '" + ruleName + "' to DFA: unsupported expression kind "
-                       + expressionKind + " (" + detail + ")";
+            @Override public String message() {
+                return "Cannot compile rule '" + ruleName + "' to DFA: unsupported expression kind " + expressionKind + " (" + detail + ")";
             }
         }
 
         record NoLexerRules() implements DfaBuildError {
-            @Override
-            public String message() {
+            @Override public String message() {
                 return "Grammar has no LEXER-classified rules and no inline literals; nothing to compile to DFA";
             }
         }
@@ -117,23 +114,23 @@ public final class DfaBuilder {
         var inlineLiterals = extractInlineLiterals(grammar, classification);
         var aliasLiterals = new ArrayList<InlineLiteral>();
         return assignKinds(grammar, classification, inlineLiterals, aliasLiterals)
-            .flatMap(assignment -> {
-                var skipped = new ArrayList<SkippedRule>();
-                // Phase B.5 — alias-detected rules (e.g. ReturnKW <- < 'return' ![..] >)
-                // had their bodies absorbed as new inline literals during assignKinds.
-                // Their NFA accept states must be added so the lexer can actually emit
-                // the corresponding INLINE_<text> kinds. Without this step the kind
-                // table contains the names but no DFA path produces them, and the
-                // generated parser's alias-match check would never see a matching
-                // token kind (the lexer would fall back to either the unaliased
-                // *KW kind via keyword resolution or to the catch-all ANY_CHAR /
-                // Identifier path, neither of which is in the alias array).
-                var combinedLiterals = new ArrayList<InlineLiteral>(inlineLiterals.size() + aliasLiterals.size());
-                combinedLiterals.addAll(inlineLiterals);
-                combinedLiterals.addAll(aliasLiterals);
-                var nfa = buildNfaWithSkips(grammar, classification, assignment, combinedLiterals, skipped);
-                return Result.success(new Built(subsetConstruction(nfa), assignment, List.copyOf(skipped)));
-            });
+        .flatMap(assignment -> {
+                     var skipped = new ArrayList<SkippedRule>();
+                     // Phase B.5 — alias-detected rules (e.g. ReturnKW <- < 'return' ![..] >)
+        // had their bodies absorbed as new inline literals during assignKinds.
+        // Their NFA accept states must be added so the lexer can actually emit
+        // the corresponding INLINE_<text> kinds. Without this step the kind
+        // table contains the names but no DFA path produces them, and the
+        // generated parser's alias-match check would never see a matching
+        // token kind (the lexer would fall back to either the unaliased
+        // *KW kind via keyword resolution or to the catch-all ANY_CHAR /
+        // Identifier path, neither of which is in the alias array).
+        var combinedLiterals = new ArrayList<InlineLiteral>(inlineLiterals.size() + aliasLiterals.size());
+                     combinedLiterals.addAll(inlineLiterals);
+                     combinedLiterals.addAll(aliasLiterals);
+                     var nfa = buildNfaWithSkips(grammar, classification, assignment, combinedLiterals, skipped);
+                     return Result.success(new Built(subsetConstruction(nfa), assignment, List.copyOf(skipped)));
+                 });
     }
 
     /**
@@ -146,31 +143,31 @@ public final class DfaBuilder {
     private static List<InlineLiteral> extractInlineLiterals(Grammar grammar,
                                                              RuleClassifier.Classification classification) {
         var seen = new LinkedHashMap<String, InlineLiteral>();
-        for (var rule : grammar.rules()) {
+        for ( var rule : grammar.rules()) {
             var kind = classification.kinds().get(rule.name());
-            if (kind == RuleKind.PARSER || kind == RuleKind.MIXED) {
-                collectLiterals(rule.expression(), seen);
-            }
+            if ( kind == RuleKind.PARSER || kind == RuleKind.MIXED) {
+            collectLiterals(rule.expression(), seen);}
         }
         var ordered = new ArrayList<>(seen.values());
         ordered.sort((a, b) -> {
-            int byLen = Integer.compare(b.text.length(), a.text.length());
-            if (byLen != 0) {
-                return byLen;
-            }
-            return Integer.compare(a.firstOccurrence, b.firstOccurrence);
-        });
+                         int byLen = Integer.compare(b.text.length(), a.text.length());
+                         if ( byLen != 0) {
+        return byLen;}
+                         return Integer.compare(a.firstOccurrence, b.firstOccurrence);
+                     });
         return ordered;
     }
 
     private static void collectLiterals(Expression expr, LinkedHashMap<String, InlineLiteral> seen) {
-        switch (expr) {
+        switch ( expr) {
             case Expression.Literal lit -> {
-                if (lit.text().isEmpty()) {
-                    return;
-                }
-                var key = lit.text() + (lit.caseInsensitive() ? "/i" : "/cs");
-                seen.computeIfAbsent(key, k -> new InlineLiteral(lit.text(), lit.caseInsensitive(), seen.size()));
+                if ( lit.text().isEmpty()) {
+                return;}
+                var key = lit.text() + (lit.caseInsensitive()
+                                        ? "/i"
+                                        : "/cs");
+                seen.computeIfAbsent(key,
+                                     k -> new InlineLiteral(lit.text(), lit.caseInsensitive(), seen.size()));
             }
             case Expression.Sequence seq -> seq.elements().forEach(e -> collectLiterals(e, seen));
             case Expression.Choice ch -> ch.alternatives().forEach(e -> collectLiterals(e, seen));
@@ -205,15 +202,14 @@ public final class DfaBuilder {
         kindNames.add("LINE_COMMENT");
         kindNames.add("BLOCK_COMMENT");
         int[] nextKindRef = {FIRST_USER_KIND};
-        for (var rule : grammar.rules()) {
-            if (classification.kinds().get(rule.name()) == RuleKind.LEXER) {
-                ruleNameToKind.put(rule.name(), nextKindRef[0]);
-                kindNames.add(rule.name());
-                nextKindRef[0]++;
-            }
-        }
+        for ( var rule : grammar.rules()) {
+        if ( classification.kinds().get(rule.name()) == RuleKind.LEXER) {
+            ruleNameToKind.put(rule.name(), nextKindRef[0]);
+            kindNames.add(rule.name());
+            nextKindRef[0]++;
+        }}
         var usedNames = new HashSet<String>(kindNames);
-        for (var lit : inlineLiterals) {
+        for ( var lit : inlineLiterals) {
             var name = uniqueInlineName(lit, usedNames);
             inlineLiteralToKind.put(literalKey(lit), nextKindRef[0]);
             kindNames.add(name);
@@ -226,36 +222,44 @@ public final class DfaBuilder {
         // map the matched text to the rule's own LEXER kind — but that rule has no
         // DFA accept state (alias detection skipped its NFA build), so the parser's
         // alias-match check would reject the token kind keyword resolution emits.
-        var ruleNameToAliasKinds = buildAliasMap(grammar, classification, inlineLiteralToKind,
-            kindNames, usedNames, nextKindRef, aliasLiteralsOut);
+        var ruleNameToAliasKinds = buildAliasMap(grammar,
+                                                 classification,
+                                                 inlineLiteralToKind,
+                                                 kindNames,
+                                                 usedNames,
+                                                 nextKindRef,
+                                                 aliasLiteralsOut);
         // Phase B.0 — keyword resolution. For each skip-prefix rule, walk the
         // referenced literal-set rule and map every keyword text to a token
         // kind. Reuse existing kinds where possible (inline literals or
         // dedicated *KW rules); allocate synthetic kinds for the rest.
-        var keywordResolutions = buildKeywordResolutions(grammar, classification,
-            ruleNameToKind, inlineLiteralToKind, kindNames, usedNames, nextKindRef,
-            ruleNameToAliasKinds);
+        var keywordResolutions = buildKeywordResolutions(grammar,
+                                                         classification,
+                                                         ruleNameToKind,
+                                                         inlineLiteralToKind,
+                                                         kindNames,
+                                                         usedNames,
+                                                         nextKindRef,
+                                                         ruleNameToAliasKinds);
         // ANY_CHAR is the catch-all fallback for characters not covered by any
         // explicit LEXER rule or inline literal. It is required only when the
         // grammar mixes lex + parse (i.e. inline literals were extracted). For
         // grammars that consist entirely of LEXER rules, no fallback is needed
         // — and adding one would silently mask under-specified rules in tests.
-        int anyCharKind = -1;
-        if (!inlineLiterals.isEmpty()) {
+        int anyCharKind = - 1;
+        if ( !inlineLiterals.isEmpty()) {
             anyCharKind = nextKindRef[0];
             kindNames.add("ANY_CHAR");
             nextKindRef[0]++;
         }
-        if (ruleNameToKind.isEmpty() && inlineLiterals.isEmpty() && grammar.whitespace().isEmpty()) {
-            return new DfaBuildError.NoLexerRules().result();
-        }
-        return Result.success(new TokenKindAssignment(
-            Map.copyOf(ruleNameToKind),
-            Map.copyOf(inlineLiteralToKind),
-            Map.copyOf(keywordResolutions),
-            Map.copyOf(ruleNameToAliasKinds),
-            anyCharKind,
-            kindNames.toArray(new String[0])));
+        if ( ruleNameToKind.isEmpty() && inlineLiterals.isEmpty() && grammar.whitespace().isEmpty()) {
+        return new DfaBuildError.NoLexerRules().result();}
+        return Result.success(new TokenKindAssignment(Map.copyOf(ruleNameToKind),
+                                                      Map.copyOf(inlineLiteralToKind),
+                                                      Map.copyOf(keywordResolutions),
+                                                      Map.copyOf(ruleNameToAliasKinds),
+                                                      anyCharKind,
+                                                      kindNames.toArray(new String[0])));
     }
 
     /**
@@ -280,30 +284,30 @@ public final class DfaBuilder {
                                                     int[] nextKindRef,
                                                     List<InlineLiteral> aliasLiteralsOut) {
         var aliases = new LinkedHashMap<String, int[]>();
-        for (var rule : grammar.rules()) {
+        for ( var rule : grammar.rules()) {
             var kind = classification.kinds().get(rule.name());
-            if (kind != RuleKind.LEXER && kind != RuleKind.MIXED) {
-                continue;
-            }
+            if ( kind != RuleKind.LEXER && kind != RuleKind.MIXED) {
+            continue;}
             // Skip-prefix rules use a dedicated DFA + post-match keyword resolution
             // path; they are not aliasable by literal text.
-            if (classification.keywordSkip().containsKey(rule.name())) {
-                continue;
-            }
-            var literals = collectAliasLiterals(rule.expression());
-            if (literals == null || literals.isEmpty()) {
-                continue;
-            }
+            if ( classification.keywordSkip().containsKey(rule.name())) {
+            continue;}
+            var literalsOpt = collectAliasLiterals(rule.expression());
+            if ( literalsOpt.isEmpty()) {
+            continue;}
+            var literals = literalsOpt.unwrap();
+            if ( literals.isEmpty()) {
+            continue;}
             var kinds = new int[literals.size()];
             int i = 0;
-            for (var lit : literals) {
-                kinds[i++] = ensureInlineKind(lit, inlineLiteralToKind, kindNames, usedNames, nextKindRef,
-                    aliasLiteralsOut);
-            }
+            for ( var lit : literals) {
+            kinds[i++] = ensureInlineKind(lit, inlineLiteralToKind, kindNames, usedNames, nextKindRef, aliasLiteralsOut);}
             // De-duplicate alias kinds (different aliases of the same text from
             // multiple alternatives would otherwise show up as duplicates) and
             // sort ascending so generated parser code can use binarySearch.
-            int[] sorted = Arrays.stream(kinds).distinct().sorted().toArray();
+            int[] sorted = Arrays.stream(kinds).distinct()
+                                        .sorted()
+                                        .toArray();
             aliases.put(rule.name(), sorted);
         }
         return aliases;
@@ -316,15 +320,15 @@ public final class DfaBuilder {
      */
     private static Expression simplifyAliasBody(Expression expr) {
         var cur = unwrapAcceptableWrappers(expr);
-        if (cur instanceof Expression.Sequence seq && seq.elements().size() >= 2) {
+        if ( cur instanceof Expression.Sequence seq && seq.elements().size() >= 2) {
             var last = unwrapAcceptableWrappers(seq.elements().get(seq.elements().size() - 1));
-            if (last instanceof Expression.Not not) {
+            if ( last instanceof Expression.Not not) {
                 var notInner = unwrapAcceptableWrappers(not.expression());
-                if (notInner instanceof Expression.CharClass) {
-                    var head = seq.elements().subList(0, seq.elements().size() - 1);
-                    if (head.size() == 1) {
-                        return unwrapAcceptableWrappers(head.get(0));
-                    }
+                if ( notInner instanceof Expression.CharClass) {
+                    var head = seq.elements().subList(0,
+                                                      seq.elements().size() - 1);
+                    if ( head.size() == 1) {
+                    return unwrapAcceptableWrappers(head.get(0));}
                     return new Expression.Sequence(seq.span(), List.copyOf(head));
                 }
             }
@@ -335,30 +339,28 @@ public final class DfaBuilder {
     /**
      * Return the list of literals if {@code expr} simplifies to either a single
      * {@link Expression.Literal} or a {@link Expression.Choice} every alternative
-     * of which simplifies to a {@link Expression.Literal}. Returns {@code null}
+     * of which simplifies to a {@link Expression.Literal}. Returns {@code Option.none()}
      * if the shape doesn't match.
      */
-    private static List<Expression.Literal> collectAliasLiterals(Expression expr) {
+    private static Option<List<Expression.Literal>> collectAliasLiterals(Expression expr) {
         var simplified = simplifyAliasBody(expr);
-        if (simplified instanceof Expression.Literal lit) {
-            if (lit.text().isEmpty()) {
-                return null;
-            }
-            return List.of(lit);
+        if ( simplified instanceof Expression.Literal lit) {
+            if ( lit.text().isEmpty()) {
+            return Option.none();}
+            return Option.some(List.of(lit));
         }
-        if (simplified instanceof Expression.Choice choice) {
+        if ( simplified instanceof Expression.Choice choice) {
             var out = new ArrayList<Expression.Literal>(choice.alternatives().size());
-            for (var alt : choice.alternatives()) {
+            for ( var alt : choice.alternatives()) {
                 var altSimplified = simplifyAliasBody(alt);
-                if (altSimplified instanceof Expression.Literal altLit && !altLit.text().isEmpty()) {
-                    out.add(altLit);
-                } else {
-                    return null;
-                }
+                if ( altSimplified instanceof Expression.Literal altLit && !altLit.text().isEmpty()) {
+                out.add(altLit);} else
+                {
+                return Option.none();}
             }
-            return out;
+            return Option.some(out);
         }
-        return null;
+        return Option.none();
     }
 
     /**
@@ -375,9 +377,8 @@ public final class DfaBuilder {
         var inlineLit = new InlineLiteral(lit.text(), lit.caseInsensitive(), inlineLiteralToKind.size());
         var key = literalKey(inlineLit);
         var existing = inlineLiteralToKind.get(key);
-        if (existing != null) {
-            return existing;
-        }
+        if ( existing != null) {
+        return existing;}
         var name = uniqueInlineName(inlineLit, usedNames);
         int kind = nextKindRef[0];
         inlineLiteralToKind.put(key, kind);
@@ -387,9 +388,8 @@ public final class DfaBuilder {
         // Record the literal so the caller can append its NFA accept fragment to
         // the lexer (otherwise the kind exists in the table but no DFA path
         // produces tokens of that kind).
-        if (aliasLiteralsOut != null) {
-            aliasLiteralsOut.add(inlineLit);
-        }
+        if ( aliasLiteralsOut != null) {
+        aliasLiteralsOut.add(inlineLit);}
         return kind;
     }
 
@@ -404,35 +404,37 @@ public final class DfaBuilder {
      * </ol>
      */
     private static Map<Integer, KeywordResolution> buildKeywordResolutions(
-            Grammar grammar,
-            RuleClassifier.Classification classification,
-            Map<String, Integer> ruleNameToKind,
-            Map<String, Integer> inlineLiteralToKind,
-            List<String> kindNames,
-            Set<String> usedNames,
-            int[] nextKindRef,
-            Map<String, int[]> ruleNameToAliasKinds) {
+    Grammar grammar,
+    RuleClassifier.Classification classification,
+    Map<String, Integer> ruleNameToKind,
+    Map<String, Integer> inlineLiteralToKind,
+    List<String> kindNames,
+    Set<String> usedNames,
+    int[] nextKindRef,
+    Map<String, int[]> ruleNameToAliasKinds) {
         var result = new LinkedHashMap<Integer, KeywordResolution>();
         var ruleMap = grammar.ruleMap();
-        for (var entry : classification.keywordSkip().entrySet()) {
+        for ( var entry : classification.keywordSkip().entrySet()) {
             var ruleName = entry.getKey();
             var info = entry.getValue();
             var identKind = ruleNameToKind.get(ruleName);
-            if (identKind == null) {
-                continue;
-            }
+            if ( identKind == null) {
+            continue;}
             var keywordRule = ruleMap.get(info.keywordRuleName());
-            if (keywordRule == null) {
-                continue;
-            }
+            if ( keywordRule == null) {
+            continue;}
             var keywordTexts = RuleClassifier.extractLiteralSet(keywordRule.expression());
-            if (keywordTexts.isEmpty()) {
-                continue;
-            }
+            if ( keywordTexts.isEmpty()) {
+            continue;}
             var textToKind = new LinkedHashMap<String, Integer>();
-            for (var text : keywordTexts) {
-                int kw = resolveKeywordKind(text, ruleNameToKind, inlineLiteralToKind,
-                    kindNames, usedNames, nextKindRef, ruleNameToAliasKinds);
+            for ( var text : keywordTexts) {
+                int kw = resolveKeywordKind(text,
+                                            ruleNameToKind,
+                                            inlineLiteralToKind,
+                                            kindNames,
+                                            usedNames,
+                                            nextKindRef,
+                                            ruleNameToAliasKinds);
                 textToKind.put(text, kw);
             }
             result.put(identKind, new KeywordResolution(identKind, Map.copyOf(textToKind)));
@@ -451,22 +453,19 @@ public final class DfaBuilder {
         //    aliasing populates these for *KW rules' bodies before we get here.
         var literalKey = text + "/cs";
         var existing = inlineLiteralToKind.get(literalKey);
-        if (existing != null) {
-            return existing;
-        }
+        if ( existing != null) {
+        return existing;}
         // 2. Try an existing dedicated *KW rule. If the rule has been aliased,
         //    its own LEXER kind no longer has a DFA accept state — falling back
         //    to it would silently emit tokens that the parser's alias-match
         //    check rejects. In that case skip to the synthesise-new path.
         var kwName = text + "KW";
         // Capitalise first letter (most KW rules are PascalCase like "IfKW").
-        if (!text.isEmpty()) {
-            kwName = Character.toUpperCase(text.charAt(0)) + text.substring(1) + "KW";
-        }
+        if ( !text.isEmpty()) {
+        kwName = Character.toUpperCase(text.charAt(0)) + text.substring(1) + "KW";}
         var kwKind = ruleNameToKind.get(kwName);
-        if (kwKind != null && !ruleNameToAliasKinds.containsKey(kwName)) {
-            return kwKind;
-        }
+        if ( kwKind != null && !ruleNameToAliasKinds.containsKey(kwName)) {
+        return kwKind;}
         // 3. Allocate a synthetic kind and record it as a virtual inline literal.
         var lit = new InlineLiteral(text, false, inlineLiteralToKind.size());
         var name = uniqueInlineName(lit, usedNames);
@@ -479,7 +478,9 @@ public final class DfaBuilder {
     }
 
     private static String literalKey(InlineLiteral lit) {
-        return lit.text + (lit.caseInsensitive ? "/i" : "/cs");
+        return lit.text + (lit.caseInsensitive
+                           ? "/i"
+                           : "/cs");
     }
 
     /**
@@ -505,43 +506,48 @@ public final class DfaBuilder {
         int globalStart = nfa.newState();
         nfa.start = globalStart;
         var priorityRef = new int[]{0};
-        for (var lit : inlineLiterals) {
+        for ( var lit : inlineLiterals) {
             int kind = assignment.inlineLiteralToKind().get(literalKey(lit));
             absorbLiteralFragment(nfa, lit, kind, priorityRef, globalStart);
         }
-        if (grammar.whitespace().isPresent()) {
-            tryAbsorb(nfa, "%whitespace", grammar.whitespace().unwrap(), KIND_WHITESPACE,
-                priorityRef, globalStart, skipped);
-        }
-        for (var rule : grammar.rules()) {
-            if (classification.kinds().get(rule.name()) != RuleKind.LEXER) {
-                continue;
-            }
+        if ( grammar.whitespace().isPresent()) {
+        tryAbsorb(nfa,
+                  "%whitespace",
+                  grammar.whitespace().unwrap(),
+                  KIND_WHITESPACE,
+                  priorityRef,
+                  globalStart,
+                  skipped);}
+        for ( var rule : grammar.rules()) {
+            if ( classification.kinds().get(rule.name()) != RuleKind.LEXER) {
+            continue;}
             // Phase B.5 — aliased rules don't need a dedicated DFA accept state;
             // the parser accepts any of the alias kinds when it sees a Reference
             // to them. Compiling them anyway would waste states and (more
             // importantly) the DFA build would fail on the !CharClass guard.
-            if (assignment.ruleNameToAliasKinds().containsKey(rule.name())) {
-                continue;
-            }
+            if ( assignment.ruleNameToAliasKinds().containsKey(rule.name())) {
+            continue;}
             int kind = assignment.ruleNameToKind().get(rule.name());
             // Phase B.0 — for skip-prefix rules, compile the body expression only.
             // The Not(Reference) head is replaced by post-match keyword resolution
             // performed by the lexer engine.
             var skipInfo = classification.keywordSkip().get(rule.name());
-            var expr = skipInfo != null ? skipInfo.bodyExpression() : rule.expression();
+            var expr = skipInfo != null
+                       ? skipInfo.bodyExpression()
+                       : rule.expression();
             tryAbsorb(nfa, rule.name(), expr, kind, priorityRef, globalStart, skipped);
         }
-        if (assignment.anyCharKind() >= 0) {
-            absorbAnyCharFallback(nfa, assignment.anyCharKind(), priorityRef, globalStart);
-        }
+        if ( assignment.anyCharKind() >= 0) {
+        absorbAnyCharFallback(nfa, assignment.anyCharKind(), priorityRef, globalStart);}
         return nfa;
     }
 
-    private static void absorbLiteralFragment(Nfa nfa, InlineLiteral lit, int kind,
-                                              int[] priorityRef, int globalStart) {
-        var fragment = compileLiteral(nfa,
-            new Expression.Literal(null, lit.text, lit.caseInsensitive));
+    private static void absorbLiteralFragment(Nfa nfa,
+                                              InlineLiteral lit,
+                                              int kind,
+                                              int[] priorityRef,
+                                              int globalStart) {
+        var fragment = compileLiteral(nfa, new Expression.Literal(null, lit.text, lit.caseInsensitive));
         nfa.addEpsilon(globalStart, fragment.start);
         nfa.markAccept(fragment.accept, kind, priorityRef[0]);
         priorityRef[0]++;
@@ -550,18 +556,22 @@ public final class DfaBuilder {
     private static void absorbAnyCharFallback(Nfa nfa, int kind, int[] priorityRef, int globalStart) {
         int start = nfa.newState();
         int accept = nfa.newState();
-        for (int c = 0; c < ALPHABET; c++) {
-            nfa.addCharEdge(start, c, accept);
-        }
+        for ( int c = 0; c < ALPHABET; c++) {
+        nfa.addCharEdge(start, c, accept);}
         nfa.addEpsilon(globalStart, start);
         nfa.markAccept(accept, kind, priorityRef[0]);
         priorityRef[0]++;
     }
 
-    private static void tryAbsorb(Nfa nfa, String ruleName, Expression expr, int kind,
-                                  int[] priorityRef, int globalStart, List<SkippedRule> skipped) {
+    private static void tryAbsorb(Nfa nfa,
+                                  String ruleName,
+                                  Expression expr,
+                                  int kind,
+                                  int[] priorityRef,
+                                  int globalStart,
+                                  List<SkippedRule> skipped) {
         var result = compileExpression(nfa, expr, ruleName);
-        if (result.isSuccess()) {
+        if ( result.isSuccess()) {
             var fragment = result.unwrap();
             nfa.addEpsilon(globalStart, fragment.start);
             nfa.markAccept(fragment.accept, kind, priorityRef[0]);
@@ -574,8 +584,9 @@ public final class DfaBuilder {
         // {@code !'*/' .}), absorb only the alternatives that compile. This
         // recovers whitespace/comment lexing for grammars whose %whitespace
         // mixes simple char classes with not-yet-supported "until" patterns.
-        var fallback = tryPartialChoice(nfa, ruleName, expr);
-        if (fallback != null) {
+        var fallbackOpt = tryPartialChoice(nfa, ruleName, expr);
+        if ( fallbackOpt.isPresent()) {
+            var fallback = fallbackOpt.unwrap();
             nfa.addEpsilon(globalStart, fallback.start);
             nfa.markAccept(fallback.accept, kind, priorityRef[0]);
             priorityRef[0]++;
@@ -591,12 +602,10 @@ public final class DfaBuilder {
         // Absorb each top-level alternative independently so the regular
         // alternatives still produce tokens of the rule's kind.
         var unwrapped = unwrapAcceptableWrappers(expr);
-        if (unwrapped instanceof Expression.Choice choice) {
-            int absorbed = absorbChoiceAlternatives(nfa, ruleName, choice, kind,
-                priorityRef, globalStart);
-            if (absorbed > 0) {
-                return;
-            }
+        if ( unwrapped instanceof Expression.Choice choice) {
+            int absorbed = absorbChoiceAlternatives(nfa, ruleName, choice, kind, priorityRef, globalStart);
+            if ( absorbed > 0) {
+            return;}
         }
         skipped.add(new SkippedRule(ruleName, result.toString()));
     }
@@ -610,14 +619,17 @@ public final class DfaBuilder {
      *
      * @return number of alternatives successfully absorbed (0 on total failure)
      */
-    private static int absorbChoiceAlternatives(Nfa nfa, String ruleName, Expression.Choice choice,
-                                                int kind, int[] priorityRef, int globalStart) {
+    private static int absorbChoiceAlternatives(Nfa nfa,
+                                                String ruleName,
+                                                Expression.Choice choice,
+                                                int kind,
+                                                int[] priorityRef,
+                                                int globalStart) {
         int absorbed = 0;
-        for (var alt : choice.alternatives()) {
+        for ( var alt : choice.alternatives()) {
             var altResult = compileExpression(nfa, alt, ruleName);
-            if (!altResult.isSuccess()) {
-                continue;
-            }
+            if ( !altResult.isSuccess()) {
+            continue;}
             var fragment = altResult.unwrap();
             nfa.addEpsilon(globalStart, fragment.start);
             nfa.markAccept(fragment.accept, kind, priorityRef[0]);
@@ -630,42 +642,40 @@ public final class DfaBuilder {
     /**
      * Attempt to compile a rule whose direct body is a kleene closure over a
      * choice. Successful alternatives are absorbed; failing ones are dropped.
-     * Returns {@code null} if the body shape doesn't match or every alternative
-     * failed.
+     * Returns {@code Option.none()} if the body shape doesn't match or every
+     * alternative failed.
      */
-    private static Fragment tryPartialChoice(Nfa nfa, String ruleName, Expression expr) {
+    private static Option<Fragment> tryPartialChoice(Nfa nfa, String ruleName, Expression expr) {
         Expression inner;
         boolean kleenePlus = false;
         var unwrapped = unwrapAcceptableWrappers(expr);
-        if (unwrapped instanceof Expression.ZeroOrMore zom) {
-            inner = unwrapAcceptableWrappers(zom.expression());
-        } else if (unwrapped instanceof Expression.OneOrMore oom) {
+        if ( unwrapped instanceof Expression.ZeroOrMore zom) {
+        inner = unwrapAcceptableWrappers(zom.expression());} else
+        if ( unwrapped instanceof Expression.OneOrMore oom) {
             inner = unwrapAcceptableWrappers(oom.expression());
             kleenePlus = true;
         } else {
-            return null;
-        }
-        if (!(inner instanceof Expression.Choice choice)) {
-            return null;
-        }
+        return Option.none();}
+        if ( ! (inner instanceof Expression.Choice choice)) {
+        return Option.none();}
         var compiled = new ArrayList<Fragment>();
-        for (var alt : choice.alternatives()) {
+        for ( var alt : choice.alternatives()) {
             var altResult = compileExpression(nfa, alt, ruleName);
-            if (altResult.isSuccess()) {
-                compiled.add(altResult.unwrap());
-            }
+            if ( altResult.isSuccess()) {
+            compiled.add(altResult.unwrap());}
         }
-        if (compiled.isEmpty()) {
-            return null;
-        }
+        if ( compiled.isEmpty()) {
+        return Option.none();}
         int choiceStart = nfa.newState();
         int choiceAccept = nfa.newState();
-        for (var f : compiled) {
+        for ( var f : compiled) {
             nfa.addEpsilon(choiceStart, f.start);
             nfa.addEpsilon(f.accept, choiceAccept);
         }
         var choiceFrag = new Fragment(choiceStart, choiceAccept);
-        return kleenePlus ? wrapOneOrMore(nfa, choiceFrag) : wrapZeroOrMore(nfa, choiceFrag);
+        return Option.some(kleenePlus
+                           ? wrapOneOrMore(nfa, choiceFrag)
+                           : wrapZeroOrMore(nfa, choiceFrag));
     }
 
     /**
@@ -685,46 +695,37 @@ public final class DfaBuilder {
      *       (closing delimiter).</li>
      * </ol>
      *
-     * <p>Returns {@code null} if {@code seq} doesn't match the expected
+     * <p>Returns {@code Option.none()} if {@code seq} doesn't match the expected
      * three-element shape with literal-equality between opening, body
      * negation, and closing delimiters.
      */
-    private static Fragment compileDelimitedBlock(Nfa nfa, Expression.Sequence seq) {
+    private static Option<Fragment> compileDelimitedBlock(Nfa nfa, Expression.Sequence seq) {
         var elements = seq.elements();
-        if (elements.size() != 3) {
-            return null;
-        }
+        if ( elements.size() != 3) {
+        return Option.none();}
         var open = unwrapAcceptableWrappers(elements.get(0));
         var body = unwrapAcceptableWrappers(elements.get(1));
         var close = unwrapAcceptableWrappers(elements.get(2));
-        if (!(open instanceof Expression.Literal openLit)
-            || !(close instanceof Expression.Literal closeLit)
-            || !(body instanceof Expression.ZeroOrMore zom)) {
-            return null;
-        }
+        if ( ! (open instanceof Expression.Literal openLit) || !(close instanceof Expression.Literal closeLit) || !(body instanceof Expression.ZeroOrMore zom)) {
+        return Option.none();}
         var bodyInner = unwrapAcceptableWrappers(zom.expression());
-        if (!(bodyInner instanceof Expression.Sequence bodySeq) || bodySeq.elements().size() != 2) {
-            return null;
-        }
+        if ( ! (bodyInner instanceof Expression.Sequence bodySeq) || bodySeq.elements().size() != 2) {
+        return Option.none();}
         var notExpr = unwrapAcceptableWrappers(bodySeq.elements().get(0));
         var anyExpr = unwrapAcceptableWrappers(bodySeq.elements().get(1));
-        if (!(notExpr instanceof Expression.Not not) || !(anyExpr instanceof Expression.Any)) {
-            return null;
-        }
+        if ( ! (notExpr instanceof Expression.Not not) || !(anyExpr instanceof Expression.Any)) {
+        return Option.none();}
         var notInner = unwrapAcceptableWrappers(not.expression());
-        if (!(notInner instanceof Expression.Literal notLit)) {
-            return null;
-        }
+        if ( ! (notInner instanceof Expression.Literal notLit)) {
+        return Option.none();}
         var delimiter = openLit.text();
-        if (delimiter.isEmpty()
-            || !delimiter.equals(closeLit.text())
-            || !delimiter.equals(notLit.text())) {
-            return null;
-        }
-        if (openLit.caseInsensitive() || closeLit.caseInsensitive() || notLit.caseInsensitive()) {
-            return null;
-        }
-        return buildDelimitedBlockFragment(nfa, delimiter);
+        if ( delimiter.isEmpty() ||
+        !delimiter.equals(closeLit.text()) ||
+        !delimiter.equals(notLit.text())) {
+        return Option.none();}
+        if ( openLit.caseInsensitive() || closeLit.caseInsensitive() || notLit.caseInsensitive()) {
+        return Option.none();}
+        return Option.some(buildDelimitedBlockFragment(nfa, delimiter));
     }
 
     /**
@@ -746,28 +747,25 @@ public final class DfaBuilder {
         int n = delimiter.length();
         // KMP-style failure function on the delimiter.
         int[] fail = new int[n];
-        for (int i = 1, k = 0; i < n; i++) {
-            while (k > 0 && delimiter.charAt(k) != delimiter.charAt(i)) {
-                k = fail[k - 1];
-            }
-            if (delimiter.charAt(k) == delimiter.charAt(i)) {
-                k++;
-            }
+        for ( int i = 1, k = 0; i < n; i++) {
+            while ( k > 0 && delimiter.charAt(k) != delimiter.charAt(i)) {
+            k = fail[k - 1];}
+            if ( delimiter.charAt(k) == delimiter.charAt(i)) {
+            k++;}
             fail[i] = k;
         }
         // Allocate one NFA state per "partial-match length" 0..n. State n is
         // the accept (full delimiter consumed in the body — closing delim).
         int[] state = new int[n + 1];
-        for (int i = 0; i <= n; i++) {
-            state[i] = nfa.newState();
-        }
+        for ( int i = 0; i <= n; i++) {
+        state[i] = nfa.newState();}
         // Opening delimiter: a chain from a fresh start state to state[0].
         // We model the opening separately so the body loop can be a clean
         // self-referencing structure: state[0] is the body's "no prefix
         // matched" state, and reaching state[n] accepts the closing.
         int chainStart = nfa.newState();
         int cur = chainStart;
-        for (int i = 0; i < n; i++) {
+        for ( int i = 0; i < n; i++) {
             int next = nfa.newState();
             nfa.addCharEdge(cur, delimiter.charAt(i), next);
             cur = next;
@@ -777,12 +775,11 @@ public final class DfaBuilder {
         // For each body state k in 0..n-1, install transitions for every
         // byte b: advance to state[k+1] if b matches delim[k], otherwise
         // collapse via the failure function then attempt the byte again.
-        for (int k = 0; k < n; k++) {
-            for (int b = 0; b < ALPHABET; b++) {
-                int target = nextDelimitedState(delimiter, fail, k, (char) b);
-                nfa.addCharEdge(state[k], b, state[target]);
-            }
-        }
+        for ( int k = 0; k < n; k++) {
+        for ( int b = 0; b < ALPHABET; b++) {
+            int target = nextDelimitedState(delimiter, fail, k, (char) b);
+            nfa.addCharEdge(state[k], b, state[target]);
+        }}
         // state[n] is the accept; it has no outgoing edges from here so
         // the longest-match scan terminates as soon as the closing
         // delimiter is fully consumed.
@@ -797,74 +794,73 @@ public final class DfaBuilder {
     private static int nextDelimitedState(String delimiter, int[] fail, int k, char b) {
         int n = delimiter.length();
         int j = k;
-        while (true) {
-            if (j < n && delimiter.charAt(j) == b) {
-                return j + 1;
-            }
-            if (j == 0) {
-                return 0;
-            }
+        while ( true) {
+            if ( j < n && delimiter.charAt(j) == b) {
+            return j + 1;}
+            if ( j == 0) {
+            return 0;}
             j = fail[j - 1];
         }
     }
 
     private static Expression unwrapAcceptableWrappers(Expression expr) {
         Expression cur = expr;
-        while (true) {
-            switch (cur) {
-                case Expression.Group g -> cur = g.expression();
-                case Expression.TokenBoundary tb -> cur = tb.expression();
-                case Expression.Capture cap -> cur = cap.expression();
-                case Expression.CaptureScope cs -> cur = cs.expression();
-                case Expression.Ignore ig -> cur = ig.expression();
-                default -> { return cur; }
+        while ( true) {
+        switch ( cur) {
+            case Expression.Group g -> cur = g.expression();
+            case Expression.TokenBoundary tb -> cur = tb.expression();
+            case Expression.Capture cap -> cur = cap.expression();
+            case Expression.CaptureScope cs -> cur = cs.expression();
+            case Expression.Ignore ig -> cur = ig.expression();
+            default -> {
+                return cur;
             }
-        }
+        }}
     }
 
     private static Result<Fragment> compileExpression(Nfa nfa, Expression expr, String ruleName) {
-        return switch (expr) {
-            case Expression.Literal lit -> Result.success(compileLiteral(nfa, lit));
-            case Expression.CharClass cc -> Result.success(compileCharClass(nfa, cc));
-            case Expression.Any __ -> Result.success(compileAny(nfa));
-            case Expression.Sequence seq -> {
-                // Phase B.6 — special-case "delimited block" pattern:
-                //   Literal(L) ZeroOrMore(Sequence(Not(Literal(L)), Any)) Literal(L)
-                // This is the canonical "match L, then anything not containing L,
-                // then L" pattern (text blocks, block comments, etc.). The DFA
-                // path otherwise can't compile the Not-predicate. Compile to a
-                // counting DFA over the L bytes.
-                var delimited = compileDelimitedBlock(nfa, seq);
-                if (delimited != null) {
-                    yield Result.success(delimited);
-                }
-                yield compileSequence(nfa, seq.elements(), ruleName);
-            }
-            case Expression.Choice ch -> compileChoice(nfa, ch.alternatives(), ruleName);
-            case Expression.ZeroOrMore zom -> compileExpression(nfa, zom.expression(), ruleName)
-                .map(inner -> wrapZeroOrMore(nfa, inner));
-            case Expression.OneOrMore oom -> compileExpression(nfa, oom.expression(), ruleName)
-                .map(inner -> wrapOneOrMore(nfa, inner));
-            case Expression.Optional opt -> compileExpression(nfa, opt.expression(), ruleName)
-                .map(inner -> wrapOptional(nfa, inner));
-            case Expression.Repetition rep -> compileRepetition(nfa, rep, ruleName);
-            case Expression.TokenBoundary tb -> compileExpression(nfa, tb.expression(), ruleName);
-            case Expression.Ignore ig -> compileExpression(nfa, ig.expression(), ruleName);
-            case Expression.Capture cap -> compileExpression(nfa, cap.expression(), ruleName);
-            case Expression.CaptureScope cs -> compileExpression(nfa, cs.expression(), ruleName);
-            case Expression.Group g -> compileExpression(nfa, g.expression(), ruleName);
-            case Expression.Cut __ -> Result.success(emptyFragment(nfa));
-            case Expression.And __ -> unsupported(ruleName, "And",
-                "lookahead in lexer rules requires NFA-with-lookahead; not implemented in Phase A");
-            case Expression.Not __ -> unsupported(ruleName, "Not",
-                "lookahead in lexer rules requires NFA-with-lookahead; not implemented in Phase A");
-            case Expression.Reference ref -> unsupported(ruleName, "Reference",
-                "rule reference '" + ref.ruleName() + "' in lexer rule — classifier should have demoted");
-            case Expression.BackReference __ -> unsupported(ruleName, "BackReference",
-                "back-references are not regular");
-            case Expression.Dictionary __ -> unsupported(ruleName, "Dictionary",
-                "dictionary not yet supported in DFA path");
-        };
+        return switch (expr) {case Expression.Literal lit -> Result.success(compileLiteral(nfa, lit));case Expression.CharClass cc -> Result.success(compileCharClass(nfa,
+                                                                                                                                                                      cc));case Expression.Any __ -> Result.success(compileAny(nfa));case Expression.Sequence seq -> {
+            // Phase B.6 — special-case "delimited block" pattern:
+            //   Literal(L) ZeroOrMore(Sequence(Not(Literal(L)), Any)) Literal(L)
+            // This is the canonical "match L, then anything not containing L,
+            // then L" pattern (text blocks, block comments, etc.). The DFA
+            // path otherwise can't compile the Not-predicate. Compile to a
+            // counting DFA over the L bytes.
+            var delimitedOpt = compileDelimitedBlock(nfa, seq);
+            if ( delimitedOpt.isPresent()) {
+            yield Result.success(delimitedOpt.unwrap());}
+            yield compileSequence(nfa, seq.elements(), ruleName);
+        }case Expression.Choice ch -> compileChoice(nfa, ch.alternatives(), ruleName);case Expression.ZeroOrMore zom -> compileExpression(nfa,
+                                                                                                                                          zom.expression(),
+                                                                                                                                          ruleName)
+        .map(inner -> wrapZeroOrMore(nfa, inner));case Expression.OneOrMore oom -> compileExpression(nfa,
+                                                                                                     oom.expression(),
+                                                                                                     ruleName)
+        .map(inner -> wrapOneOrMore(nfa, inner));case Expression.Optional opt -> compileExpression(nfa,
+                                                                                                   opt.expression(),
+                                                                                                   ruleName)
+        .map(inner -> wrapOptional(nfa, inner));case Expression.Repetition rep -> compileRepetition(nfa, rep, ruleName);case Expression.TokenBoundary tb -> compileExpression(nfa,
+                                                                                                                                                                              tb.expression(),
+                                                                                                                                                                              ruleName);case Expression.Ignore ig -> compileExpression(nfa,
+                                                                                                                                                                                                                                       ig.expression(),
+                                                                                                                                                                                                                                       ruleName);case Expression.Capture cap -> compileExpression(nfa,
+                                                                                                                                                                                                                                                                                                  cap.expression(),
+                                                                                                                                                                                                                                                                                                  ruleName);case Expression.CaptureScope cs -> compileExpression(nfa,
+                                                                                                                                                                                                                                                                                                                                                                 cs.expression(),
+                                                                                                                                                                                                                                                                                                                                                                 ruleName);case Expression.Group g -> compileExpression(nfa,
+                                                                                                                                                                                                                                                                                                                                                                                                                        g.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                        ruleName);case Expression.Cut __ -> Result.success(emptyFragment(nfa));case Expression.And __ -> unsupported(ruleName,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     "And",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     "lookahead in lexer rules requires NFA-with-lookahead; not implemented in Phase A");case Expression.Not __ -> unsupported(ruleName,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               "Not",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               "lookahead in lexer rules requires NFA-with-lookahead; not implemented in Phase A");case Expression.Reference ref -> unsupported(ruleName,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                "Reference",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                "rule reference '" + ref.ruleName() + "' in lexer rule — classifier should have demoted");case Expression.BackReference __ -> unsupported(ruleName,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          "BackReference",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          "back-references are not regular");case Expression.Dictionary __ -> unsupported(ruleName,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          "Dictionary",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          "dictionary not yet supported in DFA path");};
     }
 
     private static Result<Fragment> unsupported(String ruleName, String kind, String detail) {
@@ -873,20 +869,22 @@ public final class DfaBuilder {
 
     private static Fragment compileLiteral(Nfa nfa, Expression.Literal lit) {
         var text = lit.text();
-        if (text.isEmpty()) {
-            return emptyFragment(nfa);
-        }
+        if ( text.isEmpty()) {
+        return emptyFragment(nfa);}
         int start = nfa.newState();
         int current = start;
-        for (int i = 0; i < text.length(); i++) {
+        for ( int i = 0; i < text.length(); i++) {
             int next = nfa.newState();
             char c = text.charAt(i);
-            if (lit.caseInsensitive() && isAsciiLetter(c)) {
+            if ( lit.caseInsensitive() && isAsciiLetter(c)) {
                 nfa.addCharEdge(current, Character.toLowerCase(c), next);
                 nfa.addCharEdge(current, Character.toUpperCase(c), next);
-            } else {
-                nfa.addCharEdge(current, c, next);
-            }
+            } else
+
+
+
+            {
+            nfa.addCharEdge(current, c, next);}
             current = next;
         }
         return new Fragment(start, current);
@@ -896,32 +894,28 @@ public final class DfaBuilder {
         var mask = parseCharClassPattern(cc.pattern(), cc.negated(), cc.caseInsensitive());
         int start = nfa.newState();
         int accept = nfa.newState();
-        for (int c = mask.nextSetBit(0); c >= 0; c = mask.nextSetBit(c + 1)) {
-            nfa.addCharEdge(start, c, accept);
-        }
+        for ( int c = mask.nextSetBit(0); c >= 0; c = mask.nextSetBit(c + 1)) {
+        nfa.addCharEdge(start, c, accept);}
         return new Fragment(start, accept);
     }
 
     private static Fragment compileAny(Nfa nfa) {
         int start = nfa.newState();
         int accept = nfa.newState();
-        for (int c = 0; c < ALPHABET; c++) {
-            nfa.addCharEdge(start, c, accept);
-        }
+        for ( int c = 0; c < ALPHABET; c++) {
+        nfa.addCharEdge(start, c, accept);}
         return new Fragment(start, accept);
     }
 
     private static Result<Fragment> compileSequence(Nfa nfa, List<Expression> elements, String ruleName) {
-        if (elements.isEmpty()) {
-            return Result.success(emptyFragment(nfa));
-        }
+        if ( elements.isEmpty()) {
+        return Result.success(emptyFragment(nfa));}
         int start = nfa.newState();
         int current = start;
-        for (var element : elements) {
+        for ( var element : elements) {
             var fragmentResult = compileExpression(nfa, element, ruleName);
-            if (!fragmentResult.isSuccess()) {
-                return fragmentResult;
-            }
+            if ( !fragmentResult.isSuccess()) {
+            return fragmentResult;}
             var fragment = fragmentResult.unwrap();
             nfa.addEpsilon(current, fragment.start);
             current = fragment.accept;
@@ -930,16 +924,14 @@ public final class DfaBuilder {
     }
 
     private static Result<Fragment> compileChoice(Nfa nfa, List<Expression> alternatives, String ruleName) {
-        if (alternatives.isEmpty()) {
-            return Result.success(emptyFragment(nfa));
-        }
+        if ( alternatives.isEmpty()) {
+        return Result.success(emptyFragment(nfa));}
         int start = nfa.newState();
         int accept = nfa.newState();
-        for (var alt : alternatives) {
+        for ( var alt : alternatives) {
             var fragmentResult = compileExpression(nfa, alt, ruleName);
-            if (!fragmentResult.isSuccess()) {
-                return fragmentResult;
-            }
+            if ( !fragmentResult.isSuccess()) {
+            return fragmentResult;}
             var fragment = fragmentResult.unwrap();
             nfa.addEpsilon(start, fragment.start);
             nfa.addEpsilon(fragment.accept, accept);
@@ -977,38 +969,40 @@ public final class DfaBuilder {
 
     private static Result<Fragment> compileRepetition(Nfa nfa, Expression.Repetition rep, String ruleName) {
         int min = rep.min();
-        int max = rep.max().fold(() -> -1, m -> m);
-        int unrolledMax = max < 0 ? min : Math.min(max, REPETITION_CAP);
+        int max = rep.max().fold(() -> - 1, m -> m);
+        int unrolledMax = max < 0
+                          ? min
+                          : Math.min(max, REPETITION_CAP);
         int start = nfa.newState();
         int current = start;
-        for (int i = 0; i < min; i++) {
+        for ( int i = 0; i < min; i++) {
             var fragmentResult = compileExpression(nfa, rep.expression(), ruleName);
-            if (!fragmentResult.isSuccess()) {
-                return fragmentResult;
-            }
+            if ( !fragmentResult.isSuccess()) {
+            return fragmentResult;}
             var fragment = fragmentResult.unwrap();
             nfa.addEpsilon(current, fragment.start);
             current = fragment.accept;
         }
-        if (max < 0) {
+        if ( max < 0) {
             var tailResult = compileExpression(nfa, rep.expression(), ruleName);
-            if (!tailResult.isSuccess()) {
-                return tailResult;
-            }
+            if ( !tailResult.isSuccess()) {
+            return tailResult;}
             var tail = wrapZeroOrMore(nfa, tailResult.unwrap());
             nfa.addEpsilon(current, tail.start);
             current = tail.accept;
-        } else {
-            for (int i = min; i < unrolledMax; i++) {
-                var fragmentResult = compileExpression(nfa, rep.expression(), ruleName);
-                if (!fragmentResult.isSuccess()) {
-                    return fragmentResult;
-                }
-                var optional = wrapOptional(nfa, fragmentResult.unwrap());
-                nfa.addEpsilon(current, optional.start);
-                current = optional.accept;
-            }
-        }
+        } else
+
+
+
+        {
+        for ( int i = min; i < unrolledMax; i++) {
+            var fragmentResult = compileExpression(nfa, rep.expression(), ruleName);
+            if ( !fragmentResult.isSuccess()) {
+            return fragmentResult;}
+            var optional = wrapOptional(nfa, fragmentResult.unwrap());
+            nfa.addEpsilon(current, optional.start);
+            current = optional.accept;
+        }}
         return Result.success(new Fragment(start, current));
     }
 
@@ -1023,37 +1017,49 @@ public final class DfaBuilder {
         var mask = new BitSet(ALPHABET);
         int i = 0;
         int n = pattern.length();
-        while (i < n) {
+        while ( i < n) {
             char c1 = pattern.charAt(i);
             int firstChar;
             int afterFirst;
-            if (c1 == '\\' && i + 1 < n) {
+            if ( c1 == '\\' && i + 1 < n) {
                 firstChar = decodeEscape(pattern.charAt(i + 1));
                 afterFirst = i + 2;
-            } else {
+            } else
+
+
+
+            {
                 firstChar = c1;
                 afterFirst = i + 1;
             }
-            if (afterFirst < n && pattern.charAt(afterFirst) == '-' && afterFirst + 1 < n) {
+            if ( afterFirst < n && pattern.charAt(afterFirst) == '-' && afterFirst + 1 < n) {
                 int rangeEndStart = afterFirst + 1;
                 char endChar = pattern.charAt(rangeEndStart);
                 int endDecoded;
                 int advance;
-                if (endChar == '\\' && rangeEndStart + 1 < n) {
+                if ( endChar == '\\' && rangeEndStart + 1 < n) {
                     endDecoded = decodeEscape(pattern.charAt(rangeEndStart + 1));
                     advance = (rangeEndStart + 2) - i;
-                } else {
+                } else
+
+
+
+                {
                     endDecoded = endChar;
                     advance = (rangeEndStart + 1) - i;
                 }
                 addRange(mask, firstChar, endDecoded, caseInsensitive);
                 i += advance;
-            } else {
+            } else
+
+
+
+            {
                 addChar(mask, firstChar, caseInsensitive);
                 i = afterFirst;
             }
         }
-        if (negated) {
+        if ( negated) {
             var negatedMask = new BitSet(ALPHABET);
             negatedMask.set(0, ALPHABET);
             negatedMask.andNot(mask);
@@ -1063,23 +1069,14 @@ public final class DfaBuilder {
     }
 
     private static int decodeEscape(char esc) {
-        return switch (esc) {
-            case 'n' -> '\n';
-            case 'r' -> '\r';
-            case 't' -> '\t';
-            case '0' -> '\0';
-            case 'f' -> '\f';
-            case 'b' -> '\b';
-            default -> esc;
-        };
+        return switch (esc) {case 'n' -> '\n'; case 'r' -> '\r'; case 't' -> '\t'; case '0' -> '\0'; case 'f' -> '\f'; case 'b' -> '\b'; default -> esc;};
     }
 
     private static void addChar(BitSet mask, int c, boolean caseInsensitive) {
-        if (c < 0 || c >= ALPHABET) {
-            return;
-        }
+        if ( c < 0 || c >= ALPHABET) {
+        return;}
         mask.set(c);
-        if (caseInsensitive && isAsciiLetter((char) c)) {
+        if ( caseInsensitive && isAsciiLetter((char) c)) {
             mask.set(Character.toLowerCase((char) c));
             mask.set(Character.toUpperCase((char) c));
         }
@@ -1088,9 +1085,9 @@ public final class DfaBuilder {
     private static void addRange(BitSet mask, int start, int end, boolean caseInsensitive) {
         int lo = Math.max(0, Math.min(start, end));
         int hi = Math.min(ALPHABET - 1, Math.max(start, end));
-        for (int c = lo; c <= hi; c++) {
+        for ( int c = lo; c <= hi; c++) {
             mask.set(c);
-            if (caseInsensitive && isAsciiLetter((char) c)) {
+            if ( caseInsensitive && isAsciiLetter((char) c)) {
                 mask.set(Character.toLowerCase((char) c));
                 mask.set(Character.toUpperCase((char) c));
             }
@@ -1109,65 +1106,27 @@ public final class DfaBuilder {
      */
     private static String uniqueInlineName(InlineLiteral lit, Set<String> taken) {
         var base = "INLINE_" + encodeForIdentifier(lit.text);
-        if (lit.caseInsensitive) {
-            base = base + "_CI";
-        }
-        if (!taken.contains(base)) {
-            return base;
-        }
+        if ( lit.caseInsensitive) {
+        base = base + "_CI";}
+        if ( !taken.contains(base)) {
+        return base;}
         int n = 2;
-        while (taken.contains(base + "_" + n)) {
-            n++;
-        }
+        while ( taken.contains(base + "_" + n)) {
+        n++;}
         return base + "_" + n;
     }
 
     private static String encodeForIdentifier(String text) {
         var sb = new StringBuilder(text.length() + 4);
-        for (int i = 0; i < text.length(); i++) {
+        for ( int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+            if ( (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
                 sb.append(c);
                 continue;
             }
             sb.append('_');
-            sb.append(switch (c) {
-                case '+' -> "PLUS";
-                case '-' -> "MINUS";
-                case '*' -> "STAR";
-                case '/' -> "SLASH";
-                case '%' -> "PERCENT";
-                case '.' -> "DOT";
-                case ',' -> "COMMA";
-                case ';' -> "SEMI";
-                case ':' -> "COLON";
-                case '?' -> "QMARK";
-                case '!' -> "BANG";
-                case '~' -> "TILDE";
-                case '&' -> "AMP";
-                case '|' -> "PIPE";
-                case '^' -> "CARET";
-                case '=' -> "EQ";
-                case '<' -> "LT";
-                case '>' -> "GT";
-                case '(' -> "LPAREN";
-                case ')' -> "RPAREN";
-                case '[' -> "LBRACK";
-                case ']' -> "RBRACK";
-                case '{' -> "LBRACE";
-                case '}' -> "RBRACE";
-                case '@' -> "AT";
-                case '#' -> "HASH";
-                case '$' -> "DOLLAR";
-                case '\\' -> "BSLASH";
-                case '\'' -> "SQUOTE";
-                case '"' -> "DQUOTE";
-                case ' ' -> "SP";
-                case '\t' -> "TAB";
-                case '\n' -> "NL";
-                case '\r' -> "CR";
-                default -> "U" + String.format("%04x", (int) c);
-            });
+            sb.append(switch (c) {case '+' -> "PLUS"; case '-' -> "MINUS"; case '*' -> "STAR"; case '/' -> "SLASH"; case '%' -> "PERCENT"; case '.' -> "DOT"; case ',' -> "COMMA"; case ';' -> "SEMI"; case ':' -> "COLON"; case '?' -> "QMARK"; case '!' -> "BANG"; case '~' -> "TILDE"; case '&' -> "AMP"; case '|' -> "PIPE"; case '^' -> "CARET"; case '=' -> "EQ"; case '<' -> "LT"; case '>' -> "GT"; case '(' -> "LPAREN"; case ')' -> "RPAREN"; case '[' -> "LBRACK"; case ']' -> "RBRACK"; case '{' -> "LBRACE"; case '}' -> "RBRACE"; case '@' -> "AT"; case '#' -> "HASH"; case '$' -> "DOLLAR"; case '\\' -> "BSLASH"; case '\'' -> "SQUOTE"; case '"' -> "DQUOTE"; case ' ' -> "SP"; case '\t' -> "TAB"; case '\n' -> "NL"; case '\r' -> "CR"; default -> "U" + String.format("%04x",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           (int) c);});
         }
         return sb.toString();
     }
@@ -1183,18 +1142,23 @@ public final class DfaBuilder {
         var acceptPriorityList = new ArrayList<Integer>();
         var queue = new ArrayDeque<BitSet>();
         registerState(stateMap, dfaStates, transitions, acceptKindList, acceptPriorityList, queue, startSet, nfa);
-        while (!queue.isEmpty()) {
+        while ( !queue.isEmpty()) {
             var currentSet = queue.poll();
             int currentId = stateMap.get(currentSet);
             int[] currentTransitions = transitions.get(currentId);
-            for (int ch = 0; ch < ALPHABET; ch++) {
+            for ( int ch = 0; ch < ALPHABET; ch++) {
                 var moveSet = move(nfa, currentSet, ch);
-                if (moveSet.isEmpty()) {
-                    continue;
-                }
+                if ( moveSet.isEmpty()) {
+                continue;}
                 epsilonClosure(nfa, moveSet);
-                int targetId = registerState(stateMap, dfaStates, transitions,
-                    acceptKindList, acceptPriorityList, queue, moveSet, nfa);
+                int targetId = registerState(stateMap,
+                                             dfaStates,
+                                             transitions,
+                                             acceptKindList,
+                                             acceptPriorityList,
+                                             queue,
+                                             moveSet,
+                                             nfa);
                 currentTransitions[ch] = targetId;
             }
         }
@@ -1202,7 +1166,7 @@ public final class DfaBuilder {
         int[][] transitionTable = transitions.toArray(new int[0][]);
         int[] acceptKindArray = new int[stateCount];
         int[] acceptPriorityArray = new int[stateCount];
-        for (int i = 0; i < stateCount; i++) {
+        for ( int i = 0; i < stateCount; i++) {
             acceptKindArray[i] = acceptKindList.get(i);
             acceptPriorityArray[i] = acceptPriorityList.get(i);
         }
@@ -1218,9 +1182,8 @@ public final class DfaBuilder {
                                      BitSet stateSet,
                                      Nfa nfa) {
         var existing = stateMap.get(stateSet);
-        if (existing != null) {
-            return existing;
-        }
+        if ( existing != null) {
+        return existing;}
         int id = dfaStates.size();
         stateMap.put(stateSet, id);
         dfaStates.add(stateSet);
@@ -1234,37 +1197,37 @@ public final class DfaBuilder {
         return id;
     }
 
-    private record AcceptInfo(int kind, int priority) {}
+    private record AcceptInfo(int kind, int priority){}
 
     private static AcceptInfo chooseAccept(Nfa nfa, BitSet stateSet) {
         int bestKind = Dfa.NO_ACCEPT;
         int bestPriority = Integer.MAX_VALUE;
-        for (int s = stateSet.nextSetBit(0); s >= 0; s = stateSet.nextSetBit(s + 1)) {
+        for ( int s = stateSet.nextSetBit(0); s >= 0; s = stateSet.nextSetBit(s + 1)) {
             int kind = nfa.acceptKind[s];
-            if (kind == Dfa.NO_ACCEPT) {
-                continue;
-            }
+            if ( kind == Dfa.NO_ACCEPT) {
+            continue;}
             int priority = nfa.acceptPriority[s];
-            if (priority < bestPriority) {
+            if ( priority < bestPriority) {
                 bestPriority = priority;
                 bestKind = kind;
             }
         }
-        return new AcceptInfo(bestKind, bestKind == Dfa.NO_ACCEPT ? -1 : bestPriority);
+        return new AcceptInfo(bestKind, bestKind == Dfa.NO_ACCEPT
+                                       ? - 1
+                                       : bestPriority);
     }
 
     private static void epsilonClosure(Nfa nfa, BitSet states) {
         var stack = new ArrayDeque<Integer>();
-        for (int s = states.nextSetBit(0); s >= 0; s = states.nextSetBit(s + 1)) {
-            stack.push(s);
-        }
-        while (!stack.isEmpty()) {
+        for ( int s = states.nextSetBit(0); s >= 0; s = states.nextSetBit(s + 1)) {
+        stack.push(s);}
+        while ( !stack.isEmpty()) {
             int s = stack.pop();
             int len = nfa.epsilonLen[s];
             int[] arr = nfa.epsilon[s];
-            for (int i = 0; i < len; i++) {
+            for ( int i = 0; i < len; i++) {
                 int target = arr[i];
-                if (!states.get(target)) {
+                if ( !states.get(target)) {
                     states.set(target);
                     stack.push(target);
                 }
@@ -1274,30 +1237,27 @@ public final class DfaBuilder {
 
     private static BitSet move(Nfa nfa, BitSet states, int ch) {
         var result = new BitSet(nfa.stateCount());
-        for (int s = states.nextSetBit(0); s >= 0; s = states.nextSetBit(s + 1)) {
+        for ( int s = states.nextSetBit(0); s >= 0; s = states.nextSetBit(s + 1)) {
             int[][] perChar = nfa.charEdges[s];
-            if (perChar == null) {
-                continue;
-            }
+            if ( perChar == null) {
+            continue;}
             int[] arr = perChar[ch];
-            if (arr == null) {
-                continue;
-            }
+            if ( arr == null) {
+            continue;}
             int len = nfa.charEdgeLens[s][ch];
-            for (int i = 0; i < len; i++) {
-                result.set(arr[i]);
-            }
+            for ( int i = 0; i < len; i++) {
+            result.set(arr[i]);}
         }
         return result;
     }
 
-    private record Fragment(int start, int accept) {}
+    private record Fragment(int start, int accept){}
 
     /** A literal collected from a PARSER/MIXED rule body. Keyed by {@code (text, caseInsensitive)}. */
-    private record InlineLiteral(String text, boolean caseInsensitive, int firstOccurrence) {}
+    private record InlineLiteral(String text, boolean caseInsensitive, int firstOccurrence){}
 
     private static final class Nfa {
-        int start = -1;
+        int start = - 1;
         int[] acceptKind = new int[16];
         int[] acceptPriority = new int[16];
         int[][] epsilon = new int[16][];
@@ -1318,14 +1278,13 @@ public final class DfaBuilder {
             ensureCapacity(stateCount + 1);
             int id = stateCount++;
             acceptKind[id] = Dfa.NO_ACCEPT;
-            acceptPriority[id] = -1;
+            acceptPriority[id] = - 1;
             return id;
         }
 
         void ensureCapacity(int needed) {
-            if (needed <= acceptKind.length) {
-                return;
-            }
+            if ( needed <= acceptKind.length) {
+            return;}
             int newCap = Math.max(needed, acceptKind.length * 2);
             acceptKind = Arrays.copyOf(acceptKind, newCap);
             acceptPriority = Arrays.copyOf(acceptPriority, newCap);
@@ -1336,7 +1295,7 @@ public final class DfaBuilder {
         }
 
         void markAccept(int state, int kind, int priority) {
-            if (acceptKind[state] == Dfa.NO_ACCEPT || priority < acceptPriority[state]) {
+            if ( acceptKind[state] == Dfa.NO_ACCEPT || priority < acceptPriority[state]) {
                 acceptKind[state] = kind;
                 acceptPriority[state] = priority;
             }
@@ -1344,12 +1303,12 @@ public final class DfaBuilder {
 
         void addEpsilon(int from, int to) {
             int[] arr = epsilon[from];
-            if (arr == null) {
+            if ( arr == null) {
                 arr = new int[2];
                 epsilon[from] = arr;
             }
             int len = epsilonLen[from];
-            if (len == arr.length) {
+            if ( len == arr.length) {
                 arr = Arrays.copyOf(arr, arr.length * 2);
                 epsilon[from] = arr;
             }
@@ -1359,18 +1318,18 @@ public final class DfaBuilder {
 
         void addCharEdge(int from, int ch, int to) {
             int[][] perChar = charEdges[from];
-            if (perChar == null) {
+            if ( perChar == null) {
                 perChar = new int[ALPHABET][];
                 charEdges[from] = perChar;
                 charEdgeLens[from] = new int[ALPHABET];
             }
             int[] arr = perChar[ch];
             int len = charEdgeLens[from][ch];
-            if (arr == null) {
+            if ( arr == null) {
                 arr = new int[2];
                 perChar[ch] = arr;
             }
-            if (len == arr.length) {
+            if ( len == arr.length) {
                 arr = Arrays.copyOf(arr, arr.length * 2);
                 perChar[ch] = arr;
             }
@@ -1378,5 +1337,4 @@ public final class DfaBuilder {
             charEdgeLens[from][ch] = len + 1;
         }
     }
-
 }

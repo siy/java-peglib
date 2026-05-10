@@ -14,22 +14,17 @@ import java.util.stream.Collectors;
  * rejected (e.g. mismatched HTML-style tags). Rejecting at compile time
  * preserves correctness; full support is tracked for a future release.
  */
-public record NamedCaptureCause(List<NamedCaptureDetector.Occurrence> occurrences) implements Cause {
+public record NamedCaptureCause( List<NamedCaptureDetector.Occurrence> occurrences) implements Cause {
     public static NamedCaptureCause of(NamedCaptureDetector.DetectionResult result) {
         return new NamedCaptureCause(List.copyOf(result.occurrences()));
     }
 
-    @Override
-    public String message() {
+    @Override public String message() {
         var prefix = occurrences.size() == 1
                      ? "Grammar uses an unsupported feature (named captures / back-references):\n  - "
-                     : "Grammar uses " + occurrences.size()
-                       + " unsupported features (named captures / back-references):\n  - ";
-        var body = occurrences.stream()
-                              .map(NamedCaptureDetector.Occurrence::message)
-                              .collect(Collectors.joining("\n  - "));
-        return prefix + body + "\nNamed captures and back-references are not yet supported in peglib 0.6.0."
-               + " Rewrite the rule to match without back-references, or pin to peglib 0.5.x"
-               + " until support is added in a future release.";
+                     : "Grammar uses " + occurrences.size() + " unsupported features (named captures / back-references):\n  - ";
+        var body = occurrences.stream().map(NamedCaptureDetector.Occurrence::message)
+                                     .collect(Collectors.joining("\n  - "));
+        return prefix + body + "\nNamed captures and back-references are not yet supported in peglib 0.6.0." + " Rewrite the rule to match without back-references, or pin to peglib 0.5.x" + " until support is added in a future release.";
     }
 }
