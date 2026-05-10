@@ -1,4 +1,189 @@
-# peglib — Handover (post-0.5.1 ship, starting 0.6.0)
+# peglib — Handover
+
+**Last updated:** 2026-05-10 — end of Session 2 (Phases A+B+C+D simple-first+E.1 implemented). Original Session-1 handover preserved below for reference.
+
+---
+
+## SESSION 2 SUMMARY (2026-05-10)
+
+### State at a glance
+
+| | |
+|---|---|
+| **Active branch** | `release-0.6.0` (NOT yet committed beyond `c60a610`; all v6 work in untracked files) |
+| **Working tree** | All v6 code in NEW files under `peglib-core/src/{main,test}/java/org/pragmatica/peg/v6/**`; **0.5.x untouched** (parallel-package strategy succeeded) |
+| **Test count** | peglib-core: **1019 + 1 skip, all green** (up from 805 baseline; +214 new in v6 packages) |
+| **Java25 corpus** | **12/20 fixtures parse cleanly**; 8 still recover with diagnostics (grammar/parser quality issues — see §3) |
+| **Cold compile** | 261-919ms (under spec target 600ms when JVM warm) |
+| **Warm parse** | 4ms total for 41KB Java25 corpus across 20 fixtures |
+
+### Sub-tasks completed (17)
+
+**Phase A — Lexer foundation (5/5)**
+- A.1: RuleClassifier (LEXER/PARSER/MIXED + skip-prefix detection)
+- A.2: TokenArray + TokenArrayBuilder (flat int[])
+- A.3: Dfa + DfaBuilder (Thompson NFA → subset construction)
+- A.4: LexerEngine + LexerGenerator + LexerCompiler
+- A.5: Java25 corpus byte-equal gate (20/20 lex round-trip)
+
+**Phase B — Parser (5/5 + B.5/B.6 partial)**
+- B.0: Token granularity via post-DFA keyword resolution (87.9% → 3.20% ANY_CHAR)
+- B.1: CstArray + CstArrayBuilder + CstNode (32 bytes/node vs 80-200 in 0.5.x)
+- B.2: ParseResult + Diagnostic (Rust-style format)
+- B.3: ParserGenerator + ParserCompiler (272KB Java25 parser)
+- B.4: Panic-mode error recovery
+- B.5: Lexer-rule aliasing to inline literals (1/20 → 4/20 corpus clean)
+- B.6: StringLit lexer fix (Choice partial-absorption + delimited-block KMP DFA) — 4/20 → 12/20 clean
+
+**Phase C — User API (1/1 + gate)**
+- C.1: PegParser.fromGrammar() + Parser facade with generate-compile-cache (ConcurrentHashMap, AtomicLong class-name uniquification)
+- C gate: All 20 corpus fixtures round-trip via PegParser
+
+**Phase D — Incremental engine (simple-first, 3/3)**
+- D.0: TokenArray.spliceLex (full re-lex; D.0.1 deferred for windowed splice)
+- D.1: CstArray.findCheckpointAncestor (CstArray.spliceSubtree deferred to D.1.1)
+- D.2: IncrementalParser wrapper class (full reparse on each edit; infrastructure for true incremental in place)
+
+**Phase E — Visitor (1/many)**
+- E.1: VisitorGenerator (GVisitor<T> stub class generation per grammar)
+
+### Code surface added
+
+```
+peglib-core/src/main/java/org/pragmatica/peg/v6/
+├── PegParser.java                          (entry point + cache)
+├── Parser.java                             (facade)
+├── token/
+│   ├── TokenArray.java                     (+ spliceLex method)
+│   └── TokenArrayBuilder.java
+├── lexer/
+│   ├── RuleKind.java
+│   ├── RuleClassifier.java                 (+ skip-prefix detection for !Keyword Body)
+│   ├── Dfa.java
+│   ├── DfaBuilder.java                     (NFA→DFA, inline literals, keyword resolution, aliasing, delimited-block, ANY_CHAR fallback)
+│   └── LexerEngine.java                    (post-DFA keyword resolution)
+├── cst/
+│   ├── CstArray.java                       (+ findCheckpointAncestor)
+│   ├── CstArrayBuilder.java                (+ truncate)
+│   ├── CstNode.java                        (sealed Branch/Leaf/Error views)
+│   └── ParseResult.java
+├── diagnostic/
+│   ├── Severity.java
+│   └── Diagnostic.java                     (formatRustStyle)
+├── generator/
+│   ├── LexerGenerator.java
+│   ├── LexerCompiler.java                  (JDK Compiler API)
+│   ├── ParserGenerator.java                (recursive descent over tokens; alias matching; full-consumption + recovery loop with synthetic _ROOT)
+│   ├── ParserCompiler.java
+│   └── VisitorGenerator.java
+└── incremental/
+    └── IncrementalParser.java              (simple-first wrapper)
+```
+
+Tests in `peglib-core/src/test/java/org/pragmatica/peg/v6/**` (29 test classes, 214 tests).
+
+---
+
+## 1. The 12/20 vs 8/20 corpus situation
+
+After all of Session 2's lexer/parser work, **12/20 Java25 corpus fixtures** parse cleanly (no diagnostics, full CST). The remaining 8 fail with the **same outer pattern**: `trailing input not consumed, expected=end of input, found=public/class`.
+
+The shared OUTER pattern reflects the new "must consume all input" parser invariant added in Session 2. The INNER causes vary per fixture:
+
+| Fixture | Likely inner cause |
+|---|---|
+| Annotations.java | Annotation usage in body (`@SuppressWarnings("unused")` on parameters/returns) |
+| ChainAlignment.java, Lambdas.java, LineWrapping.java, MultilineArguments.java, MultilineParameters.java | Parameterized types in field/method declarations: `Result<String>`, `Function<String, String>` — `<`/`>` ambiguity vs comparison |
+| ClassLiterals.java | Triple-slash JavaDoc `///` + parameterized type-use `Class<?>` |
+| DeepGenerics.java | Bounded type parameters with wildcards/intersection: `<T extends Comparable<? super T> & Cloneable>` |
+
+**Diagnostic strategy** for the next session: bisect each fixture, identify the smallest input that triggers the failure, fix the responsible grammar/parser rule. Each fix is small and targeted; the overall effort is bounded but spread across multiple sessions.
+
+The **`>>` tokenization issue** (B.6.2 attempted) was bisected but the fix didn't land in this session — `>>` is currently lexed as a single shift operator instead of two `>` tokens, which breaks nested generics. This is a **good first target** for next session.
+
+### What 12/20 clean buys us
+
+- Parser PROVES correct on real Java for the cases it handles
+- CST shape is meaningful (BlankLines.java: 1040 nodes, SwitchExpressions.java: 2802 nodes — vs 8-12 nodes/fixture before B.5/B.6)
+- Generated parser source is 272KB, compiles in ~550ms
+- Round-trip byte-equal works for all 20 fixtures (cst.reconstruct() = input bytes)
+
+---
+
+## 2. Phases not started
+
+### Phase D optimization (D.0.1, D.1.1)
+- D.0.1: Windowed re-lex in TokenArray.spliceLex (currently full re-lex)
+- D.1.1: CstArray.spliceSubtree + checkpoint-driven partial reparse in IncrementalParser
+
+Infrastructure is in place; just wire up the windowing.
+
+### Phase E.2-5 (formatter, maven plugin, playground)
+- peglib-formatter rewrite on flat-array CST
+- peglib-maven-plugin update for new emission
+- peglib-playground migration to generate-and-compile path
+
+These are 0.5.x module rewrites — significant work; defer until Phase B.6.x lands more fixtures.
+
+### Phase F (bench, polish, ship)
+- Bench A/B vs 0.5.1 for parser warm-path
+- CHANGELOG + migration guide
+- Release pipeline
+
+Don't run until at least 18/20 fixtures parse cleanly.
+
+---
+
+## 3. Outstanding bugs / known limitations
+
+1. **Cut operator (^)** is currently no-op in generated parser. May affect some grammars; not blocking corpus parsing.
+2. **MIXED-rule char-level fallback** is also no-op. Char-level constructs in PARSER rules emit no CST nodes.
+3. **`>>` and `>>>` tokenization** for nested generics — needs grammar tweak or post-DFA token splitting.
+4. **`%recover` directive** isn't parsed — only the default sync set is used.
+5. **`ParserOptions`** class (referenced in spec §5) not implemented; `Parser.parse(input, maxDiagnostics)` is a stub.
+6. **JBCT-SEAL-01 lint warnings** on a few v6 files (cosmetic; sealed interfaces with single-variant nesting).
+7. **v6 files unformatted** — `jbct-maven-plugin:check` reports several need reformatting; deferred.
+8. **`IncrementalParser` does full reparse on every edit** — correct but unoptimized (O(n) per edit).
+
+---
+
+## 4. Important architectural decisions made in Session 2
+
+1. **Parallel-package strategy** worked perfectly — 0.5.x untouched, v6.* additive.
+2. **AtomicLong counter** for generated class-name uniquification (cache-by-grammar-text + counter for class names).
+3. **Parser uses ParseException internally** for control flow; never thrown to caller (per spec).
+4. **Synthetic `_ROOT`** wrapper node always exists in CST — needed for full-consumption check + multi-attempt recovery.
+5. **Inline-literal extraction** from PARSER rules + **alias map** for LEXER rules whose body is literal/literal-choice — sidesteps need for full DFA support of `!Reference` and `!CharClass`.
+6. **Post-DFA keyword resolution** lifts identifier-shaped tokens to keyword kinds. Standard "lex identifier, then check keyword table" pattern.
+7. **Delimited-block KMP DFA** handles `'"""' (!'"""' .)* '"""'` patterns (string literals, block comments) without needing `Not` in DFA.
+
+---
+
+## 5. Files NOT to commit until reviewed
+
+- All v6 packages (`org.pragmatica.peg.v6.*` and tests) — large surface area; want spec-compliance review first
+- `peglib-core/src/test/resources/java25.peg` was NOT modified in Session 2
+- No 0.5.x source files modified
+
+---
+
+## 6. Quick-reference: where to start next session
+
+1. **Read this file** (you're here).
+2. **Check current state**: `mvn -pl peglib-core test -q` should show 1019/1019 green.
+3. **Pick a target**:
+   - **Best ROI**: Phase B.6.2 — fix `>>` tokenization or other grammar issues to get more corpus fixtures clean
+   - **Architectural**: Phase D.1.1 — wire up true incremental parsing
+   - **Polish**: Phase E.2 — peglib-formatter migration
+   - **Final stretch**: Phase F — bench against 0.5.1
+4. **Helper agents**:
+   - Use `jbct-coder` for ALL coding (per CLAUDE.md mandate)
+   - Use `build-runner` for all `mvn` invocations (keep verbose output out of context)
+   - Use `Explore` for read-only investigation
+
+---
+
+# ORIGINAL SESSION-1 HANDOVER (2026-05-09, kept for reference)
 
 **Last updated:** 2026-05-10, immediately after 0.5.1 ship + 0.6.0 spec lock + branch creation.
 
