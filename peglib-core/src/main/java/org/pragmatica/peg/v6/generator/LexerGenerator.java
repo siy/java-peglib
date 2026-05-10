@@ -217,9 +217,10 @@ public final class LexerGenerator {
 
     private static void renderLexMethod(StringBuilder sb, int alphabet, boolean hasResolvers) {
         sb.append("    public static TokenArray lex(String input) {\n");
-        sb.append("        if (input == null) {\n");
-        sb.append("            throw new IllegalArgumentException(\"input must not be null\");\n");
-        sb.append("        }\n");
+        // No defensive null check on input: the only caller path is
+        // CompiledLexer.lex(String), which is invoked from Parser.parse(String)
+        // after the parser's own null discipline; passing null here is a
+        // programmer error that the JVM's NPE on input.length() catches.
         sb.append("        TokenArrayBuilder builder = new TokenArrayBuilder(input);\n");
         sb.append("        int len = input.length();\n");
         sb.append("        int pos = 0;\n");
@@ -243,9 +244,14 @@ public final class LexerGenerator {
         sb.append("                    lastAcceptKind = ak;\n");
         sb.append("                }\n");
         sb.append("            }\n");
+        // No-DFA-transition stall: emit a 1-char synthetic WHITESPACE token to
+        // make progress; the parser surfaces this as a trailing-input diagnostic.
+        // Matches the recovery contract LexerEngine.lex() uses for the
+        // interpreted (non-codegen) path.
         sb.append("            if (lastAcceptEnd <= pos) {\n");
-        sb.append("                throw new IllegalArgumentException(\n");
-        sb.append("                    \"lex error at offset \" + pos + \": '\" + input.charAt(pos) + \"'\");\n");
+        sb.append("                builder.append(TokenArray.KIND_WHITESPACE, pos, pos + 1);\n");
+        sb.append("                pos++;\n");
+        sb.append("                continue;\n");
         sb.append("            }\n");
         if ( hasResolvers) {
             sb.append("            if (lastAcceptKind >= 0 && lastAcceptKind < RESOLVERS.length) {\n");

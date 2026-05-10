@@ -319,9 +319,9 @@ public final class ParserGenerator {
             var startName = grammar.effectiveStartRule().unwrap()
                                                       .name();
             sb.append("    public static ParseResult parse(TokenArray tokens) {\n");
-            sb.append("        if (tokens == null) {\n");
-            sb.append("            throw new IllegalArgumentException(\"tokens must not be null\");\n");
-            sb.append("        }\n");
+            // No defensive null check on tokens: the only public caller path is
+            // CompiledParser.parse(TokenArray), which receives a TokenArray
+            // freshly produced by the lexer.
             sb.append("        ").append(className)
                      .append(" p = new ")
                      .append(className)
@@ -336,13 +336,10 @@ public final class ParserGenerator {
             // parsed subtree under the synthetic _ROOT so error recovery can attach
             // sibling Error nodes the same way the full parse does.
             sb.append("    public static ParseResult parseRuleFrom(TokenArray tokens, int fromTokenIdx, int ruleKind) {\n");
-            sb.append("        if (tokens == null) {\n");
-            sb.append("            throw new IllegalArgumentException(\"tokens must not be null\");\n");
-            sb.append("        }\n");
-            sb.append("        if (fromTokenIdx < 0 || fromTokenIdx > tokens.count()) {\n");
-            sb.append("            throw new IllegalArgumentException(\n");
-            sb.append("                \"fromTokenIdx out of bounds: \" + fromTokenIdx + \" (count=\" + tokens.count() + \")\");\n");
-            sb.append("        }\n");
+            // No defensive null/range checks: the only caller is the incremental
+            // engine, which passes a validated tokens array and an index in
+            // [0, tokens.count()]. An out-of-range fromTokenIdx surfaces via the
+            // !ok recovery branch (synthetic Error node + diagnostic).
             sb.append("        ").append(className)
                      .append(" p = new ")
                      .append(className)
@@ -388,7 +385,10 @@ public final class ParserGenerator {
                      .append("_KIND: return p.parse")
                      .append(entry.getKey())
                      .append("(parent);\n");}
-            sb.append("            default: throw new IllegalArgumentException(\"unknown rule kind: \" + kind);\n");
+            // Unknown rule-kind: surface as a parse failure so the caller's
+            // recovery branch emits an Error node + diagnostic, matching the
+            // contract for any other parse-time mismatch. No exception thrown.
+            sb.append("            default: return false;\n");
             sb.append("        }\n");
             sb.append("    }\n\n");
             // ruleKinds() — exposes the rule-name to kind mapping so callers

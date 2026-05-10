@@ -383,7 +383,7 @@ class ParserGeneratorTest {
     }
 
     @Test
-    void parseRuleFrom_unknownRuleKind_throws() {
+    void parseRuleFrom_unknownRuleKind_recoversWithDiagnostic() {
         var built = buildAll("""
             File <- Item ',' Item
             Item <- '(' Word ')'
@@ -393,15 +393,18 @@ class ParserGeneratorTest {
         var compiled = compile(generated);
         var tokens = built.engine()
                           .lex("(foo),(foo)");
-        // After the JBCT refactor compiled.parseRuleFrom() unwraps a Result, so a
-        // failing reflective call surfaces as IllegalStateException (Result.unwrap
-        // semantics) rather than the underlying IllegalArgumentException.
-        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
-                                                      () -> compiled.parseRuleFrom(tokens, 0, 99999));
+        // Post-JBCT: the generated parser no longer throws for an unknown rule
+        // kind. Instead parseByKind returns false and the caller's recovery
+        // branch records a syntax-error diagnostic. The CST and diagnostics
+        // are returned normally.
+        var result = compiled.parseRuleFrom(tokens, 0, 99999);
+        assertThat(result.diagnostics()).isNotEmpty();
+        assertThat(result.diagnostics().getFirst().message())
+            .containsIgnoringCase("syntax error");
     }
 
     @Test
-    void parseRuleFrom_outOfBoundsToken_throws() {
+    void parseRuleFrom_outOfBoundsToken_failsCleanly() {
         var built = buildAll("""
             File <- Item ',' Item
             Item <- '(' Word ')'
@@ -412,13 +415,17 @@ class ParserGeneratorTest {
         var tokens = built.engine()
                           .lex("(foo),(foo)");
         var ruleKinds = compiled.ruleKinds();
-        // See parseRuleFrom_unknownRuleKind_throws: error path returns through Result.unwrap.
+        // Post-JBCT: the generated parser no longer has an explicit out-of-range
+        // throw for fromTokenIdx. Negative indices reach tokens.nextNonTrivia
+        // which AIOOBEs on the precomputed table; that bubbles up through the
+        // reflection wrapper as a RuntimeException. Past-end indices are
+        // handled gracefully — nextNonTrivia returns count, and the parser
+        // records a "trailing input" / end-of-input style diagnostic.
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
                                                       () -> compiled.parseRuleFrom(tokens, - 1, ruleKinds.get("Item")));
-        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
-                                                      () -> compiled.parseRuleFrom(tokens,
-                                                                                   tokens.count() + 1,
-                                                                                   ruleKinds.get("Item")));
+        var pastEnd = compiled.parseRuleFrom(tokens, tokens.count() + 1, ruleKinds.get("Item"));
+        assertThat(pastEnd).isNotNull();
+        assertThat(pastEnd.diagnostics()).isNotEmpty();
     }
 
     @Test
