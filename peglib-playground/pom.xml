@@ -21,6 +21,10 @@
     <dependencies>
         <dependency>
             <groupId>org.pragmatica-lite</groupId>
+            <artifactId>peglib-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.pragmatica-lite</groupId>
             <artifactId>peglib</artifactId>
         </dependency>
 

@@ -11,23 +11,21 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>peglib-formatter</artifactId>
+    <artifactId>peglib-runtime</artifactId>
     <packaging>jar</packaging>
 
-    <name>Peglib Formatter</name>
-    <description>Reserved for peglib-formatter v1 — Wadler-style pretty-printer framework for peglib CSTs.</description>
+    <name>Peglib Runtime</name>
+    <description>Minimal runtime types used by generated peglib parsers (TokenArray, CstArray, ParseResult, Diagnostic). Depends only on pragmatica-lite:core, so a generated parser does NOT pull in the rest of peglib-core.</description>
     <url>https://github.com/siy/java-peglib</url>
 
     <dependencies>
+        <!-- Pragmatica Lite Core — only runtime dependency permitted by the standalone-parser invariant. -->
         <dependency>
             <groupId>org.pragmatica-lite</groupId>
-            <artifactId>peglib-runtime</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.pragmatica-lite</groupId>
-            <artifactId>peglib</artifactId>
+            <artifactId>core</artifactId>
         </dependency>
 
+        <!-- Testing -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

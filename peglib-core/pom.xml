@@ -19,6 +19,12 @@
     <url>https://github.com/siy/java-peglib</url>
 
     <dependencies>
+        <!-- Peglib Runtime — small set of types shared with generated parsers. -->
+        <dependency>
+            <groupId>org.pragmatica-lite</groupId>
+            <artifactId>peglib-runtime</artifactId>
+        </dependency>
+
         <!-- Pragmatica Lite Core -->
         <dependency>
             <groupId>org.pragmatica-lite</groupId>

@@ -1,7 +1,5 @@
 package org.pragmatica.peg.v6.token;
 
-import org.pragmatica.peg.v6.lexer.LexerEngine;
-
 /**
  * Phase A.2 — flat token-stream data structure for the 0.6.0 lex-then-parse pipeline.
  *
@@ -109,19 +107,6 @@ public final class TokenArray {
 
     public String input() {
         return input;
-    }
-
-    /**
-     * Phase D.0 / D.0.1 — produce a new {@code TokenArray} reflecting an edit at
-     * {@code [offset, offset + oldLen)} replaced by {@code newText}.
-     *
-     * <p>Convenience overload that bridges a {@link LexerEngine}; delegates to
-     * {@link #spliceLex(LexFn, int, int, String)}. See that method for the
-     * windowed re-lex contract.
-     *
-     */
-    public TokenArray spliceLex(LexerEngine engine, int offset, int oldLen, String newText) {
-        return spliceLex((LexFn) engine::lex, offset, oldLen, newText);
     }
 
     /**
