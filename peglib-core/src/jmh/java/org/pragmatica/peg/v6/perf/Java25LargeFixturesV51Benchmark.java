@@ -64,7 +64,7 @@ public class Java25LargeFixturesV51Benchmark {
      * guarantees apples-to-apples comparison on identical input bytes.
      */
     private static final Path SELFHOST_FIXTURE =
-        Path.of("src/test/resources/perf-corpus/large/Java25SelfHost-v51.java.txt");
+        Path.of("src/test/resources/bench-fixtures/Java25SelfHost-v51.java.txt");
     private static final String PACKAGE_NAME = "v51.gen.large";
     private static final String CLASS_NAME = "Java25Parser51Large";
 

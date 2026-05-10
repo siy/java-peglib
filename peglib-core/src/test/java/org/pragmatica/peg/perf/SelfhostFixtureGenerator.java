@@ -12,7 +12,7 @@ import org.pragmatica.peg.PegParser;
 /**
  * One-shot fixture generator for the canonical "selfhost" benchmark input.
  *
- * <p>Produces {@code peglib-core/src/test/resources/perf-corpus/large/Java25SelfHost-v51.java.txt}
+ * <p>Produces {@code peglib-core/src/test/resources/bench-fixtures/Java25SelfHost-v51.java.txt}
  * by running the 0.5.x source generator over the {@code java25.peg} grammar and ASCII-sanitizing
  * the result so the v6 lexer (ASCII-only character class) accepts every byte.
  *
@@ -36,7 +36,7 @@ class SelfhostFixtureGenerator {
 
     private static final Path GRAMMAR_PATH = Path.of("src/test/resources/java25.peg");
     private static final Path OUTPUT_PATH =
-        Path.of("src/test/resources/perf-corpus/large/Java25SelfHost-v51.java.txt");
+        Path.of("src/test/resources/bench-fixtures/Java25SelfHost-v51.java.txt");
 
     @Test
     void generate() throws Exception {

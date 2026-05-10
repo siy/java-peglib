@@ -50,7 +50,7 @@ public class Java25LargeFixturesBenchmark {
      * {@code SelfhostFixtureGenerator} when the Java25 grammar changes.
      */
     private static final Path SELFHOST_FIXTURE =
-        Path.of("src/test/resources/perf-corpus/large/Java25SelfHost-v51.java.txt");
+        Path.of("src/test/resources/bench-fixtures/Java25SelfHost-v51.java.txt");
 
     @Param({"reference", "selfhost"})
     public String fixture;
