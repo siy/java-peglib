@@ -1,0 +1,249 @@
+package org.pragmatica.peg.v6.token;
+
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.pragmatica.peg.v6.token.TokenArray.FIRST_USER_KIND;
+import static org.pragmatica.peg.v6.token.TokenArray.KIND_BLOCK_COMMENT;
+import static org.pragmatica.peg.v6.token.TokenArray.KIND_LINE_COMMENT;
+import static org.pragmatica.peg.v6.token.TokenArray.KIND_WHITESPACE;
+
+class TokenArrayTest {
+
+    private static final int IDENT = FIRST_USER_KIND;
+    private static final int NUMBER = FIRST_USER_KIND + 1;
+
+    private static final String[] DEFAULT_NAMES = {
+        "WHITESPACE",
+        "LINE_COMMENT",
+        "BLOCK_COMMENT",
+        "IDENT",
+        "NUMBER"
+    };
+
+    @Test
+    void emptyArray_countZero_nextNonTriviaFromZeroIsZero() {
+        var array = new TokenArrayBuilder("").build(DEFAULT_NAMES);
+
+        assertThat(array.count()).isZero();
+        assertThat(array.nextNonTrivia(0)).isZero();
+        assertThat(array.input()).isEmpty();
+    }
+
+    @Test
+    void singleTriviaToken_isTriviaTrue_textRoundTrips_nextNonTriviaSkips() {
+        var input = "   ";
+        var b = new TokenArrayBuilder(input);
+        b.append(KIND_WHITESPACE, 0, 3);
+        var array = b.build(DEFAULT_NAMES);
+
+        assertThat(array.count()).isEqualTo(1);
+        assertThat(array.isTrivia(0)).isTrue();
+        assertThat(array.textAt(0).toString()).isEqualTo("   ");
+        assertThat(array.nextNonTrivia(0)).isEqualTo(1);
+        assertThat(array.kindName(0)).isEqualTo("WHITESPACE");
+    }
+
+    @Test
+    void mixedSequence_nextNonTriviaWalksCorrectly() {
+        var input = " abc 42 ";
+        var b = new TokenArrayBuilder(input);
+        b.append(KIND_WHITESPACE, 0, 1);
+        b.append(IDENT, 1, 4);
+        b.append(KIND_WHITESPACE, 4, 5);
+        b.append(NUMBER, 5, 7);
+        b.append(KIND_WHITESPACE, 7, 8);
+        var array = b.build(DEFAULT_NAMES);
+
+        assertThat(array.count()).isEqualTo(5);
+        assertThat(array.nextNonTrivia(0)).isEqualTo(1);
+        assertThat(array.nextNonTrivia(1)).isEqualTo(1);
+        assertThat(array.nextNonTrivia(2)).isEqualTo(3);
+        assertThat(array.nextNonTrivia(3)).isEqualTo(3);
+        assertThat(array.nextNonTrivia(4)).isEqualTo(5);
+        assertThat(array.nextNonTrivia(5)).isEqualTo(5);
+    }
+
+    @Test
+    void nextNonTrivia_returnsCount_whenAllRemainingAreTrivia() {
+        var input = "x   ";
+        var b = new TokenArrayBuilder(input);
+        b.append(IDENT, 0, 1);
+        b.append(KIND_WHITESPACE, 1, 2);
+        b.append(KIND_LINE_COMMENT, 2, 3);
+        b.append(KIND_BLOCK_COMMENT, 3, 4);
+        var array = b.build(DEFAULT_NAMES);
+
+        assertThat(array.nextNonTrivia(1)).isEqualTo(array.count());
+        assertThat(array.nextNonTrivia(4)).isEqualTo(array.count());
+    }
+
+    @Test
+    void textAt_roundTripsToInput_byConcatenatingAllTokenSubsequences() {
+        var input = "  foo /*c*/ 12\n";
+        var b = new TokenArrayBuilder(input);
+        b.append(KIND_WHITESPACE, 0, 2);
+        b.append(IDENT, 2, 5);
+        b.append(KIND_WHITESPACE, 5, 6);
+        b.append(KIND_BLOCK_COMMENT, 6, 11);
+        b.append(KIND_WHITESPACE, 11, 12);
+        b.append(NUMBER, 12, 14);
+        b.append(KIND_WHITESPACE, 14, 15);
+        var array = b.build(DEFAULT_NAMES);
+
+        var rebuilt = new StringBuilder();
+        for (var i = 0; i < array.count(); i++) {
+            rebuilt.append(array.textAt(i));
+        }
+        assertThat(rebuilt.toString()).isEqualTo(input);
+
+        assertThat(array.textAt(1).toString()).isEqualTo("foo");
+        assertThat(array.textAt(3).toString()).isEqualTo("/*c*/");
+        assertThat(array.textAt(5).toString()).isEqualTo("12");
+    }
+
+    @Test
+    void kindStartEnd_parityWithBuilderCalls() {
+        var input = "ab12";
+        var b = new TokenArrayBuilder(input);
+        b.append(IDENT, 0, 2);
+        b.append(NUMBER, 2, 4);
+        var array = b.build(DEFAULT_NAMES);
+
+        assertThat(array.kindAt(0)).isEqualTo(IDENT);
+        assertThat(array.startAt(0)).isZero();
+        assertThat(array.endAt(0)).isEqualTo(2);
+        assertThat(array.kindAt(1)).isEqualTo(NUMBER);
+        assertThat(array.startAt(1)).isEqualTo(2);
+        assertThat(array.endAt(1)).isEqualTo(4);
+        assertThat(array.kindName(1)).isEqualTo("NUMBER");
+        assertThat(array.isTrivia(0)).isFalse();
+        assertThat(array.isTrivia(1)).isFalse();
+    }
+
+    @Test
+    void tokenAtEndOfInput_isValid() {
+        var input = "x";
+        var b = new TokenArrayBuilder(input);
+        b.append(IDENT, 0, 1);
+        b.append(KIND_WHITESPACE, 1, 1);
+        var array = b.build(DEFAULT_NAMES);
+
+        assertThat(array.endAt(1)).isEqualTo(input.length());
+        assertThat(array.textAt(1).toString()).isEmpty();
+    }
+
+    @Test
+    void invalidBuild_endLessThanStart_isRejected() {
+        var b = new TokenArrayBuilder("abcd");
+        b.append(IDENT, 2, 1);
+
+        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("end=");
+    }
+
+    @Test
+    void invalidBuild_startBeyondInput_isRejected() {
+        var b = new TokenArrayBuilder("ab");
+        b.append(IDENT, 5, 5);
+
+        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("start=");
+    }
+
+    @Test
+    void invalidBuild_endBeyondInput_isRejected() {
+        var b = new TokenArrayBuilder("ab");
+        b.append(IDENT, 0, 5);
+
+        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("end=");
+    }
+
+    @Test
+    void invalidBuild_startsNotMonotonic_isRejected() {
+        var b = new TokenArrayBuilder("abcd");
+        b.append(IDENT, 2, 4);
+        b.append(IDENT, 0, 1);
+
+        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("non-decreasing");
+    }
+
+    @Test
+    void invalidBuild_kindOutsideNameTable_isRejected() {
+        var b = new TokenArrayBuilder("ab");
+        b.append(99, 0, 2);
+
+        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("kindNameTable");
+    }
+
+    @Test
+    void buildIsSingleShot_secondBuildFails() {
+        var b = new TokenArrayBuilder("a");
+        b.append(IDENT, 0, 1);
+        b.build(DEFAULT_NAMES);
+
+        assertThatThrownBy(() -> b.build(DEFAULT_NAMES))
+            .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void appendAfterBuild_fails() {
+        var b = new TokenArrayBuilder("a");
+        b.append(IDENT, 0, 1);
+        b.build(DEFAULT_NAMES);
+
+        assertThatThrownBy(() -> b.append(IDENT, 0, 1))
+            .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void growth_handlesAppendsBeyondInitialCapacity() {
+        var len = 1000;
+        var input = "x".repeat(len);
+        var b = new TokenArrayBuilder(input, 4);
+        for (var i = 0; i < len; i++) {
+            b.append(IDENT, i, i + 1);
+        }
+        var array = b.build(DEFAULT_NAMES);
+
+        assertThat(array.count()).isEqualTo(len);
+        assertThat(array.startAt(999)).isEqualTo(999);
+        assertThat(array.endAt(999)).isEqualTo(1000);
+    }
+
+    @Test
+    void textAt_indexOutOfBounds_throws() {
+        var array = new TokenArrayBuilder("a").build(DEFAULT_NAMES);
+
+        assertThatThrownBy(() -> array.textAt(0))
+            .isInstanceOf(IndexOutOfBoundsException.class);
+    }
+
+    @Test
+    void kindNameTable_isCopied_so_externalMutationDoesNotLeak() {
+        var names = DEFAULT_NAMES.clone();
+        var b = new TokenArrayBuilder("a");
+        b.append(IDENT, 0, 1);
+        var array = b.build(names);
+
+        names[IDENT] = "MUTATED";
+        assertThat(array.kindName(0)).isEqualTo("IDENT");
+    }
+
+    @Test
+    void reservedKindConstants_haveExpectedValues() {
+        assertThat(KIND_WHITESPACE).isZero();
+        assertThat(KIND_LINE_COMMENT).isEqualTo(1);
+        assertThat(KIND_BLOCK_COMMENT).isEqualTo(2);
+        assertThat(FIRST_USER_KIND).isEqualTo(3);
+    }
+}
