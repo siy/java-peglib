@@ -6,6 +6,7 @@ import org.pragmatica.peg.formatter.Doc;
 import org.pragmatica.peg.formatter.Docs;
 import org.pragmatica.peg.formatter.internal.Renderer;
 import org.pragmatica.peg.v6.cst.CstArray;
+import org.pragmatica.peg.v6.token.TokenArray;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,20 +17,22 @@ import java.util.List;
  * {@link org.pragmatica.peg.formatter.Formatter}, sharing the
  * {@link Doc}/{@link Docs}/{@link Renderer} algebra.
  *
- * <p>Walk: depth-first over node indices via {@link CstArray#children(int)}.
- * For each node, child docs are computed first, then the rule registered for
- * that node's rule name (via {@link CstArray#kindNameAt(int)}) is invoked. If
- * no rule is registered, the default fallback emits the node's source text
- * verbatim for leaves and the concatenation of child docs for branches.
+ * <p>Walk: for each node, if a user-supplied {@link V6FormatterRule} is
+ * registered under its rule name (via {@link CstArray#kindNameAt(int)}) the
+ * rule is invoked with the recursively-walked child docs. Otherwise the
+ * default fallback drives a token-range walk over
+ * {@code [firstTokenAt..lastTokenAt]}, interleaving recursive child walks with
+ * inline-literal tokens (e.g. {@code 'package'}, {@code ';'}) that the
+ * generated parser consumes without producing a CST node, plus any trivia
+ * tokens between siblings (routed through the active {@link V6TriviaPolicy}).
  *
- * <p>Trivia handling is fully positional: each non-root node's leading and
- * trailing trivia tokens (per {@link CstArray#leadingTriviaTokens(int)} /
- * {@link CstArray#trailingTriviaTokens(int)}) are passed through the active
- * {@link V6TriviaPolicy}. To avoid double-emitting trivia at branch nodes
- * (whose first/last tokens equal those of their leftmost/rightmost descendant
- * leaf), only leaves emit their leading/trailing trivia. The root node also
- * emits any prefix trivia that precedes its first token and any suffix trivia
- * that follows its last token.
+ * <p>Trivia ownership is positional and unique: every trivia token is emitted
+ * exactly once, by the closest enclosing branch's default fallback (for
+ * inter-sibling gaps) or by {@link #wrapRootWithFileTrivia} (for trivia before
+ * the root's first token / after its last token). User-installed rules
+ * receive child docs that are already trivia-aware via this same default
+ * fallback, but a rule that wishes to drop or rewrite inter-child whitespace
+ * is free to do so by ignoring/manipulating the supplied child docs.
  *
  * <p>Instances are immutable and thread-safe.
  *
@@ -94,14 +97,11 @@ public final class V6Formatter {
     }
 
     private Doc walk(CstArray cst, int nodeIdx, int rootIdx) {
-        var childDocs = collectChildDocs(cst, nodeIdx, rootIdx);
-        var nodeDoc = applyRule(cst, nodeIdx, childDocs);
-        if (nodeIdx == rootIdx) {
-            // Root's leading/trailing trivia is handled exclusively by
-            // wrapRootWithFileTrivia to avoid double emission.
-            return nodeDoc;
+        var rule = config.rules().get(cst.kindNameAt(nodeIdx));
+        if (rule != null) {
+            return applyUserRule(cst, nodeIdx, collectChildDocs(cst, nodeIdx, rootIdx), rule);
         }
-        return wrapNodeWithLeafTrivia(cst, nodeIdx, nodeDoc);
+        return defaultFallback(cst, nodeIdx, rootIdx);
     }
 
     private List<Doc> collectChildDocs(CstArray cst, int nodeIdx, int rootIdx) {
@@ -113,26 +113,116 @@ public final class V6Formatter {
         return out;
     }
 
-    private Doc applyRule(CstArray cst, int nodeIdx, List<Doc> childDocs) {
-        var rule = config.rules().get(cst.kindNameAt(nodeIdx));
-        if (rule != null) {
-            var ctx = new V6FormatContext(cst, nodeIdx,
-                config.defaultIndent(), config.maxLineWidth(), config.triviaPolicy());
-            return rule.format(ctx, childDocs);
-        }
-        return defaultFallback(cst, nodeIdx, childDocs);
+    private Doc applyUserRule(CstArray cst, int nodeIdx, List<Doc> childDocs, V6FormatterRule rule) {
+        var ctx = new V6FormatContext(cst, nodeIdx,
+            config.defaultIndent(), config.maxLineWidth(), config.triviaPolicy());
+        return rule.format(ctx, childDocs);
     }
 
-    private Doc wrapNodeWithLeafTrivia(CstArray cst, int nodeIdx, Doc nodeDoc) {
-        if (cst.firstChildAt(nodeIdx) != CstArray.NO_NODE) {
-            return nodeDoc;
+    /**
+     * Default fallback used when no user-supplied rule is registered for a node.
+     * Walks the node's token range {@code [firstTokenAt..lastTokenAt]} and
+     * interleaves child docs (recursing through {@link #walk}) with the source
+     * text of inline tokens and trivia tokens that fall in the gaps between
+     * children. This is essential because the v6 generated parser consumes
+     * inline literals (e.g. {@code 'package'}, {@code ';'}) without wrapping
+     * them as child CST nodes — a naive {@code concat(childDocs)} would silently
+     * drop them. Trivia tokens in the gaps are routed through the active
+     * {@link V6TriviaPolicy} for whitespace/comment handling.
+     *
+     * <p>Note: trivia immediately preceding the node's first token and following
+     * its last token is intentionally NOT emitted here; the caller (the parent
+     * branch's own {@code defaultFallback}, or {@link #wrapRootWithFileTrivia}
+     * for the root) is responsible for those edges. This keeps every trivia
+     * token emitted exactly once across the whole tree.
+     */
+    private Doc defaultFallback(CstArray cst, int nodeIdx, int rootIdx) {
+        var first = cst.firstTokenAt(nodeIdx);
+        var last = cst.lastTokenAt(nodeIdx);
+        if (first < 0 || last < 0 || last < first) {
+            return Docs.empty();
         }
-        var leadingDoc = config.triviaPolicy().render(cst.tokens(), cst.leadingTriviaTokens(nodeIdx));
-        var trailingDoc = config.triviaPolicy().render(cst.tokens(), cst.trailingTriviaTokens(nodeIdx));
-        if (leadingDoc instanceof Doc.Empty && trailingDoc instanceof Doc.Empty) {
-            return nodeDoc;
+        var tokens = cst.tokens();
+        var policy = config.triviaPolicy();
+        var parts = new ArrayList<Doc>();
+        var cursor = first;
+        for (var iter = cst.children(nodeIdx).iterator(); iter.hasNext(); ) {
+            var childIdx = iter.nextInt();
+            var childFirst = cst.firstTokenAt(childIdx);
+            var childLast = cst.lastTokenAt(childIdx);
+            emitGapTokens(parts, tokens, policy, cursor, childFirst);
+            parts.add(walk(cst, childIdx, rootIdx));
+            cursor = (childLast < 0) ? cursor : childLast + 1;
         }
-        return Docs.concat(leadingDoc, nodeDoc, trailingDoc);
+        emitGapTokens(parts, tokens, policy, cursor, last + 1);
+        if (parts.isEmpty()) {
+            return Docs.empty();
+        }
+        return Docs.concat(parts);
+    }
+
+    /**
+     * Emit every token in the half-open range {@code [from, to)} that has not
+     * already been claimed by a child node. Trivia tokens go through
+     * {@code policy}; content (inline-literal) tokens emit their text directly,
+     * splitting embedded newlines into hard line breaks.
+     */
+    private static void emitGapTokens(List<Doc> parts,
+                                      TokenArray tokens,
+                                      V6TriviaPolicy policy,
+                                      int from,
+                                      int to) {
+        if (from >= to) {
+            return;
+        }
+        // Coalesce contiguous runs of trivia into a single policy invocation —
+        // this lets the policy see whitespace + comment runs as a unit so it can
+        // collapse blank lines, strip whitespace, etc. coherently.
+        var i = from;
+        while (i < to) {
+            if (tokens.isTrivia(i)) {
+                var runStart = i;
+                while (i < to && tokens.isTrivia(i)) {
+                    i++;
+                }
+                var runEnd = i;
+                var triviaDoc = policy.render(tokens,
+                    java.util.stream.IntStream.range(runStart, runEnd));
+                if (!(triviaDoc instanceof Doc.Empty)) {
+                    parts.add(triviaDoc);
+                }
+            } else {
+                appendTokenText(parts, tokens, i);
+                i++;
+            }
+        }
+    }
+
+    /**
+     * Append a single content (non-trivia) token's text to {@code parts}, splitting
+     * embedded newlines into hard breaks because {@link Doc.Text} forbids newlines.
+     * Java text blocks and multi-line annotations / character escapes can produce
+     * tokens whose lexed text contains real {@code \n} characters; preserving them
+     * via {@link Doc.HardLine} keeps the round-trip token stream intact.
+     */
+    private static void appendTokenText(List<Doc> parts, TokenArray tokens, int idx) {
+        var raw = tokens.textAt(idx).toString();
+        if (raw.isEmpty()) {
+            return;
+        }
+        if (raw.indexOf('\n') < 0) {
+            parts.add(Docs.text(raw));
+            return;
+        }
+        var lines = raw.split("\n", -1);
+        for (var i = 0; i < lines.length; i++) {
+            if (i > 0) {
+                parts.add(new Doc.HardLine());
+            }
+            if (!lines[i].isEmpty()) {
+                parts.add(Docs.text(lines[i]));
+            }
+        }
     }
 
     private Doc wrapRootWithFileTrivia(CstArray cst, int rootIdx, Doc rootDoc) {
@@ -152,18 +242,6 @@ public final class V6Formatter {
             return rootDoc;
         }
         return Docs.concat(prefix, rootDoc, suffix);
-    }
-
-    private static Doc defaultFallback(CstArray cst, int nodeIdx, List<Doc> childDocs) {
-        if (cst.firstChildAt(nodeIdx) == CstArray.NO_NODE) {
-            var raw = cst.textAt(nodeIdx).toString();
-            return raw.isEmpty() ? Docs.empty() : Docs.text(raw);
-        }
-        if (childDocs.isEmpty()) {
-            var raw = cst.textAt(nodeIdx).toString();
-            return raw.isEmpty() ? Docs.empty() : Docs.text(raw);
-        }
-        return Docs.concat(childDocs);
     }
 
     /** Errors a v6 formatter may report. */
