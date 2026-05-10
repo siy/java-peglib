@@ -1,0 +1,248 @@
+package org.pragmatica.peg.v6.cst;
+
+import org.junit.jupiter.api.Test;
+import org.pragmatica.peg.v6.token.TokenArrayBuilder;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.pragmatica.peg.v6.token.TokenArray.FIRST_USER_KIND;
+
+class CstArrayBuilderTest {
+
+    private static final int KIND_ROOT = 0;
+    private static final int KIND_CHILD = 1;
+
+    private static final String[] RULE_TABLE = {"Root", "Child"};
+
+    private static final int TOK_X = FIRST_USER_KIND;
+
+    private static final String[] TOKEN_NAMES = {
+        "WHITESPACE", "LINE_COMMENT", "BLOCK_COMMENT", "X"
+    };
+
+    @Test
+    void sequentialAppend_producesCorrectSiblingChain() {
+        var b = builder("aaaa", 4);
+        var root = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        var c0 = b.beginNode(KIND_CHILD, 0, root);
+        b.endNode(c0, 0);
+        var c1 = b.beginNode(KIND_CHILD, 0, root);
+        b.endNode(c1, 0);
+        var c2 = b.beginNode(KIND_CHILD, 0, root);
+        b.endNode(c2, 0);
+        var c3 = b.beginNode(KIND_CHILD, 0, root);
+        b.endNode(c3, 0);
+        b.endNode(root, 0);
+        var cst = b.build(root);
+
+        assertThat(cst.firstChildAt(root)).isEqualTo(c0);
+        assertThat(cst.nextSiblingAt(c0)).isEqualTo(c1);
+        assertThat(cst.nextSiblingAt(c1)).isEqualTo(c2);
+        assertThat(cst.nextSiblingAt(c2)).isEqualTo(c3);
+        assertThat(cst.nextSiblingAt(c3)).isEqualTo(CstArray.NO_NODE);
+
+        assertThat(cst.children(root).boxed().toList()).containsExactly(c0, c1, c2, c3);
+    }
+
+    @Test
+    void multipleNestingLevels_parentChildLinksMaintained() {
+        var b = builder("xxxx", 4);
+        var a = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        var b1 = b.beginNode(KIND_CHILD, 0, a);
+        var c = b.beginNode(KIND_CHILD, 0, b1);
+        var d = b.beginNode(KIND_CHILD, 0, c);
+        b.endNode(d, 0);
+        b.endNode(c, 0);
+        b.endNode(b1, 0);
+        var b2 = b.beginNode(KIND_CHILD, 0, a);
+        b.endNode(b2, 0);
+        b.endNode(a, 0);
+        var cst = b.build(a);
+
+        assertThat(cst.parentAt(a)).isEqualTo(CstArray.NO_NODE);
+        assertThat(cst.parentAt(b1)).isEqualTo(a);
+        assertThat(cst.parentAt(c)).isEqualTo(b1);
+        assertThat(cst.parentAt(d)).isEqualTo(c);
+        assertThat(cst.parentAt(b2)).isEqualTo(a);
+
+        assertThat(cst.firstChildAt(a)).isEqualTo(b1);
+        assertThat(cst.firstChildAt(b1)).isEqualTo(c);
+        assertThat(cst.firstChildAt(c)).isEqualTo(d);
+        assertThat(cst.firstChildAt(d)).isEqualTo(CstArray.NO_NODE);
+
+        assertThat(cst.nextSiblingAt(b1)).isEqualTo(b2);
+        assertThat(cst.nextSiblingAt(b2)).isEqualTo(CstArray.NO_NODE);
+
+        assertThat(cst.descendants(a).boxed().toList()).containsExactly(a, b1, c, d, b2);
+    }
+
+    @Test
+    void buildIsSingleShot_secondBuildFails() {
+        var b = builder("a", 1);
+        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        b.endNode(n, 0);
+        b.build(n);
+
+        assertThatThrownBy(() -> b.build(n)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void mutationAfterBuild_fails() {
+        var b = builder("a", 1);
+        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        b.endNode(n, 0);
+        b.build(n);
+
+        assertThatThrownBy(() -> b.beginNode(KIND_CHILD, 0, n)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> b.endNode(n, 0)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> b.setFlag(n, CstArray.FLAG_ERROR)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void capacityGrowth_pastInitialNodeCapacity() {
+        var n = 500;
+        var input = "x".repeat(n);
+        var tb = new TokenArrayBuilder(input);
+        for (var i = 0; i < n; i++) {
+            tb.append(TOK_X, i, i + 1);
+        }
+        var tokens = tb.build(TOKEN_NAMES);
+
+        var b = new CstArrayBuilder(input, tokens, RULE_TABLE, 4);
+        var root = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        for (var i = 0; i < n; i++) {
+            var child = b.beginNode(KIND_CHILD, i, root);
+            b.endNode(child, i);
+        }
+        b.endNode(root, n - 1);
+        var cst = b.build(root);
+
+        assertThat(cst.nodeCount()).isEqualTo(n + 1);
+        assertThat(cst.children(root).count()).isEqualTo(n);
+        var dfs = cst.descendants(root).count();
+        assertThat(dfs).isEqualTo(n + 1);
+    }
+
+    @Test
+    void zeroChildCapacity_isAccepted() {
+        var input = "a";
+        var tb = new TokenArrayBuilder(input);
+        tb.append(TOK_X, 0, 1);
+        var tokens = tb.build(TOKEN_NAMES);
+
+        var b = new CstArrayBuilder(input, tokens, RULE_TABLE, 0);
+        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        b.endNode(n, 0);
+        var cst = b.build(n);
+
+        assertThat(cst.nodeCount()).isEqualTo(1);
+    }
+
+    @Test
+    void beginNode_validation_rejectsBadInputs() {
+        var b = builder("a", 1);
+
+        assertThatThrownBy(() -> b.beginNode(-1, 0, CstArray.NO_NODE))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> b.beginNode(KIND_ROOT, -1, CstArray.NO_NODE))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> b.beginNode(KIND_ROOT, 0, 99))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void endNode_validation_rejectsBadInputs() {
+        var b = builder("aa", 2);
+        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+
+        assertThatThrownBy(() -> b.endNode(99, 0))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> b.endNode(n, -1))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void build_validation_rejectsBadRootIndex() {
+        var b = builder("a", 1);
+        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        b.endNode(n, 0);
+
+        assertThatThrownBy(() -> b.build(99)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> b.build(-1)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void emptyBuilder_buildsEmptyCstWithNoNodeRoot() {
+        var input = "";
+        var tokens = new TokenArrayBuilder(input).build(TOKEN_NAMES);
+        var b = new CstArrayBuilder(input, tokens, RULE_TABLE);
+
+        var cst = b.build(CstArray.NO_NODE);
+
+        assertThat(cst.nodeCount()).isZero();
+        assertThat(cst.rootIndex()).isEqualTo(CstArray.NO_NODE);
+        assertThat(cst.reconstruct()).isEmpty();
+    }
+
+    @Test
+    void emptyBuilder_rootIndexNotNoNode_rejected() {
+        var input = "";
+        var tokens = new TokenArrayBuilder(input).build(TOKEN_NAMES);
+        var b = new CstArrayBuilder(input, tokens, RULE_TABLE);
+
+        assertThatThrownBy(() -> b.build(0)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void currentNodeCount_reflectsAllocations() {
+        var b = builder("aaa", 3);
+        assertThat(b.currentNodeCount()).isZero();
+
+        var root = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        assertThat(b.currentNodeCount()).isEqualTo(1);
+
+        var child = b.beginNode(KIND_CHILD, 0, root);
+        assertThat(b.currentNodeCount()).isEqualTo(2);
+
+        b.endNode(child, 0);
+        b.endNode(root, 0);
+        assertThat(b.currentNodeCount()).isEqualTo(2);
+    }
+
+    @Test
+    void setFlag_orsBitsTogether() {
+        var b = builder("a", 1);
+        var n = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        b.endNode(n, 0);
+        b.setFlag(n, CstArray.FLAG_ERROR);
+        b.setFlag(n, 4);
+        var cst = b.build(n);
+
+        assertThat(cst.flagsAt(n)).isEqualTo(CstArray.FLAG_ERROR | 4);
+        assertThat(cst.isError(n)).isTrue();
+    }
+
+    @Test
+    void constructor_validatesArguments() {
+        var input = "a";
+        var tokens = new TokenArrayBuilder(input).build(TOKEN_NAMES);
+
+        assertThatThrownBy(() -> new CstArrayBuilder(null, tokens, RULE_TABLE))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CstArrayBuilder(input, null, RULE_TABLE))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CstArrayBuilder(input, tokens, null))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CstArrayBuilder(input, tokens, RULE_TABLE, -1))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private CstArrayBuilder builder(String input, int tokenCount) {
+        var tb = new TokenArrayBuilder(input);
+        for (var i = 0; i < tokenCount; i++) {
+            tb.append(TOK_X, i, i + 1);
+        }
+        var tokens = tb.build(TOKEN_NAMES);
+        return new CstArrayBuilder(input, tokens, RULE_TABLE);
+    }
+}
