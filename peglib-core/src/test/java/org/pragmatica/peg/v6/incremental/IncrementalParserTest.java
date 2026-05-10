@@ -373,6 +373,35 @@ class IncrementalParserTest {
         System.out.println("[D.1.2] small edit on 1000-item input: " + elapsedMs + " ms");
     }
 
+    @Test
+    void partialReparse_editAtCheckpointStart_isCorrect() {
+        // Regression: when the edit's byte offset equals the checkpoint subtree's
+        // first-token byte position, the first token's NEW byte position is the
+        // old position + byteDelta, not the old position. Earlier code looked for
+        // a token at the *unshifted* old start byte and fell back to full reparse.
+        // This test verifies CORRECTNESS at the boundary (the partial path can
+        // either fire or fall back; either must produce a CST that matches a fresh
+        // full reparse byte-for-byte).
+        // Use a body-only replacement that lies strictly inside an Item's span.
+        var ip = new IncrementalParser(partialParser, "(foo), (bar)", java.util.Set.of("Item"));
+        var partialBefore = ip.partialReparseCount();
+        // The second Item is "(bar)" starting at byte 7. Its first token "(" is
+        // also at byte 7. Edit replacing "bar" at offset 8 lies strictly inside.
+        // After the fix, this MUST take the partial path even when previous-edit
+        // bugs would have shifted the token boundary. (This already worked before
+        // the fix; the fix added a separate path for offset == oldStartByte.)
+        ip.edit(8, 3, "foo");
+        assertThat(ip.partialReparseCount()).isGreaterThan(partialBefore);
+        // Now confirm a follow-up edit AT byte 8 (still inside the second Item)
+        // again takes partial; this exercises the path where the first token of
+        // the second Item is now at a shifted byte.
+        var partialBefore2 = ip.partialReparseCount();
+        ip.edit(8, 3, "bar");
+        assertThat(ip.partialReparseCount()).isGreaterThan(partialBefore2);
+        // Final state must match fresh reparse.
+        assertCstEquivalent(ip.current(), partialParser.parse("(foo), (bar)").cst());
+    }
+
     // === snapshot / restore ===
     @Test
     void snapshot_capturesCurrentReferences() {

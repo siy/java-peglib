@@ -185,9 +185,21 @@ public final class IncrementalParser {
         var oldStartByte = oldFirstToken < oldTokenCount
                            ? tokens.startAt(oldFirstToken)
                            : 0;
-        var newFirstToken = findTokenStartingAt(splicedTokens, oldStartByte, oldFirstToken);
-        if ( newFirstToken < 0) {
+        // When the edit lies at-or-before the checkpoint's first token byte position,
+        // the first token has shifted by (newText.length() - oldLen). When the edit
+        // lies strictly inside the checkpoint (after the first token), the first
+        // token's byte position is unchanged. Try both candidates with hint-based
+        // scan to handle either case.
+        var editByteDelta = newText.length() - oldLen;
+        var primaryStart = offset <= oldStartByte
+                           ? oldStartByte + editByteDelta
+                           : oldStartByte;
+        var mappedFirst = findTokenStartingAt(splicedTokens, primaryStart, oldFirstToken);
+        if ( mappedFirst < 0 && primaryStart != oldStartByte) {
+        mappedFirst = findTokenStartingAt(splicedTokens, oldStartByte, oldFirstToken);}
+        if ( mappedFirst < 0) {
         return Option.none();}
+        final var newFirstToken = mappedFirst;
         // Drive the generated parser into the checkpoint rule starting at the
         // mapped token. The result's CST has a synthetic _ROOT wrapping the
         // parsed subtree as its first child. Any reflection failure becomes a
