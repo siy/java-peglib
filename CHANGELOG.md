@@ -17,9 +17,25 @@ Implementation phasing (Phase A through F per spec §7) is in progress.
 
 ### Added
 
+- v6 lexer foundation: rule classifier (LEXER/PARSER/MIXED), Thompson NFA → subset-construction DFA, TokenArray, GLexer codegen + JDK Compiler API loader. Parallel package `org.pragmatica.peg.v6.*` (0.5.x untouched).
+- v6 token granularity: post-DFA keyword resolution (`!Keyword Body` skip-prefix pattern). Java25 corpus ANY_CHAR fallback dropped from 87.9% to 3.20%.
+- v6 lexer-rule aliasing: structural literal/literal-choice LEXER rules alias to inline-literal kinds. Restores `Modifier`, `ClassKW`, `EnumKW`, etc. that DFA cannot compile due to `!CharClass` word boundary.
+- v6 lexer Choice partial-absorption fallback + KMP-driven delimited-block DFA: handles `StringLit` (regular and triple-quoted) and similar `Literal-Body-Literal` patterns previously dropped from the DFA.
+- v6 CST: flat `int[]` data structure (8 ints/node, ~32 bytes vs 80-200 in 0.5.x), sealed `CstNode` views (Branch/Leaf/Error), positional trivia helpers, lazy `IntStream` walk.
+- v6 ParseResult + Rust-style Diagnostic.
+- v6 parser codegen (GParser): recursive descent over TokenArray, FIRST-set Choice dispatch via switch, panic-mode error recovery with synthetic `_ROOT` wrapper.
+- v6 visitor codegen (GVisitor<T>): per-rule visit methods + framework (`visit`, `visitChildren`, `defaultResult`, `aggregateResult`).
+- v6 PegParser entry point: `fromGrammar(String)` runs Grammar→Classify→DFA→generate-and-compile-lexer→generate-and-compile-parser; cached in ConcurrentHashMap by grammar text; AtomicLong class-name uniquification; cold ~261-919ms, warm 0-2µs.
+- v6 incremental: TokenArray.spliceLex (windowed re-lex with ±1 token expansion), CstArray.findCheckpointAncestor + spliceSubtree, IncrementalParser wrapper.
+- JMH benchmarks for v6 parse path (warm-parse + cold-compile) under `peglib-core/src/jmh/java/org/pragmatica/peg/v6/perf/`.
+
 ### Changed
 
+- Java25 grammar: `>>` and `>>>` shift operators replaced with parser rules `RShift <- '>' '>'` and `URShift <- '>' '>' '>'`. Prevents lexer from fusing two `>` characters into one shift token, which broke nested generics like `List<Map<String, Integer>>`.
+
 ### Fixed
+
+- Java25 corpus: 19/20 fixtures (`format-examples/`) parse cleanly via `PegParser.fromGrammar(java25.peg).parse(...)`; remaining 1 (`Annotations.java`) recovers with diagnostics due to annotation-in-body usage (deferred to a future fix).
 
 ### Removed
 
