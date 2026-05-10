@@ -1,4 +1,4 @@
-# total rules hit: 101 / total rules in grammar: 132 (coverage: 76.5%)
+# total rules hit: 104 / total rules in grammar: 138 (coverage: 75.4%)
 Additive	3110	21
 AnnotatedTypeName	1228	20
 Annotation	47	8
@@ -41,6 +41,7 @@ IfKW	124	6
 ImplementsClause	12	4
 ImportDecl	90	15
 InterfaceKW	65	11
+LShiftAssign	1	1
 LambdaParam	8	1
 LambdaParams	81	7
 LocalVarType	389	14
@@ -63,6 +64,7 @@ Postfix	151	11
 PrimType	209	20
 Primary	3653	21
 QualifiedName	1421	22
+RShiftAssign	1	1
 RecordBody	53	9
 RecordComp	104	9
 RecordComponents	82	9
@@ -92,6 +94,7 @@ TypeKind	30	21
 TypeList	23	6
 TypeParam	22	4
 TypeParams	16	4
+URShiftAssign	1	1
 Unary	3625	21
 VarDecl	389	18
 VarDecls	384	18
@@ -99,4 +102,4 @@ VarInit	356	15
 WhenKW	3	1
 WhileKW	2	1
 YieldKW	4	2
-literal	12114	22
+literal	12121	22

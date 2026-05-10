@@ -133,7 +133,7 @@ PatternList <- Pattern (',' Pattern)*
 Guard <- WhenKW Expr
 
 Expr <- Assignment
-Assignment <- Ternary (('=' / '>>>=' / '>>=' / '<<=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Assignment)?
+Assignment <- Ternary ((URShiftAssign / RShiftAssign / LShiftAssign / '=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Assignment)?
 Ternary <- LogOr ('?' Expr ':' Ternary)?
 LogOr <- LogAnd ('||' LogAnd)*
 LogAnd <- BitOr ('&&' BitOr)*
@@ -142,7 +142,16 @@ BitXor <- BitAnd (!'^=' '^' BitAnd)*
 BitAnd <- Equality (!'&&' !'&=' '&' Equality)*
 Equality <- Relational (('==' / '!=') Relational)*
 Relational <- Shift (('<=' / '>=' / '<' / '>') Shift / 'instanceof' (Pattern / Type))?
-Shift <- Additive ((!'<<=' '<<' / !'>>>=' '>>>' / !'>>=' !'>>>=' '>>') Additive)*
+Shift <- Additive ((URShift / LShift / RShift) Additive)*
+# Shift / shift-assignment helpers (split into single '<' / '>' / '=' tokens so that
+# the lexer never produces a fused '>>' token. This lets nested generics like
+# List<Map<String, Integer>> parse correctly while still recognising shift ops.)
+URShift <- '>' '>' '>' !'='
+RShift <- '>' '>' !'>' !'='
+LShift <- '<' '<' !'='
+URShiftAssign <- '>' '>' '>' '='
+RShiftAssign <- '>' '>' '='
+LShiftAssign <- '<' '<' '='
 Additive <- Multiplicative ((!'+=' '+' / !'-=' !'->' '-') Multiplicative)*
 Multiplicative <- Unary ((!'*=' '*' / !'/=' '/' / !'%=' '%') Unary)*
 Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
