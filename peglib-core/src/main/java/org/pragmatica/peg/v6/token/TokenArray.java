@@ -34,6 +34,17 @@ public final class TokenArray {
     private final int count;
     private final String[] kindNameTable;
 
+    /**
+     * Precomputed lookup table for {@link #nextNonTrivia(int)}. {@code nextNonTriviaTable[i]}
+     * is the smallest {@code j >= i} such that {@code j == count} or {@code kinds[j]} is a
+     * non-trivia kind. Computed in O(n) at construction; lookup is O(1). Trades 4 bytes per
+     * token for eliminating a hot-loop linear scan past trivia runs.
+     *
+     * <p>Length is {@code count + 1}; {@code nextNonTriviaTable[count] == count} acts as a
+     * sentinel so callers passing {@code from == count} get a defined answer.
+     */
+    private final int[] nextNonTriviaTable;
+
     TokenArray(String input, int[] starts, int[] ends, int[] kinds, int count, String[] kindNameTable) {
         this.input = input;
         this.starts = starts;
@@ -41,6 +52,16 @@ public final class TokenArray {
         this.kinds = kinds;
         this.count = count;
         this.kindNameTable = kindNameTable;
+        this.nextNonTriviaTable = computeNextNonTrivia(kinds, count);
+    }
+
+    private static int[] computeNextNonTrivia(int[] kinds, int count) {
+        var table = new int[count + 1];
+        table[count] = count;
+        for (var i = count - 1; i >= 0; i-- ) {
+            table[i] = isTriviaKind(kinds[i]) ? table[i + 1] : i;
+        }
+        return table;
     }
 
     public int count() {
@@ -76,11 +97,10 @@ public final class TokenArray {
         if (from < 0) {
             throw new IndexOutOfBoundsException("from=" + from + " < 0");
         }
-        var i = from;
-        while (i < count && isTriviaKind(kinds[i])) {
-            i++ ;
+        if (from >= count) {
+            return count;
         }
-        return i;
+        return nextNonTriviaTable[from];
     }
 
     public String kindName(int i) {

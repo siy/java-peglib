@@ -256,6 +256,63 @@ class TokenArrayTest {
     }
 
     @Test
+    void nextNonTrivia_precomputedTable_matchesLinearScanReference() {
+        // Mixed trivia/non-trivia layout including consecutive trivia runs.
+        var input = "  ab // c\n  42  ";
+        var b = new TokenArrayBuilder(input);
+        b.append(KIND_WHITESPACE, 0, 2);
+        b.append(IDENT, 2, 4);
+        b.append(KIND_WHITESPACE, 4, 5);
+        b.append(KIND_LINE_COMMENT, 5, 9);
+        b.append(KIND_WHITESPACE, 9, 11);
+        b.append(NUMBER, 11, 13);
+        b.append(KIND_WHITESPACE, 13, 15);
+        b.append(KIND_BLOCK_COMMENT, 15, 15);
+        var array = b.build(DEFAULT_NAMES);
+        // Reference: linear scan past trivia.
+        for (var i = 0; i <= array.count(); i++ ) {
+            var expected = i;
+            while (expected < array.count() && array.isTrivia(expected)) {
+                expected++ ;
+            }
+            assertThat(array.nextNonTrivia(i))
+            .as("nextNonTrivia(%d)", i)
+            .isEqualTo(expected);
+        }
+    }
+
+    @Test
+    void nextNonTrivia_atCount_returnsCount() {
+        var b = new TokenArrayBuilder("abx");
+        b.append(IDENT, 0, 2);
+        b.append(KIND_WHITESPACE, 2, 3);
+        var array = b.build(DEFAULT_NAMES);
+        assertThat(array.nextNonTrivia(array.count()))
+        .isEqualTo(array.count());
+    }
+
+    @Test
+    void nextNonTrivia_atLastIndex_whenLastIsTrivia_returnsCount() {
+        var b = new TokenArrayBuilder("ab ");
+        b.append(IDENT, 0, 2);
+        b.append(KIND_WHITESPACE, 2, 3);
+        var array = b.build(DEFAULT_NAMES);
+        assertThat(array.nextNonTrivia(array.count() - 1))
+        .isEqualTo(array.count());
+    }
+
+    @Test
+    void nextNonTrivia_atLastIndex_whenLastIsNonTrivia_returnsLastIndex() {
+        var b = new TokenArrayBuilder(" ab");
+        b.append(KIND_WHITESPACE, 0, 1);
+        b.append(IDENT, 1, 3);
+        var array = b.build(DEFAULT_NAMES);
+        var last = array.count() - 1;
+        assertThat(array.nextNonTrivia(last))
+        .isEqualTo(last);
+    }
+
+    @Test
     void reservedKindConstants_haveExpectedValues() {
         assertThat(KIND_WHITESPACE)
         .isZero();

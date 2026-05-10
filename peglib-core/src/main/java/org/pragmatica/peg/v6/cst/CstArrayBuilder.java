@@ -24,6 +24,15 @@ public final class CstArrayBuilder {
     private int nodeCount;
     private int[] lastChild;
     private int lastChildCount;
+    /**
+     * Parallel array sized to {@code nodes / NODE_STRIDE}. {@code lastChildBefore[i]}
+     * stores the value of {@code lastChild[parentOf(i)]} BEFORE node {@code i} was
+     * appended (i.e., the would-be previous sibling, or {@link CstArray#NO_NODE} if
+     * {@code i} is its parent's first child or has no parent). Used as an undo log
+     * by {@link #truncate(int)} so rollback cost is O(dropped) rather than
+     * O(surviving).
+     */
+    private int[] lastChildBefore;
     private boolean built;
 
     public CstArrayBuilder(String input, TokenArray tokens, String[] ruleTable) {
@@ -50,8 +59,12 @@ public final class CstArrayBuilder {
         this.ruleTable = ruleTable;
         this.nodes = new int[cap * CstArray.NODE_STRIDE];
         this.nodeCount = 0;
-        this.lastChild = new int[16];
+        // Pre-size lastChild generously so ensureLastChildCapacity rarely fires
+        // in steady state. Quarter of node capacity is a reasonable upper bound
+        // on distinct parent indices touched per backtrack window.
+        this.lastChild = new int[Math.max(64, cap / 4)];
         this.lastChildCount = 0;
+        this.lastChildBefore = new int[cap];
         this.built = false;
     }
 
@@ -86,6 +99,14 @@ public final class CstArrayBuilder {
         nodes[base + 5] = CstArray.NO_NODE;
         nodes[base + 6] = 0;
         nodes[base + 7] = 0;
+        // Record the would-be previous sibling BEFORE linkAsChildOf overwrites
+        // lastChild[parent]. truncate() consults this slot during rollback to
+        // restore lastChild[parent] in O(dropped) time.
+        if (parent != CstArray.NO_NODE && parent < lastChildCount) {
+            lastChildBefore[newIdx] = lastChild[parent];
+        }else {
+            lastChildBefore[newIdx] = CstArray.NO_NODE;
+        }
         nodeCount++ ;
         if (parent != CstArray.NO_NODE) {
             linkAsChildOf(parent, newIdx);
@@ -135,8 +156,12 @@ public final class CstArrayBuilder {
      * parser: a call site saves {@link #currentNodeCount()} before attempting an
      * alternative and calls this method to roll back partial progress on failure.
      *
-     * <p>The {@code lastChild} table is rebuilt from the surviving nodes so a parent
-     * whose last child was truncated correctly re-links the next appended child.
+     * <p>Uses a parallel undo log {@link #lastChildBefore} populated by
+     * {@link #beginNode}. For each dropped index {@code i} we restore
+     * {@code lastChild[parentOf(i)]} to {@code lastChildBefore[i]} and clear the
+     * sibling/firstChild link that pointed to {@code i}. Cost is O(dropped),
+     * independent of the size of the surviving prefix — which dominates time when
+     * the parser performs many shallow rollbacks deep into the input.
      *
      * @throws IllegalArgumentException when {@code newCount} is outside
      *     {@code [0, currentNodeCount()]}
@@ -150,47 +175,42 @@ public final class CstArrayBuilder {
         if (newCount == nodeCount) {
             return;
         }
-        // Drop the trailing nodes wholesale; rebuild lastChild from the surviving
-        // nodes. The cheapest correct approach is to replay the parent links that
-        // remain. Parents themselves are at indices < newCount so the loop is
-        // bounded by the surviving range.
-        nodeCount = newCount;
-        for (var p = 0; p < lastChildCount; p++ ) {
-            lastChild[p] = CstArray.NO_NODE;
-        }
-        lastChildCount = 0;
-        if (newCount == 0) {
-            return;
-        }
-        // Walk surviving nodes and reconstruct lastChild + repair stale
-        // firstChild/nextSibling pointers that referenced truncated nodes.
-        for (var i = 0; i < newCount; i++ ) {
-            var firstChildSlot = i * CstArray.NODE_STRIDE + 4;
-            var firstChild = nodes[firstChildSlot];
-            if (firstChild != CstArray.NO_NODE && firstChild >= newCount) {
-                nodes[firstChildSlot] = CstArray.NO_NODE;
-            }
-            var nextSibSlot = i * CstArray.NODE_STRIDE + 5;
-            var nextSib = nodes[nextSibSlot];
-            if (nextSib != CstArray.NO_NODE && nextSib >= newCount) {
-                nodes[nextSibSlot] = CstArray.NO_NODE;
-            }
-        }
-        // Rebuild lastChild table from surviving sibling chains.
-        for (var i = 0; i < newCount; i++ ) {
-            var parent = nodes[i * CstArray.NODE_STRIDE];
+        // Walk the dropped range backward, undoing the link that beginNode
+        // recorded for each node. Two writes per dropped node:
+        //   1. Restore lastChild[parent] to the pre-link value.
+        //   2. Clear the slot that pointed to this node (parent's firstChild
+        //      when prev == NO_NODE, otherwise prev's nextSibling).
+        // Multi-sibling drops resolve correctly: processing reverse order
+        // means the LAST iteration for any parent restores the value that
+        // was current before the FIRST (lowest-index) of that parent's
+        // dropped children was added.
+        for (var i = nodeCount - 1; i >= newCount; i-- ) {
+            var base = i * CstArray.NODE_STRIDE;
+            var parent = nodes[base];
             if (parent == CstArray.NO_NODE) {
                 continue;
             }
-            ensureLastChildCapacity(parent + 1);
-            if (lastChildCount < parent + 1) {
-                for (var j = lastChildCount; j < parent + 1; j++ ) {
-                    lastChild[j] = CstArray.NO_NODE;
-                }
-                lastChildCount = parent + 1;
+            var prev = lastChildBefore[i];
+            if (prev == CstArray.NO_NODE) {
+                nodes[parent * CstArray.NODE_STRIDE + 4] = CstArray.NO_NODE;
+            }else {
+                nodes[prev * CstArray.NODE_STRIDE + 5] = CstArray.NO_NODE;
             }
-            // Track the last child seen so far for each parent.
-            lastChild[parent] = i;
+            // Note: parent may itself be in the dropped range (>= newCount).
+            // The write into lastChild[parent] is safe because beginNode
+            // ensured lastChild has capacity through any parent it ever saw,
+            // and writing to a soon-discarded slot is harmless.
+            lastChild[parent] = prev;
+        }
+        nodeCount = newCount;
+        // Clip lastChildCount so that future linkAsChildOf calls with a parent
+        // index in [newCount, oldLastChildCount) take the init path and reset
+        // the slot to NO_NODE. The back-walk above wrote restored values into
+        // lastChild for parents that were themselves dropped; those writes are
+        // stale relative to any node that may be re-allocated at the same
+        // index, and clipping forces correct re-initialisation.
+        if (lastChildCount > newCount) {
+            lastChildCount = newCount;
         }
     }
 
@@ -210,6 +230,7 @@ public final class CstArrayBuilder {
         built = true;
         nodes = null;
         lastChild = null;
+        lastChildBefore = null;
         return new CstArray(input, tokens, trimmed, nodeCount, ruleTableCopy, rootIndex);
     }
 
@@ -243,6 +264,10 @@ public final class CstArrayBuilder {
             }
         }
         nodes = Arrays.copyOf(nodes, newCap);
+        var nodeCap = newCap / CstArray.NODE_STRIDE;
+        if (lastChildBefore.length < nodeCap) {
+            lastChildBefore = Arrays.copyOf(lastChildBefore, nodeCap);
+        }
     }
 
     private void ensureLastChildCapacity(int required) {

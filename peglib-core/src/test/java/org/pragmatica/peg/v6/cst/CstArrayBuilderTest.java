@@ -243,6 +243,131 @@ class CstArrayBuilderTest {
     }
 
     @Test
+    void truncate_dropsTrailingSiblings_lastSurvivingHasNoNextSibling() {
+        var b = builder("aaaaa", 5);
+        var root = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        var c0 = b.beginNode(KIND_CHILD, 0, root);
+        b.endNode(c0, 0);
+        var c1 = b.beginNode(KIND_CHILD, 1, root);
+        b.endNode(c1, 1);
+        var savepoint = b.currentNodeCount();
+        var c2 = b.beginNode(KIND_CHILD, 2, root);
+        b.endNode(c2, 2);
+        var c3 = b.beginNode(KIND_CHILD, 3, root);
+        b.endNode(c3, 3);
+        var c4 = b.beginNode(KIND_CHILD, 4, root);
+        b.endNode(c4, 4);
+        b.truncate(savepoint);
+        assertThat(b.currentNodeCount())
+        .isEqualTo(savepoint);
+        var c5 = b.beginNode(KIND_CHILD, 2, root);
+        b.endNode(c5, 2);
+        b.endNode(root, 2);
+        var cst = b.build(root);
+        assertThat(cst.nodeCount())
+        .isEqualTo(4);
+        assertThat(cst.children(root)
+                      .boxed()
+                      .toList())
+        .containsExactly(c0, c1, c5);
+        assertThat(cst.nextSiblingAt(c5))
+        .isEqualTo(CstArray.NO_NODE);
+        assertThat(cst.firstChildAt(root))
+        .isEqualTo(c0);
+    }
+
+    @Test
+    void truncate_dropsAllChildrenOfParent_firstChildResetsToNoNode() {
+        var b = builder("aaa", 3);
+        var root = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        var savepoint = b.currentNodeCount();
+        var c0 = b.beginNode(KIND_CHILD, 0, root);
+        b.endNode(c0, 0);
+        var c1 = b.beginNode(KIND_CHILD, 1, root);
+        b.endNode(c1, 1);
+        b.truncate(savepoint);
+        assertThat(b.currentNodeCount())
+        .isEqualTo(savepoint);
+        b.endNode(root, 0);
+        var cst = b.build(root);
+        assertThat(cst.nodeCount())
+        .isEqualTo(1);
+        assertThat(cst.firstChildAt(root))
+        .isEqualTo(CstArray.NO_NODE);
+        assertThat(cst.children(root)
+                      .count())
+        .isZero();
+    }
+
+    @Test
+    void truncate_nestedSubtree_multipleLevelsRestored() {
+        var b = builder("xxxxxxxx", 8);
+        var root = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        var a = b.beginNode(KIND_CHILD, 0, root);
+        var aChild = b.beginNode(KIND_CHILD, 0, a);
+        b.endNode(aChild, 0);
+        b.endNode(a, 0);
+        var savepoint = b.currentNodeCount();
+        var b1 = b.beginNode(KIND_CHILD, 1, root);
+        var b1c0 = b.beginNode(KIND_CHILD, 1, b1);
+        b.endNode(b1c0, 1);
+        var b1c1 = b.beginNode(KIND_CHILD, 2, b1);
+        var b1c1Deep = b.beginNode(KIND_CHILD, 2, b1c1);
+        b.endNode(b1c1Deep, 2);
+        b.endNode(b1c1, 2);
+        b.endNode(b1, 2);
+        b.truncate(savepoint);
+        assertThat(b.currentNodeCount())
+        .isEqualTo(savepoint);
+        var c = b.beginNode(KIND_CHILD, 1, root);
+        b.endNode(c, 1);
+        b.endNode(root, 1);
+        var cst = b.build(root);
+        assertThat(cst.nodeCount())
+        .isEqualTo(savepoint + 1);
+        assertThat(cst.children(root)
+                      .boxed()
+                      .toList())
+        .containsExactly(a, c);
+        assertThat(cst.nextSiblingAt(a))
+        .isEqualTo(c);
+        assertThat(cst.nextSiblingAt(c))
+        .isEqualTo(CstArray.NO_NODE);
+        assertThat(cst.firstChildAt(a))
+        .isEqualTo(aChild);
+    }
+
+    @Test
+    void truncate_repeatedRollbackToSameSavepoint_consistent() {
+        var b = builder("aaaaaa", 6);
+        var root = b.beginNode(KIND_ROOT, 0, CstArray.NO_NODE);
+        var c0 = b.beginNode(KIND_CHILD, 0, root);
+        b.endNode(c0, 0);
+        var savepoint = b.currentNodeCount();
+        for (var attempt = 0; attempt < 4; attempt++ ) {
+            var c1 = b.beginNode(KIND_CHILD, attempt + 1, root);
+            var c1Deep = b.beginNode(KIND_CHILD, attempt + 1, c1);
+            b.endNode(c1Deep, attempt + 1);
+            b.endNode(c1, attempt + 1);
+            b.truncate(savepoint);
+            assertThat(b.currentNodeCount())
+            .isEqualTo(savepoint);
+        }
+        var c1 = b.beginNode(KIND_CHILD, 1, root);
+        b.endNode(c1, 1);
+        b.endNode(root, 1);
+        var cst = b.build(root);
+        assertThat(cst.children(root)
+                      .boxed()
+                      .toList())
+        .containsExactly(c0, c1);
+        assertThat(cst.nextSiblingAt(c1))
+        .isEqualTo(CstArray.NO_NODE);
+        assertThat(cst.firstChildAt(c0))
+        .isEqualTo(CstArray.NO_NODE);
+    }
+
+    @Test
     void constructor_validatesArguments() {
         var input = "a";
         var tokens = new TokenArrayBuilder(input).build(TOKEN_NAMES);
