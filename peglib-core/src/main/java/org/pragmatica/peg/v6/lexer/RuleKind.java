@@ -1,5 +1,4 @@
 package org.pragmatica.peg.v6.lexer;
-
 /**
  * Classification of a grammar rule for the 0.6.0 lex-then-parse pipeline.
  *

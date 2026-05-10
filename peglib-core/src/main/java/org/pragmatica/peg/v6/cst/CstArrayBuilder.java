@@ -1,8 +1,8 @@
 package org.pragmatica.peg.v6.cst;
 
-import java.util.Arrays;
-
 import org.pragmatica.peg.v6.token.TokenArray;
+
+import java.util.Arrays;
 
 /**
  * Append-style mutable builder for {@link CstArray}. Single-shot: one call to
@@ -14,7 +14,6 @@ import org.pragmatica.peg.v6.token.TokenArray;
  * parent is appended, the previous sibling's {@code nextSibling} slot is patched.
  */
 public final class CstArrayBuilder {
-
     private static final int DEFAULT_INITIAL_NODE_CAPACITY = 64;
 
     private final String input;
@@ -43,7 +42,7 @@ public final class CstArrayBuilder {
         }
         if (initialNodeCapacity < 0) {
             throw new IllegalArgumentException(
-                "initialNodeCapacity must be >= 0, got " + initialNodeCapacity);
+            "initialNodeCapacity must be >= 0, got " + initialNodeCapacity);
         }
         var cap = Math.max(initialNodeCapacity, 1);
         this.input = input;
@@ -74,9 +73,8 @@ public final class CstArrayBuilder {
         }
         if (parent != CstArray.NO_NODE && (parent < 0 || parent >= nodeCount)) {
             throw new IllegalArgumentException(
-                "parent=" + parent + " out of range [0, " + nodeCount + ") or != NO_NODE");
+            "parent=" + parent + " out of range [0, " + nodeCount + ") or != NO_NODE");
         }
-
         var newIdx = nodeCount;
         ensureNodeCapacity(newIdx + 1);
         var base = newIdx * CstArray.NODE_STRIDE;
@@ -88,8 +86,7 @@ public final class CstArrayBuilder {
         nodes[base + 5] = CstArray.NO_NODE;
         nodes[base + 6] = 0;
         nodes[base + 7] = 0;
-        nodeCount++;
-
+        nodeCount++ ;
         if (parent != CstArray.NO_NODE) {
             linkAsChildOf(parent, newIdx);
         }
@@ -106,7 +103,7 @@ public final class CstArrayBuilder {
         checkNotBuilt();
         if (nodeIdx < 0 || nodeIdx >= nodeCount) {
             throw new IllegalArgumentException(
-                "nodeIdx=" + nodeIdx + " out of range [0, " + nodeCount + ")");
+            "nodeIdx=" + nodeIdx + " out of range [0, " + nodeCount + ")");
         }
         if (lastToken < 0) {
             throw new IllegalArgumentException("lastToken must be >= 0, got " + lastToken);
@@ -114,7 +111,7 @@ public final class CstArrayBuilder {
         var first = nodes[nodeIdx * CstArray.NODE_STRIDE + 2];
         if (lastToken < first) {
             throw new IllegalArgumentException(
-                "lastToken=" + lastToken + " < firstToken=" + first + " for node " + nodeIdx);
+            "lastToken=" + lastToken + " < firstToken=" + first + " for node " + nodeIdx);
         }
         nodes[nodeIdx * CstArray.NODE_STRIDE + 3] = lastToken;
     }
@@ -123,7 +120,7 @@ public final class CstArrayBuilder {
         checkNotBuilt();
         if (nodeIdx < 0 || nodeIdx >= nodeCount) {
             throw new IllegalArgumentException(
-                "nodeIdx=" + nodeIdx + " out of range [0, " + nodeCount + ")");
+            "nodeIdx=" + nodeIdx + " out of range [0, " + nodeCount + ")");
         }
         nodes[nodeIdx * CstArray.NODE_STRIDE + 6] |= flag;
     }
@@ -148,7 +145,7 @@ public final class CstArrayBuilder {
         checkNotBuilt();
         if (newCount < 0 || newCount > nodeCount) {
             throw new IllegalArgumentException(
-                "newCount=" + newCount + " out of range [0, " + nodeCount + "]");
+            "newCount=" + newCount + " out of range [0, " + nodeCount + "]");
         }
         if (newCount == nodeCount) {
             return;
@@ -158,7 +155,7 @@ public final class CstArrayBuilder {
         // remain. Parents themselves are at indices < newCount so the loop is
         // bounded by the surviving range.
         nodeCount = newCount;
-        for (var p = 0; p < lastChildCount; p++) {
+        for (var p = 0; p < lastChildCount; p++ ) {
             lastChild[p] = CstArray.NO_NODE;
         }
         lastChildCount = 0;
@@ -167,7 +164,7 @@ public final class CstArrayBuilder {
         }
         // Walk surviving nodes and reconstruct lastChild + repair stale
         // firstChild/nextSibling pointers that referenced truncated nodes.
-        for (var i = 0; i < newCount; i++) {
+        for (var i = 0; i < newCount; i++ ) {
             var firstChildSlot = i * CstArray.NODE_STRIDE + 4;
             var firstChild = nodes[firstChildSlot];
             if (firstChild != CstArray.NO_NODE && firstChild >= newCount) {
@@ -180,14 +177,14 @@ public final class CstArrayBuilder {
             }
         }
         // Rebuild lastChild table from surviving sibling chains.
-        for (var i = 0; i < newCount; i++) {
+        for (var i = 0; i < newCount; i++ ) {
             var parent = nodes[i * CstArray.NODE_STRIDE];
             if (parent == CstArray.NO_NODE) {
                 continue;
             }
             ensureLastChildCapacity(parent + 1);
             if (lastChildCount < parent + 1) {
-                for (var j = lastChildCount; j < parent + 1; j++) {
+                for (var j = lastChildCount; j < parent + 1; j++ ) {
                     lastChild[j] = CstArray.NO_NODE;
                 }
                 lastChildCount = parent + 1;
@@ -202,11 +199,11 @@ public final class CstArrayBuilder {
         if (nodeCount == 0) {
             if (rootIndex != CstArray.NO_NODE) {
                 throw new IllegalArgumentException(
-                    "rootIndex must be NO_NODE for empty builder, got " + rootIndex);
+                "rootIndex must be NO_NODE for empty builder, got " + rootIndex);
             }
-        } else if (rootIndex < 0 || rootIndex >= nodeCount) {
+        }else if (rootIndex < 0 || rootIndex >= nodeCount) {
             throw new IllegalArgumentException(
-                "rootIndex=" + rootIndex + " out of range [0, " + nodeCount + ")");
+            "rootIndex=" + rootIndex + " out of range [0, " + nodeCount + ")");
         }
         var trimmed = Arrays.copyOf(nodes, nodeCount * CstArray.NODE_STRIDE);
         var ruleTableCopy = ruleTable.clone();
@@ -219,7 +216,7 @@ public final class CstArrayBuilder {
     private void linkAsChildOf(int parent, int child) {
         ensureLastChildCapacity(parent + 1);
         if (lastChildCount < parent + 1) {
-            for (var i = lastChildCount; i < parent + 1; i++) {
+            for (var i = lastChildCount; i < parent + 1; i++ ) {
                 lastChild[i] = CstArray.NO_NODE;
             }
             lastChildCount = parent + 1;
@@ -227,7 +224,7 @@ public final class CstArrayBuilder {
         var prev = lastChild[parent];
         if (prev == CstArray.NO_NODE) {
             nodes[parent * CstArray.NODE_STRIDE + 4] = child;
-        } else {
+        }else {
             nodes[prev * CstArray.NODE_STRIDE + 5] = child;
         }
         lastChild[parent] = child;
@@ -240,7 +237,7 @@ public final class CstArrayBuilder {
         }
         var newCap = nodes.length;
         while (newCap < requiredInts) {
-            newCap = newCap << 1;
+            newCap = newCap<< 1;
             if (newCap < 0) {
                 newCap = Integer.MAX_VALUE - 8;
             }
@@ -254,7 +251,7 @@ public final class CstArrayBuilder {
         }
         var newCap = lastChild.length;
         while (newCap < required) {
-            newCap = newCap << 1;
+            newCap = newCap<< 1;
             if (newCap < 0) {
                 newCap = Integer.MAX_VALUE - 8;
             }

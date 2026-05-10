@@ -1,10 +1,10 @@
 package org.pragmatica.peg.v6.cst;
 
-import java.util.List;
-import java.util.Objects;
-
 import org.pragmatica.peg.v6.diagnostic.Diagnostic;
 import org.pragmatica.peg.v6.diagnostic.Severity;
+
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Output of a 0.6.0 parse: the produced {@link CstArray} together with any diagnostics
@@ -14,7 +14,6 @@ import org.pragmatica.peg.v6.diagnostic.Severity;
  * construction so the result is fully immutable.
  */
 public record ParseResult(CstArray cst, List<Diagnostic> diagnostics) {
-
     public ParseResult {
         Objects.requireNonNull(cst, "cst");
         Objects.requireNonNull(diagnostics, "diagnostics");
@@ -26,6 +25,7 @@ public record ParseResult(CstArray cst, List<Diagnostic> diagnostics) {
     }
 
     public boolean hasErrors() {
-        return diagnostics.stream().anyMatch(d -> d.severity() == Severity.ERROR);
+        return diagnostics.stream()
+                          .anyMatch(d -> d.severity() == Severity.ERROR);
     }
 }

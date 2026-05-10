@@ -1,5 +1,4 @@
 package org.pragmatica.peg.v6.token;
-
 /**
  * Functional adapter exposing a single {@code String -> TokenArray} entry point. Used by
  * {@link TokenArray#spliceLex(LexFn, int, int, String)} so callers may bridge either the

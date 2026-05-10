@@ -1,5 +1,4 @@
 package org.pragmatica.peg.v6.lexer;
-
 /**
  * Phase A.3 — immutable DFA produced by {@link DfaBuilder} for the lexer-rules
  * of a grammar. The DFA itself only encodes the transition function and accept
@@ -35,8 +34,8 @@ package org.pragmatica.peg.v6.lexer;
  */
 public final class Dfa {
     public static final int START_STATE = 0;
-    public static final int NO_TRANSITION = -1;
-    public static final int NO_ACCEPT = -1;
+    public static final int NO_TRANSITION = - 1;
+    public static final int NO_ACCEPT = - 1;
     public static final int ALPHABET_SIZE = 256;
 
     private final int[][] transitions;

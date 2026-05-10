@@ -11,7 +11,6 @@ import java.util.Arrays;
  * allocation overhead.
  */
 public final class TokenArrayBuilder {
-
     private static final int DEFAULT_INITIAL_CAPACITY = 64;
 
     private final String input;
@@ -49,7 +48,7 @@ public final class TokenArrayBuilder {
         starts[size] = start;
         ends[size] = end;
         kinds[size] = kind;
-        size++;
+        size++ ;
     }
 
     public int size() {
@@ -78,27 +77,26 @@ public final class TokenArrayBuilder {
     private void validate(String[] kindNameTable) {
         var inputLen = input.length();
         var prevStart = 0;
-        for (var i = 0; i < size; i++) {
+        for (var i = 0; i < size; i++ ) {
             var s = starts[i];
             var e = ends[i];
             var k = kinds[i];
             if (s < 0 || s > inputLen) {
                 throw new IllegalArgumentException(
-                    "token[" + i + "] start=" + s + " out of input bounds [0, " + inputLen + "]");
+                "token[" + i + "] start=" + s + " out of input bounds [0, " + inputLen + "]");
             }
             if (e < s || e > inputLen) {
                 throw new IllegalArgumentException(
-                    "token[" + i + "] end=" + e + " invalid (start=" + s + ", input length=" + inputLen + ")");
+                "token[" + i + "] end=" + e + " invalid (start=" + s + ", input length=" + inputLen + ")");
             }
             if (s < prevStart) {
                 throw new IllegalArgumentException(
-                    "token[" + i + "] start=" + s + " less than previous start=" + prevStart
-                        + " (starts must be non-decreasing)");
+                "token[" + i + "] start=" + s + " less than previous start=" + prevStart
+                + " (starts must be non-decreasing)");
             }
             if (k < 0 || k >= kindNameTable.length) {
                 throw new IllegalArgumentException(
-                    "token[" + i + "] kind=" + k + " out of kindNameTable range [0, "
-                        + kindNameTable.length + ")");
+                "token[" + i + "] kind=" + k + " out of kindNameTable range [0, " + kindNameTable.length + ")");
             }
             prevStart = s;
         }
@@ -110,7 +108,7 @@ public final class TokenArrayBuilder {
         }
         var newCap = starts.length;
         while (newCap < required) {
-            newCap = newCap << 1;
+            newCap = newCap<< 1;
             if (newCap < 0) {
                 newCap = Integer.MAX_VALUE - 8;
             }

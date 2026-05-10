@@ -53,7 +53,6 @@ import java.util.Set;
  * {@link Expression.Dictionary}.
  */
 public final class RuleClassifier {
-
     private RuleClassifier() {}
 
     public record Warning(String ruleName, String reason) {}
@@ -90,9 +89,7 @@ public final class RuleClassifier {
         var keywordSkip = detectSkipPrefixRules(grammar, properties, kinds);
         var warnings = collectWarnings(rules, properties, kinds);
         return Result.success(new Classification(
-            Collections.unmodifiableMap(kinds),
-            Map.copyOf(keywordSkip),
-            List.copyOf(warnings)));
+        Collections.unmodifiableMap(kinds), Map.copyOf(keywordSkip), List.copyOf(warnings)));
     }
 
     private static Map<String, RuleProperties> collectProperties(List<Rule> rules) {
@@ -123,9 +120,9 @@ public final class RuleClassifier {
             var p = entry.getValue();
             if (!p.usesOnlyLexicalConstructs) {
                 kinds.put(entry.getKey(), RuleKind.PARSER);
-            } else if (p.referencesAnyRule && p.hasTerminals) {
+            }else if (p.referencesAnyRule && p.hasTerminals) {
                 kinds.put(entry.getKey(), RuleKind.PARSER);
-            } else {
+            }else {
                 kinds.put(entry.getKey(), RuleKind.LEXER);
             }
         }
@@ -165,7 +162,9 @@ public final class RuleClassifier {
         for (var entry : properties.entrySet()) {
             var referencer = entry.getKey();
             for (var referenced : entry.getValue().referencedRules) {
-                reverse.computeIfAbsent(referenced, k -> new HashSet<>()).add(referencer);
+                reverse.computeIfAbsent(referenced,
+                                        k -> new HashSet<>())
+                       .add(referencer);
             }
         }
         return reverse;
@@ -181,8 +180,8 @@ public final class RuleClassifier {
             if (kinds.get(name) == RuleKind.PARSER && p.usesCharLevelConstructs && p.referencesAnyRule) {
                 kinds.put(name, RuleKind.MIXED);
                 warnings.add(new Warning(name,
-                    "rule combines rule references with character-level constructs (., [..], or char-level &/!); "
-                    + "consider splitting into a lexer rule and a parser rule"));
+                                         "rule combines rule references with character-level constructs (., [..], or char-level &/!); "
+                                         + "consider splitting into a lexer rule and a parser rule"));
             }
         }
         return warnings;
@@ -201,8 +200,8 @@ public final class RuleClassifier {
      * may demote them on its own.
      */
     private static Map<String, KeywordSkipInfo> detectSkipPrefixRules(Grammar grammar,
-                                                                     Map<String, RuleProperties> properties,
-                                                                     Map<String, RuleKind> kinds) {
+                                                                      Map<String, RuleProperties> properties,
+                                                                      Map<String, RuleKind> kinds) {
         var result = new LinkedHashMap<String, KeywordSkipInfo>();
         var ruleMap = grammar.ruleMap();
         for (var rule : grammar.rules()) {
@@ -210,7 +209,8 @@ public final class RuleClassifier {
             if (info.isEmpty()) {
                 continue;
             }
-            var bodyProps = analyse(info.get().bodyExpression());
+            var bodyProps = analyse(info.get()
+                                        .bodyExpression());
             // Body must itself be pure-lexical (no rule references, no back-references, no dictionaries).
             if (!bodyProps.usesOnlyLexicalConstructs() || bodyProps.referencesAnyRule()) {
                 continue;
@@ -226,7 +226,7 @@ public final class RuleClassifier {
 
     private static Optional<KeywordSkipInfo> detectSkipPrefix(Expression expr, Map<String, Rule> ruleMap) {
         var unwrapped = unwrapWrappers(expr);
-        if (!(unwrapped instanceof Expression.Sequence seq)) {
+        if (! (unwrapped instanceof Expression.Sequence seq)) {
             return Optional.empty();
         }
         var elements = seq.elements();
@@ -234,11 +234,11 @@ public final class RuleClassifier {
             return Optional.empty();
         }
         var head = unwrapWrappers(elements.get(0));
-        if (!(head instanceof Expression.Not not)) {
+        if (! (head instanceof Expression.Not not)) {
             return Optional.empty();
         }
         var notInner = unwrapWrappers(not.expression());
-        if (!(notInner instanceof Expression.Reference ref)) {
+        if (! (notInner instanceof Expression.Reference ref)) {
             return Optional.empty();
         }
         var referenced = ruleMap.get(ref.ruleName());
@@ -250,8 +250,8 @@ public final class RuleClassifier {
         }
         var rest = elements.subList(1, elements.size());
         Expression body = rest.size() == 1
-            ? rest.get(0)
-            : new Expression.Sequence(seq.span(), List.copyOf(rest));
+                          ? rest.get(0)
+                          : new Expression.Sequence(seq.span(), List.copyOf(rest));
         return Optional.of(new KeywordSkipInfo(ref.ruleName(), body));
     }
 
@@ -267,7 +267,9 @@ public final class RuleClassifier {
                 case Expression.TokenBoundary tb -> cur = tb.expression();
                 case Expression.Capture cap -> cur = cap.expression();
                 case Expression.CaptureScope cs -> cur = cs.expression();
-                default -> { return cur; }
+                default -> {
+                    return cur;
+                }
             }
         }
     }
@@ -285,15 +287,18 @@ public final class RuleClassifier {
         var unwrapped = unwrapWrappers(expr);
         Expression choiceCandidate = unwrapped;
         if (unwrapped instanceof Expression.Sequence seq) {
-            if (seq.elements().isEmpty()) {
+            if (seq.elements()
+                   .isEmpty()) {
                 return false;
             }
-            choiceCandidate = unwrapWrappers(seq.elements().get(0));
+            choiceCandidate = unwrapWrappers(seq.elements()
+                                                .get(0));
         }
-        if (!(choiceCandidate instanceof Expression.Choice choice)) {
+        if (! (choiceCandidate instanceof Expression.Choice choice)) {
             return false;
         }
-        if (choice.alternatives().isEmpty()) {
+        if (choice.alternatives()
+                  .isEmpty()) {
             return false;
         }
         for (var alt : choice.alternatives()) {
@@ -313,15 +318,18 @@ public final class RuleClassifier {
         var unwrapped = unwrapWrappers(expr);
         Expression choiceCandidate = unwrapped;
         if (unwrapped instanceof Expression.Sequence seq) {
-            if (seq.elements().isEmpty()) {
+            if (seq.elements()
+                   .isEmpty()) {
                 return List.of();
             }
-            choiceCandidate = unwrapWrappers(seq.elements().get(0));
+            choiceCandidate = unwrapWrappers(seq.elements()
+                                                .get(0));
         }
-        if (!(choiceCandidate instanceof Expression.Choice choice)) {
+        if (! (choiceCandidate instanceof Expression.Choice choice)) {
             return List.of();
         }
-        var out = new ArrayList<String>(choice.alternatives().size());
+        var out = new ArrayList<String>(choice.alternatives()
+                                              .size());
         for (var alt : choice.alternatives()) {
             var lit = extractLeadingLiteral(alt);
             if (lit == null) {
@@ -337,8 +345,10 @@ public final class RuleClassifier {
         if (unwrapped instanceof Expression.Literal lit) {
             return lit.text();
         }
-        if (unwrapped instanceof Expression.Sequence seq && !seq.elements().isEmpty()) {
-            var first = unwrapWrappers(seq.elements().get(0));
+        if (unwrapped instanceof Expression.Sequence seq && !seq.elements()
+                                                                .isEmpty()) {
+            var first = unwrapWrappers(seq.elements()
+                                          .get(0));
             if (first instanceof Expression.Literal lit) {
                 return lit.text();
             }
@@ -356,11 +366,11 @@ public final class RuleClassifier {
         var visitor = new PropertyVisitor();
         visitor.walk(expr);
         return new RuleProperties(
-            visitor.referencesAnyRule,
-            visitor.usesOnlyLexicalConstructs,
-            visitor.usesCharLevelConstructs,
-            visitor.hasTerminals,
-            Set.copyOf(visitor.referencedRules));
+        visitor.referencesAnyRule,
+        visitor.usesOnlyLexicalConstructs,
+        visitor.usesCharLevelConstructs,
+        visitor.hasTerminals,
+        Set.copyOf(visitor.referencedRules));
     }
 
     private static final class PropertyVisitor {
@@ -389,8 +399,10 @@ public final class RuleClassifier {
                 }
                 case Expression.BackReference __ -> usesOnlyLexicalConstructs = false;
                 case Expression.Dictionary __ -> usesOnlyLexicalConstructs = false;
-                case Expression.Sequence seq -> seq.elements().forEach(this::walk);
-                case Expression.Choice ch -> ch.alternatives().forEach(this::walk);
+                case Expression.Sequence seq -> seq.elements()
+                                                   .forEach(this::walk);
+                case Expression.Choice ch -> ch.alternatives()
+                                               .forEach(this::walk);
                 case Expression.ZeroOrMore z -> walk(z.expression());
                 case Expression.OneOrMore o -> walk(o.expression());
                 case Expression.Optional o -> walk(o.expression());

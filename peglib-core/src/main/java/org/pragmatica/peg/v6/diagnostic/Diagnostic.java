@@ -3,13 +3,12 @@ package org.pragmatica.peg.v6.diagnostic;
 import java.util.Objects;
 
 public record Diagnostic(
-    Severity severity,
-    int offset,
-    int length,
-    String message,
-    String expected,
-    String found
-) {
+ Severity severity,
+ int offset,
+ int length,
+ String message,
+ String expected,
+ String found) {
     public Diagnostic {
         Objects.requireNonNull(severity, "severity");
         Objects.requireNonNull(message, "message");
@@ -41,21 +40,42 @@ public record Diagnostic(
         String lineNumStr = Integer.toString(line);
         int gutterWidth = lineNumStr.length();
         String emptyGutter = " ".repeat(gutterWidth + 2);
-
         var sb = new StringBuilder();
-        sb.append(severity.label()).append(": ").append(message).append('\n');
-        sb.append("  --> ").append(filename).append(':').append(line).append(':').append(col).append('\n');
-        sb.append(emptyGutter).append("|\n");
-        sb.append(' ').append(lineNumStr).append(" | ").append(lineText).append('\n');
-        sb.append(emptyGutter).append("| ").append(caretIndent(col));
+        sb.append(severity.label())
+          .append(": ")
+          .append(message)
+          .append('\n');
+        sb.append("  --> ")
+          .append(filename)
+          .append(':')
+          .append(line)
+          .append(':')
+          .append(col)
+          .append('\n');
+        sb.append(emptyGutter)
+          .append("|\n");
+        sb.append(' ')
+          .append(lineNumStr)
+          .append(" | ")
+          .append(lineText)
+          .append('\n');
+        sb.append(emptyGutter)
+          .append("| ")
+          .append(caretIndent(col));
         sb.append(carets(length));
         if (!found.isEmpty()) {
-            sb.append(" found '").append(found).append('\'');
+            sb.append(" found '")
+              .append(found)
+              .append('\'');
         }
         sb.append('\n');
-        sb.append(emptyGutter).append("|\n");
+        sb.append(emptyGutter)
+          .append("|\n");
         if (!expected.isEmpty()) {
-            sb.append(emptyGutter).append("= help: expected ").append(expected).append('\n');
+            sb.append(emptyGutter)
+              .append("= help: expected ")
+              .append(expected)
+              .append('\n');
         }
         return sb.toString();
     }
@@ -65,16 +85,18 @@ public record Diagnostic(
     }
 
     private static String carets(int length) {
-        return length <= 0 ? "^" : "^".repeat(length);
+        return length <= 0
+               ? "^"
+               : "^".repeat(length);
     }
 
     private static int[] locate(String input, int offset) {
         int clamped = Math.min(offset, input.length());
         int line = 1;
         int lineStart = 0;
-        for (int i = 0; i < clamped; i++) {
+        for (int i = 0; i < clamped; i++ ) {
             if (input.charAt(i) == '\n') {
-                line++;
+                line++ ;
                 lineStart = i + 1;
             }
         }
@@ -84,6 +106,8 @@ public record Diagnostic(
 
     private static int lineEndOffset(String input, int lineStart) {
         int end = input.indexOf('\n', lineStart);
-        return end < 0 ? input.length() : end;
+        return end < 0
+               ? input.length()
+               : end;
     }
 }

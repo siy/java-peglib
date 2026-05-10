@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DiagnosticTest {
-
     @Nested
     class Construction {
         @Test
@@ -31,38 +30,32 @@ class DiagnosticTest {
 
         @Test
         void constructor_rejectsNegativeOffset() {
-            assertThrows(IllegalArgumentException.class,
-                () -> new Diagnostic(Severity.ERROR, -1, 0, "m", "", ""));
+            assertThrows(IllegalArgumentException.class, () -> new Diagnostic(Severity.ERROR, - 1, 0, "m", "", ""));
         }
 
         @Test
         void constructor_rejectsNegativeLength() {
-            assertThrows(IllegalArgumentException.class,
-                () -> new Diagnostic(Severity.ERROR, 0, -1, "m", "", ""));
+            assertThrows(IllegalArgumentException.class, () -> new Diagnostic(Severity.ERROR, 0, - 1, "m", "", ""));
         }
 
         @Test
         void constructor_rejectsNullSeverity() {
-            assertThrows(NullPointerException.class,
-                () -> new Diagnostic(null, 0, 0, "m", "", ""));
+            assertThrows(NullPointerException.class, () -> new Diagnostic(null, 0, 0, "m", "", ""));
         }
 
         @Test
         void constructor_rejectsNullMessage() {
-            assertThrows(NullPointerException.class,
-                () -> new Diagnostic(Severity.ERROR, 0, 0, null, "", ""));
+            assertThrows(NullPointerException.class, () -> new Diagnostic(Severity.ERROR, 0, 0, null, "", ""));
         }
 
         @Test
         void constructor_rejectsNullExpected() {
-            assertThrows(NullPointerException.class,
-                () -> new Diagnostic(Severity.ERROR, 0, 0, "m", null, ""));
+            assertThrows(NullPointerException.class, () -> new Diagnostic(Severity.ERROR, 0, 0, "m", null, ""));
         }
 
         @Test
         void constructor_rejectsNullFound() {
-            assertThrows(NullPointerException.class,
-                () -> new Diagnostic(Severity.ERROR, 0, 0, "m", "", null));
+            assertThrows(NullPointerException.class, () -> new Diagnostic(Severity.ERROR, 0, 0, "m", "", null));
         }
     }
 
@@ -72,13 +65,8 @@ class DiagnosticTest {
         void specExample_byteForByte() {
             var d = Diagnostic.error(5, 1, "unexpected input", "[a-z]+", "@");
             String expected =
-                  "error: unexpected input\n"
-                + "  --> input.txt:1:6\n"
-                + "   |\n"
-                + " 1 | abc, @@@, def\n"
-                + "   |      ^ found '@'\n"
-                + "   |\n"
-                + "   = help: expected [a-z]+\n";
+            "error: unexpected input\n" + "  --> input.txt:1:6\n" + "   |\n" + " 1 | abc, @@@, def\n"
+            + "   |      ^ found '@'\n" + "   |\n" + "   = help: expected [a-z]+\n";
             assertEquals(expected, d.formatRustStyle("input.txt", "abc, @@@, def"));
         }
     }
@@ -90,13 +78,7 @@ class DiagnosticTest {
             var d = Diagnostic.error(0, 1, "boom", "", "x");
             String out = d.formatRustStyle("f", "x");
             assertEquals(
-                  "error: boom\n"
-                + "  --> f:1:1\n"
-                + "   |\n"
-                + " 1 | x\n"
-                + "   | ^ found 'x'\n"
-                + "   |\n",
-                out);
+            "error: boom\n" + "  --> f:1:1\n" + "   |\n" + " 1 | x\n" + "   | ^ found 'x'\n" + "   |\n", out);
         }
 
         @Test
@@ -104,14 +86,9 @@ class DiagnosticTest {
             var d = Diagnostic.error(0, 2, "boom", "id", "");
             String out = d.formatRustStyle("f", "ab");
             assertEquals(
-                  "error: boom\n"
-                + "  --> f:1:1\n"
-                + "   |\n"
-                + " 1 | ab\n"
-                + "   | ^^\n"
-                + "   |\n"
-                + "   = help: expected id\n",
-                out);
+            "error: boom\n" + "  --> f:1:1\n" + "   |\n" + " 1 | ab\n" + "   | ^^\n" + "   |\n"
+            + "   = help: expected id\n",
+            out);
         }
 
         @Test
@@ -119,14 +96,9 @@ class DiagnosticTest {
             var d = Diagnostic.error(2, 0, "boom", "id", "");
             String out = d.formatRustStyle("f", "abc");
             assertEquals(
-                  "error: boom\n"
-                + "  --> f:1:3\n"
-                + "   |\n"
-                + " 1 | abc\n"
-                + "   |   ^\n"
-                + "   |\n"
-                + "   = help: expected id\n",
-                out);
+            "error: boom\n" + "  --> f:1:3\n" + "   |\n" + " 1 | abc\n" + "   |   ^\n" + "   |\n"
+            + "   = help: expected id\n",
+            out);
         }
 
         @Test
@@ -134,13 +106,7 @@ class DiagnosticTest {
             var d = Diagnostic.error(0, 3, "boom", "", "abc");
             String out = d.formatRustStyle("f", "abcdef");
             assertEquals(
-                  "error: boom\n"
-                + "  --> f:1:1\n"
-                + "   |\n"
-                + " 1 | abcdef\n"
-                + "   | ^^^ found 'abc'\n"
-                + "   |\n",
-                out);
+            "error: boom\n" + "  --> f:1:1\n" + "   |\n" + " 1 | abcdef\n" + "   | ^^^ found 'abc'\n" + "   |\n", out);
         }
 
         @Test
@@ -150,14 +116,9 @@ class DiagnosticTest {
             var d = Diagnostic.error(offset, 4, "boom", "kw", "line");
             String out = d.formatRustStyle("input.txt", input);
             assertEquals(
-                  "error: boom\n"
-                + "  --> input.txt:3:7\n"
-                + "   |\n"
-                + " 3 | third line here\n"
-                + "   |       ^^^^ found 'line'\n"
-                + "   |\n"
-                + "   = help: expected kw\n",
-                out);
+            "error: boom\n" + "  --> input.txt:3:7\n" + "   |\n" + " 3 | third line here\n"
+            + "   |       ^^^^ found 'line'\n" + "   |\n" + "   = help: expected kw\n",
+            out);
         }
 
         @Test
@@ -165,14 +126,9 @@ class DiagnosticTest {
             var d = Diagnostic.error(0, 1, "boom", "x", "y");
             String out = d.formatRustStyle("f", "y");
             assertEquals(
-                  "error: boom\n"
-                + "  --> f:1:1\n"
-                + "   |\n"
-                + " 1 | y\n"
-                + "   | ^ found 'y'\n"
-                + "   |\n"
-                + "   = help: expected x\n",
-                out);
+            "error: boom\n" + "  --> f:1:1\n" + "   |\n" + " 1 | y\n" + "   | ^ found 'y'\n" + "   |\n"
+            + "   = help: expected x\n",
+            out);
         }
 
         @Test
@@ -181,13 +137,7 @@ class DiagnosticTest {
             var d = Diagnostic.error(2, 1, "boom", "", "b");
             String out = d.formatRustStyle("f", input);
             assertEquals(
-                  "error: boom\n"
-                + "  --> f:2:1\n"
-                + "   |\n"
-                + " 2 | b\n"
-                + "   | ^ found 'b'\n"
-                + "   |\n",
-                out);
+            "error: boom\n" + "  --> f:2:1\n" + "   |\n" + " 2 | b\n" + "   | ^ found 'b'\n" + "   |\n", out);
         }
 
         @Test
@@ -214,8 +164,10 @@ class DiagnosticTest {
         @Test
         void wideLineNumber_gutterExpands() {
             var sb = new StringBuilder();
-            for (int i = 1; i <= 9; i++) {
-                sb.append("line").append(i).append('\n');
+            for (int i = 1; i <= 9; i++ ) {
+                sb.append("line")
+                  .append(i)
+                  .append('\n');
             }
             sb.append("target here");
             var input = sb.toString();
@@ -223,19 +175,16 @@ class DiagnosticTest {
             var d = Diagnostic.error(offset, 6, "boom", "kw", "target");
             String out = d.formatRustStyle("f", input);
             assertEquals(
-                  "error: boom\n"
-                + "  --> f:10:1\n"
-                + "    |\n"
-                + " 10 | target here\n"
-                + "    | ^^^^^^ found 'target'\n"
-                + "    |\n"
-                + "    = help: expected kw\n",
-                out);
+            "error: boom\n" + "  --> f:10:1\n" + "    |\n" + " 10 | target here\n" + "    | ^^^^^^ found 'target'\n"
+            + "    |\n" + "    = help: expected kw\n",
+            out);
         }
     }
 
     private static String firstLine(String text) {
         int nl = text.indexOf('\n');
-        return nl < 0 ? text : text.substring(0, nl);
+        return nl < 0
+               ? text
+               : text.substring(0, nl);
     }
 }

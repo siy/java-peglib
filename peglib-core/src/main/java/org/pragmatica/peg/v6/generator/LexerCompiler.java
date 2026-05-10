@@ -27,10 +27,13 @@ import java.util.Map;
  * {@link org.pragmatica.peg.action.ActionCompiler ActionCompiler}.
  */
 public final class LexerCompiler {
-
     private LexerCompiler() {}
 
-    public sealed interface LexerCompileError extends Cause {
+    public sealed interface LexerCompileError extends Cause
+    permits LexerCompileError.NoCompilerAvailable,
+    LexerCompileError.CompilationFailed,
+    LexerCompileError.LoadFailed,
+    LexerCompileError.InvocationFailed {
         record NoCompilerAvailable() implements LexerCompileError {
             @Override
             public String message() {
@@ -60,9 +63,9 @@ public final class LexerCompiler {
         }
     }
 
-    public record CompiledLexer(Class<?> lexerClass, Method lexMethod) {
+    public record CompiledLexer(Class< ? > lexerClass, Method lexMethod) {
         public TokenArray lex(String input) {
-            try {
+            try{
                 return (TokenArray) lexMethod.invoke(null, input);
             } catch (InvocationTargetException e) {
                 var cause = e.getCause();
@@ -87,7 +90,8 @@ public final class LexerCompiler {
         if (compiler == null) {
             return new LexerCompileError.NoCompilerAvailable().result();
         }
-        return runCompilation(compiler, source).flatMap(LexerCompiler::loadLexerClass);
+        return runCompilation(compiler, source)
+               .flatMap(LexerCompiler::loadLexerClass);
     }
 
     private static Result<CompiledClass> runCompilation(JavaCompiler compiler, LexerGenerator.Generated source) {
@@ -96,8 +100,12 @@ public final class LexerCompiler {
             var fileManager = new InMemoryFileManager(standard);
             var fileObject = new StringJavaFileObject(fqcn, source.source());
             var diagnostics = new StringWriter();
-            var task = compiler.getTask(diagnostics, fileManager, null,
-                List.of("--release", "25"), null, List.of(fileObject));
+            var task = compiler.getTask(diagnostics,
+                                        fileManager,
+                                        null,
+                                        List.of("--release", "25"),
+                                        null,
+                                        List.of(fileObject));
             if (!task.call()) {
                 return new LexerCompileError.CompilationFailed(diagnostics.toString()).result();
             }
@@ -108,9 +116,8 @@ public final class LexerCompiler {
     }
 
     private static Result<CompiledLexer> loadLexerClass(CompiledClass compiled) {
-        try {
-            var classLoader = new InMemoryClassLoader(compiled.fileManager(),
-                LexerCompiler.class.getClassLoader());
+        try{
+            var classLoader = new InMemoryClassLoader(compiled.fileManager(), LexerCompiler.class.getClassLoader());
             var clazz = classLoader.loadClass(compiled.fullyQualifiedName());
             var method = clazz.getDeclaredMethod("lex", String.class);
             method.setAccessible(true);
@@ -126,7 +133,8 @@ public final class LexerCompiler {
         private final String code;
 
         StringJavaFileObject(String className, String code) {
-            super(URI.create("string:///" + className.replace('.', '/') + Kind.SOURCE.extension), Kind.SOURCE);
+            super(URI.create("string:///" + className.replace('.', '/') + Kind.SOURCE.extension),
+                  Kind.SOURCE);
             this.code = code;
         }
 
@@ -140,7 +148,8 @@ public final class LexerCompiler {
         private byte[] bytes;
 
         ByteArrayJavaFileObject(String className) {
-            super(URI.create("bytes:///" + className.replace('.', '/') + Kind.CLASS.extension), Kind.CLASS);
+            super(URI.create("bytes:///" + className.replace('.', '/') + Kind.CLASS.extension),
+                  Kind.CLASS);
         }
 
         @Override
@@ -175,8 +184,9 @@ public final class LexerCompiler {
             return fileObject;
         }
 
-        Option<byte[]> classBytes(String className) {
-            return Option.option(classFiles.get(className)).map(ByteArrayJavaFileObject::bytes);
+        Option<byte[] > classBytes(String className) {
+            return Option.option(classFiles.get(className))
+                         .map(ByteArrayJavaFileObject::bytes);
         }
     }
 
@@ -189,7 +199,7 @@ public final class LexerCompiler {
         }
 
         @Override
-        protected Class<?> findClass(String name) throws ClassNotFoundException {
+        protected Class< ? > findClass(String name) throws ClassNotFoundException {
             var bytesOpt = fileManager.classBytes(name);
             if (bytesOpt.isEmpty()) {
                 throw new ClassNotFoundException(name);

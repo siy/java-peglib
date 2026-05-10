@@ -12,7 +12,6 @@ import java.util.stream.IntStream;
  * {@code Leaf}.
  */
 public sealed interface CstNode permits CstNode.Branch, CstNode.Leaf, CstNode.Error {
-
     int index();
 
     CstArray array();

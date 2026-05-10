@@ -14,7 +14,6 @@ import org.pragmatica.peg.v6.lexer.LexerEngine;
  * and never mutated thereafter.
  */
 public final class TokenArray {
-
     public static final int KIND_WHITESPACE = 0;
     public static final int KIND_LINE_COMMENT = 1;
     public static final int KIND_BLOCK_COMMENT = 2;
@@ -25,6 +24,7 @@ public final class TokenArray {
     private final String input;
     private final int[] starts;
     private final int[] ends;
+
     /**
      * Kind ID per token. {@code int[]} (not {@code byte[]}/{@code short[]}) because real grammars
      * (Java25, see CLAUDE.md) exceed 128 rule kinds; the 4-bytes-per-token cost is negligible
@@ -78,7 +78,7 @@ public final class TokenArray {
         }
         var i = from;
         while (i < count && isTriviaKind(kinds[i])) {
-            i++;
+            i++ ;
         }
         return i;
     }
@@ -152,18 +152,14 @@ public final class TokenArray {
         }
         if (offset + oldLen > input.length()) {
             throw new IllegalArgumentException(
-                "edit range [" + offset + ", " + (offset + oldLen) + ") exceeds input length "
-                    + input.length());
+            "edit range [" + offset + ", " + (offset + oldLen) + ") exceeds input length " + input.length());
         }
-
         var newInput = input.substring(0, offset) + newText + input.substring(offset + oldLen);
         var netDelta = newText.length() - oldLen;
-
         // Empty token array — fall back to plain lex of the resulting input.
         if (count == 0) {
             return lexFn.lex(newInput);
         }
-
         // Locate affected range [firstAffected, lastAffected] in OLD tokens.
         //   firstAffected = smallest i such that ends[i] > offset (first token reaching into the edit)
         //   lastAffected  = largest i such that starts[i] < offset+oldLen (last token starting before edit ends)
@@ -171,21 +167,24 @@ public final class TokenArray {
         // before offset. The +/-1 conservative expansion below picks up the boundary tokens.
         var firstAffected = firstTokenWithEndAfter(offset);
         var lastAffected = lastTokenWithStartBefore(offset + oldLen);
-
         int reLexStart;
-        int reLexEnd; // exclusive in OLD token index space
+        int reLexEnd;
+        // exclusive in OLD token index space
         if (firstAffected >= count && lastAffected < 0) {
             // No old token overlaps the edit; pure boundary insertion outside any token.
             reLexStart = Math.max(0, firstAffected);
             reLexEnd = reLexStart;
-        } else {
-            var first = (firstAffected >= count) ? count - 1 : firstAffected;
-            var last = (lastAffected < 0) ? 0 : lastAffected;
+        }else {
+            var first = (firstAffected >= count)
+                        ? count - 1
+                        : firstAffected;
+            var last = (lastAffected < 0)
+                       ? 0
+                       : lastAffected;
             // Conservative expansion: back up by 1 and forward by 1 (handles merge/split).
             reLexStart = Math.max(0, first - 1);
             reLexEnd = Math.min(count, last + 2);
         }
-
         // Byte ranges in the OLD input that the window covers. With covered token streams
         // (every input byte is part of some token, including whitespace), the conservative
         // expansion above guarantees the window encloses [offset, offset+oldLen) fully.
@@ -199,18 +198,15 @@ public final class TokenArray {
             // covered streams but is handled defensively).
             oldByteStart = offset;
             oldByteEnd = offset + oldLen;
-        } else {
+        }else {
             oldByteStart = starts[reLexStart];
             oldByteEnd = ends[reLexEnd - 1];
         }
-
         // Construct the windowed input from the NEW input (so the edit is already applied).
         var newWindowEnd = oldByteEnd + netDelta;
         var windowedInput = newInput.substring(oldByteStart, newWindowEnd);
-
         // Re-lex only the window.
         var windowTokens = lexFn.lex(windowedInput);
-
         // Build the merged TokenArray:
         //   prefix [0, reLexStart)         — kinds/starts/ends copied verbatim from OLD
         //   window tokens                  — kinds copied; starts/ends shifted by +oldByteStart
@@ -220,26 +216,22 @@ public final class TokenArray {
         var newKinds = new int[totalCount];
         var newStarts = new int[totalCount];
         var newEnds = new int[totalCount];
-
         if (reLexStart > 0) {
             System.arraycopy(kinds, 0, newKinds, 0, reLexStart);
             System.arraycopy(starts, 0, newStarts, 0, reLexStart);
             System.arraycopy(ends, 0, newEnds, 0, reLexStart);
         }
-
-        for (var i = 0; i < winCount; i++) {
+        for (var i = 0; i < winCount; i++ ) {
             newKinds[reLexStart + i] = windowTokens.kindAt(i);
             newStarts[reLexStart + i] = windowTokens.startAt(i) + oldByteStart;
             newEnds[reLexStart + i] = windowTokens.endAt(i) + oldByteStart;
         }
-
         var suffixBase = reLexStart + winCount;
-        for (var i = reLexEnd; i < count; i++) {
+        for (var i = reLexEnd; i < count; i++ ) {
             newKinds[suffixBase + (i - reLexEnd)] = kinds[i];
             newStarts[suffixBase + (i - reLexEnd)] = starts[i] + netDelta;
             newEnds[suffixBase + (i - reLexEnd)] = ends[i] + netDelta;
         }
-
         return new TokenArray(newInput, newStarts, newEnds, newKinds, totalCount, kindNameTable);
     }
 
@@ -257,10 +249,10 @@ public final class TokenArray {
         var lo = 0;
         var hi = count;
         while (lo < hi) {
-            var mid = (lo + hi) >>> 1;
+            var mid = (lo + hi)>>> 1;
             if (ends[mid] <= byteOffset) {
                 lo = mid + 1;
-            } else {
+            }else {
                 hi = mid;
             }
         }
@@ -275,15 +267,15 @@ public final class TokenArray {
      */
     private int lastTokenWithStartBefore(int byteOffset) {
         if (count == 0) {
-            return -1;
+            return - 1;
         }
         var lo = 0;
         var hi = count;
         while (lo < hi) {
-            var mid = (lo + hi) >>> 1;
+            var mid = (lo + hi)>>> 1;
             if (starts[mid] < byteOffset) {
                 lo = mid + 1;
-            } else {
+            }else {
                 hi = mid;
             }
         }
