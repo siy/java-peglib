@@ -42,7 +42,6 @@ import java.util.Map;
  * transition and trigger the lex-error path. Wider alphabets are deferred.
  */
 public final class LexerEngine {
-
     private final Dfa dfa;
     private final String[] kindNameTable;
     private final int whitespaceKind;
@@ -73,8 +72,8 @@ public final class LexerEngine {
         this.kindNameTable = kindNameTable.clone();
         this.whitespaceKind = whitespaceKind;
         this.keywordResolutions = keywordResolutions.isEmpty()
-            ? Map.of()
-            : Map.copyOf(keywordResolutions);
+                                  ? Map.of()
+                                  : Map.copyOf(keywordResolutions);
     }
 
     public int whitespaceKind() {
@@ -100,8 +99,8 @@ public final class LexerEngine {
         int pos = 0;
         while (pos < len) {
             int state = Dfa.START_STATE;
-            int lastAcceptEnd = -1;
-            int lastAcceptKind = -1;
+            int lastAcceptEnd = - 1;
+            int lastAcceptKind = - 1;
             int cur = pos;
             while (cur < len) {
                 int ch = input.charAt(cur);
@@ -113,7 +112,7 @@ public final class LexerEngine {
                     break;
                 }
                 state = next;
-                cur++;
+                cur++ ;
                 int ak = dfa.acceptKind(state);
                 if (ak != Dfa.NO_ACCEPT) {
                     lastAcceptEnd = cur;
@@ -122,14 +121,30 @@ public final class LexerEngine {
             }
             if (lastAcceptEnd <= pos) {
                 throw new IllegalArgumentException(
-                    "lex error at offset " + pos + ": '" + input.charAt(pos) + "'");
+                "lex error at offset " + pos + ": '" + input.charAt(pos) + "'");
             }
             // Phase B.0 keyword resolution — remap identifier kinds to keyword kinds when applicable.
             var resolver = keywordResolutions.get(lastAcceptKind);
             if (resolver != null) {
-                var override = resolver.textToKind().get(input.substring(pos, lastAcceptEnd));
+                var override = resolver.textToKind()
+                                       .get(input.substring(pos, lastAcceptEnd));
                 if (override != null) {
                     lastAcceptKind = override;
+                }
+            }
+            // Phase A.6 — content-based trivia classification. WHITESPACE tokens whose
+            // text begins with "//" or "/*" are reclassified to LINE_COMMENT or
+            // BLOCK_COMMENT respectively. Pure whitespace runs never start with '/',
+            // so this is a sound prefix check.
+            if (lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {
+                char c0 = input.charAt(pos);
+                char c1 = input.charAt(pos + 1);
+                if (c0 == '/') {
+                    if (c1 == '/') {
+                        lastAcceptKind = TokenArray.KIND_LINE_COMMENT;
+                    }else if (c1 == '*') {
+                        lastAcceptKind = TokenArray.KIND_BLOCK_COMMENT;
+                    }
                 }
             }
             builder.append(lastAcceptKind, pos, lastAcceptEnd);
@@ -150,7 +165,6 @@ public final class LexerEngine {
     public static LexerEngine withoutKeywordResolution(Dfa dfa,
                                                        String[] kindNameTable,
                                                        int whitespaceKind) {
-        return new LexerEngine(dfa, kindNameTable, whitespaceKind,
-            new HashMap<>());
+        return new LexerEngine(dfa, kindNameTable, whitespaceKind, new HashMap<>());
     }
 }

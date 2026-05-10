@@ -1,7 +1,8 @@
 package org.pragmatica.peg.v6.lexer;
 
-import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.grammar.GrammarParser;
+
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,11 +19,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * underlying texts.
  */
 class AliasDetectionTest {
-
     private static DfaBuilder.Built buildFor(String grammarText) {
-        var grammar = GrammarParser.parse(grammarText).unwrap();
-        var classification = RuleClassifier.classify(grammar).unwrap();
-        return DfaBuilder.build(grammar, classification).unwrap();
+        var grammar = GrammarParser.parse(grammarText)
+                                   .unwrap();
+        var classification = RuleClassifier.classify(grammar)
+                                           .unwrap();
+        return DfaBuilder.build(grammar, classification)
+                         .unwrap();
     }
 
     @Test
@@ -34,12 +37,18 @@ class AliasDetectionTest {
             IdentRef <- < [a-zA-Z]+ >
             """;
         var built = buildFor(grammar);
-        var aliases = built.kinds().ruleNameToAliasKinds();
-        assertThat(aliases).containsKey("ClassKW");
+        var aliases = built.kinds()
+                           .ruleNameToAliasKinds();
+        assertThat(aliases)
+        .containsKey("ClassKW");
         // Inline-literal kind for "class" must be in the alias set.
-        var classKind = built.kinds().inlineLiteralToKind().get("class/cs");
-        assertThat(classKind).isNotNull();
-        assertThat(aliases.get("ClassKW")).containsExactly(classKind);
+        var classKind = built.kinds()
+                             .inlineLiteralToKind()
+                             .get("class/cs");
+        assertThat(classKind)
+        .isNotNull();
+        assertThat(aliases.get("ClassKW"))
+        .containsExactly(classKind);
     }
 
     @Test
@@ -51,13 +60,16 @@ class AliasDetectionTest {
             IdentRef <- < [a-zA-Z]+ >
             """;
         var built = buildFor(grammar);
-        var aliases = built.kinds().ruleNameToAliasKinds();
-        assertThat(aliases).containsKey("ModifierKW");
-        var inline = built.kinds().inlineLiteralToKind();
-        assertThat(aliases.get("ModifierKW")).containsExactlyInAnyOrder(
-            inline.get("public/cs"),
-            inline.get("private/cs"),
-            inline.get("protected/cs"));
+        var aliases = built.kinds()
+                           .ruleNameToAliasKinds();
+        assertThat(aliases)
+        .containsKey("ModifierKW");
+        var inline = built.kinds()
+                          .inlineLiteralToKind();
+        assertThat(aliases.get("ModifierKW"))
+        .containsExactlyInAnyOrder(inline.get("public/cs"),
+                                   inline.get("private/cs"),
+                                   inline.get("protected/cs"));
     }
 
     @Test
@@ -68,7 +80,9 @@ class AliasDetectionTest {
             IdentRef <- < [a-zA-Z]+ >
             """;
         var built = buildFor(grammar);
-        assertThat(built.kinds().ruleNameToAliasKinds()).doesNotContainKey("IdentRef");
+        assertThat(built.kinds()
+                        .ruleNameToAliasKinds())
+        .doesNotContainKey("IdentRef");
     }
 
     @Test
@@ -82,14 +96,20 @@ class AliasDetectionTest {
             %whitespace <- [ \\t\\n]*
             """;
         var built = buildFor(grammar);
-        var inline = built.kinds().inlineLiteralToKind();
+        var inline = built.kinds()
+                          .inlineLiteralToKind();
         // Pre-condition: 'public' and 'private' have inline-literal kinds.
-        assertThat(inline).containsKeys("public/cs", "private/cs");
+        assertThat(inline)
+        .containsKeys("public/cs", "private/cs");
         // Pre-condition: ModifierKW is aliased to those exact kinds.
-        var aliasKinds = built.kinds().ruleNameToAliasKinds().get("ModifierKW");
-        assertThat(aliasKinds).isNotNull();
-        assertThat(aliasKinds).containsExactlyInAnyOrder(
-            inline.get("public/cs"), inline.get("private/cs"));
+        var aliasKinds = built.kinds()
+                              .ruleNameToAliasKinds()
+                              .get("ModifierKW");
+        assertThat(aliasKinds)
+        .isNotNull();
+        assertThat(aliasKinds)
+        .containsExactlyInAnyOrder(inline.get("public/cs"),
+                                   inline.get("private/cs"));
     }
 
     @Test
@@ -101,7 +121,9 @@ class AliasDetectionTest {
             MiniKw <- 'if' / 'while'
             """;
         var built = buildFor(grammar);
-        assertThat(built.kinds().ruleNameToAliasKinds()).doesNotContainKey("MiniIdent");
+        assertThat(built.kinds()
+                        .ruleNameToAliasKinds())
+        .doesNotContainKey("MiniIdent");
     }
 
     @Test
@@ -113,9 +135,13 @@ class AliasDetectionTest {
             IdentRef <- < [a-zA-Z]+ >
             """;
         var built = buildFor(grammar);
-        var aliases = built.kinds().ruleNameToAliasKinds();
-        assertThat(aliases).containsKey("KwOnly");
+        var aliases = built.kinds()
+                           .ruleNameToAliasKinds();
+        assertThat(aliases)
+        .containsKey("KwOnly");
         assertThat(aliases.get("KwOnly"))
-            .containsExactly(built.kinds().inlineLiteralToKind().get("class/cs"));
+        .containsExactly(built.kinds()
+                              .inlineLiteralToKind()
+                              .get("class/cs"));
     }
 }

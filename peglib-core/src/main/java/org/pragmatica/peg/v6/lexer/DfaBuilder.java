@@ -61,16 +61,6 @@ public final class DfaBuilder {
     private DfaBuilder() {}
 
     /**
-     * Token-kind table for a built DFA.
-     *
-     * @param ruleNameToKind        explicit user LEXER rule name → kind id
-     * @param inlineLiteralToKind   synthesised inline literal {@code text} (or
-     *                              {@code text + "/i"} when case-insensitive) → kind id
-     * @param anyCharKind           kind id of the synthesised ANY_CHAR fallback,
-     *                              or {@code -1} if not present
-     * @param kindNameTable         flat name-per-kind table; index = kind id
-     */
-    /**
      * Phase B.0 — keyword resolution table for an identifier-shaped LEXER rule
      * whose grammar source was {@code !KeywordSet body}. The lexer engine first
      * matches the body, then consults this map to remap the token kind from the

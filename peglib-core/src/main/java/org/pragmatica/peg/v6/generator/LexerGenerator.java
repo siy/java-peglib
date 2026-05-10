@@ -37,12 +37,12 @@ import java.util.List;
  * helper rules.
  */
 public final class LexerGenerator {
-
     static final int ENTRIES_PER_CHUNK = 4096;
 
     private LexerGenerator() {}
 
-    public sealed interface LexerGenerationError extends Cause {
+    public sealed interface LexerGenerationError extends Cause
+    permits LexerGenerationError.InvalidIdentifier {
         record InvalidIdentifier(String component, String value) implements LexerGenerationError {
             @Override
             public String message() {
@@ -53,7 +53,9 @@ public final class LexerGenerator {
 
     public record Generated(String packageName, String className, String source, List<String> warnings) {
         public String fullyQualifiedName() {
-            return packageName.isEmpty() ? className : packageName + "." + className;
+            return packageName.isEmpty()
+                   ? className
+                   : packageName + "." + className;
         }
     }
 
@@ -75,9 +77,12 @@ public final class LexerGenerator {
         var warnings = new ArrayList<String>();
         if (dfa.acceptKind(Dfa.START_STATE) != Dfa.NO_ACCEPT) {
             warnings.add("DFA start state is accepting — at least one LEXER rule matches the empty string;"
-                + " generated lex() will throw on any input. Tighten the offending rule (e.g. '+' instead of '*').");
+                         + " generated lex() will throw on any input. Tighten the offending rule (e.g. '+' instead of '*').");
         }
-        int whitespaceKind = grammar.whitespace().isPresent() ? DfaBuilder.KIND_WHITESPACE : -1;
+        int whitespaceKind = grammar.whitespace()
+                                    .isPresent()
+                             ? DfaBuilder.KIND_WHITESPACE
+                             : - 1;
         var source = renderSource(packageName, className, dfa, kinds, whitespaceKind);
         return Result.success(new Generated(packageName, className, source, List.copyOf(warnings)));
     }
@@ -93,20 +98,35 @@ public final class LexerGenerator {
         int[] acceptKinds = dfa.acceptKinds();
         var sb = new StringBuilder(stateCount * alphabet * 6);
         if (!packageName.isEmpty()) {
-            sb.append("package ").append(packageName).append(";\n\n");
+            sb.append("package ")
+              .append(packageName)
+              .append(";\n\n");
         }
         sb.append("import org.pragmatica.peg.v6.token.TokenArray;\n");
         sb.append("import org.pragmatica.peg.v6.token.TokenArrayBuilder;\n\n");
-        sb.append("public final class ").append(className).append(" {\n\n");
-        sb.append("    private ").append(className).append("() {}\n\n");
-        sb.append("    public static final int STATE_COUNT = ").append(stateCount).append(";\n");
-        sb.append("    public static final int ALPHABET_SIZE = ").append(alphabet).append(";\n");
-        sb.append("    public static final int WHITESPACE_KIND = ").append(whitespaceKind).append(";\n\n");
+        sb.append("public final class ")
+          .append(className)
+          .append(" {\n\n");
+        sb.append("    private ")
+          .append(className)
+          .append("() {}\n\n");
+        sb.append("    public static final int STATE_COUNT = ")
+          .append(stateCount)
+          .append(";\n");
+        sb.append("    public static final int ALPHABET_SIZE = ")
+          .append(alphabet)
+          .append(";\n");
+        sb.append("    public static final int WHITESPACE_KIND = ")
+          .append(whitespaceKind)
+          .append(";\n\n");
         renderKindNames(sb, kinds);
         renderAcceptKinds(sb, acceptKinds);
         renderTransitions(sb, transitions, stateCount, alphabet);
         renderResolvers(sb, kinds);
-        renderLexMethod(sb, alphabet, !kinds.keywordResolutions().isEmpty());
+        renderLexMethod(sb,
+                        alphabet,
+                        !kinds.keywordResolutions()
+                              .isEmpty());
         sb.append("}\n");
         return sb.toString();
     }
@@ -122,7 +142,8 @@ public final class LexerGenerator {
         int nameTableLen = kinds.kindNameTable().length;
         sb.append("    @SuppressWarnings({\"unchecked\", \"rawtypes\"})\n");
         sb.append("    private static final java.util.HashMap<String, Integer>[] RESOLVERS = new java.util.HashMap[")
-            .append(nameTableLen).append("];\n");
+          .append(nameTableLen)
+          .append("];\n");
         if (resolutions.isEmpty()) {
             sb.append("\n");
             return;
@@ -131,15 +152,26 @@ public final class LexerGenerator {
         int idx = 0;
         for (var entry : resolutions.entrySet()) {
             var local = "r" + idx;
-            sb.append("        java.util.HashMap<String, Integer> ").append(local)
-                .append(" = new java.util.HashMap<>();\n");
-            for (var textEntry : entry.getValue().textToKind().entrySet()) {
-                sb.append("        ").append(local).append(".put(\"")
-                    .append(escapeJavaString(textEntry.getKey()))
-                    .append("\", ").append(textEntry.getValue()).append(");\n");
+            sb.append("        java.util.HashMap<String, Integer> ")
+              .append(local)
+              .append(" = new java.util.HashMap<>();\n");
+            for (var textEntry : entry.getValue()
+                                      .textToKind()
+                                      .entrySet()) {
+                sb.append("        ")
+                  .append(local)
+                  .append(".put(\"")
+                  .append(escapeJavaString(textEntry.getKey()))
+                  .append("\", ")
+                  .append(textEntry.getValue())
+                  .append(");\n");
             }
-            sb.append("        RESOLVERS[").append(entry.getKey()).append("] = ").append(local).append(";\n");
-            idx++;
+            sb.append("        RESOLVERS[")
+              .append(entry.getKey())
+              .append("] = ")
+              .append(local)
+              .append(";\n");
+            idx++ ;
         }
         sb.append("    }\n\n");
     }
@@ -147,18 +179,20 @@ public final class LexerGenerator {
     private static void renderKindNames(StringBuilder sb, DfaBuilder.TokenKindAssignment kinds) {
         var names = kinds.kindNameTable();
         sb.append("    public static final String[] KIND_NAMES = {");
-        for (int i = 0; i < names.length; i++) {
+        for (int i = 0; i < names.length; i++ ) {
             if (i > 0) {
                 sb.append(", ");
             }
-            sb.append('"').append(escapeJavaString(names[i])).append('"');
+            sb.append('"')
+              .append(escapeJavaString(names[i]))
+              .append('"');
         }
         sb.append("};\n\n");
     }
 
     private static void renderAcceptKinds(StringBuilder sb, int[] acceptKinds) {
         sb.append("    private static final int[] ACCEPT_KIND = new int[] {");
-        for (int i = 0; i < acceptKinds.length; i++) {
+        for (int i = 0; i < acceptKinds.length; i++ ) {
             if (i > 0) {
                 sb.append(',');
             }
@@ -169,30 +203,38 @@ public final class LexerGenerator {
 
     private static void renderTransitions(StringBuilder sb, int[][] transitions, int stateCount, int alphabet) {
         long total = (long) stateCount * alphabet;
-        int chunkCount = (int) ((total + ENTRIES_PER_CHUNK - 1) / ENTRIES_PER_CHUNK);
+        int chunkCount = (int)((total + ENTRIES_PER_CHUNK - 1) / ENTRIES_PER_CHUNK);
         sb.append("    private static final int[] TRANSITIONS = buildTransitions();\n\n");
         sb.append("    private static int[] buildTransitions() {\n");
         sb.append("        int[] t = new int[STATE_COUNT * ALPHABET_SIZE];\n");
         sb.append("        java.util.Arrays.fill(t, -1);\n");
-        for (int chunk = 0; chunk < chunkCount; chunk++) {
-            sb.append("        fillT").append(chunk).append("(t);\n");
+        for (int chunk = 0; chunk < chunkCount; chunk++ ) {
+            sb.append("        fillT")
+              .append(chunk)
+              .append("(t);\n");
         }
         sb.append("        return t;\n");
         sb.append("    }\n\n");
         long position = 0;
-        for (int chunk = 0; chunk < chunkCount; chunk++) {
+        for (int chunk = 0; chunk < chunkCount; chunk++ ) {
             long start = (long) chunk * ENTRIES_PER_CHUNK;
             long end = Math.min(start + ENTRIES_PER_CHUNK, total);
-            sb.append("    private static void fillT").append(chunk).append("(int[] t) {\n");
-            for (long i = start; i < end; i++) {
-                int state = (int) (i / alphabet);
-                int ch = (int) (i % alphabet);
+            sb.append("    private static void fillT")
+              .append(chunk)
+              .append("(int[] t) {\n");
+            for (long i = start; i < end; i++ ) {
+                int state = (int)(i / alphabet);
+                int ch = (int)(i % alphabet);
                 int v = transitions[state][ch];
                 if (v == Dfa.NO_TRANSITION) {
                     position = i + 1;
                     continue;
                 }
-                sb.append("        t[").append(i).append("]=").append(v).append(";\n");
+                sb.append("        t[")
+                  .append(i)
+                  .append("]=")
+                  .append(v)
+                  .append(";\n");
                 position = i + 1;
             }
             sb.append("    }\n\n");
@@ -219,8 +261,12 @@ public final class LexerGenerator {
         sb.append("            int cur = pos;\n");
         sb.append("            while (cur < len) {\n");
         sb.append("                int ch = input.charAt(cur);\n");
-        sb.append("                if (ch >= ").append(alphabet).append(") break;\n");
-        sb.append("                int next = TRANSITIONS[state * ").append(alphabet).append(" + ch];\n");
+        sb.append("                if (ch >= ")
+          .append(alphabet)
+          .append(") break;\n");
+        sb.append("                int next = TRANSITIONS[state * ")
+          .append(alphabet)
+          .append(" + ch];\n");
         sb.append("                if (next < 0) break;\n");
         sb.append("                state = next;\n");
         sb.append("                cur++;\n");
@@ -243,6 +289,18 @@ public final class LexerGenerator {
             sb.append("                }\n");
             sb.append("            }\n");
         }
+        // Phase A.6 — content-based trivia classification (mirrors LexerEngine).
+        sb.append("            if (lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {\n");
+        sb.append("                char c0 = input.charAt(pos);\n");
+        sb.append("                char c1 = input.charAt(pos + 1);\n");
+        sb.append("                if (c0 == '/') {\n");
+        sb.append("                    if (c1 == '/') {\n");
+        sb.append("                        lastAcceptKind = TokenArray.KIND_LINE_COMMENT;\n");
+        sb.append("                    } else if (c1 == '*') {\n");
+        sb.append("                        lastAcceptKind = TokenArray.KIND_BLOCK_COMMENT;\n");
+        sb.append("                    }\n");
+        sb.append("                }\n");
+        sb.append("            }\n");
         sb.append("            builder.append(lastAcceptKind, pos, lastAcceptEnd);\n");
         sb.append("            pos = lastAcceptEnd;\n");
         sb.append("        }\n");
@@ -252,20 +310,20 @@ public final class LexerGenerator {
 
     private static String escapeJavaString(String s) {
         var out = new StringBuilder(s.length() + 4);
-        for (int i = 0; i < s.length(); i++) {
+        for (int i = 0; i < s.length(); i++ ) {
             char c = s.charAt(i);
             switch (c) {
-                case '\\' -> out.append("\\\\");
-                case '"' -> out.append("\\\"");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                case '\b' -> out.append("\\b");
-                case '\f' -> out.append("\\f");
+                case'\\' -> out.append("\\\\");
+                case'"' -> out.append("\\\"");
+                case'\n' -> out.append("\\n");
+                case'\r' -> out.append("\\r");
+                case'\t' -> out.append("\\t");
+                case'\b' -> out.append("\\b");
+                case'\f' -> out.append("\\f");
                 default -> {
                     if (c < 0x20 || c == 0x7f) {
                         out.append(String.format("\\u%04x", (int) c));
-                    } else {
+                    }else {
                         out.append(c);
                     }
                 }
@@ -281,7 +339,7 @@ public final class LexerGenerator {
         if (!Character.isJavaIdentifierStart(s.charAt(0))) {
             return false;
         }
-        for (int i = 1; i < s.length(); i++) {
+        for (int i = 1; i < s.length(); i++ ) {
             if (!Character.isJavaIdentifierPart(s.charAt(i))) {
                 return false;
             }
@@ -296,7 +354,7 @@ public final class LexerGenerator {
         if (s.isEmpty()) {
             return true;
         }
-        for (var part : s.split("\\.", -1)) {
+        for (var part : s.split("\\.", - 1)) {
             if (!isValidIdentifier(part)) {
                 return false;
             }
