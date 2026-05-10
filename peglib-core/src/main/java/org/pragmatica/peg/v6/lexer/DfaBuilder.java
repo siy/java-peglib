@@ -677,6 +677,9 @@ public final class DfaBuilder {
         int accept = nfa.newState();
         for ( int c = 0; c < ALPHABET; c++) {
         nfa.addCharEdge(start, c, accept);}
+        // 0.6.0 — ANY_CHAR is a catch-all; also accept non-ASCII chars so the
+        // generated lexer covers the full input byte stream.
+        nfa.addNonAsciiEdge(start, accept);
         nfa.addEpsilon(globalStart, start);
         nfa.markAccept(accept, kind, priorityRef[0]);
         priorityRef[0]++;
@@ -837,14 +840,18 @@ public final class DfaBuilder {
         var notInner = unwrapAcceptableWrappers(not.expression());
         if ( ! (notInner instanceof Expression.Literal notLit)) {
         return Option.none();}
-        var delimiter = openLit.text();
-        if ( delimiter.isEmpty() ||
-        !delimiter.equals(closeLit.text()) ||
-        !delimiter.equals(notLit.text())) {
+        // 0.6.0 — the open/close delimiters need NOT be equal. For block
+        // comments {@code /* ... */} they differ. The KMP body loop only tracks
+        // partial matches of the CLOSE delimiter; the Not-predicate guards the
+        // body against accidentally consuming the close. Required invariant:
+        // {@code notInner == closeLit}.
+        var openText = openLit.text();
+        var closeText = closeLit.text();
+        if ( openText.isEmpty() || closeText.isEmpty() || !closeText.equals(notLit.text())) {
         return Option.none();}
         if ( openLit.caseInsensitive() || closeLit.caseInsensitive() || notLit.caseInsensitive()) {
         return Option.none();}
-        return Option.some(buildDelimitedBlockFragment(nfa, delimiter));
+        return Option.some(buildDelimitedBlockFragment(nfa, openText, closeText));
     }
 
     /**
@@ -862,43 +869,52 @@ public final class DfaBuilder {
      * to the longest proper suffix of {@code delim[0..k] + b} that is also
      * a prefix of {@code delim} (computed via the standard prefix function).
      */
-    private static Fragment buildDelimitedBlockFragment(Nfa nfa, String delimiter) {
-        int n = delimiter.length();
-        // KMP-style failure function on the delimiter.
+    private static Fragment buildDelimitedBlockFragment(Nfa nfa, String openDelim, String closeDelim) {
+        int n = closeDelim.length();
+        // KMP-style failure function on the CLOSING delimiter — the body loop
+        // only ever tracks how close we are to seeing the close.
         int[] fail = new int[n];
         for ( int i = 1, k = 0; i < n; i++) {
-            while ( k > 0 && delimiter.charAt(k) != delimiter.charAt(i)) {
+            while ( k > 0 && closeDelim.charAt(k) != closeDelim.charAt(i)) {
             k = fail[k - 1];}
-            if ( delimiter.charAt(k) == delimiter.charAt(i)) {
+            if ( closeDelim.charAt(k) == closeDelim.charAt(i)) {
             k++;}
             fail[i] = k;
         }
-        // Allocate one NFA state per "partial-match length" 0..n. State n is
-        // the accept (full delimiter consumed in the body — closing delim).
+        // Allocate one NFA state per "partial-match length" 0..n of the close
+        // delimiter. State n is the accept (full close delim consumed).
         int[] state = new int[n + 1];
         for ( int i = 0; i <= n; i++) {
         state[i] = nfa.newState();}
-        // Opening delimiter: a chain from a fresh start state to state[0].
-        // We model the opening separately so the body loop can be a clean
-        // self-referencing structure: state[0] is the body's "no prefix
-        // matched" state, and reaching state[n] accepts the closing.
+        // Opening delimiter: a chain from a fresh start state up to a state
+        // representing "0 partial matches of close delim observed yet". For
+        // asymmetric delimiters like {@code /* ... */}, the first byte of the
+        // body might also be the first byte of the close — handle the seed
+        // state by starting at state[0].
         int chainStart = nfa.newState();
         int cur = chainStart;
-        for ( int i = 0; i < n; i++) {
+        for ( int i = 0; i < openDelim.length(); i++) {
             int next = nfa.newState();
-            nfa.addCharEdge(cur, delimiter.charAt(i), next);
+            nfa.addCharEdge(cur, openDelim.charAt(i), next);
             cur = next;
         }
         // After the opening chain we're in the body's state[0].
         nfa.addEpsilon(cur, state[0]);
         // For each body state k in 0..n-1, install transitions for every
-        // byte b: advance to state[k+1] if b matches delim[k], otherwise
-        // collapse via the failure function then attempt the byte again.
+        // ASCII byte b: advance to state[k+1] if b matches closeDelim[k],
+        // otherwise collapse via the failure function.
         for ( int k = 0; k < n; k++) {
         for ( int b = 0; b < ALPHABET; b++) {
-            int target = nextDelimitedState(delimiter, fail, k, (char) b);
+            int target = nextDelimitedState(closeDelim, fail, k, (char) b);
             nfa.addCharEdge(state[k], b, state[target]);
         }}
+        // 0.6.0 — non-ASCII characters never match any byte of the close
+        // delimiter (the delimiter is ASCII text), so they always reset the
+        // partial match count to 0 (or stay at 0). Add a non-ASCII edge from
+        // every body state back to state[0] so block comments containing
+        // em-dashes, smart quotes, CJK characters, etc. lex correctly.
+        for ( int k = 0; k < n; k++) {
+        nfa.addNonAsciiEdge(state[k], state[0]);}
         // state[n] is the accept; it has no outgoing edges from here so
         // the longest-match scan terminates as soon as the closing
         // delimiter is fully consumed.
@@ -1015,6 +1031,12 @@ public final class DfaBuilder {
         int accept = nfa.newState();
         for ( int c = mask.nextSetBit(0); c >= 0; c = mask.nextSetBit(c + 1)) {
         nfa.addCharEdge(start, c, accept);}
+        // 0.6.0 — negated classes like [^abc] accept ALL non-ASCII chars too. Positive
+        // classes [a-z] stay ASCII-only by definition. The mask only tracks 0..255 ASCII
+        // bits; the non-ASCII branch is encoded as a separate per-state edge consumed
+        // by subset construction (see Dfa.nonAsciiTransition).
+        if ( cc.negated()) {
+        nfa.addNonAsciiEdge(start, accept);}
         return new Fragment(start, accept);
     }
 
@@ -1023,6 +1045,8 @@ public final class DfaBuilder {
         int accept = nfa.newState();
         for ( int c = 0; c < ALPHABET; c++) {
         nfa.addCharEdge(start, c, accept);}
+        // 0.6.0 — '.' (Any) accepts any character including non-ASCII / BMP-plus.
+        nfa.addNonAsciiEdge(start, accept);
         return new Fragment(start, accept);
     }
 
@@ -1259,8 +1283,9 @@ public final class DfaBuilder {
         var transitions = new ArrayList<int[]>();
         var acceptKindList = new ArrayList<Integer>();
         var acceptPriorityList = new ArrayList<Integer>();
+        var nonAsciiTargets = new ArrayList<Integer>();
         var queue = new ArrayDeque<BitSet>();
-        registerState(stateMap, dfaStates, transitions, acceptKindList, acceptPriorityList, queue, startSet, nfa);
+        registerState(stateMap, dfaStates, transitions, acceptKindList, acceptPriorityList, nonAsciiTargets, queue, startSet, nfa);
         while ( !queue.isEmpty()) {
             var currentSet = queue.poll();
             int currentId = stateMap.get(currentSet);
@@ -1275,21 +1300,41 @@ public final class DfaBuilder {
                                              transitions,
                                              acceptKindList,
                                              acceptPriorityList,
+                                             nonAsciiTargets,
                                              queue,
                                              moveSet,
                                              nfa);
                 currentTransitions[ch] = targetId;
+            }
+            // 0.6.0 — also compute the non-ASCII destination DFA state for this
+            // closure. Union all per-NFA-state non-ASCII targets, epsilon-close,
+            // and register (or reuse) the resulting DFA state id.
+            var nonAsciiMoveSet = moveNonAscii(nfa, currentSet);
+            if ( !nonAsciiMoveSet.isEmpty()) {
+                epsilonClosure(nfa, nonAsciiMoveSet);
+                int nonAsciiTargetId = registerState(stateMap,
+                                                     dfaStates,
+                                                     transitions,
+                                                     acceptKindList,
+                                                     acceptPriorityList,
+                                                     nonAsciiTargets,
+                                                     queue,
+                                                     nonAsciiMoveSet,
+                                                     nfa);
+                nonAsciiTargets.set(currentId, nonAsciiTargetId);
             }
         }
         int stateCount = dfaStates.size();
         int[][] transitionTable = transitions.toArray(new int[0][]);
         int[] acceptKindArray = new int[stateCount];
         int[] acceptPriorityArray = new int[stateCount];
+        int[] nonAsciiArray = new int[stateCount];
         for ( int i = 0; i < stateCount; i++) {
             acceptKindArray[i] = acceptKindList.get(i);
             acceptPriorityArray[i] = acceptPriorityList.get(i);
+            nonAsciiArray[i] = nonAsciiTargets.get(i);
         }
-        return new Dfa(transitionTable, acceptKindArray, acceptPriorityArray);
+        return new Dfa(transitionTable, acceptKindArray, acceptPriorityArray, nonAsciiArray);
     }
 
     private static int registerState(Map<BitSet, Integer> stateMap,
@@ -1297,6 +1342,7 @@ public final class DfaBuilder {
                                      List<int[]> transitions,
                                      List<Integer> acceptKindList,
                                      List<Integer> acceptPriorityList,
+                                     List<Integer> nonAsciiTargets,
                                      Deque<BitSet> queue,
                                      BitSet stateSet,
                                      Nfa nfa) {
@@ -1312,6 +1358,7 @@ public final class DfaBuilder {
         var accept = chooseAccept(nfa, stateSet);
         acceptKindList.add(accept.kind);
         acceptPriorityList.add(accept.priority);
+        nonAsciiTargets.add(Dfa.NO_TRANSITION);
         queue.add(stateSet);
         return id;
     }
@@ -1370,6 +1417,25 @@ public final class DfaBuilder {
         return result;
     }
 
+    /**
+     * 0.6.0 — union all non-ASCII targets across the NFA states in {@code states}.
+     * The caller then runs epsilon-closure over the result and registers the DFA
+     * state id; that id becomes the non-ASCII transition target for the current
+     * DFA state.
+     */
+    private static BitSet moveNonAscii(Nfa nfa, BitSet states) {
+        var result = new BitSet(nfa.stateCount());
+        for ( int s = states.nextSetBit(0); s >= 0; s = states.nextSetBit(s + 1)) {
+            int[] arr = nfa.nonAsciiEdges[s];
+            if ( arr == null) {
+            continue;}
+            int len = nfa.nonAsciiEdgeLens[s];
+            for ( int i = 0; i < len; i++) {
+            result.set(arr[i]);}
+        }
+        return result;
+    }
+
     private record Fragment(int start, int accept){}
 
     /** A literal collected from a PARSER/MIXED rule body. Keyed by {@code (text, caseInsensitive)}. */
@@ -1383,6 +1449,16 @@ public final class DfaBuilder {
         int[] epsilonLen = new int[16];
         int[][][] charEdges = new int[16][][];
         int[][] charEdgeLens = new int[16][];
+        /**
+         * 0.6.0 — per-NFA-state list of targets reachable via a non-ASCII (code &ge; 256)
+         * input character. Populated by {@link #compileAny(Nfa)} and by
+         * {@link #compileCharClass(Nfa, Expression.CharClass)} when the class is negated
+         * (positive classes like {@code [a-z]} stay ASCII-only). The subset
+         * construction unions these per closure to produce the DFA's
+         * {@code nonAsciiTransition} table.
+         */
+        int[][] nonAsciiEdges = new int[16][];
+        int[] nonAsciiEdgeLens = new int[16];
         int stateCount;
 
         Nfa() {
@@ -1411,6 +1487,8 @@ public final class DfaBuilder {
             epsilonLen = Arrays.copyOf(epsilonLen, newCap);
             charEdges = Arrays.copyOf(charEdges, newCap);
             charEdgeLens = Arrays.copyOf(charEdgeLens, newCap);
+            nonAsciiEdges = Arrays.copyOf(nonAsciiEdges, newCap);
+            nonAsciiEdgeLens = Arrays.copyOf(nonAsciiEdgeLens, newCap);
         }
 
         void markAccept(int state, int kind, int priority) {
@@ -1454,6 +1532,25 @@ public final class DfaBuilder {
             }
             arr[len] = to;
             charEdgeLens[from][ch] = len + 1;
+        }
+
+        /**
+         * 0.6.0 — add a non-ASCII edge {@code from --> to}. The lexer follows this
+         * transition when the input character is &ge; {@link Dfa#ALPHABET_SIZE}.
+         */
+        void addNonAsciiEdge(int from, int to) {
+            int[] arr = nonAsciiEdges[from];
+            int len = nonAsciiEdgeLens[from];
+            if ( arr == null) {
+                arr = new int[2];
+                nonAsciiEdges[from] = arr;
+            }
+            if ( len == arr.length) {
+                arr = Arrays.copyOf(arr, arr.length * 2);
+                nonAsciiEdges[from] = arr;
+            }
+            arr[len] = to;
+            nonAsciiEdgeLens[from] = len + 1;
         }
     }
 }

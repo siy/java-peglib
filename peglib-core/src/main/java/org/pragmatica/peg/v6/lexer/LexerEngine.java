@@ -38,8 +38,12 @@ import java.util.Map;
  *
  * <h2>Alphabet</h2>
  *
- * <p>The DFA is defined over {@code 0..255}; characters &ge; 256 produce no
- * transition and trigger the lex-error path. Wider alphabets are deferred.
+ * <p>The DFA's ASCII transition table is defined over {@code 0..255}. For input
+ * characters {@code >= 256} (non-ASCII / BMP-plus), the lexer consults a parallel
+ * per-state {@code nonAsciiTransition} slot populated by the builder whenever the
+ * state's NFA closure contains an edge that accepts non-ASCII characters
+ * (Any {@code .} or negated CharClass {@code [^...]}). Positive character classes
+ * like {@code [a-z]} stay ASCII-only.
  */
 public final class LexerEngine {
     private final Dfa dfa;
@@ -94,9 +98,11 @@ public final class LexerEngine {
             int cur = pos;
             while ( cur < len) {
                 int ch = input.charAt(cur);
+                int next;
                 if ( ch >= Dfa.ALPHABET_SIZE) {
-                break;}
-                int next = dfa.transition(state, ch);
+                next = dfa.nonAsciiTransition(state);} else
+                {
+                next = dfa.transition(state, ch);}
                 if ( next == Dfa.NO_TRANSITION) {
                 break;}
                 state = next;

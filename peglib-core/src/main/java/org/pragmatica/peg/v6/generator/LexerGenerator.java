@@ -106,6 +106,7 @@ public final class LexerGenerator {
         renderKindNames(sb, kinds);
         renderAcceptKinds(sb, acceptKinds);
         renderTransitions(sb, transitions, stateCount, alphabet);
+        renderNonAsciiTransitions(sb, dfa.nonAsciiTransitions());
         renderResolvers(sb, kinds);
         renderLexMethod(sb,
                         alphabet,
@@ -175,6 +176,22 @@ public final class LexerGenerator {
         sb.append("};\n\n");
     }
 
+    /**
+     * 0.6.0 — emit a flat {@code int[STATE_COUNT] NON_ASCII_TRANSITIONS} table.
+     * Entry {@code i} is the DFA state the lexer transitions to when state {@code i}
+     * sees a non-ASCII (code &ge; 256) input character, or {@code -1} if no such
+     * transition exists. Mirrors {@link Dfa#nonAsciiTransition(int)} in the engine.
+     */
+    private static void renderNonAsciiTransitions(StringBuilder sb, int[] nonAsciiTransitions) {
+        sb.append("    private static final int[] NON_ASCII_TRANSITIONS = new int[] {");
+        for ( int i = 0; i < nonAsciiTransitions.length; i++) {
+            if ( i > 0) {
+            sb.append(',');}
+            sb.append(nonAsciiTransitions[i]);
+        }
+        sb.append("};\n\n");
+    }
+
     private static void renderTransitions(StringBuilder sb, int[][] transitions, int stateCount, int alphabet) {
         long total = (long) stateCount * alphabet;
         int chunkCount = (int)((total + ENTRIES_PER_CHUNK - 1) / ENTRIES_PER_CHUNK);
@@ -231,10 +248,14 @@ public final class LexerGenerator {
         sb.append("            int cur = pos;\n");
         sb.append("            while (cur < len) {\n");
         sb.append("                int ch = input.charAt(cur);\n");
+        sb.append("                int next;\n");
         sb.append("                if (ch >= ").append(alphabet)
-                 .append(") break;\n");
-        sb.append("                int next = TRANSITIONS[state * ").append(alphabet)
+                 .append(") {\n");
+        sb.append("                    next = NON_ASCII_TRANSITIONS[state];\n");
+        sb.append("                } else {\n");
+        sb.append("                    next = TRANSITIONS[state * ").append(alphabet)
                  .append(" + ch];\n");
+        sb.append("                }\n");
         sb.append("                if (next < 0) break;\n");
         sb.append("                state = next;\n");
         sb.append("                cur++;\n");
