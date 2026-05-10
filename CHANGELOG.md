@@ -13,6 +13,10 @@ _Work in progress — clean-slate redesign. See [`docs/ARCHITECTURE-0.6.0.md`](d
 
 Major redesign per nine locked decisions: drop interpreter (generator-only with generate-and-compile); two-phase lex → parse with PEG surface preserved; drop runtime actions (replaced by `Visitor<T>` stub); drop AST type (CST is the only tree); pure flat `int[]` CST data layout; trivia as tokens; thin caching incremental layer; one always-on error recovery mechanism; `ParserConfig` deleted (the grammar IS the configuration). Targets parity-with-or-faster-than javac on Java parsing while emitting strictly more output.
 
+### Performance (Java25 corpus, 12 fixtures, JMH avgt)
+
+**0.6.0 is 8.55× faster than the 0.5.x source-generated parser overall** (5.116 ms → 0.598 ms summed across all 12 format-examples fixtures). Per-fixture speedup uniform at 6.7×-9.4× (structural win, not fixture-specific). SwitchExpressions.java (4201 bytes, the worst-case fixture): 1.221 ms → 0.142 ms.
+
 Implementation phasing (Phase A through F per spec §7) is in progress.
 
 ### Added
@@ -32,6 +36,8 @@ Implementation phasing (Phase A through F per spec §7) is in progress.
 ### Changed
 
 - Java25 grammar: `>>` and `>>>` shift operators replaced with parser rules `RShift <- '>' '>'` and `URShift <- '>' '>' '>'`. Prevents lexer from fusing two `>` characters into one shift token, which broke nested generics like `List<Map<String, Integer>>`.
+- `CstArrayBuilder.truncate` rewritten as O(dropped-range) bounded scan via `lastChildBefore` undo log, replacing the prior O(surviving-nodes) rebuild. Profile showed truncate at 89.7% of warm-parse CPU; this drop is the dominant contributor to the 8.55× headline speedup.
+- `TokenArray.nextNonTrivia` precomputed at construction for O(1) lookup (was linear scan).
 
 ### Fixed
 
