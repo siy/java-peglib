@@ -75,6 +75,20 @@ class PegParserTest {
     }
 
     @Test
+    void leftRecursiveGrammar_returnsFailure() {
+        // Direct LR — slips past Grammar.validate (which only rejects indirect LR)
+        // and must be caught by the new LeftRecursionDetector wired into fromGrammar.
+        String grammar = "Expr <- Expr '+' Term\nTerm <- [0-9]+\n";
+        Result<Parser> result = PegParser.fromGrammar(grammar);
+        assertFalse(result.isSuccess(), () -> "expected failure but got success: " + result);
+        var message = ((Result.Failure<?>) result).cause().message();
+        assertTrue(message.contains("left-recursive"),
+            () -> "failure message must mention 'left-recursive', got: " + message);
+        assertTrue(message.contains("Expr"),
+            () -> "failure message must mention offending rule 'Expr', got: " + message);
+    }
+
+    @Test
     void cacheLifecycle_missThenHitThenMiss() {
         String g1Text = "Start <- '@' X\nX <- 'x'\n";
         String g2Text = "Start <- '@' Y\nY <- 'y'\n";
