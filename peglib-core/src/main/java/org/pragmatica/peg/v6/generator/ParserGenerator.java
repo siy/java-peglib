@@ -144,6 +144,11 @@ public final class ParserGenerator {
         // header can emit the corresponding sorted constant arrays.
         private final Set<String> aliasArrays;
 
+        // Phase 0.6.0 — identifier-fallback constant arrays. Keyed by the
+        // skip-prefix rule name (e.g. "Identifier"); value is the sorted
+        // int[] of acceptable kinds (idKind + all fallback kinds).
+        private final Map<String, int[]> idFallbackArrays;
+
         Renderer(Grammar grammar,
                  RuleClassifier.Classification classification,
                  DfaBuilder.TokenKindAssignment kinds,
@@ -163,6 +168,7 @@ public final class ParserGenerator {
                                                .toArray(String[]::new);
             this.usedTokenKinds = new LinkedHashSet<>();
             this.aliasArrays = new LinkedHashSet<>();
+            this.idFallbackArrays = new LinkedHashMap<>();
         }
 
         Result<GeneratedParser> render() {
@@ -288,6 +294,22 @@ public final class ParserGenerator {
                         if ( i > 0) {
                         sb.append(", ");}
                         sb.append(aliasKinds[i]);
+                    }
+                    sb.append("};\n");
+                }
+                sb.append("\n");
+            }
+            // Phase 0.6.0 — emit identifier-fallback constant arrays.
+            if ( !idFallbackArrays.isEmpty()) {
+                for ( var entry : idFallbackArrays.entrySet()) {
+                    var ruleName = entry.getKey();
+                    var arr = entry.getValue();
+                    sb.append("    private static final int[] IDFALL_").append(sanitize(ruleName))
+                             .append(" = new int[] {");
+                    for ( var i = 0; i < arr.length; i++) {
+                        if ( i > 0) {
+                        sb.append(", ");}
+                        sb.append(arr[i]);
                     }
                     sb.append("};\n");
                 }
@@ -695,6 +717,18 @@ public final class ParserGenerator {
             // Fall back to ANY_CHAR or report.
             return new ParserGenerationError.UnknownReference(ctx.ruleName, ref.ruleName()).result();}
             usedTokenKinds.add(kind);
+            // Phase 0.6.0 — identifier fallback. If the referenced rule is a
+            // skip-prefix rule (e.g. {@code Identifier <- !Keyword [a-zA-Z_$]...}),
+            // accept either its dedicated kind OR any identifier-shaped inline
+            // literal / *KW kind that is NOT in the hard-keyword set. This
+            // recovers the 0.5.x behavior where contextual keywords (record,
+            // sealed, module, open, etc.) fall through to Identifier via PEG
+            // ordered choice.
+            var fallback = kinds.identifierFallbackKinds().get(ref.ruleName());
+            if ( fallback != null && fallback.length > 0) {
+                emitIdentifierFallback(ref.ruleName(), kind, fallback, ctx);
+                return Result.unitResult();
+            }
             var kindConst = "KIND_" + sanitize(kinds.kindNameTable() [kind]);
             ctx.sb.append(indent(ctx.depth)).append("if (peek() != ")
                          .append(kindConst)
@@ -705,6 +739,64 @@ public final class ParserGenerator {
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("advance();\n");
             return Result.unitResult();
+        }
+
+        /**
+         * Phase 0.6.0 — emit a guard that accepts the identifier's dedicated kind
+         * OR any of the fallback kinds (contextual keywords / non-hard-keyword
+         * inline literals). For small fallback sets the check is inlined as a
+         * short OR-chain; larger sets use {@code Arrays.binarySearch} against a
+         * sorted constant array {@code IDFALL_<RuleName>}.
+         */
+        private void emitIdentifierFallback(String ruleName, int idKind, int[] fallback, EmitContext ctx) {
+            for ( var k : fallback) {
+            usedTokenKinds.add(k);}
+            var indent = indent(ctx.depth);
+            var idKindConst = "KIND_" + sanitize(kinds.kindNameTable() [idKind]);
+            // The id rule's own kind plus each fallback kind. For ≤4 total
+            // alternatives we emit linear OR; otherwise binary search.
+            int total = 1 + fallback.length;
+            if ( total <= 4) {
+                var buf = new StringBuilder();
+                buf.append(indent).append("{ int __k = peek(); if (__k != ").append(idKindConst);
+                for ( var k : fallback) {
+                buf.append(" && __k != KIND_").append(sanitize(kinds.kindNameTable() [k]));}
+                buf.append(") { fail(\"").append(escapeJavaString(ruleName))
+                          .append("\"); ")
+                          .append(ctx.failAction)
+                          .append(" } }\n");
+                ctx.sb.append(buf);
+            } else
+            {
+                idFallbackArrays.put(ruleName, mergeAndSort(idKind, fallback));
+                ctx.sb.append(indent).append("if (java.util.Arrays.binarySearch(IDFALL_")
+                              .append(sanitize(ruleName))
+                              .append(", peek()) < 0) { fail(\"")
+                              .append(escapeJavaString(ruleName))
+                              .append("\"); ")
+                              .append(ctx.failAction)
+                              .append(" }\n");
+            }
+            ctx.sb.append(indent).append("advance();\n");
+        }
+
+        /** Merge {@code idKind} into the sorted {@code fallback} array and re-sort. */
+        private static int[] mergeAndSort(int idKind, int[] fallback) {
+            var merged = new int[fallback.length + 1];
+            System.arraycopy(fallback, 0, merged, 0, fallback.length);
+            merged[fallback.length] = idKind;
+            java.util.Arrays.sort(merged);
+            // Dedupe in-place (idKind might already be present, shouldn't be but
+            // be defensive — fallback can't overlap idKind by construction since
+            // identifier rules aren't aliased, but be safe).
+            int w = 0;
+            for ( int i = 0; i < merged.length; i++) {
+            if ( w == 0 || merged[w - 1] != merged[i]) {
+                merged[w++] = merged[i];
+            }}
+            if ( w == merged.length) {
+            return merged;}
+            return java.util.Arrays.copyOf(merged, w);
         }
 
         /**

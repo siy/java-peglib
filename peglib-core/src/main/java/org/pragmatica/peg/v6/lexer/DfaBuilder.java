@@ -84,11 +84,20 @@ public final class DfaBuilder {
      *        token kind in the alias set when it sees a {@code Reference} to that
      *        rule. The alias kinds reuse the inline-literal kinds emitted by the
      *        lexer for the corresponding text.
+     * @param identifierFallbackKinds identifier-rule name → sorted array of inline-literal
+     *        token kinds whose matched text is identifier-shaped (matches the regex
+     *        {@code [a-zA-Z_$][a-zA-Z0-9_$]*}) but is NOT in the hard-keyword set
+     *        referenced by the identifier rule's {@code !Keyword} skip-prefix head.
+     *        Generated parser code that consumes a token of the identifier rule
+     *        also accepts any kind in this fallback set — this preserves the
+     *        "contextual keywords fall through to Identifier elsewhere" behavior
+     *        that the 0.5.x interpreter got for free via PEG ordered choice.
      */
     public record TokenKindAssignment(Map<String, Integer> ruleNameToKind,
                                       Map<String, Integer> inlineLiteralToKind,
                                       Map<Integer, KeywordResolution> keywordResolutions,
                                       Map<String, int[]> ruleNameToAliasKinds,
+                                      Map<String, int[]> identifierFallbackKinds,
                                       int anyCharKind,
                                       String[] kindNameTable){}
 
@@ -254,12 +263,122 @@ public final class DfaBuilder {
         }
         if ( ruleNameToKind.isEmpty() && inlineLiterals.isEmpty() && grammar.whitespace().isEmpty()) {
         return new DfaBuildError.NoLexerRules().result();}
+        // Phase 0.6.0 — identifier fallback set. For each skip-prefix rule
+        // (e.g. {@code Identifier <- !Keyword [a-zA-Z_$] [a-zA-Z0-9_$]*}),
+        // collect every inline-literal kind whose text is identifier-shaped
+        // and whose text is NOT in the hard-keyword set referenced by the
+        // skip-prefix head. The generated parser accepts these kinds at
+        // identifier positions so contextual keywords (record, sealed,
+        // permits, module, open, etc.) continue to fall through to
+        // Identifier when used as method/field/parameter names.
+        var identifierFallbackKinds = buildIdentifierFallbacks(grammar,
+                                                               classification,
+                                                               ruleNameToKind,
+                                                               inlineLiteralToKind);
         return Result.success(new TokenKindAssignment(Map.copyOf(ruleNameToKind),
                                                       Map.copyOf(inlineLiteralToKind),
                                                       Map.copyOf(keywordResolutions),
                                                       Map.copyOf(ruleNameToAliasKinds),
+                                                      Map.copyOf(identifierFallbackKinds),
                                                       anyCharKind,
                                                       kindNames.toArray(new String[0])));
+    }
+
+    /**
+     * Phase 0.6.0 — for each skip-prefix LEXER rule (rule whose body is
+     * {@code !KeywordRule <body>}), collect inline-literal kinds whose
+     * matched text is identifier-shaped AND not in the hard-keyword set.
+     * Returns map keyed by the skip-prefix rule's name, value = sorted
+     * array of acceptable fallback kinds.
+     *
+     * <p>The hard-keyword set is exactly the literal texts in the
+     * {@code KeywordRule} referenced by the skip-prefix head. Identifier
+     * shape is the regex {@code [a-zA-Z_$][a-zA-Z0-9_$]*}.
+     *
+     * <p>If a skip-prefix rule's keyword resolution table assigns a
+     * dedicated *KW kind to a contextual keyword, that kind is added to
+     * the fallback set instead of the original inline-literal kind: the
+     * lexer emits the *KW kind for those texts, and the parser must
+     * accept it when an identifier is expected.
+     */
+    private static Map<String, int[]> buildIdentifierFallbacks(
+        Grammar grammar,
+        RuleClassifier.Classification classification,
+        Map<String, Integer> ruleNameToKind,
+        Map<String, Integer> inlineLiteralToKind) {
+        var result = new LinkedHashMap<String, int[]>();
+        var ruleMap = grammar.ruleMap();
+        for ( var entry : classification.keywordSkip().entrySet()) {
+            var idRuleName = entry.getKey();
+            var info = entry.getValue();
+            var keywordRule = ruleMap.get(info.keywordRuleName());
+            if ( keywordRule == null) {
+            continue;}
+            var hardKeywords = new HashSet<>(RuleClassifier.extractLiteralSet(keywordRule.expression()));
+            if ( hardKeywords.isEmpty()) {
+            continue;}
+            var fallback = new java.util.TreeSet<Integer>();
+            // Walk every inline literal whose text is identifier-shaped and not
+            // a hard keyword. Include the corresponding inline-literal kind so
+            // that texts like 'module', 'record', 'sealed', 'permits', 'open',
+            // etc. remain acceptable wherever Identifier is expected.
+            for ( var litEntry : inlineLiteralToKind.entrySet()) {
+                var key = litEntry.getKey();
+                // Skip case-insensitive inline literals — identifier fallback only
+                // applies to case-sensitive matches (Java keywords are case-sensitive).
+                if ( !key.endsWith("/cs")) {
+                continue;}
+                var text = key.substring(0, key.length() - "/cs".length());
+                if ( !isIdentifierShape(text)) {
+                continue;}
+                if ( hardKeywords.contains(text)) {
+                continue;}
+                fallback.add(litEntry.getValue());
+            }
+            // Also include any LEXER rule kind whose name ends with "KW" and
+            // whose underlying text (rule name minus "KW", lowercased first
+            // letter — matching {@link #resolveKeywordKind}) is identifier-shaped
+            // and not a hard keyword. Keyword resolution may have remapped
+            // contextual keywords to these kinds; the parser must still treat
+            // them as identifiers when found in identifier position.
+            for ( var ruleEntry : ruleNameToKind.entrySet()) {
+                var ruleName = ruleEntry.getKey();
+                if ( !ruleName.endsWith("KW") || ruleName.length() <= 2) {
+                continue;}
+                var stem = ruleName.substring(0, ruleName.length() - 2);
+                if ( stem.isEmpty()) {
+                continue;}
+                var lowered = Character.toLowerCase(stem.charAt(0)) + stem.substring(1);
+                if ( !isIdentifierShape(lowered)) {
+                continue;}
+                if ( hardKeywords.contains(lowered)) {
+                continue;}
+                fallback.add(ruleEntry.getValue());
+            }
+            if ( fallback.isEmpty()) {
+            continue;}
+            int[] sorted = fallback.stream().mapToInt(Integer::intValue).toArray();
+            result.put(idRuleName, sorted);
+        }
+        return result;
+    }
+
+    /**
+     * True iff {@code text} matches the regex {@code [a-zA-Z_$][a-zA-Z0-9_$]*}.
+     * Empty string returns false.
+     */
+    private static boolean isIdentifierShape(String text) {
+        if ( text.isEmpty()) {
+        return false;}
+        char first = text.charAt(0);
+        if ( ! (isAsciiLetter(first) || first == '_' || first == '$')) {
+        return false;}
+        for ( int i = 1; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ( ! (isAsciiLetter(c) || (c >= '0' && c <= '9') || c == '_' || c == '$')) {
+            return false;}
+        }
+        return true;
     }
 
     /**
