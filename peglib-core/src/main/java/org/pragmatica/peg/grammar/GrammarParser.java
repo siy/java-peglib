@@ -7,7 +7,11 @@ import org.pragmatica.peg.tree.SourceLocation;
 import org.pragmatica.peg.tree.SourceSpan;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Parser for PEG grammar syntax.
@@ -43,6 +47,7 @@ public final class GrammarParser {
         var rules = new ArrayList<Rule>();
         var suggestRules = new ArrayList<String>();
         var imports = new ArrayList<Import>();
+        var recoverSets = new LinkedHashMap<String, Set<Character>>();
         Option<String> startRule = Option.none();
         Option<Expression> whitespace = Option.none();
         Option<Expression> word = Option.none();
@@ -79,6 +84,21 @@ public final class GrammarParser {
                     imports.add(result.unwrap());
                     continue;
                 }
+                // 0.6.0 — Grammar-level %recover [chars] RuleName designates a
+                // per-rule sync set. Distinguished from rule-level %recover
+                // "msg" by lookahead: top-level form is followed by a
+                // CharClassLiteral, the rule-level form by a StringLiteral.
+                if ("recover".equals(directive.name()) && pos + 1 < tokens.size() && tokens.get(pos + 1) instanceof GrammarToken.CharClassLiteral) {
+                    advance();
+                    var result = parseRecoverDirective();
+                    if (result instanceof Result.Failure< ? > f) {
+                        return f.cause()
+                                .result();
+                    }
+                    var entry = result.unwrap();
+                    recoverSets.put(entry.ruleName(), entry.chars());
+                    continue;
+                }
                 advance();
                 var result = parseDirective(directive);
                 if (result instanceof Result.Failure< ? > f) {
@@ -109,6 +129,7 @@ public final class GrammarParser {
         }
         var copiedSuggest = List.copyOf(suggestRules);
         var copiedImports = List.copyOf(imports);
+        var copiedRecover = Map.copyOf(recoverSets);
         // 0.4.0 — when a grammar declares no imports, validate eagerly via the
         // parse-don't-validate factory. With imports, the root grammar may
         // legitimately reference rule names that only appear after %import
@@ -117,9 +138,90 @@ public final class GrammarParser {
         // routes its final composed grammar through {@link Grammar#grammar}
         // so the validation still runs — just at the right point in the pipe.
         if (copiedImports.isEmpty()) {
-            return Grammar.grammar(rules, startRule, whitespace, word, copiedSuggest, copiedImports);
+            return Grammar.grammar(rules, startRule, whitespace, word, copiedSuggest, copiedImports, copiedRecover);
         }
-        return Result.success(new Grammar(rules, startRule, whitespace, word, copiedSuggest, copiedImports));
+        return Result.success(new Grammar(rules,
+                                          startRule,
+                                          whitespace,
+                                          word,
+                                          copiedSuggest,
+                                          copiedImports,
+                                          copiedRecover));
+    }
+
+    /** Result tuple for a parsed {@code %recover &lt;CharClass&gt; RuleName} directive. */
+    private record RecoverEntry(String ruleName, Set<Character> chars) {}
+
+    /**
+     * Parse the body of a top-level {@code %recover &lt;CharClass&gt; RuleName}
+     * directive. The {@code %recover} keyword has already been consumed.
+     */
+    private Result<RecoverEntry> parseRecoverDirective() {
+        if (! (peek() instanceof GrammarToken.CharClassLiteral cc)) {
+            return new ParseError.UnexpectedInput(
+            peek()
+            .span()
+            .start(),
+            tokenDescription(peek()),
+            "character class for '%recover'").result();
+        }
+        advance();
+        if (! (peek() instanceof GrammarToken.Identifier ruleId)) {
+            return new ParseError.UnexpectedInput(
+            peek()
+            .span()
+            .start(),
+            tokenDescription(peek()),
+            "rule name after '%recover' character class").result();
+        }
+        advance();
+        var chars = expandCharClass(cc.pattern());
+        return Result.success(new RecoverEntry(ruleId.name(), chars));
+    }
+
+    /**
+     * Expand a character-class pattern (the raw text inside {@code [...]}) into
+     * the set of characters it matches. Supports literal characters and ranges
+     * ({@code a-z}). Backslash escapes are honoured for the common escape
+     * sequences ({@code \n}, {@code \t}, {@code \r}, {@code \\}, {@code \]},
+     * {@code \[}). Negation ({@code [^...]}) is intentionally not honoured for
+     * sync sets — sync chars are inherently a positive set; the lexer would
+     * never emit a kind for "any char NOT in this set".
+     */
+    private static Set<Character> expandCharClass(String pattern) {
+        var result = new LinkedHashSet<Character>();
+        var i = 0;
+        var n = pattern.length();
+        while (i < n) {
+            char c = pattern.charAt(i);
+            if (c == '\\' && i + 1 < n) {
+                char esc = pattern.charAt(i + 1);
+                char decoded = switch (esc) {
+                    case'n' -> '\n';
+                    case't' -> '\t';
+                    case'r' -> '\r';
+                    case'\\' -> '\\';
+                    case']' -> ']';
+                    case'[' -> '[';
+                    default -> esc;
+                };
+                result.add(decoded);
+                i += 2;
+                continue;
+            }
+            if (i + 2 < n && pattern.charAt(i + 1) == '-') {
+                char start = c;
+                char end = pattern.charAt(i + 2);
+                for (char ch = start; ch <= end; ch++ ) {
+                    result.add(ch);
+                }
+                i += 3;
+                continue;
+            }
+            result.add(c);
+            i++ ;
+        }
+        return Set.copyOf(result);
     }
 
     private Result<Import> parseImportDirective(SourceLocation start) {
@@ -241,13 +343,15 @@ public final class GrammarParser {
         // Trailing rule-level directives: %expected / %recover / %tag (0.2.4).
         // Each takes a single string-literal argument and is optional; order
         // among them is flexible so the author can pick whichever reads best.
+        //
+        // 0.6.0 — the grammar-level form {@code %recover [chars] RuleName} is
+        // disambiguated by lookahead: when {@code %recover} is followed by a
+        // CharClassLiteral the directive is left for {@link #parseGrammar()}
+        // to consume on the next iteration.
         Option<String> expected = Option.none();
         Option<String> recover = Option.none();
         Option<String> tag = Option.none();
-        while (peek() instanceof GrammarToken.Directive d && (d.name()
-                                                               .equals("expected") || d.name()
-                                                                                       .equals("recover") || d.name()
-                                                                                                              .equals("tag"))) {
+        while (peek() instanceof GrammarToken.Directive d && isRuleLevelTrailingDirective(d)) {
             advance();
             var argResult = parseStringLiteralArg(d.name());
             if (argResult instanceof Result.Failure< ? > f) {
@@ -263,6 +367,23 @@ public final class GrammarParser {
         }
         var span = SourceSpan.sourceSpan(start, currentLocation());
         return Result.success(new Rule(span, id.name(), expression, action, errorMessage, expected, recover, tag));
+    }
+
+    /**
+     * True when {@code d} is a rule-level trailing directive that consumes a
+     * string-literal argument. The grammar-level {@code %recover [chars] RuleName}
+     * form is intentionally excluded — it is recognised by lookahead in
+     * {@link #parseGrammar()} where the next token is a CharClassLiteral.
+     */
+    private boolean isRuleLevelTrailingDirective(GrammarToken.Directive d) {
+        var name = d.name();
+        if (!"expected".equals(name) && !"recover".equals(name) && !"tag".equals(name)) {
+            return false;
+        }
+        if ("recover".equals(name) && pos + 1 < tokens.size() && tokens.get(pos + 1) instanceof GrammarToken.CharClassLiteral) {
+            return false;
+        }
+        return true;
     }
 
     private Result<String> parseStringLiteralArg(String directiveName) {

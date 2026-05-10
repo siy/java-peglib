@@ -50,7 +50,23 @@ public record Grammar(
  Option<Expression> whitespace,
  Option<Expression> word,
  List<String> suggestRules,
- List<Import> imports) {
+ List<Import> imports,
+ Map<String, Set<Character>> recoverSets) {
+    /**
+     * Backwards-compatible canonical-shaped factory. Defaults
+     * {@code recoverSets} to an empty map.
+     *
+     * @since 0.4.0
+     */
+    public static Result<Grammar> grammar(List<Rule> rules,
+                                          Option<String> startRule,
+                                          Option<Expression> whitespace,
+                                          Option<Expression> word,
+                                          List<String> suggestRules,
+                                          List<Import> imports) {
+        return grammar(rules, startRule, whitespace, word, suggestRules, imports, Map.of());
+    }
+
     /**
      * Construct a validated {@code Grammar}.
      *
@@ -66,19 +82,22 @@ public record Grammar(
      * <p>On failure, returns a {@link Result.Failure} carrying a
      * {@link ParseError.SemanticError} describing the offending rule.
      *
-     * @since 0.4.0
+     * @since 0.6.0 — accepts per-rule {@code recoverSets} populated from
+     * grammar-level {@code %recover &lt;CharClass&gt; RuleName} directives.
      */
     public static Result<Grammar> grammar(List<Rule> rules,
                                           Option<String> startRule,
                                           Option<Expression> whitespace,
                                           Option<Expression> word,
                                           List<String> suggestRules,
-                                          List<Import> imports) {
-        return validate(new Grammar(rules, startRule, whitespace, word, suggestRules, imports));
+                                          List<Import> imports,
+                                          Map<String, Set<Character>> recoverSets) {
+        return validate(new Grammar(rules, startRule, whitespace, word, suggestRules, imports, recoverSets));
     }
 
     /**
-     * Convenience overload — empty {@code suggestRules} and {@code imports}.
+     * Convenience overload — empty {@code suggestRules}, {@code imports} and
+     * {@code recoverSets}.
      *
      * @since 0.4.0
      */
@@ -86,7 +105,25 @@ public record Grammar(
                                           Option<String> startRule,
                                           Option<Expression> whitespace,
                                           Option<Expression> word) {
-        return grammar(rules, startRule, whitespace, word, List.of(), List.of());
+        return grammar(rules, startRule, whitespace, word, List.of(), List.of(), Map.of());
+    }
+
+    /**
+     * Backwards-compatible 6-arg canonical constructor. Defaults
+     * {@code recoverSets} to an empty map. Records require canonical-ctor
+     * visibility ≥ class visibility, so this overload preserves the prior
+     * shape for existing callers (tests, generators) constructing via
+     * {@code new Grammar(...)}.
+     *
+     * @since 0.6.0
+     */
+    public Grammar(List<Rule> rules,
+                   Option<String> startRule,
+                   Option<Expression> whitespace,
+                   Option<Expression> word,
+                   List<String> suggestRules,
+                   List<Import> imports) {
+        this(rules, startRule, whitespace, word, suggestRules, imports, Map.of());
     }
 
     /**

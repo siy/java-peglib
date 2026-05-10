@@ -172,7 +172,8 @@ public final class GrammarResolver {
         root.whitespace(),
         root.word(),
         root.suggestRules(),
-        List.of());
+        List.of(),
+        root.recoverSets());
     }
 
     private Result<Grammar> loadGrammarOrFail(String grammarName, SourceLocation errorLocation, List<String> chain) {
