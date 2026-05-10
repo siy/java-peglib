@@ -102,4 +102,99 @@ class MojoIntegrationTest {
         mojo.setSmokeInput("hello");
         mojo.execute();
     }
+
+    @Test
+    void generateV6Mojo_writesLexerParserVisitor(@TempDir Path tempDir) throws Exception {
+        var grammarFile = tempDir.resolve("v6.peg")
+                                 .toFile();
+        // PARSER rule referencing a LEXER rule + a literal — the v6 pipeline
+        // requires at least one PARSER/MIXED rule to emit a parser source.
+        Files.writeString(grammarFile.toPath(), "Sum <- Number '+' Number\nNumber <- [0-9]+\n");
+        var outputDir = tempDir.resolve("generated")
+                               .toFile();
+        var mojo = new GenerateV6Mojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setOutputDirectory(outputDir);
+        mojo.setPackageName("demo.v6");
+        mojo.setLexerClassName("DemoLexer");
+        mojo.setParserClassName("DemoParser");
+        mojo.setVisitorClassName("DemoVisitor");
+        mojo.execute();
+
+        var pkgDir = outputDir.toPath()
+                              .resolve("demo")
+                              .resolve("v6");
+        var lexer = pkgDir.resolve("DemoLexer.java");
+        var parser = pkgDir.resolve("DemoParser.java");
+        var visitor = pkgDir.resolve("DemoVisitor.java");
+        assertThat(Files.exists(lexer)).as("lexer file emitted")
+                                       .isTrue();
+        assertThat(Files.exists(parser)).as("parser file emitted")
+                                        .isTrue();
+        assertThat(Files.exists(visitor)).as("visitor file emitted")
+                                         .isTrue();
+        assertThat(Files.readString(lexer)).contains("package demo.v6;",
+                                                     "class DemoLexer",
+                                                     "lex(String input)");
+        assertThat(Files.readString(parser)).contains("package demo.v6;",
+                                                      "class DemoParser",
+                                                      "parse(TokenArray tokens)");
+        assertThat(Files.readString(visitor)).contains("package demo.v6;",
+                                                       "abstract class DemoVisitor<T>",
+                                                       "visitSum");
+    }
+
+    @Test
+    void generateV6Mojo_skipsWhenAllArtifactsUpToDate(@TempDir Path tempDir) throws Exception {
+        var grammarFile = tempDir.resolve("v6.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(), "Sum <- Number '+' Number\nNumber <- [0-9]+\n");
+        var outputDir = tempDir.resolve("generated")
+                               .toFile();
+        var mojo = new GenerateV6Mojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setOutputDirectory(outputDir);
+        mojo.setPackageName("demo.v6");
+        mojo.setLexerClassName("DemoLexer");
+        mojo.setParserClassName("DemoParser");
+        mojo.setVisitorClassName("DemoVisitor");
+        mojo.execute();
+        var lexer = outputDir.toPath()
+                             .resolve("demo")
+                             .resolve("v6")
+                             .resolve("DemoLexer.java")
+                             .toFile();
+        // Mark all three generated files newer than the grammar so the
+        // up-to-date branch fires.
+        long bumped = grammarFile.lastModified() + 10_000L;
+        for (var name : new String[]{"DemoLexer.java", "DemoParser.java", "DemoVisitor.java"}) {
+            outputDir.toPath()
+                     .resolve("demo")
+                     .resolve("v6")
+                     .resolve(name)
+                     .toFile()
+                     .setLastModified(bumped);
+        }
+        long beforeMtime = lexer.lastModified();
+        mojo.execute();
+        // Up-to-date path must not rewrite any file — mtimes stay what we set.
+        assertThat(lexer.lastModified()).isEqualTo(beforeMtime);
+    }
+
+    @Test
+    void generateV6Mojo_failsOnInvalidPackageName(@TempDir Path tempDir) throws Exception {
+        var grammarFile = tempDir.resolve("v6.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(), "Sum <- Number '+' Number\nNumber <- [0-9]+\n");
+        var outputDir = tempDir.resolve("generated")
+                               .toFile();
+        var mojo = new GenerateV6Mojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setOutputDirectory(outputDir);
+        mojo.setPackageName("1bad.pkg");
+        mojo.setLexerClassName("L");
+        mojo.setParserClassName("P");
+        mojo.setVisitorClassName("V");
+        assertThatThrownBy(mojo::execute).isInstanceOf(MojoFailureException.class);
+    }
 }
