@@ -136,14 +136,24 @@ Don't run until at least 18/20 fixtures parse cleanly.
 
 ## 3. Outstanding bugs / known limitations
 
-1. **Cut operator (^)** is currently no-op in generated parser. May affect some grammars; not blocking corpus parsing.
-2. **MIXED-rule char-level fallback** is also no-op. Char-level constructs in PARSER rules emit no CST nodes.
-3. **`>>` and `>>>` tokenization** for nested generics — needs grammar tweak or post-DFA token splitting.
-4. **`%recover` directive** isn't parsed — only the default sync set is used.
-5. **`ParserOptions`** class (referenced in spec §5) not implemented; `Parser.parse(input, maxDiagnostics)` is a stub.
-6. **JBCT-SEAL-01 lint warnings** on a few v6 files (cosmetic; sealed interfaces with single-variant nesting).
-7. **v6 files unformatted** — `jbct-maven-plugin:check` reports several need reformatting; deferred.
-8. **`IncrementalParser` does full reparse on every edit** — correct but unoptimized (O(n) per edit).
+### Deferred (planned for later 0.6.x or 0.7)
+
+1. **Per-rule `%recover` sync sets** — `%recover` directive parses (Phase #5) and start-rule sync overrides emit, but per-rule recovery within nested parsers is a no-op. Spec §3.8 calls for per-rule.
+2. **MIXED-rule char-level fallback** — rules with both parser-rule references and char-level constructs emit no CST nodes for the char-level parts.
+3. **`ParserOptions` class** is a stub; `Parser.parse(input, maxDiagnostics)` ignores the cap.
+4. **Block comment classification through DFA** — works in lexer engine post-pass, but `'/*' (!'*/' .)* '*/'` inside a Choice alternative isn't routed through `compileDelimitedBlock`. LINE_COMMENT classification works.
+5. **Per-iteration trivia tokens** — `%whitespace` ZeroOrMore matches the entire whitespace+comments run as ONE token. Inner-iteration token splitting requires lexer driver changes.
+6. **Named captures + back-references** — state TBD by #12 task.
+7. **JBCT-SEAL-01 lint warnings** on a few v6 files (cosmetic; sealed interfaces with single-variant nesting).
+8. **v6 files unformatted** — `jbct-maven-plugin:check` reports several need reformatting; deferred.
+9. **`IncrementalParser` does full reparse on every edit** — correct but unoptimized (O(n) per edit).
+
+### Intentional drops (per spec — NOT returning)
+
+- BASIC/ADVANCED `RecoveryStrategy` split: one always-on panic-mode mechanism replaces it. Use `result.diagnostics().isEmpty()` for fail-fast semantics.
+- Inline `{ ... }` action blocks in grammar: replaced by `GVisitor<T>` stub class generated per grammar (Phase E.1). Compile-time rejection with migration message.
+- `AstNode` type: dropped entirely. Build domain ASTs via `GVisitor<T>` walking the CST.
+- Packrat memoization: not needed under tokens-first design. JIT scalar-replacement handles short-lived parse state.
 
 ---
 

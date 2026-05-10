@@ -39,6 +39,22 @@ Implementation phasing (Phase A through F per spec §7) is in progress.
 
 ### Removed
 
+### Intentional drops (per spec — NOT returning)
+
+- BASIC/ADVANCED `RecoveryStrategy` split: one always-on panic-mode mechanism replaces it. Use `result.diagnostics().isEmpty()` for fail-fast semantics.
+- Inline `{ ... }` action blocks in grammar: replaced by `GVisitor<T>` stub class generated per grammar (Phase E.1). Compile-time rejection with migration message.
+- `AstNode` type: dropped entirely. Build domain ASTs via `GVisitor<T>` walking the CST.
+- Packrat memoization: not needed under tokens-first design. JIT scalar-replacement handles short-lived parse state.
+
+### Deferred (planned for later 0.6.x or 0.7)
+
+- Per-rule `%recover` sync sets: `%recover` directive parses (Phase #5) and start-rule sync overrides emit, but per-rule recovery within nested parsers is a no-op. Spec §3.8 calls for per-rule.
+- MIXED-rule char-level fallback: rules with both parser-rule references and char-level constructs emit no CST nodes for the char-level parts.
+- `ParserOptions` class is a stub; `Parser.parse(input, maxDiagnostics)` ignores the cap.
+- Block comment classification through DFA: works in lexer engine post-pass, but `'/*' (!'*/' .)* '*/'` inside a Choice alternative isn't routed through `compileDelimitedBlock`. LINE_COMMENT classification works.
+- Per-iteration trivia tokens: `%whitespace` ZeroOrMore matches the entire whitespace+comments run as ONE token. Inner-iteration token splitting requires lexer driver changes.
+- Named captures + back-references: state TBD by #12 task.
+
 ## [0.5.1] - 2026-05-09
 
 _Unreleased — patch cycle following 0.5.0._
