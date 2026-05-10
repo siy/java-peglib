@@ -29,10 +29,12 @@ import java.util.Map;
  * API pattern.
  */
 public final class ParserCompiler {
-
     private ParserCompiler() {}
 
-    public sealed interface ParserCompileError extends Cause {
+    public sealed interface ParserCompileError extends Cause
+    permits ParserCompileError.NoCompilerAvailable,
+    ParserCompileError.CompilationFailed,
+    ParserCompileError.LoadFailed {
         record NoCompilerAvailable() implements ParserCompileError {
             @Override
             public String message() {
@@ -55,7 +57,10 @@ public final class ParserCompiler {
         }
     }
 
-    public record CompiledParser(Class<?> parserClass, Method parseMethod) {
+    public record CompiledParser(Class< ? > parserClass,
+                                 Method parseMethod,
+                                 Method parseRuleFromMethod,
+                                 Method ruleKindsMethod) {
         /**
          * Phase B.4 — generated {@code parse(TokenArray)} now returns
          * {@link ParseResult} unconditionally: a CST plus a (possibly empty)
@@ -63,17 +68,43 @@ public final class ParserCompiler {
          * malformed inputs no longer raise an exception to the caller.
          */
         public ParseResult parse(TokenArray tokens) {
-            try {
+            try{
                 return (ParseResult) parseMethod.invoke(null, tokens);
             } catch (InvocationTargetException e) {
-                var cause = e.getCause();
-                if (cause instanceof RuntimeException re) {
-                    throw re;
-                }
-                if (cause instanceof Error err) {
-                    throw err;
-                }
-                throw new RuntimeException(cause);
+                throw rethrow(e);
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        /**
+         * Phase D.1.2 — partial parse from a specific token index using the
+         * specified rule kind. Returns a {@link ParseResult} whose CST has a
+         * synthetic {@code _ROOT} node holding the parsed subtree (and any
+         * recovery error nodes); the caller (incremental engine) then splices
+         * the {@code _ROOT}'s first child into a larger CST.
+         */
+        public ParseResult parseRuleFrom(TokenArray tokens, int fromTokenIdx, int ruleKind) {
+            try{
+                return (ParseResult) parseRuleFromMethod.invoke(null, tokens, fromTokenIdx, ruleKind);
+            } catch (InvocationTargetException e) {
+                throw rethrow(e);
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        /**
+         * Phase D.1.2 — rule-name to rule-kind mapping. Callers map rule names
+         * (e.g. "MethodDecl") to the kind constant required by
+         * {@link #parseRuleFrom}.
+         */
+        @SuppressWarnings("unchecked")
+        public Map<String, Integer> ruleKinds() {
+            try{
+                return (Map<String, Integer>) ruleKindsMethod.invoke(null);
+            } catch (InvocationTargetException e) {
+                throw rethrow(e);
             } catch (IllegalAccessException e) {
                 throw new RuntimeException(e);
             }
@@ -84,7 +115,19 @@ public final class ParserCompiler {
          * input is well-formed. Equivalent to {@code parse(tokens).cst()}.
          */
         public CstArray parseCst(TokenArray tokens) {
-            return parse(tokens).cst();
+            return parse(tokens)
+                   .cst();
+        }
+
+        private static RuntimeException rethrow(InvocationTargetException e) {
+            var cause = e.getCause();
+            if (cause instanceof RuntimeException re) {
+                return re;
+            }
+            if (cause instanceof Error err) {
+                throw err;
+            }
+            return new RuntimeException(cause);
         }
     }
 
@@ -96,7 +139,8 @@ public final class ParserCompiler {
         if (compiler == null) {
             return new ParserCompileError.NoCompilerAvailable().result();
         }
-        return runCompilation(compiler, source).flatMap(ParserCompiler::loadParserClass);
+        return runCompilation(compiler, source)
+               .flatMap(ParserCompiler::loadParserClass);
     }
 
     private static Result<CompiledClass> runCompilation(JavaCompiler compiler, ParserGenerator.GeneratedParser source) {
@@ -105,8 +149,12 @@ public final class ParserCompiler {
             var fileManager = new InMemoryFileManager(standard);
             var fileObject = new StringJavaFileObject(fqcn, source.source());
             var diagnostics = new StringWriter();
-            var task = compiler.getTask(diagnostics, fileManager, null,
-                List.of("--release", "25"), null, List.of(fileObject));
+            var task = compiler.getTask(diagnostics,
+                                        fileManager,
+                                        null,
+                                        List.of("--release", "25"),
+                                        null,
+                                        List.of(fileObject));
             if (!task.call()) {
                 return new ParserCompileError.CompilationFailed(diagnostics.toString()).result();
             }
@@ -117,13 +165,16 @@ public final class ParserCompiler {
     }
 
     private static Result<CompiledParser> loadParserClass(CompiledClass compiled) {
-        try {
-            var classLoader = new InMemoryClassLoader(compiled.fileManager(),
-                ParserCompiler.class.getClassLoader());
+        try{
+            var classLoader = new InMemoryClassLoader(compiled.fileManager(), ParserCompiler.class.getClassLoader());
             var clazz = classLoader.loadClass(compiled.fullyQualifiedName());
             var method = clazz.getDeclaredMethod("parse", TokenArray.class);
             method.setAccessible(true);
-            return Result.success(new CompiledParser(clazz, method));
+            var parseRuleFrom = clazz.getDeclaredMethod("parseRuleFrom", TokenArray.class, int.class, int.class);
+            parseRuleFrom.setAccessible(true);
+            var ruleKinds = clazz.getDeclaredMethod("ruleKinds");
+            ruleKinds.setAccessible(true);
+            return Result.success(new CompiledParser(clazz, method, parseRuleFrom, ruleKinds));
         } catch (ClassNotFoundException | NoSuchMethodException e) {
             return new ParserCompileError.LoadFailed(compiled.fullyQualifiedName(), e).result();
         }
@@ -135,7 +186,8 @@ public final class ParserCompiler {
         private final String code;
 
         StringJavaFileObject(String className, String code) {
-            super(URI.create("string:///" + className.replace('.', '/') + Kind.SOURCE.extension), Kind.SOURCE);
+            super(URI.create("string:///" + className.replace('.', '/') + Kind.SOURCE.extension),
+                  Kind.SOURCE);
             this.code = code;
         }
 
@@ -149,7 +201,8 @@ public final class ParserCompiler {
         private byte[] bytes;
 
         ByteArrayJavaFileObject(String className) {
-            super(URI.create("bytes:///" + className.replace('.', '/') + Kind.CLASS.extension), Kind.CLASS);
+            super(URI.create("bytes:///" + className.replace('.', '/') + Kind.CLASS.extension),
+                  Kind.CLASS);
         }
 
         @Override
@@ -184,8 +237,9 @@ public final class ParserCompiler {
             return fileObject;
         }
 
-        Option<byte[]> classBytes(String className) {
-            return Option.option(classFiles.get(className)).map(ByteArrayJavaFileObject::bytes);
+        Option<byte[] > classBytes(String className) {
+            return Option.option(classFiles.get(className))
+                         .map(ByteArrayJavaFileObject::bytes);
         }
     }
 
@@ -198,7 +252,7 @@ public final class ParserCompiler {
         }
 
         @Override
-        protected Class<?> findClass(String name) throws ClassNotFoundException {
+        protected Class< ? > findClass(String name) throws ClassNotFoundException {
             var bytesOpt = fileManager.classBytes(name);
             if (bytesOpt.isEmpty()) {
                 throw new ClassNotFoundException(name);

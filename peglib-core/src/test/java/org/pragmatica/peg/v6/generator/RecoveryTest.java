@@ -1,7 +1,5 @@
 package org.pragmatica.peg.v6.generator;
 
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 import org.pragmatica.peg.v6.cst.CstArray;
@@ -9,6 +7,9 @@ import org.pragmatica.peg.v6.cst.ParseResult;
 import org.pragmatica.peg.v6.lexer.DfaBuilder;
 import org.pragmatica.peg.v6.lexer.LexerEngine;
 import org.pragmatica.peg.v6.lexer.RuleClassifier;
+
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,7 +30,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * next comma (or EOF), emit Error node, resume parsing.
  */
 class RecoveryTest {
-
     private static final String GRAMMAR = """
         File <- Item ',' Item ',' Item
         Item <- 'foo' / 'bar'
@@ -41,22 +41,37 @@ class RecoveryTest {
 
     @BeforeAll
     static void setup() {
-        Grammar grammar = GrammarParser.parse(GRAMMAR).unwrap();
-        var classification = RuleClassifier.classify(grammar).unwrap();
-        var built = DfaBuilder.build(grammar, classification).unwrap();
-        int wsKind = grammar.whitespace().isPresent() ? DfaBuilder.KIND_WHITESPACE : -1;
-        lexer = new LexerEngine(built.dfa(), built.kinds().kindNameTable(), wsKind,
-            built.kinds().keywordResolutions());
-        var generated = ParserGenerator.generate(grammar, classification, built.kinds(),
-            "test.gen.parser.recovery", "RecoveryParser").unwrap();
-        parser = ParserCompiler.compile(generated).unwrap();
+        Grammar grammar = GrammarParser.parse(GRAMMAR)
+                                       .unwrap();
+        var classification = RuleClassifier.classify(grammar)
+                                           .unwrap();
+        var built = DfaBuilder.build(grammar, classification)
+                              .unwrap();
+        int wsKind = grammar.whitespace()
+                            .isPresent()
+                     ? DfaBuilder.KIND_WHITESPACE
+                     : - 1;
+        lexer = new LexerEngine(built.dfa(),
+                                built.kinds()
+                                     .kindNameTable(),
+                                wsKind,
+                                built.kinds()
+                                     .keywordResolutions());
+        var generated = ParserGenerator.generate(grammar,
+                                                 classification,
+                                                 built.kinds(),
+                                                 "test.gen.parser.recovery",
+                                                 "RecoveryParser")
+                                       .unwrap();
+        parser = ParserCompiler.compile(generated)
+                               .unwrap();
     }
 
     private static int errorNodeCount(CstArray cst) {
         int count = 0;
-        for (int i = 0; i < cst.nodeCount(); i++) {
+        for (int i = 0; i < cst.nodeCount(); i++ ) {
             if (cst.isError(i)) {
-                count++;
+                count++ ;
             }
         }
         return count;
@@ -66,17 +81,22 @@ class RecoveryTest {
     void cleanInput_noDiagnostics() {
         var tokens = lexer.lex("foo, bar, foo");
         ParseResult result = parser.parse(tokens);
-
-        assertThat(result.diagnostics()).isEmpty();
-        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.diagnostics())
+        .isEmpty();
+        assertThat(result.isSuccess())
+        .isTrue();
         // Phase B.3.1: rootIndex points at synthetic "_ROOT" wrapper; the start
         // rule "File" is the first child on a clean parse.
         var cst = result.cst();
-        assertThat(cst.kindNameAt(cst.rootIndex())).isEqualTo("_ROOT");
+        assertThat(cst.kindNameAt(cst.rootIndex()))
+        .isEqualTo("_ROOT");
         int file = cst.firstChildAt(cst.rootIndex());
-        assertThat(file).isNotEqualTo(CstArray.NO_NODE);
-        assertThat(cst.kindNameAt(file)).isEqualTo("File");
-        assertThat(errorNodeCount(cst)).isZero();
+        assertThat(file)
+        .isNotEqualTo(CstArray.NO_NODE);
+        assertThat(cst.kindNameAt(file))
+        .isEqualTo("File");
+        assertThat(errorNodeCount(cst))
+        .isZero();
     }
 
     @Test
@@ -87,11 +107,15 @@ class RecoveryTest {
         // after the comma.
         var tokens = lexer.lex("foo, BAD, bar");
         ParseResult result = parser.parse(tokens);
-
-        assertThat(result.diagnostics()).isNotEmpty();
-        assertThat(result.hasErrors()).isTrue();
-        assertThat(errorNodeCount(result.cst())).isGreaterThanOrEqualTo(1);
-        assertThat(result.cst().nodeCount()).isGreaterThan(0);
+        assertThat(result.diagnostics())
+        .isNotEmpty();
+        assertThat(result.hasErrors())
+        .isTrue();
+        assertThat(errorNodeCount(result.cst()))
+        .isGreaterThanOrEqualTo(1);
+        assertThat(result.cst()
+                         .nodeCount())
+        .isGreaterThan(0);
     }
 
     @Test
@@ -101,10 +125,13 @@ class RecoveryTest {
         // and stops. At least one diagnostic is recorded.
         var tokens = lexer.lex("BAD foo");
         ParseResult result = parser.parse(tokens);
-
-        assertThat(result.diagnostics()).isNotEmpty();
-        assertThat(result.hasErrors()).isTrue();
-        assertThat(result.cst().nodeCount()).isGreaterThan(0);
+        assertThat(result.diagnostics())
+        .isNotEmpty();
+        assertThat(result.hasErrors())
+        .isTrue();
+        assertThat(result.cst()
+                         .nodeCount())
+        .isGreaterThan(0);
     }
 
     @Test
@@ -114,10 +141,13 @@ class RecoveryTest {
         // start rule. At least two diagnostics accumulate.
         var tokens = lexer.lex("BAD, BAD, foo");
         ParseResult result = parser.parse(tokens);
-
-        assertThat(result.diagnostics()).isNotEmpty();
-        assertThat(result.diagnostics().size()).isGreaterThanOrEqualTo(2);
-        assertThat(errorNodeCount(result.cst())).isGreaterThanOrEqualTo(2);
+        assertThat(result.diagnostics())
+        .isNotEmpty();
+        assertThat(result.diagnostics()
+                         .size())
+        .isGreaterThanOrEqualTo(2);
+        assertThat(errorNodeCount(result.cst()))
+        .isGreaterThanOrEqualTo(2);
     }
 
     @Test
@@ -127,9 +157,12 @@ class RecoveryTest {
         // root Error node and records exactly one diagnostic.
         var tokens = lexer.lex("");
         ParseResult result = parser.parse(tokens);
-
-        assertThat(result.hasErrors()).isTrue();
-        assertThat(result.diagnostics()).hasSize(1);
-        assertThat(result.cst().nodeCount()).isGreaterThan(0);
+        assertThat(result.hasErrors())
+        .isTrue();
+        assertThat(result.diagnostics())
+        .hasSize(1);
+        assertThat(result.cst()
+                         .nodeCount())
+        .isGreaterThan(0);
     }
 }

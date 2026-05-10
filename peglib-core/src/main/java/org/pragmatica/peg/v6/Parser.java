@@ -6,6 +6,8 @@ import org.pragmatica.peg.v6.generator.LexerCompiler.CompiledLexer;
 import org.pragmatica.peg.v6.generator.ParserCompiler.CompiledParser;
 import org.pragmatica.peg.v6.token.TokenArray;
 
+import java.util.Map;
+
 /**
  * Phase C.1 — thin facade over a compiled lexer + parser pair built from a
  * single PEG grammar. Instances are obtained from {@link PegParser#fromGrammar(String)}
@@ -57,5 +59,24 @@ public final class Parser {
     /** The source grammar this parser was compiled from. */
     public Grammar grammar() {
         return grammar;
+    }
+
+    /**
+     * Phase D.1.2 — partial parse. Drive the generated parser starting at
+     * {@code fromTokenIdx} (after skipping leading trivia) into the rule whose
+     * kind constant is {@code ruleKind}. Returns the ParseResult whose CST has
+     * a synthetic {@code _ROOT} wrapping the parsed subtree.
+     */
+    public ParseResult parseRuleFrom(TokenArray tokens, int fromTokenIdx, int ruleKind) {
+        return parser.parseRuleFrom(tokens, fromTokenIdx, ruleKind);
+    }
+
+    /**
+     * Phase D.1.2 — rule-name to rule-kind constant mapping (parser rules only).
+     * Used by tooling and the incremental engine to look up the kind argument
+     * for {@link #parseRuleFrom}.
+     */
+    public Map<String, Integer> ruleKinds() {
+        return parser.ruleKinds();
     }
 }
