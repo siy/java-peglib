@@ -1,6 +1,6 @@
 # total rules hit: 104 / total rules in grammar: 138 (coverage: 75.4%)
 Additive	3110	21
-AnnotatedTypeName	1228	20
+AnnotatedTypeName	1227	20
 Annotation	47	8
 AnnotationBody	10	3
 AnnotationElem	26	2
@@ -36,7 +36,7 @@ ForCtrl	65	2
 ForInit	11	2
 ForKW	65	2
 Guard	3	1
-Identifier	13991	22
+Identifier	13989	22
 IfKW	124	6
 ImplementsClause	12	4
 ImportDecl	90	15
@@ -70,7 +70,7 @@ RecordComp	104	9
 RecordComponents	82	9
 RecordKW	48	9
 RecordMember	31	3
-RefType	1210	20
+RefType	1209	20
 Relational	2838	21
 Resource	1	1
 ResourceSpec	1	1
