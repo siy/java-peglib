@@ -373,6 +373,48 @@ class IncrementalParserTest {
         System.out.println("[D.1.2] small edit on 1000-item input: " + elapsedMs + " ms");
     }
 
+    // === snapshot / restore ===
+    @Test
+    void snapshot_capturesCurrentReferences() {
+        var ip = new IncrementalParser(parser, "foo, bar");
+        var snap = ip.snapshot();
+        assertThat(snap.input())
+        .isEqualTo(ip.input());
+        assertThat(snap.tokens())
+        .isSameAs(ip.currentTokens());
+        assertThat(snap.cst())
+        .isSameAs(ip.current());
+        assertThat(snap.diagnostics())
+        .isSameAs(ip.diagnostics());
+    }
+
+    @Test
+    void restore_afterEdit_rollsBackState() {
+        var ip = new IncrementalParser(parser, "foo, bar");
+        var snap = ip.snapshot();
+        var initialInput = ip.input();
+        var initialCst = ip.current();
+        var initialTokens = ip.currentTokens();
+        var initialDiagnostics = ip.diagnostics();
+        ip.edit(5, 3, "foo");
+        assertThat(ip.input())
+        .isEqualTo("foo, foo");
+        // Roll back.
+        ip.restore(snap);
+        assertThat(ip.input())
+        .isEqualTo(initialInput);
+        assertThat(ip.current())
+        .isSameAs(initialCst);
+        assertThat(ip.currentTokens())
+        .isSameAs(initialTokens);
+        assertThat(ip.diagnostics())
+        .isSameAs(initialDiagnostics);
+        // After restore, the same edit must produce the same post-edit state.
+        var afterRestoreEdit = ip.edit(5, 3, "foo");
+        var fresh = parser.parse("foo, foo");
+        assertCstEquivalent(afterRestoreEdit.cst(), fresh.cst());
+    }
+
     @Test
     void partialAndFullPaths_produceIdenticalResults() {
         // Same edit applied via partial path (with Item checkpoint) and full

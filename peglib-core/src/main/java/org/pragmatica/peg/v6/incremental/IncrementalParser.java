@@ -306,6 +306,38 @@ public final class IncrementalParser {
     }
 
     /**
+     * Immutable snapshot of the mutable state inside an {@link IncrementalParser}.
+     *
+     * <p>Tokens, CST and the diagnostics list are themselves immutable (or treated
+     * as such by the parser pipeline), so a snapshot just captures references.
+     * Restoring is therefore O(1) — useful for benchmarks that need to replay the
+     * same edit against the same starting state per invocation, and for callers
+     * that want to implement undo/redo on top of an incremental parser without
+     * re-running the full initial parse.
+     *
+     * <p>Counters ({@code partialReparseCount}, {@code fullReparseCount}) are
+     * intentionally NOT part of the snapshot — they are observability hooks that
+     * track lifetime totals across restores, not state we want to roll back.
+     */
+    public record Snapshot(String input, TokenArray tokens, CstArray cst, List<Diagnostic> diagnostics) {}
+
+    /** Capture the current mutable state for later {@link #restore(Snapshot)}. */
+    public Snapshot snapshot() {
+        return new Snapshot(input, tokens, cst, diagnostics);
+    }
+
+    /**
+     * Restore mutable state from a snapshot taken on this same parser. References
+     * are copied verbatim; this is an O(1) operation.
+     */
+    public void restore(Snapshot snapshot) {
+        this.input = snapshot.input();
+        this.tokens = snapshot.tokens();
+        this.cst = snapshot.cst();
+        this.diagnostics = snapshot.diagnostics();
+    }
+
+    /**
      * Internal cause produced by {@link #tryPartialReparse} when the reflective
      * dispatch into the generated parser's {@code parseRuleFrom} throws. The
      * cause is immediately discarded (mapped to {@link Option#none()}) by the
