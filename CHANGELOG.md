@@ -38,10 +38,15 @@ Implementation phasing (Phase A through F per spec §7) is in progress.
 - Java25 grammar: `>>` and `>>>` shift operators replaced with parser rules `RShift <- '>' '>'` and `URShift <- '>' '>' '>'`. Prevents lexer from fusing two `>` characters into one shift token, which broke nested generics like `List<Map<String, Integer>>`.
 - `CstArrayBuilder.truncate` rewritten as O(dropped-range) bounded scan via `lastChildBefore` undo log, replacing the prior O(surviving-nodes) rebuild. Profile showed truncate at 89.7% of warm-parse CPU; this drop is the dominant contributor to the 8.55× headline speedup.
 - `TokenArray.nextNonTrivia` precomputed at construction for O(1) lookup (was linear scan).
+- **JBCT 0.25.0 conformance pass on v6** (2026-05-10): all 123 strict-mode lint errors flagged by the upgraded plugin have been eliminated. Defensive `IllegalArgumentException`/`IllegalStateException` guards on internal helpers (`CstArray`, `CstArrayBuilder`, `TokenArray`, `TokenArrayBuilder`, `Diagnostic`, the three `*Generator.generate` entry points, both `*Detector.detect`, `IncrementalParser.edit`, `PegParser.fromGrammar`, `LexerEngine` constructor) dropped — callers within v6 are trusted; JVM array-bounds catches genuine OOB if any. `Result<Void>` on `ParserGenerator` emit visitors converted to `Result<Unit>`. Null returns in `DfaBuilder.{collectAliasLiterals, tryPartialChoice, compileDelimitedBlock}`, `IncrementalParser.tryPartialReparse`, `RuleClassifier.extractLeadingLiteral` converted to `Option<T>`. Reflection wrappers in `LexerCompiler.CompiledLexer.lex` and `ParserCompiler.CompiledParser.{parse, parseRuleFrom, ruleKinds}` rewritten as `Result.lift(..., () -> Method.invoke(...)).unwrap()` so the failure cause is a typed `Cause` rather than an ad-hoc rethrow chain. Hot-path void mutators (`CstArrayBuilder.{endNode, setFlag, truncate}`, `TokenArrayBuilder.append`, `PegParser.clearCache`) and JDK-API-mandated throws (`ClassLoader.findClass`, `OutputStream.close`) carry `@SuppressWarnings("JBCT-RET-01"/"JBCT-EX-01")`. Lint passes with 0 errors, 288 warnings (style suggestions only).
 
 ### Fixed
 
 - Java25 corpus: 19/20 fixtures (`format-examples/`) parse cleanly via `PegParser.fromGrammar(java25.peg).parse(...)`; remaining 1 (`Annotations.java`) recovers with diagnostics due to annotation-in-body usage (deferred to a future fix).
+
+### Behavior changes
+
+- `LexerEngine.lex(String)` no longer throws `IllegalArgumentException` on a no-DFA-transition stall. The lexer now emits a single-character synthetic `KIND_WHITESPACE` token at the failing offset and continues, so the entire input remains covered by tokens. The downstream parser surfaces such bytes as a trailing-input diagnostic (the same recovery path already used for valid-but-unexpected tokens). Callers that previously relied on a thrown exception to detect malformed input must now inspect `parseResult.diagnostics()` instead.
 
 ### Removed
 

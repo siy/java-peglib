@@ -1,5 +1,6 @@
 package org.pragmatica.peg.v6.incremental;
 
+import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.v6.Parser;
@@ -191,9 +192,9 @@ public final class IncrementalParser {
         // mapped token. The result's CST has a synthetic _ROOT wrapping the
         // parsed subtree as its first child. Any reflection failure becomes a
         // Result.failure that we map back to Option.none().
-        var subtreeOpt = Result.lift(t -> (org.pragmatica.lang.Cause)() -> "parseRuleFrom failed: " + t,
+        var subtreeOpt = Result.lift(PartialReparseFailed::new,
                                      () -> parser.parseRuleFrom(splicedTokens, newFirstToken, ruleKind))
-        .option();
+                               .option();
         if ( subtreeOpt.isEmpty()) {
         return Option.none();}
         var subtree = subtreeOpt.unwrap();
@@ -302,5 +303,20 @@ public final class IncrementalParser {
 
     public Set<String> checkpointRules() {
         return checkpointRules;
+    }
+
+    /**
+     * Internal cause produced by {@link #tryPartialReparse} when the reflective
+     * dispatch into the generated parser's {@code parseRuleFrom} throws. The
+     * cause is immediately discarded (mapped to {@link Option#none()}) by the
+     * caller, which falls back to a full reparse — but a typed cause is still
+     * preferable to an inline lambda for the {@link Result#lift} adapter
+     * boundary.
+     */
+    private record PartialReparseFailed(Throwable cause) implements Cause {
+        @Override
+        public String message() {
+            return "parseRuleFrom reflective dispatch failed: " + cause;
+        }
     }
 }

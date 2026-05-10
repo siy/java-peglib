@@ -145,7 +145,7 @@ Don't run until at least 18/20 fixtures parse cleanly.
 5. **Per-iteration trivia tokens** — `%whitespace` ZeroOrMore matches the entire whitespace+comments run as ONE token. Inner-iteration token splitting requires lexer driver changes.
 6. **Named captures + back-references** — state TBD by #12 task.
 7. **JBCT-SEAL-01 lint warnings** on a few v6 files (cosmetic; sealed interfaces with single-variant nesting).
-8. **v6 files unformatted** — `jbct-maven-plugin:check` reports several need reformatting; deferred.
+8. **v6 JBCT 0.25.0 plugin: `<skip>true</skip>` pinned** — the JBCT-conformance refactor (May 2026) eliminated all 123 strict-mode lint errors flagged by 0.25.0 (0 errors, 288 cosmetic warnings). However 5 files (`TokenArray`, `DfaBuilder`, `ParserCompiler`, `LexerCompiler`, `ParserGenerator`) hit unstable cases in the 0.25.0 formatter where `jbct:format` does not converge: each pass either inserts 4-7 blank lines between `} else` and `{`, or oscillates around a `if ( foo) { return ...;}` single-line shape. Skip remains true until either the formatter is fixed upstream or those files are hand-formatted; the *lint refactor itself is complete and shippable*. To re-verify lint: flip `<skip>false</skip>` in `peglib-core/pom.xml` and run `mvn -pl peglib-core jbct:check` — expect 5 format issues, 0 lint errors. Reference work item: tracking the format bug upstream.
 9. **`IncrementalParser` does full reparse on every edit** — correct but unoptimized (O(n) per edit).
 
 ### Intentional drops (per spec — NOT returning)
