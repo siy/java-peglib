@@ -1,6 +1,78 @@
 # peglib — Handover
 
-**Last updated:** 2026-05-10 — end of Session 2 (Phases A+B+C+D simple-first+E.1 implemented). Original Session-1 handover preserved below for reference.
+**Last updated:** 2026-05-11 — Sessions 2+3+4 complete. 0.6.0 ready for release.
+
+---
+
+## SESSION 4 SUMMARY — 0.6.0 ship-ready
+
+### State at a glance
+
+| | |
+|---|---|
+| **Active branch** | `release-0.6.0` at `4a2799d`, tagged `v0.6.0-candidate` |
+| **Tests** | **1440 passing** across 7 modules, 0 failures, 4 pre-existing skips |
+| **Java25 corpus** | 20/20 clean parse |
+| **Real-world Java** | FactoryClassGenerator.java (1900 LOC, JBCT generator): 0 diagnostics |
+| **vs 0.5.x-gen** | **11-12× faster** |
+| **vs javac parse-only** | **1.20-1.83× of javac** (same category) |
+| **Incremental** | Sub-ms p50, p99 ~1.5ms |
+| **Working tree** | clean |
+
+### What shipped across sessions 2-4
+
+Phase A-F per spec §7 — all implemented or documented as known limitations:
+
+- **Phase A**: Lexer foundation — DFA construction, TokenArray, GLexer codegen, Java25 corpus byte-equal
+- **Phase B**: Parser — flat CST, ParseResult+Diagnostic, ParserGenerator, panic recovery, %recover directive, Cut operator, lexer-rule aliasing, StringLit/delimited blocks
+- **Phase C**: PegParser API with generate-compile-cache
+- **Phase D**: Incremental engine — TokenArray.spliceLex, CstArray.findCheckpointAncestor + spliceSubtree, IncrementalParser, true partial reparse
+- **Phase E.1**: GVisitor stub generation
+- **Phase E.2-3**: peglib-formatter + peglib-maven-plugin + peglib-playground migrations (parallel package)
+- **Phase F**: Bench validated, migration guide written
+
+### Critical fixes landed in session 4
+
+1. **Bounded-scan truncate** (CstArrayBuilder): 24-48× speedup on the hot path — eliminated the 75% CPU dominant cost
+2. **JBCT 0.25.0 v6 conformance**: 0 lint errors after refactor (throws → Result, nulls → Option, void mutators @SuppressWarnings)
+3. **peglib-runtime module**: standalone-parser invariant met; 25KB jar
+4. **V6Formatter corpus validation**: 20/20 round-trip; 2 bugs found and fixed
+5. **DFA Unicode handling**: non-ASCII chars in comments/strings now work
+6. **Asymmetric delimited blocks**: block comments inside Choice now route through compileDelimitedBlock
+7. **Identifier fallback**: contextual keywords (open/module/record/yield) accepted as identifiers
+8. **java25 grammar**: `>>` split into single `>` tokens (nested generics), Annotation* on var decls
+
+### Known limitations (intentional or deferred)
+
+**Intentional drops** (per spec §3 — NOT returning):
+- BASIC/ADVANCED recovery split (one always-on mechanism)
+- Inline `{...}` action blocks (replaced by Visitor)
+- AstNode type (CST only)
+- Packrat memoization (tokens-first design)
+
+**Deferred for 0.6.x or 0.7**:
+- Per-rule `%recover` sync sets (start-rule only currently)
+- MIXED-rule char-level fallback (no-op)
+- `ParserOptions.maxDiagnostics` (stub)
+- Per-iteration trivia tokens for `%whitespace` ZeroOrMore
+- Named captures + back-references runtime (rejected at fromGrammar with clear error)
+- JBCT `<skip>true</skip>` due to upstream formatter convergence bug on 5 v6 files (lint itself passes cleanly)
+
+### Release recommendation
+
+Ship as **0.6.0 stable** (not rc). Validation is strong:
+- All architectural goals met
+- Apples-to-apples javac comparison shows competitive performance
+- Tests + corpus + real-world fixtures all clean
+- Migration guide ready (`docs/MIGRATION-0.5-TO-0.6.md`)
+
+PR will be open against `main` for review.
+
+---
+
+## ARCHITECTURAL DECISIONS (for next session)
+
+See §11 below for the 9-decision summary. See `docs/ARCHITECTURE-0.6.0.md` for the full spec.
 
 ---
 

@@ -5,9 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - 2026-05-10
+## [0.6.0] - 2026-05-11
 
-_Work in progress — clean-slate redesign. See [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md)._
+**Major performance + architecture release.** Clean-slate redesign delivering parity with javac on Java parsing while emitting full CST + trivia + diagnostics that javac doesn't expose. Tokens-first lex-then-parse architecture with flat int[] CST achieves 11-12× speedup over the 0.5.x source-generated parser.
+
+### Headline performance (real-world Java25 fixtures)
+
+| Workload | 0.5.x gen | 0.6.0 | javac | v6 vs 0.5.x | v6 vs javac |
+|---|---:|---:|---:|---:|---:|
+| 1900-LOC parse | 33.24 ms | **2.71 ms** | 2.25 ms | **12.3×** faster | 1.20× of javac |
+| 40K-LOC parse | 1141 ms | **95.65 ms** | 52.25 ms | **11.9×** faster | 1.83× of javac |
+| Memory (1900 LOC) | 77 MB | **8.03 MB** | 3.17 MB | **9.6×** less | 2.53× of javac |
+| Incremental edit | n/a | **0.70 ms p50 / 1.5 ms p99** | n/a | — | — |
+
+### Highlights
+
+- 9 architectural decisions implemented per spec §3 (drop interpreter, lex→parse two-phase, Visitor pattern replaces actions, CST-only, flat int[] CST, trivia as tokens, thin incremental, one always-on recovery, grammar IS the configuration)
+- New `peglib-runtime` module: 25KB jar containing the runtime types — generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core (standalone-parser invariant)
+- DFA Unicode support: handles non-ASCII characters in line/block comments, strings, identifiers
+- True partial reparse via grammar `%checkpoint` directives: small edits skip the unchanged subtree
+- Rust-style diagnostics with panic-mode error recovery; always-on, single mechanism
+- JBCT 0.25.0 conformance: 0 lint errors on v6 surface
+- 1440 tests passing across 7 modules; Java25 corpus 20/20 clean; FactoryClassGenerator.java (1900 LOC real-world JBCT generator) parses with 0 diagnostics
+
+See [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md) for the spec and [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md) for upgrade instructions.
 
 ### Architecture (BREAKING)
 
