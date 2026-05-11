@@ -6,7 +6,7 @@
 
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-parent</artifactId>
-    <version>0.5.1</version>
+    <version>0.6.0</version>
     <packaging>pom</packaging>
 
     <name>Peglib Parent</name>
@@ -36,6 +36,7 @@
     </scm>
 
     <modules>
+        <module>peglib-runtime</module>
         <module>peglib-core</module>
         <module>peglib-incremental</module>
         <module>peglib-formatter</module>
@@ -55,6 +56,11 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.pragmatica-lite</groupId>
+                <artifactId>peglib-runtime</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>org.pragmatica-lite</groupId>
                 <artifactId>peglib</artifactId>

@@ -1,0 +1,239 @@
+package org.pragmatica.peg.v6.generator;
+
+import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Option;
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.v6.cst.CstArray;
+import org.pragmatica.peg.v6.cst.ParseResult;
+import org.pragmatica.peg.v6.token.TokenArray;
+
+import javax.tools.ForwardingJavaFileManager;
+import javax.tools.JavaCompiler;
+import javax.tools.JavaFileObject;
+import javax.tools.SimpleJavaFileObject;
+import javax.tools.StandardJavaFileManager;
+import javax.tools.ToolProvider;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.io.StringWriter;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.net.URI;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Phase B.3 — compile a {@link ParserGenerator.GeneratedParser} into a callable
+ * {@link CompiledParser}. Mirrors {@link LexerCompiler}'s in-memory JDK Compiler
+ * API pattern.
+ */
+public final class ParserCompiler {
+    private ParserCompiler() {}
+
+    public sealed interface ParserCompileError extends Cause permits ParserCompileError.NoCompilerAvailable,
+    ParserCompileError.CompilationFailed,
+    ParserCompileError.LoadFailed {
+        record NoCompilerAvailable() implements ParserCompileError {
+            @Override public String message() {
+                return "No Java compiler available — run with a JDK, not a JRE";
+            }
+        }
+
+        record CompilationFailed(String diagnostics) implements ParserCompileError {
+            @Override public String message() {
+                return "Generated parser compilation failed:\n" + diagnostics;
+            }
+        }
+
+        record LoadFailed(String className, Throwable cause) implements ParserCompileError {
+            @Override public String message() {
+                return "Failed to load generated parser '" + className + "': " + cause;
+            }
+        }
+    }
+
+    public record CompiledParser(Class<?> parserClass,
+                                 Method parseMethod,
+                                 Method parseRuleFromMethod,
+                                 Method ruleKindsMethod) {
+        /**
+         * Phase B.4 — generated {@code parse(TokenArray)} now returns
+         * {@link ParseResult} unconditionally: a CST plus a (possibly empty)
+         * diagnostics list. Recovery is panic-mode at the token sync set so
+         * malformed inputs no longer raise an exception to the caller.
+         */
+        public ParseResult parse(TokenArray tokens) {
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+                               () -> (ParseResult) parseMethod.invoke(null, tokens))
+            .unwrap();
+        }
+
+        /**
+         * Phase D.1.2 — partial parse from a specific token index using the
+         * specified rule kind. Returns a {@link ParseResult} whose CST has a
+         * synthetic {@code _ROOT} node holding the parsed subtree (and any
+         * recovery error nodes); the caller (incremental engine) then splices
+         * the {@code _ROOT}'s first child into a larger CST.
+         */
+        public ParseResult parseRuleFrom(TokenArray tokens, int fromTokenIdx, int ruleKind) {
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+                               () -> (ParseResult) parseRuleFromMethod.invoke(null, tokens, fromTokenIdx, ruleKind))
+            .unwrap();
+        }
+
+        /**
+         * Phase D.1.2 — rule-name to rule-kind mapping. Callers map rule names
+         * (e.g. "MethodDecl") to the kind constant required by
+         * {@link #parseRuleFrom}.
+         */
+        @SuppressWarnings("unchecked")
+        public Map<String, Integer> ruleKinds() {
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+                               () -> (Map<String, Integer>) ruleKindsMethod.invoke(null))
+            .unwrap();
+        }
+
+        /**
+         * Convenience wrapper for callers that want only the CST and assume the
+         * input is well-formed. Equivalent to {@code parse(tokens).cst()}.
+         */
+        public CstArray parseCst(TokenArray tokens) {
+            return parse(tokens).cst();
+        }
+
+        private static Throwable unwrapCause(Throwable t) {
+            return t instanceof InvocationTargetException ite && ite.getCause() != null
+                   ? ite.getCause()
+                   : t;
+        }
+    }
+
+    public static Result<CompiledParser> compile(ParserGenerator.GeneratedParser source) {
+        var compiler = ToolProvider.getSystemJavaCompiler();
+        if ( compiler == null) {
+        return new ParserCompileError.NoCompilerAvailable().result();}
+        return runCompilation(compiler, source).flatMap(ParserCompiler::loadParserClass);
+    }
+
+    private static Result<CompiledClass> runCompilation(JavaCompiler compiler, ParserGenerator.GeneratedParser source) {
+        var fqcn = source.fullyQualifiedName();
+        try (var standard = compiler.getStandardFileManager(null, null, null)) {
+            var fileManager = new InMemoryFileManager(standard);
+            var fileObject = new StringJavaFileObject(fqcn, source.source());
+            var diagnostics = new StringWriter();
+            var task = compiler.getTask(diagnostics,
+                                        fileManager,
+                                        null,
+                                        List.of("--release", "25"),
+                                        null,
+                                        List.of(fileObject));
+            if ( !task.call()) {
+            return new ParserCompileError.CompilationFailed(diagnostics.toString()).result();}
+            return Result.success(new CompiledClass(fqcn, fileManager));
+        }
+
+
+
+        catch (Exception e) {
+            return new ParserCompileError.LoadFailed(fqcn, e).result();
+        }
+    }
+
+    private static Result<CompiledParser> loadParserClass(CompiledClass compiled) {
+        try {
+            var classLoader = new InMemoryClassLoader(compiled.fileManager(), ParserCompiler.class.getClassLoader());
+            var clazz = classLoader.loadClass(compiled.fullyQualifiedName());
+            var method = clazz.getDeclaredMethod("parse", TokenArray.class);
+            method.setAccessible(true);
+            var parseRuleFrom = clazz.getDeclaredMethod("parseRuleFrom", TokenArray.class, int.class, int.class);
+            parseRuleFrom.setAccessible(true);
+            var ruleKinds = clazz.getDeclaredMethod("ruleKinds");
+            ruleKinds.setAccessible(true);
+            return Result.success(new CompiledParser(clazz, method, parseRuleFrom, ruleKinds));
+        }
+
+
+
+        catch (ClassNotFoundException | NoSuchMethodException e) {
+            return new ParserCompileError.LoadFailed(compiled.fullyQualifiedName(), e).result();
+        }
+    }
+
+    private record CompiledClass(String fullyQualifiedName, InMemoryFileManager fileManager){}
+
+    private static final class StringJavaFileObject extends SimpleJavaFileObject {
+        private final String code;
+
+        StringJavaFileObject(String className, String code) {
+            super(URI.create("string:///" + className.replace('.', '/') + Kind.SOURCE.extension),
+                  Kind.SOURCE);
+            this.code = code;
+        }
+
+        @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+            return code;
+        }
+    }
+
+    private static final class ByteArrayJavaFileObject extends SimpleJavaFileObject {
+        private byte[] bytes;
+
+        ByteArrayJavaFileObject(String className) {
+            super(URI.create("bytes:///" + className.replace('.', '/') + Kind.CLASS.extension),
+                  Kind.CLASS);
+        }
+
+        @Override public OutputStream openOutputStream() {
+            return new ByteArrayOutputStream() {@Override@SuppressWarnings("JBCT-RET-01") public void close() {
+                bytes = toByteArray();
+            }};
+        }
+
+        byte[] bytes() {
+            return bytes;
+        }
+    }
+
+    private static final class InMemoryFileManager extends ForwardingJavaFileManager<StandardJavaFileManager> {
+        private final Map<String, ByteArrayJavaFileObject> classFiles = new HashMap<>();
+
+        InMemoryFileManager(StandardJavaFileManager delegate) {
+            super(delegate);
+        }
+
+        @Override public JavaFileObject getJavaFileForOutput(Location location,
+                                                             String className,
+                                                             JavaFileObject.Kind kind,
+                                                             javax.tools.FileObject sibling) {
+            var fileObject = new ByteArrayJavaFileObject(className);
+            classFiles.put(className, fileObject);
+            return fileObject;
+        }
+
+        Option<byte[]> classBytes(String className) {
+            return Option.option(classFiles.get(className)).map(ByteArrayJavaFileObject::bytes);
+        }
+    }
+
+    private static final class InMemoryClassLoader extends ClassLoader {
+        private final InMemoryFileManager fileManager;
+
+        InMemoryClassLoader(InMemoryFileManager fileManager, ClassLoader parent) {
+            super(parent);
+            this.fileManager = fileManager;
+        }
+
+        // ClassLoader.findClass JDK API mandates a ClassNotFoundException throws
+        // clause; suppress JBCT-EX-01 because the contract is dictated by the JDK.
+        @Override
+        @SuppressWarnings("JBCT-EX-01")
+        protected Class<?> findClass(String name) throws ClassNotFoundException {
+            var bytesOpt = fileManager.classBytes(name);
+            if ( bytesOpt.isEmpty()) {
+            throw new ClassNotFoundException(name);}
+            var bytes = bytesOpt.unwrap();
+            return defineClass(name, bytes, 0, bytes.length);
+        }
+    }
+}

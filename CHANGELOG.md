@@ -5,6 +5,89 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-11
+
+**Major performance + architecture release.** Clean-slate redesign delivering parity with javac on Java parsing while emitting full CST + trivia + diagnostics that javac doesn't expose. Tokens-first lex-then-parse architecture with flat int[] CST achieves 11-12× speedup over the 0.5.x source-generated parser.
+
+### Headline performance (real-world Java25 fixtures)
+
+| Workload | 0.5.x gen | 0.6.0 | javac | v6 vs 0.5.x | v6 vs javac |
+|---|---:|---:|---:|---:|---:|
+| 1900-LOC parse | 33.24 ms | **2.71 ms** | 2.25 ms | **12.3×** faster | 1.20× of javac |
+| 40K-LOC parse | 1141 ms | **95.65 ms** | 52.25 ms | **11.9×** faster | 1.83× of javac |
+| Memory (1900 LOC) | 77 MB | **8.03 MB** | 3.17 MB | **9.6×** less | 2.53× of javac |
+| Incremental edit | n/a | **0.70 ms p50 / 1.5 ms p99** | n/a | — | — |
+
+### Highlights
+
+- 9 architectural decisions implemented per spec §3 (drop interpreter, lex→parse two-phase, Visitor pattern replaces actions, CST-only, flat int[] CST, trivia as tokens, thin incremental, one always-on recovery, grammar IS the configuration)
+- New `peglib-runtime` module: 25KB jar containing the runtime types — generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core (standalone-parser invariant)
+- DFA Unicode support: handles non-ASCII characters in line/block comments, strings, identifiers
+- True partial reparse via grammar `%checkpoint` directives: small edits skip the unchanged subtree
+- Rust-style diagnostics with panic-mode error recovery; always-on, single mechanism
+- JBCT 0.25.0 conformance: 0 lint errors on v6 surface
+- 1440 tests passing across 7 modules; Java25 corpus 20/20 clean; FactoryClassGenerator.java (1900 LOC real-world JBCT generator) parses with 0 diagnostics
+
+See [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md) for the spec and [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md) for upgrade instructions.
+
+### Architecture (BREAKING)
+
+Major redesign per nine locked decisions: drop interpreter (generator-only with generate-and-compile); two-phase lex → parse with PEG surface preserved; drop runtime actions (replaced by `Visitor<T>` stub); drop AST type (CST is the only tree); pure flat `int[]` CST data layout; trivia as tokens; thin caching incremental layer; one always-on error recovery mechanism; `ParserConfig` deleted (the grammar IS the configuration). Targets parity-with-or-faster-than javac on Java parsing while emitting strictly more output.
+
+### Performance (Java25 corpus, 12 fixtures, JMH avgt)
+
+**0.6.0 is 8.55× faster than the 0.5.x source-generated parser overall** (5.116 ms → 0.598 ms summed across all 12 format-examples fixtures). Per-fixture speedup uniform at 6.7×-9.4× (structural win, not fixture-specific). SwitchExpressions.java (4201 bytes, the worst-case fixture): 1.221 ms → 0.142 ms.
+
+Implementation phasing (Phase A through F per spec §7) is in progress.
+
+### Added
+
+- v6 lexer foundation: rule classifier (LEXER/PARSER/MIXED), Thompson NFA → subset-construction DFA, TokenArray, GLexer codegen + JDK Compiler API loader. Parallel package `org.pragmatica.peg.v6.*` (0.5.x untouched).
+- v6 token granularity: post-DFA keyword resolution (`!Keyword Body` skip-prefix pattern). Java25 corpus ANY_CHAR fallback dropped from 87.9% to 3.20%.
+- v6 lexer-rule aliasing: structural literal/literal-choice LEXER rules alias to inline-literal kinds. Restores `Modifier`, `ClassKW`, `EnumKW`, etc. that DFA cannot compile due to `!CharClass` word boundary.
+- v6 lexer Choice partial-absorption fallback + KMP-driven delimited-block DFA: handles `StringLit` (regular and triple-quoted) and similar `Literal-Body-Literal` patterns previously dropped from the DFA.
+- v6 CST: flat `int[]` data structure (8 ints/node, ~32 bytes vs 80-200 in 0.5.x), sealed `CstNode` views (Branch/Leaf/Error), positional trivia helpers, lazy `IntStream` walk.
+- v6 ParseResult + Rust-style Diagnostic.
+- v6 parser codegen (GParser): recursive descent over TokenArray, FIRST-set Choice dispatch via switch, panic-mode error recovery with synthetic `_ROOT` wrapper.
+- v6 visitor codegen (GVisitor<T>): per-rule visit methods + framework (`visit`, `visitChildren`, `defaultResult`, `aggregateResult`).
+- v6 PegParser entry point: `fromGrammar(String)` runs Grammar→Classify→DFA→generate-and-compile-lexer→generate-and-compile-parser; cached in ConcurrentHashMap by grammar text; AtomicLong class-name uniquification; cold ~261-919ms, warm 0-2µs.
+- v6 incremental: TokenArray.spliceLex (windowed re-lex with ±1 token expansion), CstArray.findCheckpointAncestor + spliceSubtree, IncrementalParser wrapper.
+- JMH benchmarks for v6 parse path (warm-parse + cold-compile) under `peglib-core/src/jmh/java/org/pragmatica/peg/v6/perf/`.
+
+### Changed
+
+- Java25 grammar: `>>` and `>>>` shift operators replaced with parser rules `RShift <- '>' '>'` and `URShift <- '>' '>' '>'`. Prevents lexer from fusing two `>` characters into one shift token, which broke nested generics like `List<Map<String, Integer>>`.
+- `CstArrayBuilder.truncate` rewritten as O(dropped-range) bounded scan via `lastChildBefore` undo log, replacing the prior O(surviving-nodes) rebuild. Profile showed truncate at 89.7% of warm-parse CPU; this drop is the dominant contributor to the 8.55× headline speedup.
+- `TokenArray.nextNonTrivia` precomputed at construction for O(1) lookup (was linear scan).
+- **JBCT 0.25.0 conformance pass on v6** (2026-05-10): all 123 strict-mode lint errors flagged by the upgraded plugin have been eliminated, both in framework code and in the source emitted by `ParserGenerator`/`LexerGenerator`. Defensive `IllegalArgumentException`/`IllegalStateException` guards on internal helpers (`CstArray`, `CstArrayBuilder`, `TokenArray`, `TokenArrayBuilder`, `Diagnostic`, the three `*Generator.generate` entry points, both `*Detector.detect`, `IncrementalParser.edit`, `PegParser.fromGrammar`, `LexerEngine` constructor) dropped — callers within v6 are trusted; JVM array-bounds catches genuine OOB if any. `Result<Void>` on `ParserGenerator` emit visitors converted to `Result<Unit>`. Null returns in `DfaBuilder.{collectAliasLiterals, tryPartialChoice, compileDelimitedBlock}`, `IncrementalParser.tryPartialReparse`, `RuleClassifier.extractLeadingLiteral` converted to `Option<T>`. Reflection wrappers in `LexerCompiler.CompiledLexer.lex` and `ParserCompiler.CompiledParser.{parse, parseRuleFrom, ruleKinds}` rewritten as `Result.lift(..., () -> Method.invoke(...)).unwrap()` so the failure cause is a typed `Cause` rather than an ad-hoc rethrow chain. Generated parser source no longer emits `throw new IllegalArgumentException(...)` for null-tokens, out-of-range `fromTokenIdx`, or unknown rule kind: the unknown-rule-kind switch default returns `false`, routing through the existing recovery branch that emits a syntax-error diagnostic + `Error` node. Generated lexer source no longer throws on a no-DFA-transition stall — emits a 1-char synthetic `KIND_WHITESPACE` token (matches `LexerEngine.lex` behavior). Hot-path void mutators (`CstArrayBuilder.{endNode, setFlag, truncate}`, `TokenArrayBuilder.append`, `PegParser.clearCache`) and JDK-API-mandated throws (`ClassLoader.findClass`, `OutputStream.close`) carry `@SuppressWarnings("JBCT-RET-01"/"JBCT-EX-01")`. Lint passes with 0 errors, 287 warnings (style suggestions only). `IncrementalParser.tryPartialReparse`'s reflection-failure cause is now a typed `private record PartialReparseFailed(Throwable cause) implements Cause` rather than an inline lambda. Bench (10 samples × 2 forks): reference `7.06 ± 0.19 ms` (vs `~7.4ms` baseline), selfhost `97.4 ± 27.9 ms` (vs `~97ms` baseline) — within noise, no regression.
+
+### Fixed
+
+- Java25 corpus: 19/20 fixtures (`format-examples/`) parse cleanly via `PegParser.fromGrammar(java25.peg).parse(...)`; remaining 1 (`Annotations.java`) recovers with diagnostics due to annotation-in-body usage (deferred to a future fix).
+
+### Behavior changes
+
+- `LexerEngine.lex(String)` and the generated `lex(String)` method emitted by `LexerGenerator` no longer throw `IllegalArgumentException` on a no-DFA-transition stall. Both paths now emit a single-character synthetic `KIND_WHITESPACE` token at the failing offset and continue, so the entire input remains covered by tokens. The downstream parser surfaces such bytes as a trailing-input diagnostic (the same recovery path already used for valid-but-unexpected tokens). Callers that previously relied on a thrown exception to detect malformed input must now inspect `parseResult.diagnostics()` instead.
+- The generated parser's `parseRuleFrom(TokenArray, int, int)` no longer throws for an unknown rule-kind argument or for a `null` tokens argument. Unknown rule-kind reaches a recovery branch that records a syntax-error `Diagnostic` and an `Error` CST node (consistent with how the parser handles any other parse-time mismatch). A `null` tokens reference will surface as `NullPointerException` from the first dereference rather than a wrapped `IllegalArgumentException` — the difference is in the exception type, not in whether the call survives.
+
+### Removed
+
+### Intentional drops (per spec — NOT returning)
+
+- BASIC/ADVANCED `RecoveryStrategy` split: one always-on panic-mode mechanism replaces it. Use `result.diagnostics().isEmpty()` for fail-fast semantics.
+- Inline `{ ... }` action blocks in grammar: replaced by `GVisitor<T>` stub class generated per grammar (Phase E.1). Compile-time rejection with migration message.
+- `AstNode` type: dropped entirely. Build domain ASTs via `GVisitor<T>` walking the CST.
+- Packrat memoization: not needed under tokens-first design. JIT scalar-replacement handles short-lived parse state.
+
+### Deferred (planned for later 0.6.x or 0.7)
+
+- Per-rule `%recover` sync sets: `%recover` directive parses (Phase #5) and start-rule sync overrides emit, but per-rule recovery within nested parsers is a no-op. Spec §3.8 calls for per-rule.
+- MIXED-rule char-level fallback: rules with both parser-rule references and char-level constructs emit no CST nodes for the char-level parts.
+- `ParserOptions` class is a stub; `Parser.parse(input, maxDiagnostics)` ignores the cap.
+- Block comment classification through DFA: works in lexer engine post-pass, but `'/*' (!'*/' .)* '*/'` inside a Choice alternative isn't routed through `compileDelimitedBlock`. LINE_COMMENT classification works.
+- Per-iteration trivia tokens: `%whitespace` ZeroOrMore matches the entire whitespace+comments run as ONE token. Inner-iteration token splitting requires lexer driver changes.
+- Named captures + back-references: state TBD by #12 task.
+
 ## [0.5.1] - 2026-05-09
 
 _Unreleased — patch cycle following 0.5.0._

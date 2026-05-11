@@ -72,7 +72,7 @@ ConstructorDecl <- TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 Block <- '{' BlockStmt* '}'
 BlockStmt <- LocalVar / LocalTypeDecl / Stmt
 LocalTypeDecl <- Annotation* Modifier* TypeKind
-LocalVar <- Modifier* LocalVarType VarDecls ';'
+LocalVar <- Annotation* Modifier* LocalVarType VarDecls ';'
 LocalVarType <- < 'var' ![a-zA-Z0-9_$] > / Type
 # Statement keywords use helper rules to combine keyword + word boundary as single token
 # This prevents the parser from skipping whitespace before the boundary check
@@ -116,9 +116,9 @@ FinallyKW <- < 'finally' ![a-zA-Z0-9_$] >
 WhenKW <- < 'when' ![a-zA-Z0-9_$] >
 ForCtrl <- ForInit? ';' Expr? ';' ExprList? / LocalVarType Identifier ':' Expr
 ForInit <- LocalVarNoSemi / ExprList
-LocalVarNoSemi <- Modifier* LocalVarType VarDecls
+LocalVarNoSemi <- Annotation* Modifier* LocalVarType VarDecls
 ResourceSpec <- '(' Resource (';' Resource)* ';'? ')'
-Resource <- Modifier* LocalVarType Identifier '=' Expr / QualifiedName
+Resource <- Annotation* Modifier* LocalVarType Identifier '=' Expr / QualifiedName
 Catch <- CatchKW ^ '(' Modifier* Type ('|' Type)* Identifier ')' Block
 Finally <- FinallyKW ^ Block
 SwitchBlock <- '{' SwitchRule* '}'
@@ -133,7 +133,7 @@ PatternList <- Pattern (',' Pattern)*
 Guard <- WhenKW Expr
 
 Expr <- Assignment
-Assignment <- Ternary (('=' / '>>>=' / '>>=' / '<<=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Assignment)?
+Assignment <- Ternary ((URShiftAssign / RShiftAssign / LShiftAssign / '=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Assignment)?
 Ternary <- LogOr ('?' Expr ':' Ternary)?
 LogOr <- LogAnd ('||' LogAnd)*
 LogAnd <- BitOr ('&&' BitOr)*
@@ -142,7 +142,16 @@ BitXor <- BitAnd (!'^=' '^' BitAnd)*
 BitAnd <- Equality (!'&&' !'&=' '&' Equality)*
 Equality <- Relational (('==' / '!=') Relational)*
 Relational <- Shift (('<=' / '>=' / '<' / '>') Shift / 'instanceof' (Pattern / Type))?
-Shift <- Additive ((!'<<=' '<<' / !'>>>=' '>>>' / !'>>=' !'>>>=' '>>') Additive)*
+Shift <- Additive ((URShift / LShift / RShift) Additive)*
+# Shift / shift-assignment helpers (split into single '<' / '>' / '=' tokens so that
+# the lexer never produces a fused '>>' token. This lets nested generics like
+# List<Map<String, Integer>> parse correctly while still recognising shift ops.)
+URShift <- '>' '>' '>' !'='
+RShift <- '>' '>' !'>' !'='
+LShift <- '<' '<' !'='
+URShiftAssign <- '>' '>' '>' '='
+RShiftAssign <- '>' '>' '='
+LShiftAssign <- '<' '<' '='
 Additive <- Multiplicative ((!'+=' '+' / !'-=' !'->' '-') Multiplicative)*
 Multiplicative <- Unary ((!'*=' '*' / !'/=' '/' / !'%=' '%') Unary)*
 Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix

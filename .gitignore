@@ -49,3 +49,6 @@ Thumbs.db
 
 # JMH per-benchmark profile output directories (left at repo root)
 org.pragmatica.peg.*-variant-*/
+
+# Claude local config
+.claude/
