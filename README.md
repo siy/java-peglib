@@ -2,6 +2,19 @@
 
 A PEG (Parsing Expression Grammar) parser library for Java, inspired by [cpp-peglib](https://github.com/yhirose/cpp-peglib).
 
+## 0.6.0 — new major release (2026-05-11)
+
+Clean-slate redesign. **11-12× faster** than the 0.5.x source-generated parser; parity-category with `javac` parse-only (1.20-1.83× of javac on real Java25 fixtures) while emitting full CST + trivia + diagnostics that javac doesn't expose.
+
+| Workload | 0.5.x gen | 0.6.0 | javac |
+|---|---:|---:|---:|
+| 1900-LOC parse | 33.24 ms | **2.71 ms** | 2.25 ms |
+| 40K-LOC parse | 1141 ms | **95.65 ms** | 52.25 ms |
+| Memory (1900 LOC) | 77 MB | **8.03 MB** | 3.17 MB |
+| Incremental edit | n/a | **0.70 ms p50 / 1.5 ms p99** | — |
+
+0.6.0 is a **breaking** release. Inline `{...}` actions, `AstNode`, BASIC/ADVANCED recovery split, and packrat memoization are gone — replaced by tokens-first architecture, flat int[] CST, Visitor pattern for CST→domain transforms, and always-on panic-mode recovery. See [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md) for the upgrade guide and [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md) for the spec.
+
 ## Features
 
 - **Grammar-driven parsing** - Define parsers using PEG syntax in strings
