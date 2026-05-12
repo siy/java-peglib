@@ -391,10 +391,13 @@ public final class ParserGenerator {
             // later steps failed will leave its capture visible (matches 0.5.x
             // PegEngine.parseCapture which only invokes setCapture on success).
             sb.append("    private final java.util.Map<String, long[]> captures = new java.util.HashMap<>();\n");
-            sb.append("    private final java.util.ArrayDeque<java.util.Map<String, long[]>> captureScopeStack = new java.util.ArrayDeque<>();\n\n");
+            sb.append("    private final java.util.ArrayDeque<java.util.Map<String, long[]>> captureScopeStack = new java.util.ArrayDeque<>();\n");
+            // 0.6.1 — Item G — diagnostic cap. parseWithRecovery exits its loop once
+            // diagnostics.size() reaches this value. Integer.MAX_VALUE = no cap.
+            sb.append("    private final int maxDiagnostics;\n\n");
             // Constructor.
             sb.append("    private ").append(className)
-                     .append("(TokenArray tokens) {\n");
+                     .append("(TokenArray tokens, int maxDiagnostics) {\n");
             sb.append("        this.tokens = tokens;\n");
             sb.append("        this.cst = new CstArrayBuilder(tokens.input(), tokens, RULE_TABLE);\n");
             sb.append("        this.diagnostics = new ArrayList<>();\n");
@@ -403,6 +406,8 @@ public final class ParserGenerator {
             sb.append("        this.expected = null;\n");
             sb.append("        this.found = -1;\n");
             sb.append("        this.lastFailedRuleKind = -1;\n");
+            // Negative cap = no cap (Integer.MAX_VALUE). 0 is honored as zero.
+            sb.append("        this.maxDiagnostics = maxDiagnostics < 0 ? Integer.MAX_VALUE : maxDiagnostics;\n");
             sb.append("    }\n\n");
             // Public entry point — Phase B.4 returns ParseResult unconditionally.
             var startName = grammar.effectiveStartRule().unwrap()
@@ -411,10 +416,18 @@ public final class ParserGenerator {
             // No defensive null check on tokens: the only public caller path is
             // CompiledParser.parse(TokenArray), which receives a TokenArray
             // freshly produced by the lexer.
+            sb.append("        return parse(tokens, Integer.MAX_VALUE);\n");
+            sb.append("    }\n\n");
+            // 0.6.1 — Item G — capped-diagnostics entry point. parseWithRecovery
+            // exits once diagnostics.size() reaches maxDiagnostics.
+            //   maxDiagnostics == 0: zero diagnostics recorded; loop exits at the
+            //                        first error site without recording it.
+            //   maxDiagnostics  < 0: treated as no cap (Integer.MAX_VALUE).
+            sb.append("    public static ParseResult parse(TokenArray tokens, int maxDiagnostics) {\n");
             sb.append("        ").append(className)
                      .append(" p = new ")
                      .append(className)
-                     .append("(tokens);\n");
+                     .append("(tokens, maxDiagnostics);\n");
             sb.append("        int rootIdx = p.parseWithRecovery();\n");
             sb.append("        CstArray cstArr = p.cst.build(rootIdx);\n");
             sb.append("        return new ParseResult(cstArr, p.diagnostics);\n");
@@ -429,10 +442,12 @@ public final class ParserGenerator {
             // engine, which passes a validated tokens array and an index in
             // [0, tokens.count()]. An out-of-range fromTokenIdx surfaces via the
             // !ok recovery branch (synthetic Error node + diagnostic).
+            // Partial parse is uncapped by design (incremental reparse must report
+            // every diagnostic from the reparsed subtree).
             sb.append("        ").append(className)
                      .append(" p = new ")
                      .append(className)
-                     .append("(tokens);\n");
+                     .append("(tokens, Integer.MAX_VALUE);\n");
             sb.append("        p.pos = tokens.nextNonTrivia(fromTokenIdx);\n");
             sb.append("        int rootFirstTok = p.pos < tokens.count() ? p.pos : (tokens.count() == 0 ? 0 : tokens.count() - 1);\n");
             sb.append("        int rootIdx = p.cst.beginNode(RULE_ROOT_KIND, rootFirstTok, -1);\n");
@@ -519,7 +534,7 @@ public final class ParserGenerator {
             sb.append("            // whether anything remains to parse.\n");
             sb.append("            while (pos < tokens.count() && tokens.isTrivia(pos)) pos++;\n");
             sb.append("            if (pos >= tokens.count()) {\n");
-            sb.append("                if (firstAttempt) {\n");
+            sb.append("                if (firstAttempt && diagnostics.size() < maxDiagnostics) {\n");
             sb.append("                    // Empty / all-trivia input — record a diagnostic so callers\n");
             sb.append("                    // know the parse couldn't even attempt the start rule.\n");
             sb.append("                    int off = tokens.count() == 0 ? 0 : tokens.startAt(0);\n");
@@ -552,6 +567,12 @@ public final class ParserGenerator {
             sb.append("            if (!parsedOk && pos == beforePos) {\n");
             sb.append("                // Recovery couldn't move past the failing token (no sync, no EOF\n");
             sb.append("                // beyond, etc.); break to avoid an infinite loop.\n");
+            sb.append("                break;\n");
+            sb.append("            }\n");
+            // 0.6.1 — Item G — diagnostic cap. Check AFTER the emit calls; they are
+            // internally guarded so cap==0 records zero. We still break here to
+            // stop attempting further start-rule iterations once the cap is hit.
+            sb.append("            if (diagnostics.size() >= maxDiagnostics) {\n");
             sb.append("                break;\n");
             sb.append("            }\n");
             sb.append("            // Loop to either consume more input via another start-rule call or\n");
@@ -617,8 +638,12 @@ public final class ParserGenerator {
             sb.append("            foundText = \"<end-of-input>\";\n");
             sb.append("        }\n");
             sb.append("        String expectedText = expected != null ? expected : \"valid input\";\n");
-            sb.append("        diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
-            sb.append("            \"syntax error\", expectedText, foundText));\n");
+            // 0.6.1 — Item G — guard diagnostic record by the cap. Position is
+            // still advanced unconditionally so the loop terminates correctly.
+            sb.append("        if (diagnostics.size() < maxDiagnostics) {\n");
+            sb.append("            diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
+            sb.append("                \"syntax error\", expectedText, foundText));\n");
+            sb.append("        }\n");
             sb.append("        pos = newPos;\n");
             sb.append("    }\n\n");
             // Forced-advance helper: when the start rule succeeded but consumed no
@@ -634,8 +659,12 @@ public final class ParserGenerator {
             sb.append("        int diagLen = tokens.endAt(atPos) - tokens.startAt(atPos);\n");
             sb.append("        if (diagLen < 1) diagLen = 1;\n");
             sb.append("        String foundText = String.valueOf(tokens.textAt(atPos));\n");
-            sb.append("        diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
-            sb.append("            \"trailing input not consumed\", \"end of input\", foundText));\n");
+            // 0.6.1 — Item G — guard diagnostic record by the cap. Position is
+            // still advanced unconditionally so the loop terminates correctly.
+            sb.append("        if (diagnostics.size() < maxDiagnostics) {\n");
+            sb.append("            diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
+            sb.append("                \"trailing input not consumed\", \"end of input\", foundText));\n");
+            sb.append("        }\n");
             sb.append("        pos = tokens.nextNonTrivia(atPos + 1);\n");
             sb.append("    }\n\n");
             // Helpers used by the recovery loop. nextSyncToken walks forward from

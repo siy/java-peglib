@@ -38,12 +38,18 @@ public final class Parser {
     }
 
     /**
-     * Phase F-stub — diagnostic capping. The {@code maxDiagnostics} parameter
-     * is currently ignored; full diagnostic-cap plumbing through the generated
-     * parser will land in Phase F. Today this is identical to {@link #parse(String)}.
+     * 0.6.1 — Item G — diagnostic-capped parse. Caps the number of recorded
+     * diagnostics; once the cap is reached, the recovery loop exits.
+     * Semantics:
+     * <ul>
+     *   <li>{@code maxDiagnostics == 0}: zero diagnostics recorded.</li>
+     *   <li>{@code maxDiagnostics < 0}: treated as no cap.</li>
+     *   <li>Successful parse: no diagnostics regardless of cap.</li>
+     * </ul>
      */
     public ParseResult parse(String input, int maxDiagnostics) {
-        return parse(input);
+        TokenArray tokens = lexer.lex(input);
+        return parser.parse(tokens, maxDiagnostics);
     }
 
     /** The compiled lexer; exposed for callers that want raw token access (incremental engine). */
