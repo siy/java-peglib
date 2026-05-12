@@ -1,112 +1,90 @@
-# Peglib - PEG Parser Library for Java
+# Peglib — PEG Parser Library for Java
 
-## Project Status: FEATURE COMPLETE
+## Project Status
+
+**0.6.0 shipped to Maven Central** (2026-05-11). Tokens-first lex-then-parse redesign. Generated parsers run within 1.2-1.8× of javac time on real Java 25, 11-12× faster than the 0.5.x source-generated parser. See `docs/HANDOVER.md` for state and `docs/ARCHITECTURE-0.6.0.md` for design.
+
+Current branch: `main` at `v0.6.0`.
 
 ## Agent Usage
 
-**IMPORTANT:** Use ONLY `jbct-coder` agent for ALL coding and fixing tasks in this project.
+**MANDATE:** Use ONLY `jbct-coder` agent for ALL coding/fixing in this project. Use `build-runner` for `mvn` invocations. Use `chore-runner` for git/changelog work.
 
-## Overview
+## Architecture (0.6.0)
 
-Java implementation of PEG (Parsing Expression Grammar) parser inspired by [cpp-peglib](https://github.com/yhirose/cpp-peglib).
+Nine decisions (per spec §3 — all implemented or documented):
 
-## Key Design Decisions
+1. Drop the interpreter. Generator-only with generate-and-compile-and-cache.
+2. Two-phase lex → parse. PEG surface preserved; backend tokens-first.
+3. Drop runtime actions. Generate `GVisitor<T>` stub per grammar.
+4. Drop AST type. CST is the only tree.
+5. Flat int[] CST (32 bytes/node).
+6. Trivia as tokens.
+7. Incremental engine as thin caching layer.
+8. Error recovery: one always-on mechanism.
+9. The grammar IS the configuration. `ParserConfig` deleted.
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Package | `org.pragmatica.peg` | Clean namespace |
-| Artifact ID | `peglib` | Matches cpp-peglib naming |
-| Java version | 25 | Latest features |
-| Grammar syntax | cpp-peglib compatible | Familiar to users |
-| Actions | Inline Java in `{ }` blocks | More readable than external attachment |
-| Tree output | Both CST and AST | CST for formatting/linting, AST for compilers |
-| Whitespace/comments | Grouped as Trivia nodes | Convenient for tooling |
-| Error recovery | Configurable (basic/advanced) | Flexibility for different use cases |
-| Runtime dependency | `pragmatica-lite:core` 0.9.0 | Result/Option/Promise types |
-
-## Compilation Modes
-
-1. **Runtime compilation** - JDK compiler API, full Java support in actions
-2. **Source generation** - Single self-contained Java file, depends on pragmatica-lite:core only
-
-## Source Files
+## Module Layout
 
 ```
-src/main/java/org/pragmatica/peg/
-├── PegParser.java              # Main entry point
-├── grammar/
-│   ├── Expression.java         # PEG expression types (sealed interface)
-│   ├── Rule.java               # Grammar rule record
-│   ├── Grammar.java            # Complete grammar record
-│   ├── GrammarToken.java       # Lexer token types
-│   ├── GrammarLexer.java       # Tokenizer for PEG grammar
-│   └── GrammarParser.java      # Recursive descent parser
-├── parser/
-│   ├── Parser.java             # Parser interface
-│   ├── ParserConfig.java       # Configuration record
-│   ├── ParsingContext.java     # Mutable parsing state with packrat cache
-│   ├── ParseResult.java        # Parse result types (sealed)
-│   ├── ParseResultWithDiagnostics.java # Result with error recovery diagnostics
-│   ├── ParseMode.java          # Parsing mode (standard, withActions, noWhitespace)
-│   └── PegEngine.java          # PEG parsing engine with action execution
-├── tree/
-│   ├── SourceLocation.java     # Position in source (line, column, offset)
-│   ├── SourceSpan.java         # Range in source (start, end)
-│   ├── Trivia.java             # Whitespace/comments (sealed interface)
-│   ├── CstNode.java            # Concrete syntax tree (sealed interface)
-│   └── AstNode.java            # Abstract syntax tree (sealed interface)
-├── action/
-│   ├── Action.java             # Functional interface for actions
-│   ├── SemanticValues.java     # Values passed to actions ($0, $1, etc.)
-│   └── ActionCompiler.java     # JDK Compiler API based action compiler
-├── generator/
-│   ├── ParserGenerator.java    # Generates standalone parser source
-│   └── ErrorReporting.java     # BASIC/ADVANCED enum for generated parser diagnostics
-└── error/
-    ├── ParseError.java         # Parse errors (sealed interface extends Cause)
-    ├── RecoveryStrategy.java   # Error recovery enum (NONE, BASIC, ADVANCED)
-    └── Diagnostic.java         # Rich error type for Rust-style messages
+peglib/
+├── peglib-runtime/         25KB; generated parsers depend ONLY on this + pragmatica-lite:core
+├── peglib-core/            grammar parser, codegen, analyzers, v6 implementation
+├── peglib-incremental/     IncrementalParser; true partial reparse
+├── peglib-formatter/       Wadler-Lindig pretty printer on flat CST
+├── peglib-maven-plugin/    build-time codegen mojo
+└── peglib-playground/      REPL + HTTP UI
+```
 
-src/test/java/org/pragmatica/peg/
-├── PegParserTest.java          # 50 tests (parsing + actions + cut operator)
-├── EdgeCaseTest.java           # 24 tests (edge cases)
-├── TriviaTest.java             # 13 tests (trivia handling)
-├── GeneratedParserTriviaTest.java # 6 tests (generated parser trivia)
-├── ErrorRecoveryTest.java      # 8 tests (error recovery + diagnostics)
-├── parser/
-│   ├── ParseResultTest.java    # 10 tests (ParseResult internal types)
-│   └── ParsingContextTest.java # 8 tests (packrat cache)
-├── grammar/
-│   └── GrammarParserTest.java  # 17 tests for grammar parser
+## Source Files (v6, in peglib-core/peglib-runtime)
+
+```
+peglib-runtime/src/main/java/org/pragmatica/peg/v6/
+├── token/
+│   ├── TokenArray.java              flat int[] tokens; spliceLex for incremental
+│   ├── TokenArrayBuilder.java
+│   └── LexFn.java                   functional lexer adapter
+├── cst/
+│   ├── CstArray.java                flat int[]; findCheckpointAncestor; spliceSubtree
+│   ├── CstArrayBuilder.java         truncate uses lastChildBefore undo log (O(dropped) bounded scan)
+│   ├── CstNode.java                 sealed Branch/Leaf/Error views
+│   └── ParseResult.java
+└── diagnostic/
+    ├── Severity.java
+    └── Diagnostic.java              Rust-style format
+
+peglib-core/src/main/java/org/pragmatica/peg/v6/
+├── PegParser.java                   entry: fromGrammar(text) → Result<Parser>
+├── Parser.java                      facade: parse(input) → ParseResult
+├── lexer/
+│   ├── RuleClassifier.java          LEXER/PARSER/MIXED + skip-prefix detection
+│   ├── Dfa.java                     non-ASCII transition slot
+│   ├── DfaBuilder.java              NFA→DFA + inline literals + aliases + delimited-block
+│   └── LexerEngine.java
+├── analyzer/
+│   ├── LeftRecursionDetector.java   rejects at fromGrammar with witness
+│   └── NamedCaptureDetector.java    rejects at fromGrammar (not yet supported at runtime)
 ├── generator/
-│   ├── ParserGeneratorTest.java # 18 tests for source generation
-│   └── GeneratedParserDiagnosticsTest.java # 6 tests (ADVANCED diagnostics)
-└── examples/
-    ├── ErrorRecoveryExample.java # 12 tests - error recovery patterns
-    ├── CalculatorExample.java   # 6 tests - arithmetic with actions
-    ├── JsonParserExample.java   # 11 tests - JSON CST parsing
-    ├── SExpressionExample.java  # 11 tests - Lisp-like syntax
-    ├── CsvParserExample.java    # 8 tests - CSV data format
-    ├── SourceGenerationExample.java # 11 tests - standalone parser
-    ├── CutOperatorRegressionTest.java # 16 tests - cut operator regression tests
-    └── Java25GrammarExample.java # 60 tests - Java 25 syntax
+│   ├── LexerGenerator.java          emits GLexer.java
+│   ├── ParserGenerator.java         emits GParser.java; boolean control flow
+│   ├── VisitorGenerator.java        emits GVisitor.java
+│   ├── LexerCompiler.java           JDK Compiler API
+│   └── ParserCompiler.java
+└── incremental/
+    └── IncrementalParser.java       snapshot/restore; partial reparse via checkpoint
 ```
 
 ## Grammar Syntax (cpp-peglib compatible)
 
 ```peg
-# Rule definition
 RuleName <- Expression
 
 # Operators
 e1 e2       # Sequence
-e1 / e2     # Ordered choice (prioritized)
-e*          # Zero or more
-e+          # One or more
-e?          # Optional
-&e          # Positive lookahead
-!e          # Negative lookahead
-(e)         # Grouping
+e1 / e2     # Ordered choice
+e* e+ e?    # Repetition
+&e !e       # Lookahead
+(e)         # Group
 'literal'   # String literal
 "literal"   # String literal
 [a-z]       # Character class
@@ -115,314 +93,164 @@ e?          # Optional
 
 # Extensions
 < e >       # Token boundary (captures matched text)
-~e          # Ignore semantic value
 'text'i     # Case-insensitive literal
 [a-z]i      # Case-insensitive character class
-e{n}        # Exactly n repetitions
-e{n,}       # At least n repetitions
-e{n,m}      # Between n and m repetitions
-$name<e>    # Named capture
-$name       # Back-reference
-^           # Cut - commits to current choice, prevents backtracking
-↑           # Cut (alternative syntax)
+e{n,m}      # Bounded repetition
+^           # Cut — commits to current Choice alternative
 
 # Directives
-%whitespace <- [ \t\r\n]*    # Auto-skip whitespace
-
-# Inline actions (Java)
-Number <- < [0-9]+ > { return sv.toInt(); }
-Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
+%whitespace <- [ \t\r\n]*
+%recover <CharSet> Rule       # per-rule sync set (start-rule applied currently)
+%checkpoint Rule              # incremental-reparse boundary
 ```
 
-## Implementation Progress
-
-### Completed
-- [x] Project scaffolded with `jbct init`
-- [x] pom.xml updated for Java 25, pragmatica-lite 0.9.0
-- [x] Core types implemented
-- [x] Grammar parser (bootstrap) implemented
-- [x] Parsing engine with packrat memoization
-- [x] Action compilation (runtime) - JDK Compiler API
-- [x] Source generator - standalone parser Java file
-- [x] Trivia handling (whitespace/comments) for lossless CST
-- [x] Advanced error recovery with Rust-style diagnostics
-- [x] Generated parser ErrorReporting (BASIC/ADVANCED) for optional Rust-style diagnostics
-- [x] Cut operator (^/↑) - commits to current choice, prevents backtracking
-- [x] 705 passing peglib-core tests + supporting modules (peglib-formatter 66, peglib-maven-plugin 5, peglib-playground 27); RoundTripTest enabled and 22/22 since 0.3.5
-- [x] Performance rework (0.2.2): 4.23× speedup on 1,900-LOC Java 25 fixture via generator-time perf flags; see `docs/archive/PERF-REWORK-SPEC.md` (archived) and `docs/bench-results/`.
-- [x] Throughput-engine Tier 1 arc + post-rollback wins (0.5.0-candidate): reference fixture **19.12 ms / 68.02 MB** (vs 76.2 ms / 150 MB pre-Tier-1); selfhost fixture 832 ms / 1.85 GB. See `docs/incremental/THROUGHPUT-ENGINE-TIER1.md` and `docs/incremental/THROUGHPUT-ENGINE-MOVE-B.md` (Move B post-mortem).
-
-### Remaining Work
-- [ ] Lambda action attachment (lowest priority) - attach actions programmatically using type-safe RuleId:
-  ```java
-  parser.rule(RuleId.Number.class).action(sv -> sv.toInt());
-  parser.rule(RuleId.Sum.class).action(sv -> (Integer)sv.get(0) + (Integer)sv.get(1));
-  ```
+**Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`); named captures `$name<e>` and back-references `$name` (rejected at `fromGrammar`).
 
 ## API Usage
 
 ```java
-// Basic usage - CST/AST parsing
-var parser = PegParser.fromGrammar("""
-    Number <- < [0-9]+ >
-    %whitespace <- [ \\t]*
-    """).unwrap();
+// Basic — generate, compile, cache, parse
+var parser = PegParser.fromGrammar(grammarText).unwrap();
+ParseResult result = parser.parse(input);
 
-Result<CstNode> cst = parser.parseCst("123");      // Lossless tree
-Result<AstNode> ast = parser.parseAst("123");      // Optimized tree
+if (result.isSuccess()) {
+    CstArray cst = result.cst();
+    // walk via cst.children(idx), cst.descendants(idx), or pattern-match cst.viewAt(idx)
+}
 
-// Parsing with actions - returns semantic values
-var calculator = PegParser.fromGrammar("""
-    Sum <- Number '+' Number { return (Integer)$1 + (Integer)$2; }
-    Number <- < [0-9]+ > { return sv.toInt(); }
-    %whitespace <- [ ]*
-    """).unwrap();
-
-Result<Object> result = calculator.parse("3 + 5");  // Returns 8
-
-// Configuration
-var parser = PegParser.builder(grammar)
-    .packrat(true)
-    .trivia(true)
-    .build()
-    .unwrap();
-
-// Source generation - standalone parser
-Result<String> source = PegParser.generateParser(
-    grammarText,
-    "com.example.parser",
-    "MyParser"
-);
-// Write source to file, compile with javac
-
-// Source generation with ADVANCED error reporting (Rust-style diagnostics)
-import org.pragmatica.peg.generator.ErrorReporting;
-
-Result<String> source = PegParser.generateCstParser(
-    grammarText,
-    "com.example.parser",
-    "MyParser",
-    ErrorReporting.ADVANCED  // Enables parseWithDiagnostics() method
-);
+for (Diagnostic d : result.diagnostics()) {
+    System.err.println(d.formatRustStyle("file.java", input));
+}
 ```
 
-## Action API
+## Visitor Pattern (replaces 0.5.x inline actions)
 
-Actions have access to `SemanticValues sv`:
-- `sv.token()` / `$0` - matched text (the raw input that was parsed)
-- `sv.get(0)` / `$1` - first child's semantic value
-- `sv.get(1)` / `$2` - second child's semantic value
-- `sv.toInt()` - parse matched text as integer
-- `sv.toDouble()` - parse as double
-- `sv.size()` - number of child values
-- `sv.values()` - all child values as List
+The generator emits `GVisitor<T>` per grammar. One method per parser rule. Users subclass and override selectively.
 
-Note: `$1`, `$2`, etc. use 1-based indexing (like regex groups), while `sv.get()` uses 0-based indexing.
+```java
+class TypeChecker extends GVisitor<Type> {
+    @Override public Type visitBinaryExpr(CstArray cst, int nodeIdx) {
+        Type left = visit(cst, cst.firstChildAt(nodeIdx));
+        Type right = visit(cst, cst.lastChildBefore(nodeIdx));
+        return resolveBinaryOp(cst.textAt(nodeIdx), left, right);
+    }
+}
+```
 
 ## Trivia Handling
 
-Both runtime and generated parsers support trivia (whitespace/comments) collection for lossless CST:
+Trivia (whitespace, line comments, block comments) lives in `TokenArray` as tokens with kinds 0/1/2:
 
-### Design
-- Each match of the INNER whitespace expression creates one Trivia item
-- For `%whitespace <- [ \t]+`, inner is `[ \t]`, so each char is separate trivia
-- For `%whitespace <- ([ \t]+ / Comment)+`, inner is `[ \t]+ / Comment`, so each run is one trivia
+- `TokenArray.KIND_WHITESPACE`
+- `TokenArray.KIND_LINE_COMMENT`
+- `TokenArray.KIND_BLOCK_COMMENT`
 
-### Trivia Types (sealed)
-- `Trivia.Whitespace` - spaces, tabs, newlines
-- `Trivia.LineComment` - `// ...` style comments
-- `Trivia.BlockComment` - `/* ... */` style comments
-
-### Access
-```java
-CstNode node = parser.parseCst("  42  ").unwrap();
-List<Trivia> leading = node.leadingTrivia();   // Before node
-List<Trivia> trailing = node.trailingTrivia(); // After node (at EOF)
-```
-
-### Classification
-Trivia is classified based on content:
-- Starts with `//` → LineComment
-- Starts with `/*` → BlockComment
-- Otherwise → Whitespace
+Access via `cst.leadingTriviaTokens(nodeIdx)` and `trailingTriviaTokens(nodeIdx)`. Round-trip reconstruction: `cst.reconstruct()` concatenates all tokens including trivia.
 
 ## Error Recovery
 
-Advanced error recovery with Rust-style diagnostic messages.
+One always-on mechanism (panic-mode synchronization):
 
-### Recovery Strategies
-- `NONE` - Fail immediately on first error
-- `BASIC` - Report error with context but stop parsing
-- `ADVANCED` - Continue parsing, collect multiple errors, insert Error nodes
+1. Parser hits unexpected token
+2. Walks forward to sync set (grammar's `%recover` or default `{ ; , } ) ] }`)
+3. Emits `Error` node covering skipped range
+4. Records `Diagnostic`
+5. Resumes parsing
 
-### API Usage
-```java
-var parser = PegParser.builder(grammar)
-    .recovery(RecoveryStrategy.ADVANCED)
-    .build()
-    .unwrap();
+`ParseResult.diagnostics()` is always present (empty = success).
 
-// Parse with diagnostics
-var result = parser.parseCstWithDiagnostics(input);
+## Java 25 Contextual Keywords (IMPORTANT)
 
-if (result.hasErrors()) {
-    // Rust-style formatted output
-    System.out.println(result.formatDiagnostics("input.txt"));
-}
+Java has hard and contextual keywords. The grammar's `Keyword` rule should list only **hard** keywords:
 
-// CST may contain Error nodes for unparseable regions
-if (result.hasNode()) {
-    CstNode cst = result.node();
-}
+```
+class, interface, package, import, public, private, return, if, else, while, ...
 ```
 
-### Diagnostic Output (Rust-style)
-```
-error: unexpected input
-  --> input.txt:1:6
-   |
- 1 | abc, @@@, def
-   |      ^ found '@'
-   |
-   = help: expected [a-z]+
-```
+Contextual keywords are matched by specific rules and **fall through to Identifier elsewhere**:
 
-### Recovery Points
-Parser recovers at: `,`, `;`, `}`, `)`, `]`, newline
+| Keyword | Reserved Context | Identifier elsewhere |
+|---|---|---|
+| `var` | local type inference | method/field names |
+| `yield` | switch expression | method/field names |
+| `record` | type declaration | method/field names |
+| `sealed`, `non-sealed` | class modifier | method/field names |
+| `permits` | sealed class | method/field names |
+| `when` | pattern guard | method/field names |
+| `module`, `open`, `opens`, `requires`, `exports`, `provides`, `uses`, `with`, `to` | module declarations | regular code |
 
-## Test Coverage (705 peglib-core tests + supporting modules)
-
-### Grammar Parser Tests (17 tests)
-- Simple rules, actions, sequences, choices
-- Lookahead predicates, repetition operators
-- Token boundaries, whitespace directive
-- Case-insensitive matching, named captures
-- Grammar validation (undefined rule references)
-
-### Parsing Engine Tests (29 tests)
-- Literals, character classes, negated classes
-- Any character, sequences, choices
-- Zero-or-more, one-or-more, optional
-- Bounded repetition, lookahead predicates
-- Token boundaries, rule references
-- Whitespace skipping, case-insensitive
-- Cut operator (^/↑) - prevents backtracking after commit
-
-### Action Tests (6 tests)
-- Simple action returning integer
-- Actions with child values (sum)
-- Token text transformation
-- List building
-- No action returns CST node
-
-### Generator Tests (18 tests)
-- Simple literal generates valid Java
-- Whitespace handling
-- Action code inclusion
-- All quantifiers generate loops
-- Only depends on pragmatica-lite
-- ErrorReporting.BASIC mode (no diagnostics)
-- ErrorReporting.ADVANCED mode (Rust-style diagnostics)
-- parseWithDiagnostics() method generation
-
-### Internal Type Tests (24 tests)
-- **ParseResultTest** (10 tests): CutFailure, PredicateSuccess, Ignored, semantic values
-- **ParsingContextTest** (8 tests): Packrat cache hit/miss, cache disabled behavior
-- **GeneratedParserDiagnosticsTest** (6 tests): ADVANCED diagnostics in generated parsers
-
-### Example Tests (135 tests)
-- **ErrorRecovery** (12 tests): Recovery strategies, diagnostic formatting, CST error nodes
-- **Calculator** (6 tests): Number parsing, addition, multiplication, boolean/double types
-- **JSON** (11 tests): CST parsing of JSON values, objects, arrays, nested structures
-- **S-Expression** (11 tests): Lisp-like syntax, nested lists, atoms, symbols
-- **CSV** (8 tests): Field parsing, empty fields, spaces preserved
-- **Source Generation** (11 tests): Standalone parser generation, all operators
-- **CutOperatorRegression** (16 tests): Cut operator regression tests
-- **Java25Grammar** (60 tests): Full Java 25 syntax including modules, var, patterns, text blocks
-
-### Trivia Tests (19 tests)
-- **TriviaTest** (13 tests): Runtime trivia - leading, trailing, mixed, comments
-- **GeneratedParserTriviaTest** (6 tests): Generated parser trivia consistency
-
-### Error Recovery Tests (8 tests)
-- Rust-style diagnostic formatting
-- Multiple error collection
-- Fragment recovery (valid/invalid/valid parsing)
-- Error nodes with skipped text
-- Recovery strategies (NONE, BASIC, ADVANCED)
-
-### Edge Case Tests (24 tests)
-- Null actions, token boundaries, complex grammars
-- Recursive parsing, repetition, predicates
-- Character classes, unicode, ignore operator
-
-## Type Summary
-
-### Expression Types (sealed)
-- `Literal`, `CharClass`, `Any`, `Reference`
-- `Sequence`, `Choice`
-- `ZeroOrMore`, `OneOrMore`, `Optional`, `Repetition`
-- `And`, `Not`
-- `TokenBoundary`, `Ignore`, `Capture`, `BackReference`
-- `Cut`, `Group`
-
-### CstNode Types (sealed)
-- `Terminal` - leaf with text
-- `NonTerminal` - interior with children
-- `Token` - result of < > operator
-- `Error` - unparseable region (error recovery)
-
-### ParseResult Types (sealed)
-- `Success` - matched with node and optional semantic value
-- `Failure` - no match at position
-- `CutFailure` - failure after cut, prevents trying alternatives
-- `PredicateSuccess` - predicate matched (no consumption)
-- `Ignored` - matched but no node
-
-## Java 25 Grammar: Contextual Keywords
-
-Java has two types of reserved words:
-
-### Hard Keywords (always reserved)
-These can NEVER be used as identifiers:
-```
-abstract, assert, boolean, break, byte, case, catch, char, class, const,
-continue, default, do, double, else, enum, extends, false, final, finally,
-float, for, goto, if, implements, import, instanceof, int, interface, long,
-native, new, null, package, private, protected, public, return, short,
-static, strictfp, super, switch, synchronized, this, throw, throws,
-transient, true, try, void, volatile, while
-```
-
-### Contextual Keywords (context-dependent)
-These are only reserved in specific syntactic positions and CAN be used as identifiers elsewhere:
-
-| Keyword | Reserved Context | Can be identifier in |
-|---------|-----------------|---------------------|
-| `var` | Local variable type inference | Method/field names, parameters |
-| `yield` | Switch expression | Method/field names, parameters |
-| `record` | Type declaration | Method/field names, parameters |
-| `sealed`, `non-sealed` | Class modifier | Method/field names, parameters |
-| `permits` | Sealed class clause | Method/field names, parameters |
-| `when` | Pattern guard | Method/field names, parameters |
-| `module`, `open`, `opens`, `requires`, `exports`, `provides`, `uses`, `with`, `to` | Module declarations | Regular code |
-
-### Grammar Design
-The `Keyword` rule should only include hard keywords. Contextual keywords are matched by their specific rules (e.g., `PermitsClause <- 'permits' TypeList`) and fall through to `Identifier` elsewhere. PEG's ordered choice handles this naturally.
-
-## References
-
-- [cpp-peglib](https://github.com/yhirose/cpp-peglib) - Reference implementation
-- [PEG Paper](https://bford.info/pub/lang/peg.pdf) - Bryan Ford's original paper
-- [Packrat Parsing](https://bford.info/pub/lang/packrat-icfp02.pdf) - Memoization technique
+In 0.6.0's tokens-first parser, contextual keywords get **Identifier-fallback** at codegen time: where the parser references `Identifier`, it also accepts inline-literal kinds whose text is identifier-shaped and not in the hard-keyword set. See `DfaBuilder.buildIdentifierFallbacks` and `ParserGenerator.emitIdentifierFallback`.
 
 ## Build Commands
 
 ```bash
-mvn compile          # Compile
-mvn test             # Run tests (705+ peglib-core tests; 0 skipped)
-mvn verify           # Full verification
+mvn install                                                            # full reactor
+mvn -pl peglib-core test                                               # core tests only
+mvn -pl peglib-core -am -Pbench -DskipTests -Djbct.skip=true package   # build bench jar
+cd peglib-core && java -jar target/benchmarks.jar <BenchClass> -wi 3 -i 5 -f 1
 ```
+
+`-Djbct.skip=true` is required for `mvn install` due to a JBCT 0.25.0 formatter convergence bug on 5 v6 files (lint passes cleanly without skip — the bug is in format-check only). Tracked as upstream.
+
+Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof async:libPath=...;event=cpu;output=collapsed;dir=/tmp/profile`.
+
+## Tests
+
+**1440 tests across 7 modules**, 0 failures, 4 pre-existing skips. See `docs/HANDOVER.md` §"State at a glance" for breakdown.
+
+Notable test classes for verification gates:
+- `Java25CorpusGateTest` — 20 format-examples fixtures lex round-trip
+- `Java25ParserGateTest` — same fixtures parse round-trip
+- `FactoryClassGeneratorDiagTest` — real-world 1900-LOC parse (0 diagnostics)
+- `IncrementalEditBenchmark` — edit latency p50/p99 in `src/jmh/`
+- `Java25LargeFixturesBenchmark` — warm parse vs 0.5.x-gen
+- `JavacParseOnlyBenchmark` — vs javac via `JavacTask.parse()`
+
+---
+
+# Banked Lessons
+
+## Parser-domain rules
+
+- **Bisection-first on parser bugs.** When a real-world file produces N diagnostics, write a bisect that narrows to a minimal failing input. Theorizing about likely causes wastes more time than running a 10-line bisect. (from 0.6.0 ship: 13,529 diagnostics on FactoryClassGenerator narrowed to one em-dash via 6 bisect rounds; the prior 3 theoretical hypotheses were all wrong.)
+
+- **CST shape sanity is part of phase gates.** N LOC of source code should produce roughly N/3 to N CST nodes for this grammar. Order of magnitude shallower means parser is matching empty alternatives and bailing. "20/20 corpus round-trip" with 11 nodes/fixture is a false positive. (from 0.6.0 ship: the empty-CompilationUnit issue went undetected for two sessions because round-trip-via-tokens passed.)
+
+- **Validate against real-world Java input early.** Curated test fixtures prove not-broken; they don't prove complete. Test against an actual codebase (e.g., a real JBCT slice generator) before declaring a parsing phase done. (from 0.6.0 ship: 20/20 curated corpus passed cleanly; FactoryClassGenerator surfaced contextual-keyword + Unicode + delimited-block bugs the corpus never exercised.)
+
+- **For any perf claim: profile-first, theorize never.** Run async-profiler before optimizing. Mental models of hot paths in JIT'd Java are systematically wrong. (from 0.6.0 ship: pre-profile, I hypothesized JIT/allocation/method-dispatch; profile said 75% in one method (`CstArrayBuilder.truncate`) with one specific O(N) bug.)
+
+- **Re-run JMH bench after every hot-path change.** Specifically anything touching `CstArrayBuilder`, `TokenArray.spliceLex`, `LexerEngine.lex`, or generated parser emit. Small changes matter. (from 0.6.0 ship: bounded-scan truncate was 24-48× on Records/SwitchExpressions; small.)
+
+- **Contextual keywords in tokens-first PEG: MUST have explicit Identifier-fallback.** Java's `var`/`yield`/`record`/`sealed`/`permits`/`when`/`module`/`open`/etc. appear as inline literals in grammar rules but must accept Identifier-shaped tokens at codegen. This is a known design risk noted in CLAUDE.md but easy to forget. (from 0.6.0 ship: this gap caused ~13K diagnostics on FactoryClassGenerator until `buildIdentifierFallbacks` + `emitIdentifierFallback` were wired.)
+
+- **DFA alphabet is 0..255 + per-state non-ASCII transition slot.** Don't try to extend alphabet to full Unicode — too expensive. For `.` (Any) and negated `CharClass`, emit a separate non-ASCII edge; the driver checks it when `ch >= 256`. (from 0.6.0 ship: line/block comments and strings broke on em-dash until the non-ASCII slot landed.)
+
+- **Generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core.** If `peglib-core` shows up in generated source imports, the standalone-parser invariant is broken. Grep generated source for verification.
+
+- **Block comments inside Choice need explicit routing through `compileDelimitedBlock`.** The `'/*' (!'*/' .)* '*/'` pattern won't match correctly otherwise — the DFA can't handle `Not(Literal)` inside Choice alternatives. (from 0.6.0 ship: this is why block comments in `%whitespace` failed to lex until asymmetric `compileDelimitedBlock` was added.)
+
+## Process rules
+
+- **Commit checkpoints before dispatching parallel agents that touch crossing scopes.** If working tree has uncommitted impactful changes, parallel agents will collide on git state via stash — and stash-popping can lose work silently. (from 0.6.0 ship: the parallel #1 + #9 dispatch lost the Annotations.java fix into a stash that was nearly dropped.)
+
+- **Spot-check destructive agent claims.** When an agent reports "removed N tests" or "dropped N validations", read 2-3 of them before accepting. Most are correct; the occasional wrong removal is hard to catch later. (from 0.6.0 ship: cleanup agent removed 37 validation-only tests as part of JBCT refactor; mostly fine but a spot-check would have been cheap.)
+
+- **Phase gates must include shape sanity, not just functional pass.** A round-trip-via-tokens gate that succeeds when the parser produced 11 nodes/fixture is broken; the gate definition needed CST-node-count sanity.
+
+## Collaboration Notes
+
+Direct tips for the user (Sergiy) when working with Claude on this project. Banked from prior sessions where these patterns either saved time or cost it.
+
+- **When Claude says "looks done" without showing build-runner output, push back.** Specifically: "show me the surefire summary." Cheap insurance against shipping wrong numbers. (banked from: bench-finished-mid-fixture incident where Claude reported "looks done" but only 1 of 8 JMH combinations had finished.)
+
+- **When Claude offers A or B after you've already decided, override with the call.** Don't accept hedging — it costs cycles. Auto mode pushes Claude toward action; reinforce it with directness. (banked from: multiple "would you like A or B?" moments where "go with X" cut a 20-min cycle to 5 min.)
+
+- **When a gate result looks suspiciously good, ask for a real-world fixture check before celebrating.** "20/20 clean parse + sub-ms incremental + 8.55× faster than 0.5.x" sounds great but each piece needs validation against non-curated input. (banked from: the 0.6.0 architectural promise was met on curated corpus but real-world Java files needed two more sessions of fixes.)
+
+- **When Claude quotes a number from HANDOVER, ARCHITECTURE-0.6.0.md, or spec as authoritative, ask "verify it currently."** Static docs go stale within a session; live measurement doesn't. (banked from: the "javac parses 1900-LOC in ~9 ms" figure from HANDOVER was outdated; actual javac was 2.24 ms. The wrong figure nearly shipped as a real comparison claim.)
+
+- **For 0.6.0, the "Visitor pattern" replaces inline actions.** When porting 0.5.x code that used `{ ... }` action blocks, generate `GVisitor.java` via the maven plugin and implement `visit<Rule>` methods. (banked from: this transition wasn't obvious to users; document it more prominently in user-facing migration guide.)
 
 ## ndx
 
@@ -432,4 +260,9 @@ Key commands: `ndx recall search "query"` (hybrid search), `ndx recall wake` (co
 
 Skills: `/ndx-recall-classify`, `/ndx-recall-score`, `/ndx-recall-dedupe`, `/ndx-recall-contradict`, `/ndx-recall-summarize`, `/ndx-recall-handover`.
 
-If recall palace is not initialized, run `ndx recall init` then `ndx recall mine --from-memory`.
+## References
+
+- [cpp-peglib](https://github.com/yhirose/cpp-peglib) — surface grammar syntax reference
+- [PEG Paper](https://bford.info/pub/lang/peg.pdf) — Bryan Ford's original
+- [Packrat Parsing](https://bford.info/pub/lang/packrat-icfp02.pdf) — historical context (0.6.0 doesn't use packrat)
+- [tree-sitter](https://tree-sitter.github.io/tree-sitter/) — architectural analog for flat-array CST + incremental
