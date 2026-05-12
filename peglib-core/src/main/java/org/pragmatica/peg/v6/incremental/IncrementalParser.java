@@ -41,11 +41,13 @@ import java.util.Set;
  */
 public final class IncrementalParser {
     /**
-     * Default rule names treated as checkpoints when no grammar-supplied list is
-     * available. Hardcoded for D.1.1; the {@code %checkpoint} grammar directive is
-     * deferred to D.2.x. Includes the common Java/C-family statement-and-declaration
-     * boundaries; if a grammar uses different names, override via
-     * {@link #checkpointRules()} (subclassing) or wait for D.2.x.
+     * Default rule names treated as checkpoints when neither the grammar nor
+     * the caller supplied a list. As of 0.6.1, grammars may declare their own
+     * checkpoints via the {@code %checkpoint RuleName} directive; the 2-arg
+     * constructor prefers that grammar-supplied set when non-empty and falls
+     * back to this default only when the grammar carries no checkpoint
+     * directives. Includes the common Java/C-family statement-and-declaration
+     * boundaries.
      */
     public static final Set<String> DEFAULT_CHECKPOINT_RULES = Set.of("Stmt",
                                                                       "Statement",
@@ -71,7 +73,11 @@ public final class IncrementalParser {
     private int fullReparseCount;
 
     public IncrementalParser(Parser parser, String initialInput) {
-        this(parser, initialInput, DEFAULT_CHECKPOINT_RULES);
+        this(parser,
+             initialInput,
+             parser.grammar().checkpointRules().isEmpty()
+             ? DEFAULT_CHECKPOINT_RULES
+             : parser.grammar().checkpointRules());
     }
 
     public IncrementalParser(Parser parser, String initialInput, Set<String> checkpointRules) {

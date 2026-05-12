@@ -15,6 +15,7 @@ import java.nio.file.Paths;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -70,7 +71,7 @@ class RuleClassifierTest {
      * the indirect-left-recursion cycle test).
      */
     private static Grammar grammarUnchecked(Rule... rules) {
-        return new Grammar(List.of(rules), Option.none(), Option.none(), Option.none(), List.of(), List.of());
+        return new Grammar(List.of(rules), Option.none(), Option.none(), Option.none(), List.of(), List.of(), Map.of(), Set.of());
     }
 
     @Test
@@ -183,7 +184,7 @@ class RuleClassifierTest {
     void classify_emptyGrammar_returnsEmptyMap() {
         // Grammar.grammar requires at least one rule for validation? Build a minimal grammar.
         // We bypass the factory because empty rule list is technically permitted by the record.
-        var g = new Grammar(List.of(), Option.none(), Option.none(), Option.none(), List.of(), List.of());
+        var g = new Grammar(List.of(), Option.none(), Option.none(), Option.none(), List.of(), List.of(), Map.of(), Set.of());
         var classification = RuleClassifier.classify(g)
                                            .unwrap();
         assertThat(classification.kinds())
