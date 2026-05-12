@@ -53,7 +53,11 @@ public final class DfaBuilder {
     public static final int KIND_WHITESPACE = 0;
     public static final int KIND_LINE_COMMENT = 1;
     public static final int KIND_BLOCK_COMMENT = 2;
-    public static final int FIRST_USER_KIND = 3;
+    /** Triple-slash documentation line comment. Allocated by post-classification, never by the DFA directly. */
+    public static final int KIND_DOC_LINE_COMMENT = 3;
+    /** Javadoc-style block comment. Allocated by post-classification, never by the DFA directly. */
+    public static final int KIND_DOC_BLOCK_COMMENT = 4;
+    public static final int FIRST_USER_KIND = 5;
 
     private static final int ALPHABET = Dfa.ALPHABET_SIZE;
     private static final int REPETITION_CAP = 256;
@@ -210,6 +214,8 @@ public final class DfaBuilder {
         kindNames.add("WHITESPACE");
         kindNames.add("LINE_COMMENT");
         kindNames.add("BLOCK_COMMENT");
+        kindNames.add("DOC_LINE_COMMENT");
+        kindNames.add("DOC_BLOCK_COMMENT");
         int[] nextKindRef = {FIRST_USER_KIND};
         for ( var rule : grammar.rules()) {
         if ( classification.kinds().get(rule.name()) == RuleKind.LEXER) {

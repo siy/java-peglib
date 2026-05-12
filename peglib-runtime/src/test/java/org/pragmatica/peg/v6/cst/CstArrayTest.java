@@ -20,7 +20,9 @@ class CstArrayTest {
     private static final int TOK_NUMBER = FIRST_USER_KIND;
     private static final int TOK_PLUS = FIRST_USER_KIND + 1;
 
-    private static final String[] TOKEN_NAMES = {"WHITESPACE", "LINE_COMMENT", "BLOCK_COMMENT", "NUMBER", "PLUS"};
+    private static final String[] TOKEN_NAMES = {
+        "WHITESPACE", "LINE_COMMENT", "BLOCK_COMMENT", "DOC_LINE_COMMENT", "DOC_BLOCK_COMMENT", "NUMBER", "PLUS"
+    };
 
     @Test
     void emptyCst_singleLeafRoot_spanFromTokens() {

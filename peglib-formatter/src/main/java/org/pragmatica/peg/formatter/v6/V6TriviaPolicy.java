@@ -18,7 +18,8 @@ import static org.pragmatica.peg.formatter.Docs.text;
  * <p>v6's flat-array trivia model is purely positional: trivia tokens live
  * inline with content tokens, classified by kind
  * ({@link TokenArray#KIND_WHITESPACE}, {@link TokenArray#KIND_LINE_COMMENT},
- * {@link TokenArray#KIND_BLOCK_COMMENT}). The policy is invoked once per
+ * {@link TokenArray#KIND_BLOCK_COMMENT}, {@link TokenArray#KIND_DOC_LINE_COMMENT},
+ * {@link TokenArray#KIND_DOC_BLOCK_COMMENT}). The policy is invoked once per
  * trivia run with the run's token indices and produces a {@link Doc}
  * fragment to splice into the output.
  *
@@ -70,8 +71,8 @@ public interface V6TriviaPolicy {
                     var ws = normalizeBlankLines ? collapseBlankLines(raw) : raw;
                     appendWhitespace(parts, ws);
                 }
-                case TokenArray.KIND_LINE_COMMENT -> appendLineComment(parts, raw);
-                case TokenArray.KIND_BLOCK_COMMENT -> appendBlockComment(parts, raw);
+                case TokenArray.KIND_LINE_COMMENT, TokenArray.KIND_DOC_LINE_COMMENT -> appendLineComment(parts, raw);
+                case TokenArray.KIND_BLOCK_COMMENT, TokenArray.KIND_DOC_BLOCK_COMMENT -> appendBlockComment(parts, raw);
                 default -> parts.add(text(raw));
             }
         });

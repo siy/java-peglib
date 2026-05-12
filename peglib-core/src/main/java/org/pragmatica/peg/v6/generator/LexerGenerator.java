@@ -283,15 +283,26 @@ public final class LexerGenerator {
             sb.append("                }\n");
             sb.append("            }\n");
         }
-        // Phase A.6 — content-based trivia classification (mirrors LexerEngine).
+        // Phase A.6 / 0.6.1 — content-based trivia classification (mirrors LexerEngine).
+        // //         → LINE_COMMENT          (also // without third '/')
+        // ///        → DOC_LINE_COMMENT      (3+ slashes)
+        // /* ... */  → BLOCK_COMMENT
+        // /** ... */ → DOC_BLOCK_COMMENT     (NOT '/**/' — smallest empty block)
         sb.append("            if (lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {\n");
         sb.append("                char c0 = input.charAt(pos);\n");
         sb.append("                char c1 = input.charAt(pos + 1);\n");
         sb.append("                if (c0 == '/') {\n");
         sb.append("                    if (c1 == '/') {\n");
-        sb.append("                        lastAcceptKind = TokenArray.KIND_LINE_COMMENT;\n");
+        sb.append("                        if (lastAcceptEnd > pos + 2 && input.charAt(pos + 2) == '/') {\n");
+        sb.append("                            lastAcceptKind = TokenArray.KIND_DOC_LINE_COMMENT;\n");
+        sb.append("                        } else {\n");
+        sb.append("                            lastAcceptKind = TokenArray.KIND_LINE_COMMENT;\n");
+        sb.append("                        }\n");
         sb.append("                    } else if (c1 == '*') {\n");
-        sb.append("                        lastAcceptKind = TokenArray.KIND_BLOCK_COMMENT;\n");
+        sb.append("                        boolean isDoc = lastAcceptEnd > pos + 2\n");
+        sb.append("                                        && input.charAt(pos + 2) == '*'\n");
+        sb.append("                                        && !(lastAcceptEnd == pos + 4 && input.charAt(pos + 3) == '/');\n");
+        sb.append("                        lastAcceptKind = isDoc ? TokenArray.KIND_DOC_BLOCK_COMMENT : TokenArray.KIND_BLOCK_COMMENT;\n");
         sb.append("                    }\n");
         sb.append("                }\n");
         sb.append("            }\n");

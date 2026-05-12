@@ -15,9 +15,13 @@ public final class TokenArray {
     public static final int KIND_WHITESPACE = 0;
     public static final int KIND_LINE_COMMENT = 1;
     public static final int KIND_BLOCK_COMMENT = 2;
+    /** Triple-slash documentation line comment ({@code /// ...}). Trivia. */
+    public static final int KIND_DOC_LINE_COMMENT = 3;
+    /** Javadoc-style block comment ({@code /** ... *}{@code /}). Trivia. */
+    public static final int KIND_DOC_BLOCK_COMMENT = 4;
 
     /** First numeric kind available to user grammar rules. Reserved kinds occupy {@code [0, FIRST_USER_KIND)}. */
-    public static final int FIRST_USER_KIND = 3;
+    public static final int FIRST_USER_KIND = 5;
 
     private final String input;
     private final int[] starts;
@@ -88,8 +92,7 @@ public final class TokenArray {
     }
 
     public boolean isTrivia(int i) {
-        var k = kindAt(i);
-        return k == KIND_WHITESPACE || k == KIND_LINE_COMMENT || k == KIND_BLOCK_COMMENT;
+        return isTriviaKind(kindAt(i));
     }
 
     public int nextNonTrivia(int from) {
@@ -268,7 +271,11 @@ public final class TokenArray {
     }
 
     private static boolean isTriviaKind(int k) {
-        return k == KIND_WHITESPACE || k == KIND_LINE_COMMENT || k == KIND_BLOCK_COMMENT;
+        return k == KIND_WHITESPACE
+               || k == KIND_LINE_COMMENT
+               || k == KIND_BLOCK_COMMENT
+               || k == KIND_DOC_LINE_COMMENT
+               || k == KIND_DOC_BLOCK_COMMENT;
     }
 
     @SuppressWarnings("JBCT-RET-01")

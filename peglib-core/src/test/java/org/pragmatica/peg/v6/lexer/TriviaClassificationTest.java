@@ -193,4 +193,137 @@ class TriviaClassificationTest {
         assertThat(reconstruct(tokens))
         .isEqualTo(input);
     }
+
+    // ---- 0.6.1 — DOC line/block classification --------------------------------
+    //
+    // The line-comment alternative in the grammar above (`'//' [^\n]*`) lexes
+    // any `/+` line including `///` and `////`. Post-classification distinguishes
+    // them by inspecting the third char. Doc-block (`/** */`) is exercised via a
+    // grammar that routes the block via compileDelimitedBlock (see comment on
+    // the disabled blockComment tests above for the regular path's caveat).
+    //
+    // We deliberately exercise the line variants through the existing GRAMMAR_WITH_COMMENTS
+    // (which lexes `//` runs cleanly via the negated-char-class branch), and exercise the
+    // block variants through a grammar whose %whitespace IS the block-comment delimited
+    // pattern alone, so the DFA routes it through compileDelimitedBlock.
+
+    /** %whitespace is a single block-comment match — DfaBuilder routes via compileDelimitedBlock. */
+    private static final String GRAMMAR_BLOCK_ONLY = """
+        Word <- [a-zA-Z]+
+        %whitespace <- ([ \\t\\n] / '/*' (!'*/' .)* '*/')*
+        """;
+
+    @Test
+    void tripleSlashComment_isClassifiedAsDocLineComment() {
+        var engine = engineFor(GRAMMAR_WITH_COMMENTS);
+        var input = "/// doc\n";
+        var tokens = engine.lex(input);
+        assertThat(tokens.count())
+        .isGreaterThan(0);
+        assertThat(tokens.kindAt(0))
+        .isEqualTo(TokenArray.KIND_DOC_LINE_COMMENT);
+        assertThat(tokens.textAt(0)
+                         .toString())
+        .startsWith("///");
+        assertThat(reconstruct(tokens))
+        .isEqualTo(input);
+        assertThat(tokens.isTrivia(0))
+        .isTrue();
+    }
+
+    @Test
+    void quadrupleSlashComment_isClassifiedAsDocLineComment() {
+        // 4+ slashes still qualify as doc — the rule is "3 or more slashes".
+        var engine = engineFor(GRAMMAR_WITH_COMMENTS);
+        var input = "//// still doc\n";
+        var tokens = engine.lex(input);
+        assertThat(tokens.kindAt(0))
+        .isEqualTo(TokenArray.KIND_DOC_LINE_COMMENT);
+        assertThat(reconstruct(tokens))
+        .isEqualTo(input);
+    }
+
+    @Test
+    void doubleSlashComment_remainsLineComment() {
+        // Regression: the doc-line classification must not catch a regular `//`.
+        var engine = engineFor(GRAMMAR_WITH_COMMENTS);
+        var input = "// regular\n";
+        var tokens = engine.lex(input);
+        assertThat(tokens.kindAt(0))
+        .isEqualTo(TokenArray.KIND_LINE_COMMENT);
+    }
+
+    @Test
+    void blockComment_isClassifiedAsBlockComment_viaDelimitedBlockGrammar() {
+        var engine = engineFor(GRAMMAR_BLOCK_ONLY);
+        var input = "/* plain */";
+        var tokens = engine.lex(input);
+        assertThat(tokens.count())
+        .isGreaterThan(0);
+        assertThat(tokens.kindAt(0))
+        .isEqualTo(TokenArray.KIND_BLOCK_COMMENT);
+        assertThat(reconstruct(tokens))
+        .isEqualTo(input);
+    }
+
+    @Test
+    void docBlockComment_isClassifiedAsDocBlockComment() {
+        var engine = engineFor(GRAMMAR_BLOCK_ONLY);
+        var input = "/** doc */";
+        var tokens = engine.lex(input);
+        assertThat(tokens.kindAt(0))
+        .isEqualTo(TokenArray.KIND_DOC_BLOCK_COMMENT);
+        assertThat(reconstruct(tokens))
+        .isEqualTo(input);
+    }
+
+    @Test
+    void tripleStarBlockComment_isClassifiedAsDocBlockComment() {
+        // `/*** foo */` starts with `/**` followed by `*` (not `/`), so it qualifies.
+        var engine = engineFor(GRAMMAR_BLOCK_ONLY);
+        var input = "/*** foo */";
+        var tokens = engine.lex(input);
+        assertThat(tokens.kindAt(0))
+        .isEqualTo(TokenArray.KIND_DOC_BLOCK_COMMENT);
+    }
+
+    @Test
+    void smallestEmptyBlockComment_isRegularBlockComment_notDoc() {
+        // `/**/` is the canonical "smallest empty block" — NOT Javadoc.
+        var engine = engineFor(GRAMMAR_BLOCK_ONLY);
+        var input = "/**/";
+        var tokens = engine.lex(input);
+        assertThat(tokens.kindAt(0))
+        .isEqualTo(TokenArray.KIND_BLOCK_COMMENT);
+        assertThat(reconstruct(tokens))
+        .isEqualTo(input);
+    }
+
+    @Test
+    void closingStarSlashBlockComment_isDocBlockComment() {
+        // `/***/` is length 5: starts with `/**`, char[3] is `*`, char[4] is `/`.
+        // Doc rule: `/**` + anything except `/` at char[3]; here char[3]='*' qualifies.
+        var engine = engineFor(GRAMMAR_BLOCK_ONLY);
+        var input = "/***/";
+        var tokens = engine.lex(input);
+        assertThat(tokens.kindAt(0))
+        .isEqualTo(TokenArray.KIND_DOC_BLOCK_COMMENT);
+    }
+
+    @Test
+    void docKinds_areTrivia() {
+        // The TokenArray.isTrivia helper must include both DOC variants.
+        var engine = engineFor(GRAMMAR_WITH_COMMENTS);
+        var input = "/// doc\n";
+        var tokens = engine.lex(input);
+        assertThat(tokens.isTrivia(0))
+        .as("DOC_LINE_COMMENT is trivia")
+        .isTrue();
+
+        var engine2 = engineFor(GRAMMAR_BLOCK_ONLY);
+        var tokens2 = engine2.lex("/** doc */");
+        assertThat(tokens2.isTrivia(0))
+        .as("DOC_BLOCK_COMMENT is trivia")
+        .isTrue();
+    }
 }
