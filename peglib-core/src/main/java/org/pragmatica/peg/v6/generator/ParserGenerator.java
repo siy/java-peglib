@@ -189,9 +189,16 @@ public final class ParserGenerator {
             //
             // 0.6.0 — if the grammar declares a {@code %recover [chars] StartRule}
             // directive for the effective start rule, the per-rule sync set
-            // overrides the default. Per-rule recovery for non-start rules is
-            // deferred to a future phase (panic-mode loop is currently top-level
-            // only); the lookup is keyed on the start rule for now.
+            // overrides the default for DEFAULT_SYNC.
+            //
+            // 0.6.1 — Item B — per-rule sync sets. For every rule with a
+            // non-empty {@code %recover} entry resolving to ≥1 known inline-literal
+            // kind, emit a {@code SYNC_<RuleName>} array. The generated parser
+            // tracks {@code lastFailedRuleKind} (updated by {@code fail()} when
+            // it advances the furthest-failure position) and dispatches via
+            // {@code syncForRule(ruleKind)} at recovery time. This lets nested
+            // rule failures recover on rule-specific sync sets while the outer
+            // panic-mode loop remains top-level.
             var inlineLiterals = kinds.inlineLiteralToKind();
             var syncKindSet = new TreeSet<Integer>();
             var startRuleName = grammar.effectiveStartRule().unwrap()
@@ -215,6 +222,31 @@ public final class ParserGenerator {
             }}
             var syncKinds = syncKindSet.stream().mapToInt(Integer::intValue)
                                               .toArray();
+            // Per-rule sync sets: only emit for rules with non-empty recoverSets
+            // that resolve to at least one inline-literal kind AND that are
+            // parser/mixed rules (the lookup is keyed by RULE_<Name>_KIND).
+            // Start rule is excluded — its set IS the DEFAULT_SYNC above.
+            var perRuleSync = new LinkedHashMap<String, int[]>();
+            for ( var entry : grammar.recoverSets().entrySet()) {
+                var ruleName = entry.getKey();
+                if ( ruleName.equals(startRuleName)) {
+                continue;}
+                if ( !parserRuleKinds.containsKey(ruleName)) {
+                continue;}
+                var chars = entry.getValue();
+                if ( chars == null || chars.isEmpty()) {
+                continue;}
+                var perKindSet = new TreeSet<Integer>();
+                for ( var ch : chars) {
+                    var k = inlineLiterals.get(String.valueOf(ch) + "/cs");
+                    if ( k != null) {
+                        perKindSet.add(k);
+                        usedTokenKinds.add(k);
+                    }
+                }
+                if ( !perKindSet.isEmpty()) {
+                perRuleSync.put(ruleName, perKindSet.stream().mapToInt(Integer::intValue).toArray());}
+            }
             // ERROR sentinel kind sits at index ruleTable.length (one past the user
             // rules); we append "ERROR" to the emitted RULE_TABLE so kindNameAt
             // resolves it.
@@ -279,6 +311,22 @@ public final class ParserGenerator {
                 sb.append(syncKinds[i]);
             }
             sb.append("};\n\n");
+            // 0.6.1 — Item B — per-rule SYNC_<RuleName> arrays. Sorted ascending
+            // for binarySearch in nextSyncToken.
+            for ( var entry : perRuleSync.entrySet()) {
+                var ruleName = entry.getKey();
+                var arr = entry.getValue();
+                sb.append("    private static final int[] SYNC_").append(sanitize(ruleName))
+                         .append(" = new int[] {");
+                for ( var i = 0; i < arr.length; i++) {
+                    if ( i > 0) {
+                    sb.append(", ");}
+                    sb.append(arr[i]);
+                }
+                sb.append("};\n");
+            }
+            if ( !perRuleSync.isEmpty()) {
+            sb.append("\n");}
             // Phase B.5 — emit per-rule sorted alias arrays for binarySearch path.
             // Linear-OR alias guards (≤4 entries) inline their kinds and don't need
             // an array.
@@ -325,7 +373,11 @@ public final class ParserGenerator {
             // ParseException control flow.
             sb.append("    private int errorPos;\n");
             sb.append("    private String expected;\n");
-            sb.append("    private int found;\n\n");
+            sb.append("    private int found;\n");
+            // 0.6.1 — Item B — rule-kind of the enclosing rule at the deepest
+            // recorded failure. Used by syncForRule() at recovery time to pick
+            // the appropriate SYNC_<RuleName> array.
+            sb.append("    private int lastFailedRuleKind;\n\n");
             // Constructor.
             sb.append("    private ").append(className)
                      .append("(TokenArray tokens) {\n");
@@ -336,6 +388,7 @@ public final class ParserGenerator {
             sb.append("        this.errorPos = -1;\n");
             sb.append("        this.expected = null;\n");
             sb.append("        this.found = -1;\n");
+            sb.append("        this.lastFailedRuleKind = -1;\n");
             sb.append("    }\n\n");
             // Public entry point — Phase B.4 returns ParseResult unconditionally.
             var startName = grammar.effectiveStartRule().unwrap()
@@ -469,6 +522,7 @@ public final class ParserGenerator {
             sb.append("            errorPos = -1;\n");
             sb.append("            expected = null;\n");
             sb.append("            found = -1;\n");
+            sb.append("            lastFailedRuleKind = -1;\n");
             sb.append("            boolean parsedOk = parse").append(startName)
                      .append("(root);\n");
             sb.append("            if (!parsedOk) {\n");
@@ -574,16 +628,37 @@ public final class ParserGenerator {
             // {@code from} through content tokens (skipping trivia) returning the
             // index of the first sync-set token, or tokens.count() at EOF.
             sb.append("    private int nextSyncToken(int from) {\n");
+            sb.append("        int[] sync = syncForRule(lastFailedRuleKind);\n");
             sb.append("        int i = from;\n");
             sb.append("        int n = tokens.count();\n");
             sb.append("        while (i < n) {\n");
             sb.append("            if (tokens.isTrivia(i)) { i++; continue; }\n");
-            sb.append("            if (java.util.Arrays.binarySearch(DEFAULT_SYNC, tokens.kindAt(i)) >= 0) {\n");
+            sb.append("            if (java.util.Arrays.binarySearch(sync, tokens.kindAt(i)) >= 0) {\n");
             sb.append("                return i;\n");
             sb.append("            }\n");
             sb.append("            i++;\n");
             sb.append("        }\n");
             sb.append("        return n;\n");
+            sb.append("    }\n\n");
+            // 0.6.1 — Item B — pick the SYNC array tied to the rule kind at the
+            // deepest failure. Falls back to DEFAULT_SYNC if no rule-specific
+            // sync set exists (the common case — most grammars use DEFAULT_SYNC
+            // only). The switch is omitted entirely when perRuleSync is empty.
+            sb.append("    private int[] syncForRule(int ruleKind) {\n");
+            if ( !perRuleSync.isEmpty()) {
+                sb.append("        switch (ruleKind) {\n");
+                for ( var ruleName : perRuleSync.keySet()) {
+                    sb.append("            case RULE_").append(ruleName)
+                             .append("_KIND: return SYNC_")
+                             .append(sanitize(ruleName))
+                             .append(";\n");
+                }
+                sb.append("            default: return DEFAULT_SYNC;\n");
+                sb.append("        }\n");
+            } else
+            {
+                sb.append("        return DEFAULT_SYNC;\n");
+            }
             sb.append("    }\n\n");
             // Token-advance helper: skips trivia after consuming a token.
             sb.append("    private void advance() {\n");
@@ -597,12 +672,13 @@ public final class ParserGenerator {
             // false. PEG convention: track the most-distant failure offset since
             // alternatives explored beyond an earlier failure usually yield more
             // useful diagnostics. Replaces the old throwing error() helper.
-            sb.append("    private boolean fail(String expectedText) {\n");
+            sb.append("    private boolean fail(String expectedText, int ruleKind) {\n");
             sb.append("        int offset = pos < tokens.count() ? tokens.startAt(pos) : tokens.input().length();\n");
             sb.append("        if (offset >= errorPos) {\n");
             sb.append("            errorPos = offset;\n");
             sb.append("            expected = expectedText;\n");
             sb.append("            found = peek();\n");
+            sb.append("            lastFailedRuleKind = ruleKind;\n");
             sb.append("        }\n");
             sb.append("        return false;\n");
             sb.append("    }\n\n");
@@ -734,11 +810,23 @@ public final class ParserGenerator {
                          .append(kindConst)
                          .append(") { fail(\"")
                          .append(escapeJavaString(ref.ruleName()))
-                         .append("\"); ")
+                         .append("\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("advance();\n");
             return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item B — the RULE_<ctx.ruleName>_KIND constant string, used as
+         * the rule-kind argument to emitted {@code fail(..., kind)} calls so the
+         * generated parser can route to the correct {@code SYNC_<RuleName>} array
+         * at recovery time.
+         */
+        private static String ruleKindConst(EmitContext ctx) {
+            return "RULE_" + ctx.ruleName + "_KIND";
         }
 
         /**
@@ -762,7 +850,9 @@ public final class ParserGenerator {
                 for ( var k : fallback) {
                 buf.append(" && __k != KIND_").append(sanitize(kinds.kindNameTable() [k]));}
                 buf.append(") { fail(\"").append(escapeJavaString(ruleName))
-                          .append("\"); ")
+                          .append("\", ")
+                          .append(ruleKindConst(ctx))
+                          .append("); ")
                           .append(ctx.failAction)
                           .append(" } }\n");
                 ctx.sb.append(buf);
@@ -773,7 +863,9 @@ public final class ParserGenerator {
                               .append(sanitize(ruleName))
                               .append(", peek()) < 0) { fail(\"")
                               .append(escapeJavaString(ruleName))
-                              .append("\"); ")
+                              .append("\", ")
+                              .append(ruleKindConst(ctx))
+                              .append("); ")
                               .append(ctx.failAction)
                               .append(" }\n");
             }
@@ -818,7 +910,9 @@ public final class ParserGenerator {
                     sb.append("__k != KIND_").append(sanitize(kinds.kindNameTable() [aliasKinds[i]]));
                 }
                 sb.append(") { fail(\"").append(escapeJavaString(ruleName))
-                         .append("\"); ")
+                         .append("\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" } }\n");
                 ctx.sb.append(sb);
@@ -832,7 +926,9 @@ public final class ParserGenerator {
                              .append(sanitize(ruleName))
                              .append(", peek()) < 0) { fail(\"")
                              .append(escapeJavaString(ruleName))
-                             .append("\"); ")
+                             .append("\", ")
+                             .append(ruleKindConst(ctx))
+                             .append("); ")
                              .append(ctx.failAction)
                              .append(" }\n");
             }
@@ -852,7 +948,9 @@ public final class ParserGenerator {
                          .append(kindConst)
                          .append(") { fail(\"'")
                          .append(escapeJavaString(lit.text()))
-                         .append("'\"); ")
+                         .append("'\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("advance();\n");
@@ -860,7 +958,9 @@ public final class ParserGenerator {
         }
 
         private Result<Unit> emitAnyToken(EmitContext ctx) {
-            ctx.sb.append(indent(ctx.depth)).append("if (peek() < 0) { fail(\"<any token>\"); ")
+            ctx.sb.append(indent(ctx.depth)).append("if (peek() < 0) { fail(\"<any token>\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("advance();\n");
@@ -945,7 +1045,9 @@ public final class ParserGenerator {
             // cut was hit but the committed alternative failed.
             ctx.sb.append(indent(inner.depth)).append("if (!matched_")
                          .append(label)
-                         .append(") { fail(\"<choice>\"); ")
+                         .append(") { fail(\"<choice>\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("}\n");
@@ -1128,7 +1230,9 @@ public final class ParserGenerator {
                          .append(");\n");
             ctx.sb.append(indent(body.depth)).append("if (!andOk_")
                          .append(label)
-                         .append(") { fail(\"&<predicate>\"); ")
+                         .append(") { fail(\"&<predicate>\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("}\n");
@@ -1173,7 +1277,9 @@ public final class ParserGenerator {
                          .append(");\n");
             ctx.sb.append(indent(body.depth)).append("if (notMatched_")
                          .append(label)
-                         .append(") { fail(\"!<predicate>\"); ")
+                         .append(") { fail(\"!<predicate>\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("}\n");
