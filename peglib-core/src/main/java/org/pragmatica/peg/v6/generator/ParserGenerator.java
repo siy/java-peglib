@@ -722,7 +722,8 @@ public final class ParserGenerator {
             sb.append("        int savedNodes = cst.currentNodeCount();\n");
             sb.append("        int self = cst.beginNode(RULE_").append(rule.name())
                      .append("_KIND, firstTok, parent);\n");
-            var ctx = new EmitContext(rule.name(), 1, sb);
+            var ruleKind = classification.kinds().getOrDefault(rule.name(), RuleKind.PARSER);
+            var ctx = new EmitContext(rule.name(), 1, sb, ruleKind);
             var bodyResult = emitExpression(rule.expression(), ctx);
             if ( !bodyResult.isSuccess()) {
             return bodyResult.map(__ -> "");}
@@ -746,30 +747,241 @@ public final class ParserGenerator {
          * the rule-body root.
          */
         private Result<Unit> emitExpression(Expression expr, EmitContext ctx) {
-            return switch (expr) {case Expression.Reference ref -> emitReference(ref, ctx);case Expression.Literal lit -> emitLiteral(lit,
-                                                                                                                                      ctx);case Expression.Sequence seq -> emitSequence(seq,
-                                                                                                                                                                                        ctx);case Expression.Choice ch -> emitChoice(ch,
-                                                                                                                                                                                                                                     ctx);case Expression.ZeroOrMore zom -> emitZeroOrMore(zom.expression(),
-                                                                                                                                                                                                                                                                                           ctx);case Expression.OneOrMore oom -> emitOneOrMore(oom.expression(),
-                                                                                                                                                                                                                                                                                                                                               ctx);case Expression.Optional opt -> emitOptional(opt.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                 ctx);case Expression.Repetition rep -> emitRepetition(rep,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                       ctx);case Expression.And a -> isCharLevelOnly(a.expression())
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ? emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        "and-predicate over char-level expression — handled by lexer")
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    : emitAnd(a.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Not n -> isCharLevelOnly(n.expression())
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           ? emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               "not-predicate over char-level expression — handled by lexer")
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           : emitNot(n.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     ctx);case Expression.TokenBoundary tb -> emitExpression(tb.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ctx);case Expression.Ignore ig -> emitExpression(ig.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Capture cap -> emitCapture(cap,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ctx);case Expression.CaptureScope cs -> emitCaptureScope(cs,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ctx);case Expression.Group g -> emitExpression(g.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       ctx);case Expression.Cut __ -> emitCut(ctx);case Expression.Any __ -> emitAnyToken(ctx);case Expression.CharClass cc -> emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 "char-class '" + cc.pattern() + "' inside parser rule — handled by lexer (Phase B.3 no-op)");case Expression.BackReference br -> emitBackReference(br,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ctx);case Expression.Dictionary __ -> emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              "Dictionary (Phase B.3 no-op)");};
+            return switch (expr) {
+                case Expression.Reference ref -> emitReference(ref, ctx);
+                case Expression.Literal lit -> emitLiteral(lit, ctx);
+                case Expression.Sequence seq -> emitSequence(seq, ctx);
+                case Expression.Choice ch -> emitChoice(ch, ctx);
+                case Expression.ZeroOrMore zom -> emitZeroOrMore(zom.expression(), ctx);
+                case Expression.OneOrMore oom -> emitOneOrMore(oom.expression(), ctx);
+                case Expression.Optional opt -> emitOptional(opt.expression(), ctx);
+                case Expression.Repetition rep -> emitRepetition(rep, ctx);
+                case Expression.And a -> emitAndDispatch(a.expression(), ctx);
+                case Expression.Not n -> emitNotDispatch(n.expression(), ctx);
+                case Expression.TokenBoundary tb -> emitExpression(tb.expression(), ctx);
+                case Expression.Ignore ig -> emitExpression(ig.expression(), ctx);
+                case Expression.Capture cap -> emitCapture(cap, ctx);
+                case Expression.CaptureScope cs -> emitCaptureScope(cs, ctx);
+                case Expression.Group g -> emitExpression(g.expression(), ctx);
+                case Expression.Cut __ -> emitCut(ctx);
+                case Expression.Any __ -> emitAnyToken(ctx);
+                case Expression.CharClass cc -> emitCharClassDispatch(cc, ctx);
+                case Expression.BackReference br -> emitBackReference(br, ctx);
+                case Expression.Dictionary __ -> emitParseTimeNoop(ctx, "Dictionary (Phase B.3 no-op)");
+            };
+        }
+
+        /**
+         * 0.6.1 — Item E. {@code &(char-level)} and {@code !(char-level)}
+         * predicates inside MIXED rules stay no-op even with the char-level
+         * fallback enabled. Rationale: in real grammars these are word-boundary
+         * guards (e.g. {@code 'var' ![a-zA-Z0-9_$]}) used to forbid char-by-char
+         * extension of a keyword. In tokens-first parsing the lexer ALREADY
+         * enforces token boundaries (the {@code var} token cannot include
+         * trailing identifier chars), so re-activating these predicates as
+         * token-level probes would mis-fire on the very next token (an
+         * unrelated identifier) and break the parse. The CharClass / Any
+         * fallback below remains active for genuine char-level consumption.
+         */
+        private Result<Unit> emitAndDispatch(Expression inner, EmitContext ctx) {
+            if (isCharLevelOnly(inner)) {
+                return emitParseTimeNoop(ctx, "and-predicate over char-level expression — handled by lexer");
+            }
+            return emitAnd(inner, ctx);
+        }
+
+        /**
+         * 0.6.1 — Item E. Negated counterpart of {@link #emitAndDispatch}; see
+         * its javadoc for why MIXED rules keep this as a no-op.
+         */
+        private Result<Unit> emitNotDispatch(Expression inner, EmitContext ctx) {
+            if (isCharLevelOnly(inner)) {
+                return emitParseTimeNoop(ctx, "not-predicate over char-level expression — handled by lexer");
+            }
+            return emitNot(inner, ctx);
+        }
+
+        /**
+         * 0.6.1 — Item E. A bare CharClass inside a MIXED rule consumes one
+         * token if its first character is in the class; outside MIXED rules
+         * it stays a parse-time no-op.
+         */
+        private Result<Unit> emitCharClassDispatch(Expression.CharClass cc, EmitContext ctx) {
+            if (ctx.isMixed()) {
+                return emitCharClassToken(cc, ctx);
+            }
+            return emitParseTimeNoop(ctx, "char-class " + cc.pattern() + " inside parser rule — handled by lexer (Phase B.3 no-op)");
+        }
+
+        /**
+         * 0.6.1 — Item E. Token-level proxy for a {@link Expression.CharClass}
+         * inside a MIXED rule. Peeks the first byte of the current token's
+         * source text and consumes one token if it satisfies the class
+         * membership. The membership test is generated inline as an OR-chain
+         * over ASCII ranges/single chars; for negated classes, non-ASCII
+         * characters (code unit ≥ 256) are accepted (mirrors the DFA's
+         * non-ASCII transition slot in {@link org.pragmatica.peg.v6.lexer.Dfa}).
+         * Case-insensitive ranges are expanded at codegen time.
+         */
+        private Result<Unit> emitCharClassToken(Expression.CharClass cc, EmitContext ctx) {
+            var membership = renderCharClassMembership(cc, "__c");
+            var indent = indent(ctx.depth);
+            ctx.sb.append(indent).append("if (pos >= tokens.count()) { fail(\"")
+                  .append(escapeJavaString("[" + cc.pattern() + "]"))
+                  .append("\", ")
+                  .append(ruleKindConst(ctx))
+                  .append("); ")
+                  .append(ctx.failAction)
+                  .append(" }\n");
+            ctx.sb.append(indent).append("{ int __off = tokens.startAt(pos);\n");
+            ctx.sb.append(indent).append("  int __c = __off < tokens.input().length() ? tokens.input().charAt(__off) : -1;\n");
+            ctx.sb.append(indent).append("  if (!(").append(membership).append(")) { fail(\"")
+                  .append(escapeJavaString("[" + cc.pattern() + "]"))
+                  .append("\", ")
+                  .append(ruleKindConst(ctx))
+                  .append("); ")
+                  .append(ctx.failAction)
+                  .append(" } }\n");
+            ctx.sb.append(indent).append("advance();\n");
+            return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item E. Compile a {@link Expression.CharClass} into a Java
+         * boolean expression that tests whether {@code varName} is in the class.
+         * Mirrors {@code DfaBuilder.parseCharClassPattern} but emits inline
+         * Java code instead of a {@link java.util.BitSet}.
+         */
+        private static String renderCharClassMembership(Expression.CharClass cc, String varName) {
+            var ranges = parseCharClassRanges(cc.pattern(), cc.caseInsensitive());
+            var sb = new StringBuilder();
+            sb.append('(');
+            // For negated classes, accept non-ASCII (code unit ≥ 256) as the DFA
+            // does via its non-ASCII transition slot.
+            if (cc.negated()) {
+                sb.append(varName).append(" >= 256 || (");
+                sb.append(varName).append(" >= 0 && !(");
+                appendRangeOrChain(sb, ranges, varName);
+                sb.append("))");
+            } else {
+                sb.append(varName).append(" >= 0 && (");
+                appendRangeOrChain(sb, ranges, varName);
+                sb.append(')');
+            }
+            sb.append(')');
+            return sb.toString();
+        }
+
+        /** Emits an OR-chain over a list of {@code [lo,hi]} char ranges. */
+        private static void appendRangeOrChain(StringBuilder sb, int[][] ranges, String varName) {
+            if (ranges.length == 0) {
+                sb.append("false");
+                return;
+            }
+            for (int i = 0; i < ranges.length; i++) {
+                if (i > 0) {
+                    sb.append(" || ");
+                }
+                int lo = ranges[i][0];
+                int hi = ranges[i][1];
+                if (lo == hi) {
+                    sb.append(varName).append(" == ").append(lo);
+                } else {
+                    sb.append('(').append(varName).append(" >= ").append(lo).append(" && ")
+                      .append(varName).append(" <= ").append(hi).append(')');
+                }
+            }
+        }
+
+        /**
+         * 0.6.1 — Item E. Parse a char-class pattern string (the body inside
+         * {@code [...]}) into a list of {@code [lo,hi]} ranges, expanding
+         * case-insensitive letters. Mirrors {@code DfaBuilder.parseCharClassPattern}.
+         */
+        private static int[][] parseCharClassRanges(String pattern, boolean caseInsensitive) {
+            var out = new java.util.ArrayList<int[]>();
+            int i = 0;
+            int n = pattern.length();
+            while (i < n) {
+                char c1 = pattern.charAt(i);
+                int firstChar;
+                int afterFirst;
+                if (c1 == '\\' && i + 1 < n) {
+                    firstChar = decodeCharClassEscape(pattern.charAt(i + 1));
+                    afterFirst = i + 2;
+                } else {
+                    firstChar = c1;
+                    afterFirst = i + 1;
+                }
+                if (afterFirst < n && pattern.charAt(afterFirst) == '-' && afterFirst + 1 < n) {
+                    int rangeEndStart = afterFirst + 1;
+                    char endChar = pattern.charAt(rangeEndStart);
+                    int endDecoded;
+                    int advance;
+                    if (endChar == '\\' && rangeEndStart + 1 < n) {
+                        endDecoded = decodeCharClassEscape(pattern.charAt(rangeEndStart + 1));
+                        advance = (rangeEndStart + 2) - i;
+                    } else {
+                        endDecoded = endChar;
+                        advance = (rangeEndStart + 1) - i;
+                    }
+                    int lo = Math.min(firstChar, endDecoded);
+                    int hi = Math.max(firstChar, endDecoded);
+                    out.add(new int[]{lo, hi});
+                    if (caseInsensitive) {
+                        addCaseInsensitiveRange(out, lo, hi);
+                    }
+                    i += advance;
+                } else {
+                    out.add(new int[]{firstChar, firstChar});
+                    if (caseInsensitive && isAsciiLetter(firstChar)) {
+                        int lower = Character.toLowerCase((char) firstChar);
+                        int upper = Character.toUpperCase((char) firstChar);
+                        if (lower != firstChar) {
+                            out.add(new int[]{lower, lower});
+                        }
+                        if (upper != firstChar) {
+                            out.add(new int[]{upper, upper});
+                        }
+                    }
+                    i = afterFirst;
+                }
+            }
+            return out.toArray(new int[0][]);
+        }
+
+        private static int decodeCharClassEscape(char esc) {
+            return switch (esc) {
+                case 'n' -> '\n';
+                case 'r' -> '\r';
+                case 't' -> '\t';
+                case '0' -> '\0';
+                case 'f' -> '\f';
+                case 'b' -> '\b';
+                default -> esc;
+            };
+        }
+
+        private static boolean isAsciiLetter(int c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        }
+
+        private static void addCaseInsensitiveRange(java.util.ArrayList<int[]> out, int lo, int hi) {
+            // For any range, also include the corresponding upper- and
+            // lower-case sub-ranges. Simple approach: walk the range and add
+            // single-char alternates for letters.
+            for (int c = Math.max(lo, 0); c <= Math.min(hi, 127); c++) {
+                if (isAsciiLetter(c)) {
+                    int lower = Character.toLowerCase((char) c);
+                    int upper = Character.toUpperCase((char) c);
+                    if (lower != c) {
+                        out.add(new int[]{lower, lower});
+                    }
+                    if (upper != c) {
+                        out.add(new int[]{upper, upper});
+                    }
+                }
+            }
         }
 
         private Result<Unit> emitReference(Expression.Reference ref, EmitContext ctx) {
@@ -1491,6 +1703,16 @@ public final class ParserGenerator {
         final String failAction;
 
         /**
+         * 0.6.1 — Item E. The enclosing rule's classification. Used to gate the
+         * MIXED-rule char-level fallback: only MIXED rules emit token-level
+         * proxies for {@link Expression.CharClass} and predicates over
+         * char-level subtrees. PARSER and LEXER rules retain the previous
+         * no-op behavior (PARSER rules shouldn't reach char-level constructs;
+         * LEXER rules don't go through this generator).
+         */
+        final RuleKind ruleKind;
+
+        /**
          * Java identifier of the boolean flag in the enclosing Choice's emitted
          * scope which {@link Renderer#emitCut} sets to {@code true}. {@code null}
          * means no enclosing Choice — Cut becomes a no-op. Inherited across
@@ -1503,8 +1725,8 @@ public final class ParserGenerator {
         final String cutFlag;
         private final int[] labelCounter;
 
-        EmitContext(String ruleName, int depth, StringBuilder sb) {
-            this(ruleName, depth, sb, new int[]{0}, RULE_BODY_FAIL_ACTION, null);
+        EmitContext(String ruleName, int depth, StringBuilder sb, RuleKind ruleKind) {
+            this(ruleName, depth, sb, new int[]{0}, RULE_BODY_FAIL_ACTION, null, ruleKind);
         }
 
         EmitContext(String ruleName,
@@ -1512,29 +1734,35 @@ public final class ParserGenerator {
                     StringBuilder sb,
                     int[] labelCounter,
                     String failAction,
-                    String cutFlag) {
+                    String cutFlag,
+                    RuleKind ruleKind) {
             this.ruleName = ruleName;
             this.depth = depth;
             this.sb = sb;
             this.labelCounter = labelCounter;
             this.failAction = failAction;
             this.cutFlag = cutFlag;
+            this.ruleKind = ruleKind;
         }
 
         EmitContext indented() {
-            return new EmitContext(ruleName, depth + 1, sb, labelCounter, failAction, cutFlag);
+            return new EmitContext(ruleName, depth + 1, sb, labelCounter, failAction, cutFlag, ruleKind);
         }
 
         EmitContext withFailAction(String newFailAction) {
-            return new EmitContext(ruleName, depth, sb, labelCounter, newFailAction, cutFlag);
+            return new EmitContext(ruleName, depth, sb, labelCounter, newFailAction, cutFlag, ruleKind);
         }
 
         EmitContext indentedWithFailAction(String newFailAction) {
-            return new EmitContext(ruleName, depth + 1, sb, labelCounter, newFailAction, cutFlag);
+            return new EmitContext(ruleName, depth + 1, sb, labelCounter, newFailAction, cutFlag, ruleKind);
         }
 
         EmitContext withCutFlag(String newCutFlag) {
-            return new EmitContext(ruleName, depth, sb, labelCounter, failAction, newCutFlag);
+            return new EmitContext(ruleName, depth, sb, labelCounter, failAction, newCutFlag, ruleKind);
+        }
+
+        boolean isMixed() {
+            return ruleKind == RuleKind.MIXED;
         }
 
         int nextLabelId() {
