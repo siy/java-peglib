@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-05-12
+
+_Patch release in progress._
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
 ## [0.6.0] - 2026-05-11
 
 **Major performance + architecture release.** Clean-slate redesign delivering parity with javac on Java parsing while emitting full CST + trivia + diagnostics that javac doesn't expose. Tokens-first lex-then-parse architecture with flat int[] CST achieves 11-12× speedup over the 0.5.x source-generated parser.
