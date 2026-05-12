@@ -1,10 +1,99 @@
 # peglib — Handover
 
-**Last updated:** 2026-05-11 — Sessions 2+3+4 complete. 0.6.0 ready for release.
+**Last updated:** 2026-05-12 — **0.6.0 SHIPPED to Maven Central.** Closing checkpoint after Sessions 2-5.
 
 ---
 
-## SESSION 4 SUMMARY — 0.6.0 ship-ready
+## SESSION 5 SUMMARY — 0.6.0 LIVE
+
+### State at a glance
+
+| | |
+|---|---|
+| **Release** | **v0.6.0** live on Maven Central (deployed 2026-05-11) |
+| **Branch** | `main` at `3518df0` |
+| **Tag** | `v0.6.0` at `94ef675` (PR #34 merge commit) |
+| **Local artifacts** | `~/.m2/repository/org/pragmatica-lite/peglib*/0.6.0` |
+| **Working tree** | clean |
+| **Tests** | **1440 passing** across 7 modules, 0 failures, 4 pre-existing skips |
+| **Java25 corpus** | 20/20 clean parse |
+| **Real-world Java** | FactoryClassGenerator (1900 LOC, JBCT generator): 0 diagnostics |
+| **Perf vs 0.5.x-gen** | **11-12× faster, 9-13× less memory** |
+| **Perf vs javac parse-only** | **1.20-1.83× of javac time** (same category) |
+| **Incremental edits** | sub-ms p50 (~700µs), p99 ~1.5ms |
+
+### What landed in session 5 (post-rc, ship + polish)
+
+1. **JBCT plugin bumped** 0.4.1 → 0.25.0 (fixed parser crash on `DfaBuilder.java`)
+2. **v6 JBCT-0.25.0 conformance refactor**: 123 lint errors → 0 (throws → `Result`, nulls → `Option`, `Result<Void>` → `Result<Unit>`, hot-path void mutators retained with `@SuppressWarnings("JBCT-RET-01")`)
+3. **peglib-runtime module extracted** (25KB jar): standalone-parser invariant met. Generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core.
+4. **V6Formatter corpus validation**: 20/20 round-trip; found and fixed 2 real bugs (multi-line leaf text crashed `Doc.Text`; inline-literal tokens dropped by `Docs.concat`)
+5. **Bounded-scan truncate** (CstArrayBuilder): 24-48× hot-path speedup
+6. **DFA Unicode support**: non-ASCII chars in comments/strings/identifiers now work
+7. **Asymmetric delimited blocks**: `'/*' (!'*/' .)* '*/'` inside Choice now routes through `compileDelimitedBlock`
+8. **Contextual-keyword Identifier fallback**: `open`/`module`/`record`/`yield`/etc. accept as identifiers
+9. **FactoryClassGenerator real-world parse**: 13,529 → 0 diagnostics
+10. **java25.peg fixes**: `>>` split to single `>` tokens (nested generics), `Annotation*` on `var` decls
+11. **CHANGELOG, MIGRATION guide, README** updated for 0.6.0
+12. **PR #34 merged**, tagged `v0.6.0`, deployed to Maven Central (deployment `d0511073-6ec1-4e4e-89ce-415f949e8516`)
+13. **CLAUDE.md refreshed**: banked lessons + collaboration notes; stale 0.5.x content removed
+
+### Known limitations (carrying forward — none ship-blocking)
+
+**Intentional drops** (per spec §3 — NOT returning):
+- BASIC/ADVANCED recovery split (one always-on mechanism)
+- Inline `{...}` action blocks (replaced by Visitor pattern)
+- `AstNode` type (CST only)
+- Packrat memoization (tokens-first design)
+
+**Deferred for 0.6.x patches or 0.7**:
+- Per-rule `%recover` sync sets (start-rule only currently)
+- MIXED-rule char-level fallback (no-op; affects 5 Java25 rules)
+- `ParserOptions.maxDiagnostics` (stub; no current callers)
+- Per-iteration trivia tokens for `%whitespace` ZeroOrMore (currently coalesces into single token)
+- Named captures + back-references runtime (rejects at `fromGrammar` with helpful error)
+- JBCT `<skip>true</skip>` in `peglib-core/pom.xml` (lint passes cleanly; only the upstream formatter has a convergence bug on 5 v6 files)
+- True partial parse on `selfhost` (40K LOC) fixture (parses with some diagnostics — grammar gaps in specific Java patterns)
+
+### Possible next-session targets
+
+In order of likely value:
+
+1. **0.6.1 patch (no rush)**: address any user-reported bugs from Maven Central uptake. Fix the JBCT format-stuck-files upstream issue once JBCT 0.26+ ships.
+2. **Per-rule `%recover` sync sets**: spec §3.8 calls for per-rule recovery; currently only start-rule. Real value for IDE integration.
+3. **MIXED-rule char-level fallback** in generated parser: closes the 5 deferred Java25 rules. Improves CST shape for rare edge-case patterns.
+4. **Selfhost fixture grammar gaps**: bisect the remaining diagnostics in `Java25SelfHost-v51.java.txt` to identify and fix the specific Java patterns the grammar misses.
+5. **`ParserOptions` wired through**: actually honor `maxDiagnostics` cap. Small, mechanical.
+6. **Documentation arc**: README polish (currently brief mention of 0.6.0), tutorial-style docs for the visitor pattern, real-world examples beyond the test corpus.
+7. **0.7 architectural moves** (open):
+   - Better contextual keyword handling (lexer modes?)
+   - Token-array pool / arena for memory-sensitive workloads (close the 3× allocation gap vs javac)
+   - Generic improvements to `IncrementalParser` (e.g., snapshot stack for undo/redo support)
+
+### Quick-start for next session
+
+1. **Read this file**, then `docs/ARCHITECTURE-0.6.0.md` if going architectural.
+2. **Read `CLAUDE.md`** — refreshed with banked lessons (parser-domain + collaboration notes). Honor the rules; they were earned.
+3. **Verify current state**: `mvn install` → 1440 tests pass.
+4. **Pick a target** from the list above, or whatever surfaces from user reports.
+5. **Useful agents**: `jbct-coder` for ALL coding, `build-runner` for `mvn`, `chore-runner` for git/changelog work.
+
+### Critical lessons banked (DON'T RE-LEARN)
+
+These were earned over 5 sessions of work. They live in `CLAUDE.md` now but worth restating:
+
+- **Bisection-first on parser bugs.** Theorize never. Em-dash bug took 6 bisect rounds; 3 prior theory-hypotheses were all wrong.
+- **Profile-first for perf claims.** Mental models of JIT'd Java hot paths are systematically wrong. `CstArrayBuilder.truncate` was 75% of CPU — not on any pre-profile theory list.
+- **CST shape sanity in phase gates.** N LOC ≈ N/3 to N CST nodes for this grammar. 11 nodes/fixture for 1900-LOC files was a false positive that hid the empty-CompilationUnit issue for two sessions.
+- **Curated fixtures prove not-broken, not complete.** Real-world Java input must be tested early.
+- **Contextual keywords need identifier-fallback** in tokens-first PEG. Known design risk; still hit it.
+- **Parallel agents + uncommitted impactful changes = stash collision risk.** Commit checkpoints before parallel dispatch.
+- **DFA alphabet 0..256 + per-state non-ASCII slot.** Don't extend alphabet to full Unicode.
+- **Generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core.** Standalone-parser invariant.
+
+---
+
+## SESSION 4 SUMMARY — 0.6.0 ship-ready (preserved as pre-merge snapshot)
 
 ### State at a glance
 
