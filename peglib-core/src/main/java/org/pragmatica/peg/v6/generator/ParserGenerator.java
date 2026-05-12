@@ -377,7 +377,21 @@ public final class ParserGenerator {
             // 0.6.1 — Item B — rule-kind of the enclosing rule at the deepest
             // recorded failure. Used by syncForRule() at recovery time to pick
             // the appropriate SYNC_<RuleName> array.
-            sb.append("    private int lastFailedRuleKind;\n\n");
+            sb.append("    private int lastFailedRuleKind;\n");
+            // 0.6.1 — Item D — named captures runtime. Each entry maps a capture
+            // name to {startByte, endByte} into tokens.input(). BackReference
+            // matches by source-span equality (re-scans the next bytes of input
+            // against the captured substring). CaptureScope snapshots the map on
+            // entry and unconditionally restores on exit (matches 0.5.x
+            // PegEngine.parseCaptureScope which always restores regardless of
+            // inner success/failure). Within a single Choice's alternatives,
+            // captures from failed alternatives persist into later alternatives
+            // — Capture only sets on inner-expression success, so a partial
+            // alternative whose capture's inner expression matched but whose
+            // later steps failed will leave its capture visible (matches 0.5.x
+            // PegEngine.parseCapture which only invokes setCapture on success).
+            sb.append("    private final java.util.Map<String, long[]> captures = new java.util.HashMap<>();\n");
+            sb.append("    private final java.util.ArrayDeque<java.util.Map<String, long[]>> captureScopeStack = new java.util.ArrayDeque<>();\n\n");
             // Constructor.
             sb.append("    private ").append(className)
                      .append("(TokenArray tokens) {\n");
@@ -749,12 +763,12 @@ public final class ParserGenerator {
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            : emitNot(n.expression(),
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      ctx);case Expression.TokenBoundary tb -> emitExpression(tb.expression(),
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Ignore ig -> emitExpression(ig.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Capture cap -> emitExpression(cap.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ctx);case Expression.CaptureScope cs -> emitExpression(cs.expression(),
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Capture cap -> emitCapture(cap,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ctx);case Expression.CaptureScope cs -> emitCaptureScope(cs,
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         ctx);case Expression.Group g -> emitExpression(g.expression(),
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ctx);case Expression.Cut __ -> emitCut(ctx);case Expression.Any __ -> emitAnyToken(ctx);case Expression.CharClass cc -> emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 "char-class '" + cc.pattern() + "' inside parser rule — handled by lexer (Phase B.3 no-op)");case Expression.BackReference br -> emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    "BackReference '" + br.name() + "' (Phase B.3 no-op)");case Expression.Dictionary __ -> emitParseTimeNoop(ctx,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 "char-class '" + cc.pattern() + "' inside parser rule — handled by lexer (Phase B.3 no-op)");case Expression.BackReference br -> emitBackReference(br,
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ctx);case Expression.Dictionary __ -> emitParseTimeNoop(ctx,
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               "Dictionary (Phase B.3 no-op)");};
         }
 
@@ -1283,6 +1297,142 @@ public final class ParserGenerator {
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("}\n");
+            return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item D — emit a named-capture {@code $name<expr>}. Records the
+         * source-byte span of the inner-match into the {@code captures} map on
+         * SUCCESS only. On inner failure the parent's failAction fires and
+         * captures is left untouched (matches 0.5.x PegEngine.parseCapture).
+         * The capture span is taken from the bytes spanned by the consumed
+         * tokens, not the tokens themselves — back-references match by raw
+         * source-text equality, so trivia between tokens inside the capture is
+         * elided naturally (the captured substring is the contiguous source
+         * slice from the first token's startAt to the last token's endAt).
+         */
+        private Result<Unit> emitCapture(Expression.Capture cap, EmitContext ctx) {
+            var label = "cap_" + ctx.nextLabelId();
+            var indent = indent(ctx.depth);
+            ctx.sb.append(indent).append("// capture: $").append(escapeJavaString(cap.name()))
+                  .append("\n");
+            ctx.sb.append(indent).append("int capStartTok_").append(label)
+                  .append(" = pos;\n");
+            ctx.sb.append(indent).append("int capStartByte_").append(label)
+                  .append(" = pos < tokens.count() ? tokens.startAt(pos) : tokens.input().length();\n");
+            // Emit inner; on failure the parent's failAction fires and we never
+            // reach the put() below. On success we record the span.
+            var innerResult = emitExpression(cap.expression(), ctx);
+            if (!innerResult.isSuccess()) {
+                return innerResult;
+            }
+            ctx.sb.append(indent).append("int capEndByte_").append(label)
+                  .append(" = pos > capStartTok_").append(label)
+                  .append(" ? tokens.endAt(pos - 1) : capStartByte_").append(label)
+                  .append(";\n");
+            ctx.sb.append(indent).append("captures.put(\"").append(escapeJavaString(cap.name()))
+                  .append("\", new long[]{capStartByte_").append(label)
+                  .append(", capEndByte_").append(label)
+                  .append("});\n");
+            return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item D — emit a capture-scope {@code $(...)}. Snapshots the
+         * current captures map on entry; on exit (whether the inner expression
+         * succeeded or failed) the map is unconditionally restored. This
+         * matches 0.5.x PegEngine.parseCaptureScope which always restores. We
+         * wrap the inner emit in a do/while so failure inside breaks out, then
+         * we restore captures, then we re-dispatch the parent's failAction if
+         * the inner failed — so semantics propagate while ensuring restore.
+         */
+        private Result<Unit> emitCaptureScope(Expression.CaptureScope cs, EmitContext ctx) {
+            var label = "scope_" + ctx.nextLabelId();
+            var indent = indent(ctx.depth);
+            ctx.sb.append(indent).append("// capture-scope: ").append(label).append("\n");
+            ctx.sb.append(indent).append("{\n");
+            var body = ctx.indented();
+            ctx.sb.append(indent(body.depth)).append("java.util.Map<String, long[]> savedCaptures_")
+                  .append(label).append(" = new java.util.HashMap<>(captures);\n");
+            ctx.sb.append(indent(body.depth)).append("boolean scopeOk_").append(label)
+                  .append(" = false;\n");
+            ctx.sb.append(indent(body.depth)).append("do {\n");
+            var inner = body.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION);
+            var innerResult = emitExpression(cs.expression(), inner);
+            if (!innerResult.isSuccess()) {
+                return innerResult;
+            }
+            ctx.sb.append(indent(inner.depth)).append("scopeOk_").append(label)
+                  .append(" = true;\n");
+            ctx.sb.append(indent(body.depth)).append("} while (false);\n");
+            // Unconditional restore — matches 0.5.x.
+            ctx.sb.append(indent(body.depth)).append("captures.clear();\n");
+            ctx.sb.append(indent(body.depth)).append("captures.putAll(savedCaptures_")
+                  .append(label).append(");\n");
+            // If inner failed inside the do/while, dispatch parent's failAction.
+            ctx.sb.append(indent(body.depth)).append("if (!scopeOk_").append(label)
+                  .append(") { ").append(ctx.failAction).append(" }\n");
+            ctx.sb.append(indent).append("}\n");
+            return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item D — emit a back-reference {@code $name}. Looks up the
+         * captured span; on absent capture, fails. On present capture, compares
+         * the captured source substring (bytes [start..end)) against the input
+         * bytes starting at the current pos's startAt. On mismatch or
+         * insufficient remaining input, fails. On match, advances pos past the
+         * matched bytes (to the first token whose startAt >= target byte
+         * offset). No CST node emitted — back-references are char-level
+         * constructs and were previously parse-time no-ops; preserving the CST
+         * shape (no extra nodes) is the simpler choice.
+         */
+        private Result<Unit> emitBackReference(Expression.BackReference br, EmitContext ctx) {
+            var label = "bref_" + ctx.nextLabelId();
+            var indent = indent(ctx.depth);
+            var name = escapeJavaString(br.name());
+            ctx.sb.append(indent).append("// back-reference: $").append(name).append("\n");
+            ctx.sb.append(indent).append("{\n");
+            var body = indent(ctx.depth + 1);
+            ctx.sb.append(body).append("long[] cap_").append(label)
+                  .append(" = captures.get(\"").append(name).append("\");\n");
+            ctx.sb.append(body).append("if (cap_").append(label)
+                  .append(" == null) { fail(\"back-reference $").append(name)
+                  .append(" not captured\", ").append(ruleKindConst(ctx))
+                  .append("); ").append(ctx.failAction).append(" }\n");
+            ctx.sb.append(body).append("int capLen_").append(label)
+                  .append(" = (int)(cap_").append(label).append("[1] - cap_")
+                  .append(label).append("[0]);\n");
+            ctx.sb.append(body).append("int posByte_").append(label)
+                  .append(" = pos < tokens.count() ? tokens.startAt(pos) : tokens.input().length();\n");
+            ctx.sb.append(body).append("String inputStr_").append(label)
+                  .append(" = tokens.input();\n");
+            ctx.sb.append(body).append("if (posByte_").append(label)
+                  .append(" + capLen_").append(label)
+                  .append(" > inputStr_").append(label).append(".length()) { fail(\"back-reference $")
+                  .append(name).append("\", ").append(ruleKindConst(ctx))
+                  .append("); ").append(ctx.failAction).append(" }\n");
+            ctx.sb.append(body).append("boolean eq_").append(label).append(" = true;\n");
+            ctx.sb.append(body).append("for (int i = 0; i < capLen_").append(label)
+                  .append("; i++) {\n");
+            ctx.sb.append(indent(ctx.depth + 2)).append("if (inputStr_").append(label)
+                  .append(".charAt(posByte_").append(label)
+                  .append(" + i) != inputStr_").append(label)
+                  .append(".charAt((int)cap_").append(label)
+                  .append("[0] + i)) { eq_").append(label).append(" = false; break; }\n");
+            ctx.sb.append(body).append("}\n");
+            ctx.sb.append(body).append("if (!eq_").append(label).append(") { fail(\"back-reference $")
+                  .append(name).append("\", ").append(ruleKindConst(ctx))
+                  .append("); ").append(ctx.failAction).append(" }\n");
+            // Advance pos past the matched bytes. Empty capture: no advance.
+            ctx.sb.append(body).append("if (capLen_").append(label).append(" > 0) {\n");
+            ctx.sb.append(indent(ctx.depth + 2)).append("int targetByte_").append(label)
+                  .append(" = posByte_").append(label).append(" + capLen_")
+                  .append(label).append(";\n");
+            ctx.sb.append(indent(ctx.depth + 2)).append("while (pos < tokens.count() && tokens.startAt(pos) < targetByte_")
+                  .append(label).append(") pos++;\n");
+            ctx.sb.append(body).append("}\n");
+            ctx.sb.append(indent).append("}\n");
             return Result.unitResult();
         }
 

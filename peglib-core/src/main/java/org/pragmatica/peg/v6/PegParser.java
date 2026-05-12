@@ -5,8 +5,6 @@ import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 import org.pragmatica.peg.v6.analyzer.LeftRecursionCause;
 import org.pragmatica.peg.v6.analyzer.LeftRecursionDetector;
-import org.pragmatica.peg.v6.analyzer.NamedCaptureCause;
-import org.pragmatica.peg.v6.analyzer.NamedCaptureDetector;
 import org.pragmatica.peg.v6.generator.LexerCompiler;
 import org.pragmatica.peg.v6.generator.LexerCompiler.CompiledLexer;
 import org.pragmatica.peg.v6.generator.LexerGenerator;
@@ -59,7 +57,6 @@ public final class PegParser {
         String lexerClassName = "GLexer_" + uid;
         String parserClassName = "GParser_" + uid;
         return GrammarParser.parse(grammarText).flatMap(PegParser::checkLeftRecursion)
-                                  .flatMap(PegParser::checkNamedCaptures)
                                   .flatMap(grammar -> RuleClassifier.classify(grammar)
         .flatMap(classification -> DfaBuilder.build(grammar, classification)
         .flatMap(built -> compileLexer(grammar, classification, built, lexerClassName)
@@ -71,13 +68,6 @@ public final class PegParser {
         return LeftRecursionDetector.detect(grammar)
         .flatMap(result -> result.hasErrors()
                           ? LeftRecursionCause.of(result).result()
-                          : Result.success(grammar));
-    }
-
-    private static Result<Grammar> checkNamedCaptures(Grammar grammar) {
-        return NamedCaptureDetector.detect(grammar)
-        .flatMap(result -> result.hasOccurrences()
-                          ? NamedCaptureCause.of(result).result()
                           : Result.success(grammar));
     }
 
