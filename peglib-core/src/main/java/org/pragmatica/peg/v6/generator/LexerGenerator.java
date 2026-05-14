@@ -31,10 +31,14 @@ import java.util.List;
  * <h2>Empty-match warning</h2>
  *
  * <p>If the DFA's start state is itself accepting (e.g. a rule body like
- * {@code [a-z]*} that matches the empty string), the generated lexer will throw
- * at run time on any input. {@link Generated#warnings} surfaces a heads-up; the
- * code is still emitted because some grammars only stumble into this for unused
- * helper rules.
+ * {@code [a-z]*} that matches the empty string), the generated lexer falls
+ * back to emitting a synthetic 1-char {@code WHITESPACE} token on every
+ * no-progress stall — it does not throw. The parser then surfaces those
+ * synthetic tokens as trailing-input diagnostics. This is usually fine: many
+ * grammars hit it on unused helper rules or rules that are also reachable
+ * via longer-match alternatives. {@link Generated#warnings} names the
+ * offending rule so authors can tighten it (e.g. {@code +} instead of
+ * {@code *}) if the synthetic-token fallback isn't acceptable.
  */
 public final class LexerGenerator {
     static final int ENTRIES_PER_CHUNK = 4096;
@@ -69,8 +73,18 @@ public final class LexerGenerator {
         if ( !isValidIdentifier(className)) {
         return new LexerGenerationError.InvalidIdentifier("className", String.valueOf(className)).result();}
         var warnings = new ArrayList<String>();
-        if ( dfa.acceptKind(Dfa.START_STATE) != Dfa.NO_ACCEPT) {
-        warnings.add("DFA start state is accepting — at least one LEXER rule matches the empty string;" + " generated lex() will throw on any input. Tighten the offending rule (e.g. '+' instead of '*').");}
+        var startAcceptKind = dfa.acceptKind(Dfa.START_STATE);
+        if ( startAcceptKind != Dfa.NO_ACCEPT) {
+            var nameTable = kinds.kindNameTable();
+            var ruleName = (startAcceptKind >= 0 && startAcceptKind < nameTable.length)
+                           ? nameTable[startAcceptKind]
+                           : ("<kind:" + startAcceptKind + ">");
+            warnings.add("LEXER rule '" + ruleName
+                         + "' matches the empty string (DFA start state accepts kind " + startAcceptKind
+                         + "). The generated lexer will not throw — on a no-progress stall it emits a"
+                         + " synthetic 1-char WHITESPACE token and continues. Tighten the rule"
+                         + " (e.g. '+' instead of '*') if the synthetic-token fallback is unacceptable.");
+        }
         int whitespaceKind = grammar.whitespace().isPresent()
                              ? DfaBuilder.KIND_WHITESPACE
                              : - 1;
@@ -283,15 +297,26 @@ public final class LexerGenerator {
             sb.append("                }\n");
             sb.append("            }\n");
         }
-        // Phase A.6 — content-based trivia classification (mirrors LexerEngine).
+        // Phase A.6 / 0.6.1 — content-based trivia classification (mirrors LexerEngine).
+        // //         → LINE_COMMENT          (also // without third '/')
+        // ///        → DOC_LINE_COMMENT      (3+ slashes)
+        // /* ... */  → BLOCK_COMMENT
+        // /** ... */ → DOC_BLOCK_COMMENT     (NOT '/**/' — smallest empty block)
         sb.append("            if (lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {\n");
         sb.append("                char c0 = input.charAt(pos);\n");
         sb.append("                char c1 = input.charAt(pos + 1);\n");
         sb.append("                if (c0 == '/') {\n");
         sb.append("                    if (c1 == '/') {\n");
-        sb.append("                        lastAcceptKind = TokenArray.KIND_LINE_COMMENT;\n");
+        sb.append("                        if (lastAcceptEnd > pos + 2 && input.charAt(pos + 2) == '/') {\n");
+        sb.append("                            lastAcceptKind = TokenArray.KIND_DOC_LINE_COMMENT;\n");
+        sb.append("                        } else {\n");
+        sb.append("                            lastAcceptKind = TokenArray.KIND_LINE_COMMENT;\n");
+        sb.append("                        }\n");
         sb.append("                    } else if (c1 == '*') {\n");
-        sb.append("                        lastAcceptKind = TokenArray.KIND_BLOCK_COMMENT;\n");
+        sb.append("                        boolean isDoc = lastAcceptEnd > pos + 2\n");
+        sb.append("                                        && input.charAt(pos + 2) == '*'\n");
+        sb.append("                                        && !(lastAcceptEnd == pos + 4 && input.charAt(pos + 3) == '/');\n");
+        sb.append("                        lastAcceptKind = isDoc ? TokenArray.KIND_DOC_BLOCK_COMMENT : TokenArray.KIND_BLOCK_COMMENT;\n");
         sb.append("                    }\n");
         sb.append("                }\n");
         sb.append("            }\n");

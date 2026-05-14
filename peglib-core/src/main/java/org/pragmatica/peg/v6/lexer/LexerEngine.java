@@ -128,18 +128,38 @@ public final class LexerEngine {
                 if ( override != null) {
                 lastAcceptKind = override;}
             }
-            // Phase A.6 — content-based trivia classification. WHITESPACE tokens whose
-            // text begins with "//" or "/*" are reclassified to LINE_COMMENT or
-            // BLOCK_COMMENT respectively. Pure whitespace runs never start with '/',
-            // so this is a sound prefix check.
+            // Phase A.6 / 0.6.1 — content-based trivia classification. WHITESPACE tokens
+            // whose text begins with a comment prefix are reclassified into the matching
+            // (regular or doc) line/block-comment kind. Pure whitespace runs never start
+            // with '/', so this is a sound prefix check.
+            //   //         → LINE_COMMENT          (also /+ that isn't doc; see below)
+            //   ///        → DOC_LINE_COMMENT      (3 or more slashes)
+            //   /* ... */  → BLOCK_COMMENT
+            //   /** ... */ → DOC_BLOCK_COMMENT     (NOT the smallest empty block /**/)
             if ( lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {
                 char c0 = input.charAt(pos);
                 char c1 = input.charAt(pos + 1);
                 if ( c0 == '/') {
-                if ( c1 == '/') {
-                lastAcceptKind = TokenArray.KIND_LINE_COMMENT;} else
-                if ( c1 == '*') {
-                lastAcceptKind = TokenArray.KIND_BLOCK_COMMENT;}}
+                    if ( c1 == '/') {
+                        // Line comment. Doc-line variant requires a third '/'.
+                        if ( lastAcceptEnd > pos + 2 && input.charAt(pos + 2) == '/') {
+                            lastAcceptKind = TokenArray.KIND_DOC_LINE_COMMENT;
+                        } else {
+                            lastAcceptKind = TokenArray.KIND_LINE_COMMENT;
+                        }
+                    } else if ( c1 == '*') {
+                        // Block comment. Doc-block variant requires '/**' followed by
+                        // anything except a closing '/'. The 4-char empty block '/**/'
+                        // is the smallest regular block comment, NOT Javadoc.
+                        boolean isDoc =
+                            lastAcceptEnd > pos + 2
+                            && input.charAt(pos + 2) == '*'
+                            && !(lastAcceptEnd == pos + 4 && input.charAt(pos + 3) == '/');
+                        lastAcceptKind = isDoc
+                                         ? TokenArray.KIND_DOC_BLOCK_COMMENT
+                                         : TokenArray.KIND_BLOCK_COMMENT;
+                    }
+                }
             }
             builder.append(lastAcceptKind, pos, lastAcceptEnd);
             pos = lastAcceptEnd;

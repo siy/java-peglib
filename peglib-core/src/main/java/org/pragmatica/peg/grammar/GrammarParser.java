@@ -48,6 +48,7 @@ public final class GrammarParser {
         var suggestRules = new ArrayList<String>();
         var imports = new ArrayList<Import>();
         var recoverSets = new LinkedHashMap<String, Set<Character>>();
+        var checkpointRules = new LinkedHashSet<String>();
         Option<String> startRule = Option.none();
         Option<Expression> whitespace = Option.none();
         Option<Expression> word = Option.none();
@@ -99,6 +100,20 @@ public final class GrammarParser {
                     recoverSets.put(entry.ruleName(), entry.chars());
                     continue;
                 }
+                // 0.6.1 — Grammar-level %checkpoint RuleName designates an
+                // incremental-reparse boundary consumed by IncrementalParser.
+                // No rule-level form exists, so the only disambiguation needed
+                // is the lookahead that the next token is an Identifier.
+                if ("checkpoint".equals(directive.name()) && pos + 1 < tokens.size() && tokens.get(pos + 1) instanceof GrammarToken.Identifier) {
+                    advance();
+                    var result = parseCheckpointDirective();
+                    if (result instanceof Result.Failure< ? > f) {
+                        return f.cause()
+                                .result();
+                    }
+                    checkpointRules.add(result.unwrap());
+                    continue;
+                }
                 advance();
                 var result = parseDirective(directive);
                 if (result instanceof Result.Failure< ? > f) {
@@ -130,6 +145,7 @@ public final class GrammarParser {
         var copiedSuggest = List.copyOf(suggestRules);
         var copiedImports = List.copyOf(imports);
         var copiedRecover = Map.copyOf(recoverSets);
+        var copiedCheckpoint = Set.copyOf(checkpointRules);
         // 0.4.0 — when a grammar declares no imports, validate eagerly via the
         // parse-don't-validate factory. With imports, the root grammar may
         // legitimately reference rule names that only appear after %import
@@ -138,7 +154,7 @@ public final class GrammarParser {
         // routes its final composed grammar through {@link Grammar#grammar}
         // so the validation still runs — just at the right point in the pipe.
         if (copiedImports.isEmpty()) {
-            return Grammar.grammar(rules, startRule, whitespace, word, copiedSuggest, copiedImports, copiedRecover);
+            return Grammar.grammar(rules, startRule, whitespace, word, copiedSuggest, copiedImports, copiedRecover, copiedCheckpoint);
         }
         return Result.success(new Grammar(rules,
                                           startRule,
@@ -146,7 +162,8 @@ public final class GrammarParser {
                                           word,
                                           copiedSuggest,
                                           copiedImports,
-                                          copiedRecover));
+                                          copiedRecover,
+                                          copiedCheckpoint));
     }
 
     /** Result tuple for a parsed {@code %recover &lt;CharClass&gt; RuleName} directive. */
@@ -177,6 +194,27 @@ public final class GrammarParser {
         advance();
         var chars = expandCharClass(cc.pattern());
         return Result.success(new RecoverEntry(ruleId.name(), chars));
+    }
+
+    /**
+     * Parse the body of a top-level {@code %checkpoint RuleName} directive.
+     * The {@code %checkpoint} keyword has already been consumed. Unknown
+     * rule names are accepted — the engine silently ignores them, matching
+     * the relaxed handling of grammar-level {@code %recover}.
+     *
+     * @since 0.6.1
+     */
+    private Result<String> parseCheckpointDirective() {
+        if (! (peek() instanceof GrammarToken.Identifier ruleId)) {
+            return new ParseError.UnexpectedInput(
+            peek()
+            .span()
+            .start(),
+            tokenDescription(peek()),
+            "rule name for '%checkpoint'").result();
+        }
+        advance();
+        return Result.success(ruleId.name());
     }
 
     /**

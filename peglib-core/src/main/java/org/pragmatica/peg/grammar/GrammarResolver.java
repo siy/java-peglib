@@ -166,6 +166,17 @@ public final class GrammarResolver {
         // validated end-to-end (undefined references / indirect LR cycles).
         // The root grammar may have referenced unresolved import targets pre-
         // composition; validation is intentionally deferred to this point.
+        // 0.6.1 — union the checkpoint sets from the root and every imported
+        // grammar. Imported grammars may declare their own %checkpoint rules;
+        // composition preserves them so an incremental engine wrapping the
+        // composed grammar sees every boundary declared anywhere upstream.
+        var composedCheckpoints = new LinkedHashSet<String>(root.checkpointRules());
+        for (var imp : root.imports()) {
+            var cached = loadedGrammars.get(imp.grammarName());
+            if (cached != null) {
+                composedCheckpoints.addAll(cached.checkpointRules());
+            }
+        }
         return Grammar.grammar(
         new ArrayList<>(composedRules.values()),
         root.startRule(),
@@ -173,7 +184,8 @@ public final class GrammarResolver {
         root.word(),
         root.suggestRules(),
         List.of(),
-        root.recoverSets());
+        root.recoverSets(),
+        Set.copyOf(composedCheckpoints));
     }
 
     private Result<Grammar> loadGrammarOrFail(String grammarName, SourceLocation errorLocation, List<String> chain) {

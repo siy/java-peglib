@@ -12,7 +12,9 @@ class TokenArrayTest {
     private static final int IDENT = FIRST_USER_KIND;
     private static final int NUMBER = FIRST_USER_KIND + 1;
 
-    private static final String[] DEFAULT_NAMES = {"WHITESPACE", "LINE_COMMENT", "BLOCK_COMMENT", "IDENT", "NUMBER"};
+    private static final String[] DEFAULT_NAMES = {
+        "WHITESPACE", "LINE_COMMENT", "BLOCK_COMMENT", "DOC_LINE_COMMENT", "DOC_BLOCK_COMMENT", "IDENT", "NUMBER"
+    };
 
     @Test
     void emptyArray_countZero_nextNonTriviaFromZeroIsZero() {
@@ -256,7 +258,11 @@ class TokenArrayTest {
         .isEqualTo(1);
         assertThat(KIND_BLOCK_COMMENT)
         .isEqualTo(2);
-        assertThat(FIRST_USER_KIND)
+        assertThat(TokenArray.KIND_DOC_LINE_COMMENT)
         .isEqualTo(3);
+        assertThat(TokenArray.KIND_DOC_BLOCK_COMMENT)
+        .isEqualTo(4);
+        assertThat(FIRST_USER_KIND)
+        .isEqualTo(5);
     }
 }

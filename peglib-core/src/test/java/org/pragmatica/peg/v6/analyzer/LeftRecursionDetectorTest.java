@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
@@ -225,7 +226,7 @@ class LeftRecursionDetectorTest {
 
     private static Grammar grammar(Rule... rules) {
         return new Grammar(
-        List.of(rules), Option.none(), Option.none(), Option.none(), List.of(), List.of(), Map.of());
+        List.of(rules), Option.none(), Option.none(), Option.none(), List.of(), List.of(), Map.of(), Set.of());
     }
 
     private static Rule rule(String name, Expression body) {

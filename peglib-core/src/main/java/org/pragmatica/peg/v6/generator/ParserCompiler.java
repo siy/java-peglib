@@ -55,6 +55,7 @@ public final class ParserCompiler {
 
     public record CompiledParser(Class<?> parserClass,
                                  Method parseMethod,
+                                 Method parseCappedMethod,
                                  Method parseRuleFromMethod,
                                  Method ruleKindsMethod) {
         /**
@@ -66,6 +67,23 @@ public final class ParserCompiler {
         public ParseResult parse(TokenArray tokens) {
             return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
                                () -> (ParseResult) parseMethod.invoke(null, tokens))
+            .unwrap();
+        }
+
+        /**
+         * 0.6.1 — Item G — diagnostic-capped parse. The generated parser's
+         * recovery loop exits once {@code maxDiagnostics} have been recorded.
+         * Semantics:
+         * <ul>
+         *   <li>{@code maxDiagnostics == 0}: zero diagnostics recorded; the loop
+         *       exits at the first error site without recording it.</li>
+         *   <li>{@code maxDiagnostics < 0}: treated as no cap.</li>
+         *   <li>Successful parse: no diagnostics regardless of cap.</li>
+         * </ul>
+         */
+        public ParseResult parse(TokenArray tokens, int maxDiagnostics) {
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+                               () -> (ParseResult) parseCappedMethod.invoke(null, tokens, maxDiagnostics))
             .unwrap();
         }
 
@@ -146,11 +164,13 @@ public final class ParserCompiler {
             var clazz = classLoader.loadClass(compiled.fullyQualifiedName());
             var method = clazz.getDeclaredMethod("parse", TokenArray.class);
             method.setAccessible(true);
+            var methodCapped = clazz.getDeclaredMethod("parse", TokenArray.class, int.class);
+            methodCapped.setAccessible(true);
             var parseRuleFrom = clazz.getDeclaredMethod("parseRuleFrom", TokenArray.class, int.class, int.class);
             parseRuleFrom.setAccessible(true);
             var ruleKinds = clazz.getDeclaredMethod("ruleKinds");
             ruleKinds.setAccessible(true);
-            return Result.success(new CompiledParser(clazz, method, parseRuleFrom, ruleKinds));
+            return Result.success(new CompiledParser(clazz, method, methodCapped, parseRuleFrom, ruleKinds));
         }
 
 

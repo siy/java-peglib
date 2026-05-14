@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-05-12
+
+Patch release closing gaps from the 0.6.0 ship. Adds doc-comment trivia, completes
+grammar directive runtime (`%recover` per-rule, `%checkpoint`), restores named-capture
+and back-reference runtime, and adds the `maxDiagnostics` cap.
+
+### Added
+
+- `TokenArray.KIND_DOC_LINE_COMMENT` (3) and `KIND_DOC_BLOCK_COMMENT` (4) trivia kinds —
+  `///` lines and `/** */` blocks are now distinguishable from regular line/block comments.
+  `FIRST_USER_KIND` shifted to 5. `V6TriviaPolicy` routes doc kinds through the
+  appropriate formatter helpers. Item A.
+- Per-rule `%recover <CharClass> RuleName` directive now drives generated recovery
+  via leaf-level dispatch. Each rule with a custom sync set emits its own
+  `SYNC_<RuleName>` array; the parser tracks `lastFailedRuleKind` (the deepest
+  rule that ran `fail(...)`) and recovery's `nextSyncToken` consults the matching
+  SYNC array, falling back to `DEFAULT_SYNC`. Item B.
+- `%checkpoint <RuleName>` grammar directive parsed and propagated. `IncrementalParser`
+  built with the 2-arg constructor consults `parser.grammar().checkpointRules()` first,
+  falling back to `DEFAULT_CHECKPOINT_RULES`. Java25 grammar now declares
+  `%checkpoint Stmt`, `%checkpoint MethodDecl`, `%checkpoint TypeDecl`. Item C.
+- Named captures (`$name<e>`), back-references (`$name`), and capture-scope
+  (`$(...)`) runtime restored with source-span equality semantics matching 0.5.x.
+  Generated parsers carry `Map<String, long[]> captures` (start/end byte spans);
+  CaptureScope unconditionally restores on exit; Choice does not save/restore
+  per alternative. The `NamedCaptureDetector` rejection is gone. Item D.
+- `MIXED`-rule char-level fallback for `CharClass` and `Any` — token-level proxy
+  consumes one token on first-char match and produces a CST leaf. `EmitContext`
+  threads `RuleKind` through emit dispatch. Char-level predicates
+  (`&(charClass)` / `!(charClass)`) remain no-op even in MIXED rules (Java
+  word-boundary-guard idiom). `Dictionary` remains no-op. Item E.
+- `Parser.parse(input, maxDiagnostics)` now honors the cap. Generated parser
+  accepts `maxDiagnostics` via constructor; the recovery loop bails out after
+  recording reaches the cap; emit helpers internally guard so `cap == 0`
+  produces zero diagnostics; negative cap is normalized to `Integer.MAX_VALUE`.
+  Item G.
+- `docs/VISITOR-TUTORIAL.md` — end-to-end calculator walkthrough showing
+  `GVisitor<T>` use with grammar text, codegen path, and visit-dispatch. Item J.
+
+### Changed
+
+- `Grammar` record extended with `Set<String> checkpointRules` (8th component). All
+  constructor call sites (production + tests) updated. `GrammarResolver` unions
+  checkpoint sets during composition.
+- README rewritten for a 0.6.x audience (367 lines, down from 564). Quick start uses
+  current API; visitor walkthrough; no obsolete 0.5.x flags / packrat / inline-action
+  references. Item J.
+
+### Removed
+
+- `NamedCaptureDetector` and `NamedCaptureCause` — the rejection they served is
+  obsolete now that capture runtime is implemented.
+
+### Known limitations
+
+- **Selfhost fixture** (`Java25SelfHost-v51.java.txt`, 1.85MB) currently produces
+  >1000 diagnostics, all downstream cascades from one root cause: shift operators
+  (`<<`, `>>`, `>>>`) in field/local-var initializer context fail at top-level
+  `CompilationUnit` despite parsing cleanly via `parseRuleFrom(Shift)` /
+  `parseRuleFrom(Expr)` in isolation. The two assertion tests in
+  `Java25SelfHostDiagTest` are `@Disabled` pending the fix in 0.6.2. The
+  `dumpDiagnostics` test remains active and produces a clustered failure report
+  for debugging. Item F partial.
+- Per-rule `%recover` dispatch is leaf-level: routing picks the SYNC array tied
+  to whichever rule recorded the deepest furthest-failure offset, not the scope
+  of the enclosing call. Call-site wrapping (try/catch-style per-`parseFoo`)
+  remains out of scope.
+
 ## [0.6.0] - 2026-05-11
 
 **Major performance + architecture release.** Clean-slate redesign delivering parity with javac on Java parsing while emitting full CST + trivia + diagnostics that javac doesn't expose. Tokens-first lex-then-parse architecture with flat int[] CST achieves 11-12× speedup over the 0.5.x source-generated parser.

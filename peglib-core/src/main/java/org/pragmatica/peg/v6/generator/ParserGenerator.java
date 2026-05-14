@@ -189,9 +189,16 @@ public final class ParserGenerator {
             //
             // 0.6.0 — if the grammar declares a {@code %recover [chars] StartRule}
             // directive for the effective start rule, the per-rule sync set
-            // overrides the default. Per-rule recovery for non-start rules is
-            // deferred to a future phase (panic-mode loop is currently top-level
-            // only); the lookup is keyed on the start rule for now.
+            // overrides the default for DEFAULT_SYNC.
+            //
+            // 0.6.1 — Item B — per-rule sync sets. For every rule with a
+            // non-empty {@code %recover} entry resolving to ≥1 known inline-literal
+            // kind, emit a {@code SYNC_<RuleName>} array. The generated parser
+            // tracks {@code lastFailedRuleKind} (updated by {@code fail()} when
+            // it advances the furthest-failure position) and dispatches via
+            // {@code syncForRule(ruleKind)} at recovery time. This lets nested
+            // rule failures recover on rule-specific sync sets while the outer
+            // panic-mode loop remains top-level.
             var inlineLiterals = kinds.inlineLiteralToKind();
             var syncKindSet = new TreeSet<Integer>();
             var startRuleName = grammar.effectiveStartRule().unwrap()
@@ -215,6 +222,31 @@ public final class ParserGenerator {
             }}
             var syncKinds = syncKindSet.stream().mapToInt(Integer::intValue)
                                               .toArray();
+            // Per-rule sync sets: only emit for rules with non-empty recoverSets
+            // that resolve to at least one inline-literal kind AND that are
+            // parser/mixed rules (the lookup is keyed by RULE_<Name>_KIND).
+            // Start rule is excluded — its set IS the DEFAULT_SYNC above.
+            var perRuleSync = new LinkedHashMap<String, int[]>();
+            for ( var entry : grammar.recoverSets().entrySet()) {
+                var ruleName = entry.getKey();
+                if ( ruleName.equals(startRuleName)) {
+                continue;}
+                if ( !parserRuleKinds.containsKey(ruleName)) {
+                continue;}
+                var chars = entry.getValue();
+                if ( chars == null || chars.isEmpty()) {
+                continue;}
+                var perKindSet = new TreeSet<Integer>();
+                for ( var ch : chars) {
+                    var k = inlineLiterals.get(String.valueOf(ch) + "/cs");
+                    if ( k != null) {
+                        perKindSet.add(k);
+                        usedTokenKinds.add(k);
+                    }
+                }
+                if ( !perKindSet.isEmpty()) {
+                perRuleSync.put(ruleName, perKindSet.stream().mapToInt(Integer::intValue).toArray());}
+            }
             // ERROR sentinel kind sits at index ruleTable.length (one past the user
             // rules); we append "ERROR" to the emitted RULE_TABLE so kindNameAt
             // resolves it.
@@ -279,6 +311,22 @@ public final class ParserGenerator {
                 sb.append(syncKinds[i]);
             }
             sb.append("};\n\n");
+            // 0.6.1 — Item B — per-rule SYNC_<RuleName> arrays. Sorted ascending
+            // for binarySearch in nextSyncToken.
+            for ( var entry : perRuleSync.entrySet()) {
+                var ruleName = entry.getKey();
+                var arr = entry.getValue();
+                sb.append("    private static final int[] SYNC_").append(sanitize(ruleName))
+                         .append(" = new int[] {");
+                for ( var i = 0; i < arr.length; i++) {
+                    if ( i > 0) {
+                    sb.append(", ");}
+                    sb.append(arr[i]);
+                }
+                sb.append("};\n");
+            }
+            if ( !perRuleSync.isEmpty()) {
+            sb.append("\n");}
             // Phase B.5 — emit per-rule sorted alias arrays for binarySearch path.
             // Linear-OR alias guards (≤4 entries) inline their kinds and don't need
             // an array.
@@ -325,10 +373,31 @@ public final class ParserGenerator {
             // ParseException control flow.
             sb.append("    private int errorPos;\n");
             sb.append("    private String expected;\n");
-            sb.append("    private int found;\n\n");
+            sb.append("    private int found;\n");
+            // 0.6.1 — Item B — rule-kind of the enclosing rule at the deepest
+            // recorded failure. Used by syncForRule() at recovery time to pick
+            // the appropriate SYNC_<RuleName> array.
+            sb.append("    private int lastFailedRuleKind;\n");
+            // 0.6.1 — Item D — named captures runtime. Each entry maps a capture
+            // name to {startByte, endByte} into tokens.input(). BackReference
+            // matches by source-span equality (re-scans the next bytes of input
+            // against the captured substring). CaptureScope snapshots the map on
+            // entry and unconditionally restores on exit (matches 0.5.x
+            // PegEngine.parseCaptureScope which always restores regardless of
+            // inner success/failure). Within a single Choice's alternatives,
+            // captures from failed alternatives persist into later alternatives
+            // — Capture only sets on inner-expression success, so a partial
+            // alternative whose capture's inner expression matched but whose
+            // later steps failed will leave its capture visible (matches 0.5.x
+            // PegEngine.parseCapture which only invokes setCapture on success).
+            sb.append("    private final java.util.Map<String, long[]> captures = new java.util.HashMap<>();\n");
+            sb.append("    private final java.util.ArrayDeque<java.util.Map<String, long[]>> captureScopeStack = new java.util.ArrayDeque<>();\n");
+            // 0.6.1 — Item G — diagnostic cap. parseWithRecovery exits its loop once
+            // diagnostics.size() reaches this value. Integer.MAX_VALUE = no cap.
+            sb.append("    private final int maxDiagnostics;\n\n");
             // Constructor.
             sb.append("    private ").append(className)
-                     .append("(TokenArray tokens) {\n");
+                     .append("(TokenArray tokens, int maxDiagnostics) {\n");
             sb.append("        this.tokens = tokens;\n");
             sb.append("        this.cst = new CstArrayBuilder(tokens.input(), tokens, RULE_TABLE);\n");
             sb.append("        this.diagnostics = new ArrayList<>();\n");
@@ -336,6 +405,9 @@ public final class ParserGenerator {
             sb.append("        this.errorPos = -1;\n");
             sb.append("        this.expected = null;\n");
             sb.append("        this.found = -1;\n");
+            sb.append("        this.lastFailedRuleKind = -1;\n");
+            // Negative cap = no cap (Integer.MAX_VALUE). 0 is honored as zero.
+            sb.append("        this.maxDiagnostics = maxDiagnostics < 0 ? Integer.MAX_VALUE : maxDiagnostics;\n");
             sb.append("    }\n\n");
             // Public entry point — Phase B.4 returns ParseResult unconditionally.
             var startName = grammar.effectiveStartRule().unwrap()
@@ -344,10 +416,18 @@ public final class ParserGenerator {
             // No defensive null check on tokens: the only public caller path is
             // CompiledParser.parse(TokenArray), which receives a TokenArray
             // freshly produced by the lexer.
+            sb.append("        return parse(tokens, Integer.MAX_VALUE);\n");
+            sb.append("    }\n\n");
+            // 0.6.1 — Item G — capped-diagnostics entry point. parseWithRecovery
+            // exits once diagnostics.size() reaches maxDiagnostics.
+            //   maxDiagnostics == 0: zero diagnostics recorded; loop exits at the
+            //                        first error site without recording it.
+            //   maxDiagnostics  < 0: treated as no cap (Integer.MAX_VALUE).
+            sb.append("    public static ParseResult parse(TokenArray tokens, int maxDiagnostics) {\n");
             sb.append("        ").append(className)
                      .append(" p = new ")
                      .append(className)
-                     .append("(tokens);\n");
+                     .append("(tokens, maxDiagnostics);\n");
             sb.append("        int rootIdx = p.parseWithRecovery();\n");
             sb.append("        CstArray cstArr = p.cst.build(rootIdx);\n");
             sb.append("        return new ParseResult(cstArr, p.diagnostics);\n");
@@ -362,10 +442,12 @@ public final class ParserGenerator {
             // engine, which passes a validated tokens array and an index in
             // [0, tokens.count()]. An out-of-range fromTokenIdx surfaces via the
             // !ok recovery branch (synthetic Error node + diagnostic).
+            // Partial parse is uncapped by design (incremental reparse must report
+            // every diagnostic from the reparsed subtree).
             sb.append("        ").append(className)
                      .append(" p = new ")
                      .append(className)
-                     .append("(tokens);\n");
+                     .append("(tokens, Integer.MAX_VALUE);\n");
             sb.append("        p.pos = tokens.nextNonTrivia(fromTokenIdx);\n");
             sb.append("        int rootFirstTok = p.pos < tokens.count() ? p.pos : (tokens.count() == 0 ? 0 : tokens.count() - 1);\n");
             sb.append("        int rootIdx = p.cst.beginNode(RULE_ROOT_KIND, rootFirstTok, -1);\n");
@@ -452,7 +534,7 @@ public final class ParserGenerator {
             sb.append("            // whether anything remains to parse.\n");
             sb.append("            while (pos < tokens.count() && tokens.isTrivia(pos)) pos++;\n");
             sb.append("            if (pos >= tokens.count()) {\n");
-            sb.append("                if (firstAttempt) {\n");
+            sb.append("                if (firstAttempt && diagnostics.size() < maxDiagnostics) {\n");
             sb.append("                    // Empty / all-trivia input — record a diagnostic so callers\n");
             sb.append("                    // know the parse couldn't even attempt the start rule.\n");
             sb.append("                    int off = tokens.count() == 0 ? 0 : tokens.startAt(0);\n");
@@ -469,6 +551,7 @@ public final class ParserGenerator {
             sb.append("            errorPos = -1;\n");
             sb.append("            expected = null;\n");
             sb.append("            found = -1;\n");
+            sb.append("            lastFailedRuleKind = -1;\n");
             sb.append("            boolean parsedOk = parse").append(startName)
                      .append("(root);\n");
             sb.append("            if (!parsedOk) {\n");
@@ -484,6 +567,12 @@ public final class ParserGenerator {
             sb.append("            if (!parsedOk && pos == beforePos) {\n");
             sb.append("                // Recovery couldn't move past the failing token (no sync, no EOF\n");
             sb.append("                // beyond, etc.); break to avoid an infinite loop.\n");
+            sb.append("                break;\n");
+            sb.append("            }\n");
+            // 0.6.1 — Item G — diagnostic cap. Check AFTER the emit calls; they are
+            // internally guarded so cap==0 records zero. We still break here to
+            // stop attempting further start-rule iterations once the cap is hit.
+            sb.append("            if (diagnostics.size() >= maxDiagnostics) {\n");
             sb.append("                break;\n");
             sb.append("            }\n");
             sb.append("            // Loop to either consume more input via another start-rule call or\n");
@@ -549,8 +638,12 @@ public final class ParserGenerator {
             sb.append("            foundText = \"<end-of-input>\";\n");
             sb.append("        }\n");
             sb.append("        String expectedText = expected != null ? expected : \"valid input\";\n");
-            sb.append("        diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
-            sb.append("            \"syntax error\", expectedText, foundText));\n");
+            // 0.6.1 — Item G — guard diagnostic record by the cap. Position is
+            // still advanced unconditionally so the loop terminates correctly.
+            sb.append("        if (diagnostics.size() < maxDiagnostics) {\n");
+            sb.append("            diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
+            sb.append("                \"syntax error\", expectedText, foundText));\n");
+            sb.append("        }\n");
             sb.append("        pos = newPos;\n");
             sb.append("    }\n\n");
             // Forced-advance helper: when the start rule succeeded but consumed no
@@ -566,24 +659,49 @@ public final class ParserGenerator {
             sb.append("        int diagLen = tokens.endAt(atPos) - tokens.startAt(atPos);\n");
             sb.append("        if (diagLen < 1) diagLen = 1;\n");
             sb.append("        String foundText = String.valueOf(tokens.textAt(atPos));\n");
-            sb.append("        diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
-            sb.append("            \"trailing input not consumed\", \"end of input\", foundText));\n");
+            // 0.6.1 — Item G — guard diagnostic record by the cap. Position is
+            // still advanced unconditionally so the loop terminates correctly.
+            sb.append("        if (diagnostics.size() < maxDiagnostics) {\n");
+            sb.append("            diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
+            sb.append("                \"trailing input not consumed\", \"end of input\", foundText));\n");
+            sb.append("        }\n");
             sb.append("        pos = tokens.nextNonTrivia(atPos + 1);\n");
             sb.append("    }\n\n");
             // Helpers used by the recovery loop. nextSyncToken walks forward from
             // {@code from} through content tokens (skipping trivia) returning the
             // index of the first sync-set token, or tokens.count() at EOF.
             sb.append("    private int nextSyncToken(int from) {\n");
+            sb.append("        int[] sync = syncForRule(lastFailedRuleKind);\n");
             sb.append("        int i = from;\n");
             sb.append("        int n = tokens.count();\n");
             sb.append("        while (i < n) {\n");
             sb.append("            if (tokens.isTrivia(i)) { i++; continue; }\n");
-            sb.append("            if (java.util.Arrays.binarySearch(DEFAULT_SYNC, tokens.kindAt(i)) >= 0) {\n");
+            sb.append("            if (java.util.Arrays.binarySearch(sync, tokens.kindAt(i)) >= 0) {\n");
             sb.append("                return i;\n");
             sb.append("            }\n");
             sb.append("            i++;\n");
             sb.append("        }\n");
             sb.append("        return n;\n");
+            sb.append("    }\n\n");
+            // 0.6.1 — Item B — pick the SYNC array tied to the rule kind at the
+            // deepest failure. Falls back to DEFAULT_SYNC if no rule-specific
+            // sync set exists (the common case — most grammars use DEFAULT_SYNC
+            // only). The switch is omitted entirely when perRuleSync is empty.
+            sb.append("    private int[] syncForRule(int ruleKind) {\n");
+            if ( !perRuleSync.isEmpty()) {
+                sb.append("        switch (ruleKind) {\n");
+                for ( var ruleName : perRuleSync.keySet()) {
+                    sb.append("            case RULE_").append(ruleName)
+                             .append("_KIND: return SYNC_")
+                             .append(sanitize(ruleName))
+                             .append(";\n");
+                }
+                sb.append("            default: return DEFAULT_SYNC;\n");
+                sb.append("        }\n");
+            } else
+            {
+                sb.append("        return DEFAULT_SYNC;\n");
+            }
             sb.append("    }\n\n");
             // Token-advance helper: skips trivia after consuming a token.
             sb.append("    private void advance() {\n");
@@ -597,12 +715,13 @@ public final class ParserGenerator {
             // false. PEG convention: track the most-distant failure offset since
             // alternatives explored beyond an earlier failure usually yield more
             // useful diagnostics. Replaces the old throwing error() helper.
-            sb.append("    private boolean fail(String expectedText) {\n");
+            sb.append("    private boolean fail(String expectedText, int ruleKind) {\n");
             sb.append("        int offset = pos < tokens.count() ? tokens.startAt(pos) : tokens.input().length();\n");
             sb.append("        if (offset >= errorPos) {\n");
             sb.append("            errorPos = offset;\n");
             sb.append("            expected = expectedText;\n");
             sb.append("            found = peek();\n");
+            sb.append("            lastFailedRuleKind = ruleKind;\n");
             sb.append("        }\n");
             sb.append("        return false;\n");
             sb.append("    }\n\n");
@@ -632,7 +751,8 @@ public final class ParserGenerator {
             sb.append("        int savedNodes = cst.currentNodeCount();\n");
             sb.append("        int self = cst.beginNode(RULE_").append(rule.name())
                      .append("_KIND, firstTok, parent);\n");
-            var ctx = new EmitContext(rule.name(), 1, sb);
+            var ruleKind = classification.kinds().getOrDefault(rule.name(), RuleKind.PARSER);
+            var ctx = new EmitContext(rule.name(), 1, sb, ruleKind);
             var bodyResult = emitExpression(rule.expression(), ctx);
             if ( !bodyResult.isSuccess()) {
             return bodyResult.map(__ -> "");}
@@ -656,30 +776,241 @@ public final class ParserGenerator {
          * the rule-body root.
          */
         private Result<Unit> emitExpression(Expression expr, EmitContext ctx) {
-            return switch (expr) {case Expression.Reference ref -> emitReference(ref, ctx);case Expression.Literal lit -> emitLiteral(lit,
-                                                                                                                                      ctx);case Expression.Sequence seq -> emitSequence(seq,
-                                                                                                                                                                                        ctx);case Expression.Choice ch -> emitChoice(ch,
-                                                                                                                                                                                                                                     ctx);case Expression.ZeroOrMore zom -> emitZeroOrMore(zom.expression(),
-                                                                                                                                                                                                                                                                                           ctx);case Expression.OneOrMore oom -> emitOneOrMore(oom.expression(),
-                                                                                                                                                                                                                                                                                                                                               ctx);case Expression.Optional opt -> emitOptional(opt.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                 ctx);case Expression.Repetition rep -> emitRepetition(rep,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                       ctx);case Expression.And a -> isCharLevelOnly(a.expression())
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    ? emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        "and-predicate over char-level expression — handled by lexer")
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    : emitAnd(a.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Not n -> isCharLevelOnly(n.expression())
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           ? emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               "not-predicate over char-level expression — handled by lexer")
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           : emitNot(n.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     ctx);case Expression.TokenBoundary tb -> emitExpression(tb.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ctx);case Expression.Ignore ig -> emitExpression(ig.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ctx);case Expression.Capture cap -> emitExpression(cap.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ctx);case Expression.CaptureScope cs -> emitExpression(cs.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        ctx);case Expression.Group g -> emitExpression(g.expression(),
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       ctx);case Expression.Cut __ -> emitCut(ctx);case Expression.Any __ -> emitAnyToken(ctx);case Expression.CharClass cc -> emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 "char-class '" + cc.pattern() + "' inside parser rule — handled by lexer (Phase B.3 no-op)");case Expression.BackReference br -> emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    "BackReference '" + br.name() + "' (Phase B.3 no-op)");case Expression.Dictionary __ -> emitParseTimeNoop(ctx,
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              "Dictionary (Phase B.3 no-op)");};
+            return switch (expr) {
+                case Expression.Reference ref -> emitReference(ref, ctx);
+                case Expression.Literal lit -> emitLiteral(lit, ctx);
+                case Expression.Sequence seq -> emitSequence(seq, ctx);
+                case Expression.Choice ch -> emitChoice(ch, ctx);
+                case Expression.ZeroOrMore zom -> emitZeroOrMore(zom.expression(), ctx);
+                case Expression.OneOrMore oom -> emitOneOrMore(oom.expression(), ctx);
+                case Expression.Optional opt -> emitOptional(opt.expression(), ctx);
+                case Expression.Repetition rep -> emitRepetition(rep, ctx);
+                case Expression.And a -> emitAndDispatch(a.expression(), ctx);
+                case Expression.Not n -> emitNotDispatch(n.expression(), ctx);
+                case Expression.TokenBoundary tb -> emitExpression(tb.expression(), ctx);
+                case Expression.Ignore ig -> emitExpression(ig.expression(), ctx);
+                case Expression.Capture cap -> emitCapture(cap, ctx);
+                case Expression.CaptureScope cs -> emitCaptureScope(cs, ctx);
+                case Expression.Group g -> emitExpression(g.expression(), ctx);
+                case Expression.Cut __ -> emitCut(ctx);
+                case Expression.Any __ -> emitAnyToken(ctx);
+                case Expression.CharClass cc -> emitCharClassDispatch(cc, ctx);
+                case Expression.BackReference br -> emitBackReference(br, ctx);
+                case Expression.Dictionary __ -> emitParseTimeNoop(ctx, "Dictionary (Phase B.3 no-op)");
+            };
+        }
+
+        /**
+         * 0.6.1 — Item E. {@code &(char-level)} and {@code !(char-level)}
+         * predicates inside MIXED rules stay no-op even with the char-level
+         * fallback enabled. Rationale: in real grammars these are word-boundary
+         * guards (e.g. {@code 'var' ![a-zA-Z0-9_$]}) used to forbid char-by-char
+         * extension of a keyword. In tokens-first parsing the lexer ALREADY
+         * enforces token boundaries (the {@code var} token cannot include
+         * trailing identifier chars), so re-activating these predicates as
+         * token-level probes would mis-fire on the very next token (an
+         * unrelated identifier) and break the parse. The CharClass / Any
+         * fallback below remains active for genuine char-level consumption.
+         */
+        private Result<Unit> emitAndDispatch(Expression inner, EmitContext ctx) {
+            if (isCharLevelOnly(inner)) {
+                return emitParseTimeNoop(ctx, "and-predicate over char-level expression — handled by lexer");
+            }
+            return emitAnd(inner, ctx);
+        }
+
+        /**
+         * 0.6.1 — Item E. Negated counterpart of {@link #emitAndDispatch}; see
+         * its javadoc for why MIXED rules keep this as a no-op.
+         */
+        private Result<Unit> emitNotDispatch(Expression inner, EmitContext ctx) {
+            if (isCharLevelOnly(inner)) {
+                return emitParseTimeNoop(ctx, "not-predicate over char-level expression — handled by lexer");
+            }
+            return emitNot(inner, ctx);
+        }
+
+        /**
+         * 0.6.1 — Item E. A bare CharClass inside a MIXED rule consumes one
+         * token if its first character is in the class; outside MIXED rules
+         * it stays a parse-time no-op.
+         */
+        private Result<Unit> emitCharClassDispatch(Expression.CharClass cc, EmitContext ctx) {
+            if (ctx.isMixed()) {
+                return emitCharClassToken(cc, ctx);
+            }
+            return emitParseTimeNoop(ctx, "char-class " + cc.pattern() + " inside parser rule — handled by lexer (Phase B.3 no-op)");
+        }
+
+        /**
+         * 0.6.1 — Item E. Token-level proxy for a {@link Expression.CharClass}
+         * inside a MIXED rule. Peeks the first byte of the current token's
+         * source text and consumes one token if it satisfies the class
+         * membership. The membership test is generated inline as an OR-chain
+         * over ASCII ranges/single chars; for negated classes, non-ASCII
+         * characters (code unit ≥ 256) are accepted (mirrors the DFA's
+         * non-ASCII transition slot in {@link org.pragmatica.peg.v6.lexer.Dfa}).
+         * Case-insensitive ranges are expanded at codegen time.
+         */
+        private Result<Unit> emitCharClassToken(Expression.CharClass cc, EmitContext ctx) {
+            var membership = renderCharClassMembership(cc, "__c");
+            var indent = indent(ctx.depth);
+            ctx.sb.append(indent).append("if (pos >= tokens.count()) { fail(\"")
+                  .append(escapeJavaString("[" + cc.pattern() + "]"))
+                  .append("\", ")
+                  .append(ruleKindConst(ctx))
+                  .append("); ")
+                  .append(ctx.failAction)
+                  .append(" }\n");
+            ctx.sb.append(indent).append("{ int __off = tokens.startAt(pos);\n");
+            ctx.sb.append(indent).append("  int __c = __off < tokens.input().length() ? tokens.input().charAt(__off) : -1;\n");
+            ctx.sb.append(indent).append("  if (!(").append(membership).append(")) { fail(\"")
+                  .append(escapeJavaString("[" + cc.pattern() + "]"))
+                  .append("\", ")
+                  .append(ruleKindConst(ctx))
+                  .append("); ")
+                  .append(ctx.failAction)
+                  .append(" } }\n");
+            ctx.sb.append(indent).append("advance();\n");
+            return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item E. Compile a {@link Expression.CharClass} into a Java
+         * boolean expression that tests whether {@code varName} is in the class.
+         * Mirrors {@code DfaBuilder.parseCharClassPattern} but emits inline
+         * Java code instead of a {@link java.util.BitSet}.
+         */
+        private static String renderCharClassMembership(Expression.CharClass cc, String varName) {
+            var ranges = parseCharClassRanges(cc.pattern(), cc.caseInsensitive());
+            var sb = new StringBuilder();
+            sb.append('(');
+            // For negated classes, accept non-ASCII (code unit ≥ 256) as the DFA
+            // does via its non-ASCII transition slot.
+            if (cc.negated()) {
+                sb.append(varName).append(" >= 256 || (");
+                sb.append(varName).append(" >= 0 && !(");
+                appendRangeOrChain(sb, ranges, varName);
+                sb.append("))");
+            } else {
+                sb.append(varName).append(" >= 0 && (");
+                appendRangeOrChain(sb, ranges, varName);
+                sb.append(')');
+            }
+            sb.append(')');
+            return sb.toString();
+        }
+
+        /** Emits an OR-chain over a list of {@code [lo,hi]} char ranges. */
+        private static void appendRangeOrChain(StringBuilder sb, int[][] ranges, String varName) {
+            if (ranges.length == 0) {
+                sb.append("false");
+                return;
+            }
+            for (int i = 0; i < ranges.length; i++) {
+                if (i > 0) {
+                    sb.append(" || ");
+                }
+                int lo = ranges[i][0];
+                int hi = ranges[i][1];
+                if (lo == hi) {
+                    sb.append(varName).append(" == ").append(lo);
+                } else {
+                    sb.append('(').append(varName).append(" >= ").append(lo).append(" && ")
+                      .append(varName).append(" <= ").append(hi).append(')');
+                }
+            }
+        }
+
+        /**
+         * 0.6.1 — Item E. Parse a char-class pattern string (the body inside
+         * {@code [...]}) into a list of {@code [lo,hi]} ranges, expanding
+         * case-insensitive letters. Mirrors {@code DfaBuilder.parseCharClassPattern}.
+         */
+        private static int[][] parseCharClassRanges(String pattern, boolean caseInsensitive) {
+            var out = new java.util.ArrayList<int[]>();
+            int i = 0;
+            int n = pattern.length();
+            while (i < n) {
+                char c1 = pattern.charAt(i);
+                int firstChar;
+                int afterFirst;
+                if (c1 == '\\' && i + 1 < n) {
+                    firstChar = decodeCharClassEscape(pattern.charAt(i + 1));
+                    afterFirst = i + 2;
+                } else {
+                    firstChar = c1;
+                    afterFirst = i + 1;
+                }
+                if (afterFirst < n && pattern.charAt(afterFirst) == '-' && afterFirst + 1 < n) {
+                    int rangeEndStart = afterFirst + 1;
+                    char endChar = pattern.charAt(rangeEndStart);
+                    int endDecoded;
+                    int advance;
+                    if (endChar == '\\' && rangeEndStart + 1 < n) {
+                        endDecoded = decodeCharClassEscape(pattern.charAt(rangeEndStart + 1));
+                        advance = (rangeEndStart + 2) - i;
+                    } else {
+                        endDecoded = endChar;
+                        advance = (rangeEndStart + 1) - i;
+                    }
+                    int lo = Math.min(firstChar, endDecoded);
+                    int hi = Math.max(firstChar, endDecoded);
+                    out.add(new int[]{lo, hi});
+                    if (caseInsensitive) {
+                        addCaseInsensitiveRange(out, lo, hi);
+                    }
+                    i += advance;
+                } else {
+                    out.add(new int[]{firstChar, firstChar});
+                    if (caseInsensitive && isAsciiLetter(firstChar)) {
+                        int lower = Character.toLowerCase((char) firstChar);
+                        int upper = Character.toUpperCase((char) firstChar);
+                        if (lower != firstChar) {
+                            out.add(new int[]{lower, lower});
+                        }
+                        if (upper != firstChar) {
+                            out.add(new int[]{upper, upper});
+                        }
+                    }
+                    i = afterFirst;
+                }
+            }
+            return out.toArray(new int[0][]);
+        }
+
+        private static int decodeCharClassEscape(char esc) {
+            return switch (esc) {
+                case 'n' -> '\n';
+                case 'r' -> '\r';
+                case 't' -> '\t';
+                case '0' -> '\0';
+                case 'f' -> '\f';
+                case 'b' -> '\b';
+                default -> esc;
+            };
+        }
+
+        private static boolean isAsciiLetter(int c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        }
+
+        private static void addCaseInsensitiveRange(java.util.ArrayList<int[]> out, int lo, int hi) {
+            // For any range, also include the corresponding upper- and
+            // lower-case sub-ranges. Simple approach: walk the range and add
+            // single-char alternates for letters.
+            for (int c = Math.max(lo, 0); c <= Math.min(hi, 127); c++) {
+                if (isAsciiLetter(c)) {
+                    int lower = Character.toLowerCase((char) c);
+                    int upper = Character.toUpperCase((char) c);
+                    if (lower != c) {
+                        out.add(new int[]{lower, lower});
+                    }
+                    if (upper != c) {
+                        out.add(new int[]{upper, upper});
+                    }
+                }
+            }
         }
 
         private Result<Unit> emitReference(Expression.Reference ref, EmitContext ctx) {
@@ -734,11 +1065,23 @@ public final class ParserGenerator {
                          .append(kindConst)
                          .append(") { fail(\"")
                          .append(escapeJavaString(ref.ruleName()))
-                         .append("\"); ")
+                         .append("\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("advance();\n");
             return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item B — the RULE_<ctx.ruleName>_KIND constant string, used as
+         * the rule-kind argument to emitted {@code fail(..., kind)} calls so the
+         * generated parser can route to the correct {@code SYNC_<RuleName>} array
+         * at recovery time.
+         */
+        private static String ruleKindConst(EmitContext ctx) {
+            return "RULE_" + ctx.ruleName + "_KIND";
         }
 
         /**
@@ -762,7 +1105,9 @@ public final class ParserGenerator {
                 for ( var k : fallback) {
                 buf.append(" && __k != KIND_").append(sanitize(kinds.kindNameTable() [k]));}
                 buf.append(") { fail(\"").append(escapeJavaString(ruleName))
-                          .append("\"); ")
+                          .append("\", ")
+                          .append(ruleKindConst(ctx))
+                          .append("); ")
                           .append(ctx.failAction)
                           .append(" } }\n");
                 ctx.sb.append(buf);
@@ -773,7 +1118,9 @@ public final class ParserGenerator {
                               .append(sanitize(ruleName))
                               .append(", peek()) < 0) { fail(\"")
                               .append(escapeJavaString(ruleName))
-                              .append("\"); ")
+                              .append("\", ")
+                              .append(ruleKindConst(ctx))
+                              .append("); ")
                               .append(ctx.failAction)
                               .append(" }\n");
             }
@@ -818,7 +1165,9 @@ public final class ParserGenerator {
                     sb.append("__k != KIND_").append(sanitize(kinds.kindNameTable() [aliasKinds[i]]));
                 }
                 sb.append(") { fail(\"").append(escapeJavaString(ruleName))
-                         .append("\"); ")
+                         .append("\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" } }\n");
                 ctx.sb.append(sb);
@@ -832,7 +1181,9 @@ public final class ParserGenerator {
                              .append(sanitize(ruleName))
                              .append(", peek()) < 0) { fail(\"")
                              .append(escapeJavaString(ruleName))
-                             .append("\"); ")
+                             .append("\", ")
+                             .append(ruleKindConst(ctx))
+                             .append("); ")
                              .append(ctx.failAction)
                              .append(" }\n");
             }
@@ -852,7 +1203,9 @@ public final class ParserGenerator {
                          .append(kindConst)
                          .append(") { fail(\"'")
                          .append(escapeJavaString(lit.text()))
-                         .append("'\"); ")
+                         .append("'\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("advance();\n");
@@ -860,7 +1213,9 @@ public final class ParserGenerator {
         }
 
         private Result<Unit> emitAnyToken(EmitContext ctx) {
-            ctx.sb.append(indent(ctx.depth)).append("if (peek() < 0) { fail(\"<any token>\"); ")
+            ctx.sb.append(indent(ctx.depth)).append("if (peek() < 0) { fail(\"<any token>\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("advance();\n");
@@ -945,7 +1300,9 @@ public final class ParserGenerator {
             // cut was hit but the committed alternative failed.
             ctx.sb.append(indent(inner.depth)).append("if (!matched_")
                          .append(label)
-                         .append(") { fail(\"<choice>\"); ")
+                         .append(") { fail(\"<choice>\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("}\n");
@@ -1128,7 +1485,9 @@ public final class ParserGenerator {
                          .append(");\n");
             ctx.sb.append(indent(body.depth)).append("if (!andOk_")
                          .append(label)
-                         .append(") { fail(\"&<predicate>\"); ")
+                         .append(") { fail(\"&<predicate>\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("}\n");
@@ -1173,10 +1532,148 @@ public final class ParserGenerator {
                          .append(");\n");
             ctx.sb.append(indent(body.depth)).append("if (notMatched_")
                          .append(label)
-                         .append(") { fail(\"!<predicate>\"); ")
+                         .append(") { fail(\"!<predicate>\", ")
+                         .append(ruleKindConst(ctx))
+                         .append("); ")
                          .append(ctx.failAction)
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("}\n");
+            return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item D — emit a named-capture {@code $name<expr>}. Records the
+         * source-byte span of the inner-match into the {@code captures} map on
+         * SUCCESS only. On inner failure the parent's failAction fires and
+         * captures is left untouched (matches 0.5.x PegEngine.parseCapture).
+         * The capture span is taken from the bytes spanned by the consumed
+         * tokens, not the tokens themselves — back-references match by raw
+         * source-text equality, so trivia between tokens inside the capture is
+         * elided naturally (the captured substring is the contiguous source
+         * slice from the first token's startAt to the last token's endAt).
+         */
+        private Result<Unit> emitCapture(Expression.Capture cap, EmitContext ctx) {
+            var label = "cap_" + ctx.nextLabelId();
+            var indent = indent(ctx.depth);
+            ctx.sb.append(indent).append("// capture: $").append(escapeJavaString(cap.name()))
+                  .append("\n");
+            ctx.sb.append(indent).append("int capStartTok_").append(label)
+                  .append(" = pos;\n");
+            ctx.sb.append(indent).append("int capStartByte_").append(label)
+                  .append(" = pos < tokens.count() ? tokens.startAt(pos) : tokens.input().length();\n");
+            // Emit inner; on failure the parent's failAction fires and we never
+            // reach the put() below. On success we record the span.
+            var innerResult = emitExpression(cap.expression(), ctx);
+            if (!innerResult.isSuccess()) {
+                return innerResult;
+            }
+            ctx.sb.append(indent).append("int capEndByte_").append(label)
+                  .append(" = pos > capStartTok_").append(label)
+                  .append(" ? tokens.endAt(pos - 1) : capStartByte_").append(label)
+                  .append(";\n");
+            ctx.sb.append(indent).append("captures.put(\"").append(escapeJavaString(cap.name()))
+                  .append("\", new long[]{capStartByte_").append(label)
+                  .append(", capEndByte_").append(label)
+                  .append("});\n");
+            return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item D — emit a capture-scope {@code $(...)}. Snapshots the
+         * current captures map on entry; on exit (whether the inner expression
+         * succeeded or failed) the map is unconditionally restored. This
+         * matches 0.5.x PegEngine.parseCaptureScope which always restores. We
+         * wrap the inner emit in a do/while so failure inside breaks out, then
+         * we restore captures, then we re-dispatch the parent's failAction if
+         * the inner failed — so semantics propagate while ensuring restore.
+         */
+        private Result<Unit> emitCaptureScope(Expression.CaptureScope cs, EmitContext ctx) {
+            var label = "scope_" + ctx.nextLabelId();
+            var indent = indent(ctx.depth);
+            ctx.sb.append(indent).append("// capture-scope: ").append(label).append("\n");
+            ctx.sb.append(indent).append("{\n");
+            var body = ctx.indented();
+            ctx.sb.append(indent(body.depth)).append("java.util.Map<String, long[]> savedCaptures_")
+                  .append(label).append(" = new java.util.HashMap<>(captures);\n");
+            ctx.sb.append(indent(body.depth)).append("boolean scopeOk_").append(label)
+                  .append(" = false;\n");
+            ctx.sb.append(indent(body.depth)).append("do {\n");
+            var inner = body.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION);
+            var innerResult = emitExpression(cs.expression(), inner);
+            if (!innerResult.isSuccess()) {
+                return innerResult;
+            }
+            ctx.sb.append(indent(inner.depth)).append("scopeOk_").append(label)
+                  .append(" = true;\n");
+            ctx.sb.append(indent(body.depth)).append("} while (false);\n");
+            // Unconditional restore — matches 0.5.x.
+            ctx.sb.append(indent(body.depth)).append("captures.clear();\n");
+            ctx.sb.append(indent(body.depth)).append("captures.putAll(savedCaptures_")
+                  .append(label).append(");\n");
+            // If inner failed inside the do/while, dispatch parent's failAction.
+            ctx.sb.append(indent(body.depth)).append("if (!scopeOk_").append(label)
+                  .append(") { ").append(ctx.failAction).append(" }\n");
+            ctx.sb.append(indent).append("}\n");
+            return Result.unitResult();
+        }
+
+        /**
+         * 0.6.1 — Item D — emit a back-reference {@code $name}. Looks up the
+         * captured span; on absent capture, fails. On present capture, compares
+         * the captured source substring (bytes [start..end)) against the input
+         * bytes starting at the current pos's startAt. On mismatch or
+         * insufficient remaining input, fails. On match, advances pos past the
+         * matched bytes (to the first token whose startAt >= target byte
+         * offset). No CST node emitted — back-references are char-level
+         * constructs and were previously parse-time no-ops; preserving the CST
+         * shape (no extra nodes) is the simpler choice.
+         */
+        private Result<Unit> emitBackReference(Expression.BackReference br, EmitContext ctx) {
+            var label = "bref_" + ctx.nextLabelId();
+            var indent = indent(ctx.depth);
+            var name = escapeJavaString(br.name());
+            ctx.sb.append(indent).append("// back-reference: $").append(name).append("\n");
+            ctx.sb.append(indent).append("{\n");
+            var body = indent(ctx.depth + 1);
+            ctx.sb.append(body).append("long[] cap_").append(label)
+                  .append(" = captures.get(\"").append(name).append("\");\n");
+            ctx.sb.append(body).append("if (cap_").append(label)
+                  .append(" == null) { fail(\"back-reference $").append(name)
+                  .append(" not captured\", ").append(ruleKindConst(ctx))
+                  .append("); ").append(ctx.failAction).append(" }\n");
+            ctx.sb.append(body).append("int capLen_").append(label)
+                  .append(" = (int)(cap_").append(label).append("[1] - cap_")
+                  .append(label).append("[0]);\n");
+            ctx.sb.append(body).append("int posByte_").append(label)
+                  .append(" = pos < tokens.count() ? tokens.startAt(pos) : tokens.input().length();\n");
+            ctx.sb.append(body).append("String inputStr_").append(label)
+                  .append(" = tokens.input();\n");
+            ctx.sb.append(body).append("if (posByte_").append(label)
+                  .append(" + capLen_").append(label)
+                  .append(" > inputStr_").append(label).append(".length()) { fail(\"back-reference $")
+                  .append(name).append("\", ").append(ruleKindConst(ctx))
+                  .append("); ").append(ctx.failAction).append(" }\n");
+            ctx.sb.append(body).append("boolean eq_").append(label).append(" = true;\n");
+            ctx.sb.append(body).append("for (int i = 0; i < capLen_").append(label)
+                  .append("; i++) {\n");
+            ctx.sb.append(indent(ctx.depth + 2)).append("if (inputStr_").append(label)
+                  .append(".charAt(posByte_").append(label)
+                  .append(" + i) != inputStr_").append(label)
+                  .append(".charAt((int)cap_").append(label)
+                  .append("[0] + i)) { eq_").append(label).append(" = false; break; }\n");
+            ctx.sb.append(body).append("}\n");
+            ctx.sb.append(body).append("if (!eq_").append(label).append(") { fail(\"back-reference $")
+                  .append(name).append("\", ").append(ruleKindConst(ctx))
+                  .append("); ").append(ctx.failAction).append(" }\n");
+            // Advance pos past the matched bytes. Empty capture: no advance.
+            ctx.sb.append(body).append("if (capLen_").append(label).append(" > 0) {\n");
+            ctx.sb.append(indent(ctx.depth + 2)).append("int targetByte_").append(label)
+                  .append(" = posByte_").append(label).append(" + capLen_")
+                  .append(label).append(";\n");
+            ctx.sb.append(indent(ctx.depth + 2)).append("while (pos < tokens.count() && tokens.startAt(pos) < targetByte_")
+                  .append(label).append(") pos++;\n");
+            ctx.sb.append(body).append("}\n");
+            ctx.sb.append(indent).append("}\n");
             return Result.unitResult();
         }
 
@@ -1235,6 +1732,16 @@ public final class ParserGenerator {
         final String failAction;
 
         /**
+         * 0.6.1 — Item E. The enclosing rule's classification. Used to gate the
+         * MIXED-rule char-level fallback: only MIXED rules emit token-level
+         * proxies for {@link Expression.CharClass} and predicates over
+         * char-level subtrees. PARSER and LEXER rules retain the previous
+         * no-op behavior (PARSER rules shouldn't reach char-level constructs;
+         * LEXER rules don't go through this generator).
+         */
+        final RuleKind ruleKind;
+
+        /**
          * Java identifier of the boolean flag in the enclosing Choice's emitted
          * scope which {@link Renderer#emitCut} sets to {@code true}. {@code null}
          * means no enclosing Choice — Cut becomes a no-op. Inherited across
@@ -1247,8 +1754,8 @@ public final class ParserGenerator {
         final String cutFlag;
         private final int[] labelCounter;
 
-        EmitContext(String ruleName, int depth, StringBuilder sb) {
-            this(ruleName, depth, sb, new int[]{0}, RULE_BODY_FAIL_ACTION, null);
+        EmitContext(String ruleName, int depth, StringBuilder sb, RuleKind ruleKind) {
+            this(ruleName, depth, sb, new int[]{0}, RULE_BODY_FAIL_ACTION, null, ruleKind);
         }
 
         EmitContext(String ruleName,
@@ -1256,29 +1763,35 @@ public final class ParserGenerator {
                     StringBuilder sb,
                     int[] labelCounter,
                     String failAction,
-                    String cutFlag) {
+                    String cutFlag,
+                    RuleKind ruleKind) {
             this.ruleName = ruleName;
             this.depth = depth;
             this.sb = sb;
             this.labelCounter = labelCounter;
             this.failAction = failAction;
             this.cutFlag = cutFlag;
+            this.ruleKind = ruleKind;
         }
 
         EmitContext indented() {
-            return new EmitContext(ruleName, depth + 1, sb, labelCounter, failAction, cutFlag);
+            return new EmitContext(ruleName, depth + 1, sb, labelCounter, failAction, cutFlag, ruleKind);
         }
 
         EmitContext withFailAction(String newFailAction) {
-            return new EmitContext(ruleName, depth, sb, labelCounter, newFailAction, cutFlag);
+            return new EmitContext(ruleName, depth, sb, labelCounter, newFailAction, cutFlag, ruleKind);
         }
 
         EmitContext indentedWithFailAction(String newFailAction) {
-            return new EmitContext(ruleName, depth + 1, sb, labelCounter, newFailAction, cutFlag);
+            return new EmitContext(ruleName, depth + 1, sb, labelCounter, newFailAction, cutFlag, ruleKind);
         }
 
         EmitContext withCutFlag(String newCutFlag) {
-            return new EmitContext(ruleName, depth, sb, labelCounter, failAction, newCutFlag);
+            return new EmitContext(ruleName, depth, sb, labelCounter, failAction, newCutFlag, ruleKind);
+        }
+
+        boolean isMixed() {
+            return ruleKind == RuleKind.MIXED;
         }
 
         int nextLabelId() {

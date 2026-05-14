@@ -406,7 +406,19 @@ public final class TriviaPostPass {
                                                                                                                                   .isEmpty() && nt.trailingTrivia()
                                                                                                                                                   .isEmpty();
         ArrayList<CstNode> newChildren = null;
+        // 0.6.1 — bug fix: previously cursor=spanStart caused scanWhitespaceFast
+        // to fail on the parent's opening delimiter (e.g. '{') and silently drop
+        // all trivia between the delimiter and the first child. Advance past any
+        // non-whitespace prefix of the gap so the trivia scan starts at a
+        // position the %whitespace rule can match.
+        // See docs/bugs/first-member-trivia-loss-2026-05-12.md.
         int cursor = spanStart;
+        if (childCount > 0) {
+            int firstChildStart = children.get(0).span().startOffset();
+            while (cursor < firstChildStart && !canStartTrivia(input.charAt(cursor))) {
+                cursor++;
+            }
+        }
         for (int i = 0; i < childCount; i++ ) {
             var c = children.get(i);
             var drainForThis = (i == childCount - 1)
@@ -437,6 +449,14 @@ public final class TriviaPostPass {
                             ? children
                             : List.copyOf(newChildren);
         return new CstNode.NonTerminal(nt.id(), nt.span(), nt.rule(), finalChildren, leading, extraTrailing);
+    }
+
+    // 0.6.1 — cheap predicate used by rebuildNonTerminal to skip past a parent's
+    // opening syntactic prefix (delimiters like '{', '(', '[') before starting
+    // the trivia scan. Returns true when the character could start a whitespace
+    // run or a comment under any reasonable PEG %whitespace rule.
+    private static boolean canStartTrivia(char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '/' || c == '#';
     }
 
     private static List<Trivia> combine(List<Trivia> a, List<Trivia> b) {

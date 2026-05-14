@@ -196,6 +196,42 @@ formatted output; they are purely machine-readable.
 
 These appear at the top level of the grammar, alongside `%whitespace`.
 
+### `%whitespace` shape and v6 per-kind trivia classification
+
+In the v6 (0.6.x) tokens-first lexer, trivia is classified by inspecting the
+matched span's leading prefix: `//` → `LINE_COMMENT`, `///` → `DOC_LINE_COMMENT`,
+`/*` → `BLOCK_COMMENT`, `/**` (followed by non-`/`) → `DOC_BLOCK_COMMENT`,
+otherwise `WHITESPACE`. The check only fires when the entire matched token IS
+the comment.
+
+This means **the shape of the `%whitespace` rule matters**. Two equivalent-looking
+forms produce very different token streams:
+
+```peg
+# Folds runs into ONE WHITESPACE-kind token — comment classification never fires:
+%whitespace <- ([ \t\r\n] / '//' [^\n]* / '/*' (!'*/' .)* '*/')*
+
+# Emits one token per chunk — classification works:
+%whitespace <- [ \t\r\n]+ / '//' [^\n]* / '/*' (!'*/' .)* '*/'
+```
+
+The outer `*` in the first form causes the lexer's longest-match scan to consume
+multi-chunk runs (whitespace + comment + whitespace) as a single token whose
+first char is whitespace — the prefix check fails and the entire run stays
+`KIND_WHITESPACE`. Dropping the outer `*` and making the inner whitespace
+alternative `[ \t\r\n]+` lets each invocation match exactly one chunk; the
+lexer's outer maximal-munch loop iterates and emits separate tokens, each
+classified correctly.
+
+A side benefit: the split form does NOT match the empty string, so the
+"`LEXER rule '%whitespace' matches the empty string`" warning emitted by
+`peglib:generate-v6` goes away.
+
+A 0.6.2 follow-up will add per-iteration trivia tokenization so the folded
+form also produces per-kind tokens, but until then the split form is the
+canonical shape. The example grammar at
+`peglib-core/src/test/resources/java25.peg` uses the split form.
+
 ### `%suggest`
 
 `%suggest RuleName`

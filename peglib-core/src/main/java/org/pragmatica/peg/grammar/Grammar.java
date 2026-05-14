@@ -27,6 +27,12 @@ import java.util.stream.Collectors;
  * {@code imports} list and all imported rules appear as regular entries in
  * {@link #rules()}.
  *
+ * <p>{@code checkpointRules} (0.6.1) is the set of rule names declared at grammar
+ * level via {@code %checkpoint RuleName}. These designate incremental-reparse
+ * boundaries consumed by {@code IncrementalParser}. Unknown rule names are
+ * accepted without validation (silently ignored by the engine) — matches the
+ * relaxed-directive principle used for {@code %recover}.
+ *
  * <h2>Construction (parse-don't-validate)</h2>
  *
  * <p>Use {@link #grammar(List, Option, Option, Option, List, List)} to build a
@@ -51,10 +57,23 @@ public record Grammar(
  Option<Expression> word,
  List<String> suggestRules,
  List<Import> imports,
- Map<String, Set<Character>> recoverSets) {
+ Map<String, Set<Character>> recoverSets,
+ Set<String> checkpointRules) {
+    /**
+     * Canonical compact constructor. Applies a defensive copy to
+     * {@code checkpointRules} so the record's exposed set is immutable
+     * regardless of how callers construct the instance. Matches the style
+     * used for {@code recoverSets}.
+     *
+     * @since 0.6.1
+     */
+    public Grammar {
+        checkpointRules = Set.copyOf(checkpointRules);
+    }
+
     /**
      * Backwards-compatible canonical-shaped factory. Defaults
-     * {@code recoverSets} to an empty map.
+     * {@code recoverSets} and {@code checkpointRules} to empty.
      *
      * @since 0.4.0
      */
@@ -64,7 +83,23 @@ public record Grammar(
                                           Option<Expression> word,
                                           List<String> suggestRules,
                                           List<Import> imports) {
-        return grammar(rules, startRule, whitespace, word, suggestRules, imports, Map.of());
+        return grammar(rules, startRule, whitespace, word, suggestRules, imports, Map.of(), Set.of());
+    }
+
+    /**
+     * Backwards-compatible 7-arg factory. Defaults
+     * {@code checkpointRules} to the empty set.
+     *
+     * @since 0.6.0
+     */
+    public static Result<Grammar> grammar(List<Rule> rules,
+                                          Option<String> startRule,
+                                          Option<Expression> whitespace,
+                                          Option<Expression> word,
+                                          List<String> suggestRules,
+                                          List<Import> imports,
+                                          Map<String, Set<Character>> recoverSets) {
+        return grammar(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, Set.of());
     }
 
     /**
@@ -79,11 +114,15 @@ public record Grammar(
      *       Warth-style seeding and is allowed.</li>
      * </ul>
      *
+     * <p>{@code checkpointRules} is NOT validated — unknown rule names are
+     * accepted and silently ignored by the incremental engine. This matches
+     * the relaxed-directive principle already applied to {@code recoverSets}.
+     *
      * <p>On failure, returns a {@link Result.Failure} carrying a
      * {@link ParseError.SemanticError} describing the offending rule.
      *
-     * @since 0.6.0 — accepts per-rule {@code recoverSets} populated from
-     * grammar-level {@code %recover &lt;CharClass&gt; RuleName} directives.
+     * @since 0.6.1 — accepts grammar-level {@code checkpointRules} populated
+     * from {@code %checkpoint RuleName} directives.
      */
     public static Result<Grammar> grammar(List<Rule> rules,
                                           Option<String> startRule,
@@ -91,13 +130,14 @@ public record Grammar(
                                           Option<Expression> word,
                                           List<String> suggestRules,
                                           List<Import> imports,
-                                          Map<String, Set<Character>> recoverSets) {
-        return validate(new Grammar(rules, startRule, whitespace, word, suggestRules, imports, recoverSets));
+                                          Map<String, Set<Character>> recoverSets,
+                                          Set<String> checkpointRules) {
+        return validate(new Grammar(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, checkpointRules));
     }
 
     /**
-     * Convenience overload — empty {@code suggestRules}, {@code imports} and
-     * {@code recoverSets}.
+     * Convenience overload — empty {@code suggestRules}, {@code imports},
+     * {@code recoverSets} and {@code checkpointRules}.
      *
      * @since 0.4.0
      */
@@ -105,15 +145,15 @@ public record Grammar(
                                           Option<String> startRule,
                                           Option<Expression> whitespace,
                                           Option<Expression> word) {
-        return grammar(rules, startRule, whitespace, word, List.of(), List.of(), Map.of());
+        return grammar(rules, startRule, whitespace, word, List.of(), List.of(), Map.of(), Set.of());
     }
 
     /**
      * Backwards-compatible 6-arg canonical constructor. Defaults
-     * {@code recoverSets} to an empty map. Records require canonical-ctor
-     * visibility ≥ class visibility, so this overload preserves the prior
-     * shape for existing callers (tests, generators) constructing via
-     * {@code new Grammar(...)}.
+     * {@code recoverSets} to an empty map and {@code checkpointRules} to
+     * the empty set. Records require canonical-ctor visibility ≥ class
+     * visibility, so this overload preserves the prior shape for existing
+     * callers (tests, generators) constructing via {@code new Grammar(...)}.
      *
      * @since 0.6.0
      */
@@ -123,7 +163,23 @@ public record Grammar(
                    Option<Expression> word,
                    List<String> suggestRules,
                    List<Import> imports) {
-        this(rules, startRule, whitespace, word, suggestRules, imports, Map.of());
+        this(rules, startRule, whitespace, word, suggestRules, imports, Map.of(), Set.of());
+    }
+
+    /**
+     * Backwards-compatible 7-arg canonical constructor. Defaults
+     * {@code checkpointRules} to the empty set.
+     *
+     * @since 0.6.1
+     */
+    public Grammar(List<Rule> rules,
+                   Option<String> startRule,
+                   Option<Expression> whitespace,
+                   Option<Expression> word,
+                   List<String> suggestRules,
+                   List<Import> imports,
+                   Map<String, Set<Character>> recoverSets) {
+        this(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, Set.of());
     }
 
     /**
