@@ -1,6 +1,5 @@
 package org.pragmatica.peg.perf;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.pragmatica.lang.Result;
@@ -487,29 +486,25 @@ class TriviaAdversarialTest {
     }
 
     /**
-     * Target #6 — Optional CutFailure asymmetry.
-     * In {@link org.pragmatica.peg.parser.PegEngine#parseOptionalWithMode}
-     * (line 1936): on CutFailure the code returns the failure WITHOUT
-     * restoring the entry pending snapshot. Regular failure DOES restore
-     * (line 1941). Predates Step 1 docs.
+     * Target #6 — Optional CutFailure symmetry (fixed).
+     * {@link org.pragmatica.peg.parser.PegEngine#parseOptionalWithMode} now
+     * restores the entry pending-trivia snapshot on the CutFailure path,
+     * matching the regular-failure path. The same symmetric fix was applied to
+     * the repetition combinators (parseZeroOrMoreWithMode,
+     * parseOneOrMoreWithMode, parseRepetitionWithMode), which had the identical
+     * asymmetry on their per-iteration snapshots.
      */
     @Nested
-    class OptionalCutFailurePending {
+    class OptionalCutFailureSymmetry {
 
         /**
-         * Optional containing a Cut that fails. Outer parse fails because
-         * the cut prevents recovery. Pending state asymmetry can only be
-         * observed via cross-implementation comparison or instrumentation.
-         *
-         * <p>Disabled because it surfaces a latent bug rather than asserting
-         * correct behaviour — there is no straightforward black-box assertion
-         * that distinguishes "snapshot restored" from "snapshot not restored"
-         * when the parse subsequently fails. Documented as Bug 2 in the
-         * findings doc; minimum reproducer captured here.
+         * Optional containing a Cut that fails. The cut commits to the
+         * alternative, so the Optional must NOT swallow the failure — the outer
+         * parse fails. The pending-trivia snapshot is restored on the cut path,
+         * keeping trivia state consistent with the regular-failure path.
          */
         @Test
-        @Disabled("Bug 2 (latent): parseOptionalWithMode line 1936 returns CutFailure without restoring entryPendingSnapshot. No black-box surface manifestation found yet — observability requires instrumented context. See TRIVIA-ADVERSARIAL-FINDINGS.md.")
-        void optional_withInternalCutFailure_pendingSnapshotNotRestored() {
+        void optional_withInternalCutFailure_propagatesAndRestoresSnapshot() {
             var grammar = """
                 Item <- Pre Tail?
                 Pre <- < 'a' >
@@ -518,8 +513,86 @@ class TriviaAdversarialTest {
                 """;
             var parser = PegParser.fromGrammar(grammar).unwrap();
             // "a b X" — Tail matches 'b', cut commits, then 'c' fails.
-            // Optional should NOT swallow the cut; outer parse should fail.
+            // Optional must NOT swallow the cut; outer parse must fail.
             var result = parser.parseCst("a b X");
+            assertThat(result.isFailure()).isTrue();
+        }
+
+        /**
+         * Companion success case for the same grammar: the Optional Tail
+         * matches fully, so the parse succeeds and all three spaces are
+         * accounted for as trivia. This pins that the pending-trivia buffer is
+         * not corrupted on the success path, complementing the cut-failure
+         * restoration above.
+         */
+        @Test
+        void optional_withInternalCutSuccess_triviaIntact() {
+            var grammar = """
+                Item <- Pre Tail?
+                Pre <- < 'a' >
+                Tail <- 'b' ^ 'c'
+                %whitespace <- [ ]+
+                """;
+            var parser = PegParser.fromGrammar(grammar).unwrap();
+            // "a b c" — Tail matches fully; 2 inter-word spaces are trivia.
+            var result = parser.parseCst("a b c");
+            assertThat(result.isSuccess()).isTrue();
+            assertThat(collectAllTriviaText(result.unwrap())).isEqualTo("  ");
+        }
+
+        /**
+         * ZeroOrMore body contains a Cut that fails on a later iteration. The
+         * cut must propagate out of the star (it must not silently terminate
+         * the loop as a normal no-more-matches), and the per-iteration pending
+         * snapshot is restored on the cut path.
+         */
+        @Test
+        void zeroOrMore_withInternalCutFailure_propagates() {
+            var grammar = """
+                Item <- Pre Tail*
+                Pre <- < 'a' >
+                Tail <- 'b' ^ 'c'
+                %whitespace <- [ ]+
+                """;
+            var parser = PegParser.fromGrammar(grammar).unwrap();
+            // "a b c b X" — first Tail matches, second Tail's cut commits then
+            // 'c' fails. Star must not swallow the cut.
+            var result = parser.parseCst("a b c b X");
+            assertThat(result.isFailure()).isTrue();
+        }
+
+        /**
+         * OneOrMore body contains a Cut that fails on a later iteration. Same
+         * propagation and snapshot-restore requirement as ZeroOrMore.
+         */
+        @Test
+        void oneOrMore_withInternalCutFailure_propagates() {
+            var grammar = """
+                Item <- Pre Tail+
+                Pre <- < 'a' >
+                Tail <- 'b' ^ 'c'
+                %whitespace <- [ ]+
+                """;
+            var parser = PegParser.fromGrammar(grammar).unwrap();
+            var result = parser.parseCst("a b c b X");
+            assertThat(result.isFailure()).isTrue();
+        }
+
+        /**
+         * Bounded repetition {@code {n,m}} body contains a Cut that fails. The
+         * cut must propagate out of the bounded loop and the per-iteration
+         * pending snapshot is restored on the cut path.
+         */
+        @Test
+        void boundedRepetition_withInternalCutFailure_propagates() {
+            var grammar = """
+                Item <- Pre Tail{1,3}
+                Pre <- < 'a' >
+                Tail <- 'b' ^ 'c'
+                %whitespace <- [ ]+
+                """;
+            var parser = PegParser.fromGrammar(grammar).unwrap();
+            var result = parser.parseCst("a b c b X");
             assertThat(result.isFailure()).isTrue();
         }
     }

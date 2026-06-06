@@ -1912,8 +1912,13 @@ public final class PegEngine implements Parser {
             }else {
                 result = parseExpressionWithMode(ctx, zom.expression(), ruleName, mode);
             }
-            // CutFailure must propagate - don't just break
+            // CutFailure must propagate - don't just break. Restore the
+            // pending-leading buffer first so trivia state matches the
+            // regular-failure path below (symmetry fix).
             if (result instanceof ParseResult.CutFailure) {
+                if (!triviaPostPass) {
+                    ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                }
                 return result;
             }
             if (result.isFailure()) {
@@ -1991,8 +1996,13 @@ public final class PegEngine implements Parser {
             }else {
                 result = parseExpressionWithMode(ctx, oom.expression(), ruleName, mode);
             }
-            // CutFailure must propagate - don't just break
+            // CutFailure must propagate - don't just break. Restore the
+            // pending-leading buffer first so trivia state matches the
+            // regular-failure path below (symmetry fix).
             if (result instanceof ParseResult.CutFailure) {
+                if (!triviaPostPass) {
+                    ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                }
                 return result;
             }
             if (result.isFailure()) {
@@ -2038,8 +2048,13 @@ public final class PegEngine implements Parser {
         if (result.isSuccess()) {
             return result;
         }
-        // CutFailure must propagate - don't treat as success
+        // CutFailure must propagate - don't treat as success. Restore the
+        // pending-leading buffer before propagating so trivia state stays
+        // consistent with the regular-failure path below (symmetry fix).
         if (result instanceof ParseResult.CutFailure) {
+            if (!triviaPostPass) {
+                ctx.restorePendingLeadingTrivia(entryPendingSnapshot);
+            }
             return result;
         }
         // Optional always succeeds - return empty node on no match
@@ -2102,8 +2117,13 @@ public final class PegEngine implements Parser {
             }else {
                 result = parseExpressionWithMode(ctx, rep.expression(), ruleName, mode);
             }
-            // CutFailure must propagate - don't just break
+            // CutFailure must propagate - don't just break. Restore the
+            // pending-leading buffer first so trivia state matches the
+            // regular-failure path below (symmetry fix).
             if (result instanceof ParseResult.CutFailure) {
+                if (!triviaPostPass) {
+                    ctx.restorePendingLeadingTrivia(iterPendingSnapshot);
+                }
                 return result;
             }
             if (result.isFailure()) {
