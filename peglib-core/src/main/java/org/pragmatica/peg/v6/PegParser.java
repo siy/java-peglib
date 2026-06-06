@@ -105,7 +105,12 @@ public final class PegParser {
                                                         RuleClassifier.Classification classification,
                                                         DfaBuilder.Built built,
                                                         String className) {
-        return ParserGenerator.generate(grammar, classification, built.kinds(), GENERATED_PACKAGE, className)
+        var skippedReasons = built.skipped()
+                                  .stream()
+                                  .collect(java.util.stream.Collectors.toMap(DfaBuilder.SkippedRule::ruleName,
+                                                                             DfaBuilder.SkippedRule::reason,
+                                                                             (a, __) -> a));
+        return ParserGenerator.generate(grammar, classification, built.kinds(), skippedReasons, GENERATED_PACKAGE, className)
         .flatMap(ParserCompiler::compile);
     }
 }

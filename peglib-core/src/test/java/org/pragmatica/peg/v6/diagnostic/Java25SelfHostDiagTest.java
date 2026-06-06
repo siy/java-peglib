@@ -1,6 +1,5 @@
 package org.pragmatica.peg.v6.diagnostic;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.v6.PegParser;
 import org.pragmatica.peg.v6.cst.CstArray;
@@ -85,7 +84,6 @@ public class Java25SelfHostDiagTest {
     // cleanly via parseRuleFrom(Shift) / parseRuleFrom(Expr) in isolation.
     // Hypothesis: Type / Relational / TypeArgs interaction with '<' literals
     // corrupts parser state on backtrack. Deferred to 0.6.2.
-    @Disabled("TODO 0.6.2 — shift-in-FieldDecl bug; see comment")
     @Test
     public void selfHostFixtureParsesCleanly() throws Exception {
         String grammar = Files.readString(GRAMMAR);
@@ -122,7 +120,6 @@ public class Java25SelfHostDiagTest {
         }
     }
 
-    @Disabled("TODO 0.6.2 — depends on shift-in-FieldDecl fix")
     @Test
     public void selfHostFixtureProducesShallowCST() throws Exception {
         String grammar = Files.readString(GRAMMAR);

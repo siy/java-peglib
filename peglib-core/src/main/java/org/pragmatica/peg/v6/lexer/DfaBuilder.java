@@ -97,11 +97,34 @@ public final class DfaBuilder {
      *        "contextual keywords fall through to Identifier elsewhere" behavior
      *        that the 0.5.x interpreter got for free via PEG ordered choice.
      */
+    /**
+     * 0.6.2 — inline-expansion plan for a LEXER rule whose body is a sequence of
+     * single-character literals optionally followed by a negative-lookahead
+     * literal (shape {@code literal+ !literal}). Such rules (e.g.
+     * {@code LShift <- '<' '<' !'='}) cannot be compiled to a single DFA accept
+     * state because the {@code Not} lookahead is not regular, AND fusing the
+     * constituent characters into one token would break the deliberate
+     * two-token model for {@code <}/{@code >} that nested generics
+     * ({@code List<List<String>>}) depend on. Instead the generated parser
+     * matches each constituent inline-literal kind as a separate adjacent token
+     * and verifies the negative lookahead, expanding the rule body inline at the
+     * reference site.
+     *
+     * @param literalKinds    inline-literal token kinds for each positive
+     *                        single-char literal, in body order (length &ge; 1)
+     * @param negLookaheadKinds inline-literal token kinds for each trailing
+     *                        {@code !literal} guard, in body order (possibly
+     *                        empty). A match requires that the next non-trivia
+     *                        token is none of these kinds (when byte-adjacent).
+     */
+    public record InlineExpansion(int[] literalKinds, int[] negLookaheadKinds){}
+
     public record TokenKindAssignment(Map<String, Integer> ruleNameToKind,
                                       Map<String, Integer> inlineLiteralToKind,
                                       Map<Integer, KeywordResolution> keywordResolutions,
                                       Map<String, int[]> ruleNameToAliasKinds,
                                       Map<String, int[]> identifierFallbackKinds,
+                                      Map<String, InlineExpansion> inlineExpansions,
                                       int anyCharKind,
                                       String[] kindNameTable){}
 
@@ -244,6 +267,23 @@ public final class DfaBuilder {
                                                  usedNames,
                                                  nextKindRef,
                                                  aliasLiteralsOut);
+        // 0.6.2 — inline-expansion detection. For each LEXER rule whose body is a
+        // sequence of single-char literals with a trailing negative-lookahead
+        // literal (shape {@code literal+ !literal}, e.g. {@code LShift <- '<' '<'
+        // !'='}), the DFA cannot build it (the Not is not regular) AND fusing the
+        // characters into one token would break the two-token model for </> that
+        // nested generics depend on. Allocate inline-literal kinds for each
+        // constituent character, record an InlineExpansion, and REMOVE the rule's
+        // own kind so the parser never references a dead single-token kind.
+        var inlineExpansions = detectInlineExpansions(grammar,
+                                                      classification,
+                                                      ruleNameToKind,
+                                                      ruleNameToAliasKinds,
+                                                      inlineLiteralToKind,
+                                                      kindNames,
+                                                      usedNames,
+                                                      nextKindRef,
+                                                      aliasLiteralsOut);
         // Phase B.0 — keyword resolution. For each skip-prefix rule, walk the
         // referenced literal-set rule and map every keyword text to a token
         // kind. Reuse existing kinds where possible (inline literals or
@@ -286,6 +326,7 @@ public final class DfaBuilder {
                                                       Map.copyOf(keywordResolutions),
                                                       Map.copyOf(ruleNameToAliasKinds),
                                                       Map.copyOf(identifierFallbackKinds),
+                                                      Map.copyOf(inlineExpansions),
                                                       anyCharKind,
                                                       kindNames.toArray(new String[0])));
     }
@@ -436,6 +477,108 @@ public final class DfaBuilder {
             aliases.put(rule.name(), sorted);
         }
         return aliases;
+    }
+
+    /**
+     * 0.6.2 — detect LEXER rules eligible for inline expansion. A rule is
+     * eligible iff (after unwrapping acceptable wrappers and a token boundary)
+     * its body is a {@link Expression.Sequence} of single-character
+     * {@link Expression.Literal}s optionally terminated by a single
+     * {@code !literal} negative lookahead, AND the rule is not already aliased,
+     * not a skip-prefix rule, and is currently kind-assigned as LEXER. For each
+     * eligible rule the constituent inline-literal kinds are allocated (so the
+     * lexer actually produces the single-char tokens) and the rule's own kind is
+     * removed from {@code ruleNameToKind} so the parser never matches it as a
+     * fused single token.
+     *
+     * <p>The shape match deliberately requires the trailing {@code !literal}: a
+     * bare {@code literal+} sequence (e.g. {@code RShiftAssign <- '>' '>' '='})
+     * is DFA-compilable as a single token and is left untouched to preserve the
+     * existing compound-assignment behavior.
+     */
+    private static Map<String, InlineExpansion> detectInlineExpansions(
+        Grammar grammar,
+        RuleClassifier.Classification classification,
+        Map<String, Integer> ruleNameToKind,
+        Map<String, int[]> ruleNameToAliasKinds,
+        Map<String, Integer> inlineLiteralToKind,
+        List<String> kindNames,
+        Set<String> usedNames,
+        int[] nextKindRef,
+        List<InlineLiteral> aliasLiteralsOut) {
+        var result = new LinkedHashMap<String, InlineExpansion>();
+        for ( var rule : grammar.rules()) {
+            if ( classification.kinds().get(rule.name()) != RuleKind.LEXER) {
+            continue;}
+            if ( !ruleNameToKind.containsKey(rule.name())) {
+            continue;}
+            if ( ruleNameToAliasKinds.containsKey(rule.name())) {
+            continue;}
+            if ( classification.keywordSkip().containsKey(rule.name())) {
+            continue;}
+            var shape = matchInlineExpansionShape(rule.expression());
+            if ( shape.isEmpty()) {
+            continue;}
+            var s = shape.unwrap();
+            var literalKinds = new int[s.literals().size()];
+            for ( int i = 0; i < s.literals().size(); i++) {
+            literalKinds[i] = ensureInlineKind(s.literals().get(i), inlineLiteralToKind, kindNames, usedNames, nextKindRef, aliasLiteralsOut);}
+            var negKinds = new int[s.negLookaheads().size()];
+            for ( int i = 0; i < s.negLookaheads().size(); i++) {
+            negKinds[i] = ensureInlineKind(s.negLookaheads().get(i), inlineLiteralToKind, kindNames, usedNames, nextKindRef, aliasLiteralsOut);}
+            result.put(rule.name(), new InlineExpansion(literalKinds, negKinds));
+            ruleNameToKind.remove(rule.name());
+        }
+        return result;
+    }
+
+    private record ExpansionShape(List<Expression.Literal> literals, List<Expression.Literal> negLookaheads){}
+
+    /**
+     * Match the {@code literal+ (!literal)*} inline-expansion shape. Returns the
+     * positive single-char literals and the trailing negative-lookahead literals
+     * (e.g. {@code RShift <- '>' '>' !'>' !'='} yields positives {@code [>,>]}
+     * and negatives {@code [>,=]}), or {@code Option.none()} when the body
+     * doesn't fit. Every positive element must be a non-empty, case-sensitive
+     * single-character literal; every trailing {@code !literal} must likewise be
+     * a single-char case-sensitive literal, and all negatives must follow all
+     * positives. At least one trailing negative lookahead is required: a bare
+     * literal sequence is DFA-compilable as a single token and left untouched.
+     */
+    private static Option<ExpansionShape> matchInlineExpansionShape(Expression expr) {
+        var unwrapped = unwrapAcceptableWrappers(expr);
+        if ( ! (unwrapped instanceof Expression.Sequence seq)) {
+        return Option.none();}
+        var elements = seq.elements();
+        if ( elements.isEmpty()) {
+        return Option.none();}
+        var positives = new ArrayList<Expression.Literal>();
+        var negLookaheads = new ArrayList<Expression.Literal>();
+        for ( var element : elements) {
+            var el = unwrapAcceptableWrappers(element);
+            if ( el instanceof Expression.Not not) {
+                var notInner = unwrapAcceptableWrappers(not.expression());
+                if ( ! (notInner instanceof Expression.Literal notLit) || !isSingleCharLiteral(notLit)) {
+                return Option.none();}
+                negLookaheads.add(notLit);
+            } else
+            if ( el instanceof Expression.Literal lit && isSingleCharLiteral(lit)) {
+                // A positive literal after a negative lookahead is not the
+                // supported shape (negatives must be strictly trailing).
+                if ( !negLookaheads.isEmpty()) {
+                return Option.none();}
+                positives.add(lit);
+            } else
+            {
+            return Option.none();}
+        }
+        if ( positives.isEmpty() || negLookaheads.isEmpty()) {
+        return Option.none();}
+        return Option.some(new ExpansionShape(positives, negLookaheads));
+    }
+
+    private static boolean isSingleCharLiteral(Expression.Literal lit) {
+        return lit.text().length() == 1 && !lit.caseInsensitive();
     }
 
     /**
@@ -651,6 +794,11 @@ public final class DfaBuilder {
             // to them. Compiling them anyway would waste states and (more
             // importantly) the DFA build would fail on the !CharClass guard.
             if ( assignment.ruleNameToAliasKinds().containsKey(rule.name())) {
+            continue;}
+            // 0.6.2 — inline-expanded rules (e.g. LShift) have no own token kind;
+            // the parser matches their constituent inline-literal kinds directly.
+            // They must not be compiled as standalone DFA accepts.
+            if ( assignment.inlineExpansions().containsKey(rule.name())) {
             continue;}
             int kind = assignment.ruleNameToKind().get(rule.name());
             // Phase B.0 — for skip-prefix rules, compile the body expression only.

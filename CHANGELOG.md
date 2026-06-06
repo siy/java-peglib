@@ -9,7 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- (placeholder — release in progress)
+- Shift operators (`<<`, `>>`, `>>>`) in field and local-variable initializer context
+  failed at `CompilationUnit` level. Root cause: `LShift`/`RShift`/`URShift` lexer rules
+  contain negative lookaheads (`!'='`), which the DFA builder cannot compile — the rules
+  were silently skipped while their assigned token kinds stayed live in the generated
+  parser, so the shift alternatives could never match. Fixed by inline expansion:
+  DFA-skipped LEXER rules of shape `literal+ (!literal)*` now expand in the generated
+  parser as adjacent constituent-token matches (byte-contiguity checked, so `1 < < 2`
+  does not fuse) with trailing negative lookaheads. Selfhost fixture (40K LOC) now
+  parses with 0 diagnostics; both previously `@Disabled` `Java25SelfHostDiagTest`
+  assertions re-enabled.
+
+### Added
+
+- Loud `fromGrammar` failure (`SkippedRuleReferenced`) when a parser rule references a
+  lexer rule whose token kind was assigned but whose DFA compilation was skipped without
+  an inline-expansion path — broken parsers are no longer generated silently.
+- `ShiftOperatorInlineExpansionTest` — 16 regression tests covering shift operators in
+  field/local-var/parenthesized/chained contexts, compound shift assignments, adjacency
+  non-fusing, nested generics, and the loud guard.
 
 ## [0.6.1] - 2026-05-12
 
