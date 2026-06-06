@@ -1,6 +1,28 @@
 # peglib — Handover
 
-**Last updated:** 2026-05-14 — **0.6.1 SHIPPING to Maven Central.** Closing checkpoint after Session 6.
+**Last updated:** 2026-06-06 — 0.6.2 release branch (release-0.6.2)
+
+---
+
+## Session 7 — 0.6.2 (2026-06-06)
+
+### State at a glance
+
+| | |
+|---|---|
+| **Release** | **v0.6.2** on `release-0.6.2` (patch) |
+| **Tests** | **1420 passing** across 7 modules, 0 failures, 2 pre-existing skips |
+| **Java25 corpus** | 20/20 clean parse |
+| **Selfhost (40K LOC)** | **0 diagnostics**, 1.26M CST nodes |
+| **Real-world Java** | FactoryClassGenerator (1900 LOC): 0 diagnostics |
+| **JMH** | reference 2.68 ms, selfhost 71.9 ms — flat vs 0.6.1 |
+
+### What landed in session 7 (0.6.2 patch items)
+
+1. **Shift operators (`<<`/`>>`/`>>>`) in field/local-var initializer context** — fixed. Root cause was NOT the 0.6.1 rollback hypothesis (`Type`/`Relational`/`TypeArgs` `<` rollback); it was a **dead token kind from a lexer rule silently skipped by the DFA**. Fix: inline expansion of DFA-skipped lexer rules of the `literal+ (!literal)*` shape, plus a loud `SkippedRuleReferenced` guard at `fromGrammar`. Both `Java25SelfHostDiagTest` assertions re-enabled; selfhost fixture (40K LOC) now parses with **0 diagnostics**, 1,261,302 CST nodes.
+2. **Per-iteration `%whitespace` tokenization** — folded `%whitespace <- (...)*` now emits per-kind trivia tokens via per-alternative DFA absorption. The c4169b6 canonical-grammar split workaround is **REVERTED** in `java25.peg`; the empty-match warning is gone for the folded form; 2 previously-disabled trivia tests re-enabled.
+
+Skips moved 4 → 2 (remaining: `LexerGeneratorTest` parity 1, `TriviaAdversarialTest$OptionalCutFailurePending` 1).
 
 ---
 
@@ -43,9 +65,9 @@
 - BASIC/ADVANCED recovery split; inline `{...}` action blocks; `AstNode` type; packrat memoization
 
 **Deferred to 0.6.2 or 0.7**:
-- **Shift-in-FieldDecl bug** (0.6.2 target): shift operators in field/local-var init context fail at `CompilationUnit` level. Hypothesis: `Type`/`Relational`/`TypeArgs` `<` literal rollback corrupts state. 2 `Java25SelfHostDiagTest` assertions `@Disabled` pending fix.
-- **Per-iteration `%whitespace` tokenization** (Item A harder part): ZeroOrMore loop itself should drive per-iteration token emission rather than relying on grammar split. Deferred.
-- **jbct v6 API migration** (0.6.2): jbct `46ac5e993` applied the `%whitespace` grammar split fix; full peglib v6 API migration remains.
+- **Shift-in-FieldDecl bug** (0.6.2 target): shift operators in field/local-var init context fail at `CompilationUnit` level. Hypothesis: `Type`/`Relational`/`TypeArgs` `<` literal rollback corrupts state. 2 `Java25SelfHostDiagTest` assertions `@Disabled` pending fix. ✅ RESOLVED in 0.6.2
+- **Per-iteration `%whitespace` tokenization** (Item A harder part): ZeroOrMore loop itself should drive per-iteration token emission rather than relying on grammar split. Deferred. ✅ RESOLVED in 0.6.2
+- **jbct v6 API migration** (0.6.2): jbct `46ac5e993` applied the `%whitespace` grammar split fix; full peglib v6 API migration remains. (split workaround obsolete since 0.6.2 — folded form now emits per-kind trivia; full jbct v6 API migration still pending)
 - **JBCT `<skip>true</skip>`** in `peglib-core/pom.xml`: formatter convergence bug on 5 v6 files. Lint passes cleanly; tracking upstream.
 - **Items H (token pool), I (lexer modes), K (JBCT plugin bump)**: 0.7+ backlog.
 
@@ -53,8 +75,8 @@
 
 1. **Read this file**, then `docs/ARCHITECTURE-0.6.0.md` if going architectural.
 2. **Read `CLAUDE.md`** — banked lessons (parser-domain + collaboration notes).
-3. **Verify**: `mvn install -Djbct.skip=true` → 1440 tests pass.
-4. **0.6.2 target**: fix shift-in-FieldDecl bug (see `Java25SelfHostDiagTest` disabled assertions), then re-enable the gate.
+3. **Verify**: `mvn install -Djbct.skip=true` → 1420 tests pass.
+4. **0.6.2 target**: fix shift-in-FieldDecl bug (see `Java25SelfHostDiagTest` disabled assertions), then re-enable the gate. (done in 0.6.2)
 5. **Agents**: `jbct-coder` for ALL coding, `build-runner` for `mvn`, `chore-runner` for git/changelog.
 
 ---
@@ -108,7 +130,7 @@
 - Per-iteration trivia tokens for `%whitespace` ZeroOrMore (currently coalesces into single token)
 - Named captures + back-references runtime (rejects at `fromGrammar` with helpful error)
 - JBCT `<skip>true</skip>` in `peglib-core/pom.xml` (lint passes cleanly; only the upstream formatter has a convergence bug on 5 v6 files)
-- True partial parse on `selfhost` (40K LOC) fixture (parses with some diagnostics — grammar gaps in specific Java patterns)
+- True partial parse on `selfhost` (40K LOC) fixture (parses with some diagnostics — grammar gaps in specific Java patterns) (resolved: 0 diagnostics as of 0.6.2)
 
 ### Possible next-session targets
 
@@ -662,7 +684,7 @@ Reference machine: same Apple Silicon used for 0.5.x bench session. Numbers from
 | Incremental edit median (Regime B) | 5.0 ms | **≤ 3 ms** | ≤ 1 ms |
 | First-call (cold compile) | n/a | **≤ 600 ms** (one-time) | — |
 
-For comparison: javac parses 1900-LOC Java in ~9 ms (parse-only). 0.6.0 reference target of ~10 ms = parity with javac while emitting strictly more output.
+For comparison: measured javac parse-only for the 1900-LOC reference is ≈2.2 ms; peglib's warm reference parse (≈2.68 ms as of 0.6.2) is ≈1.2× javac while emitting strictly more output.
 
 ---
 
