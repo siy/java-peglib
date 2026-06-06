@@ -3,7 +3,7 @@
 A PEG (Parsing Expression Grammar) parser library for Java. Tokens-first lex-then-parse
 architecture, flat int[] CST, visitor pattern, true incremental reparse.
 
-Maven Central: `org.pragmatica-lite:peglib:0.6.2`
+Maven Central: `org.pragmatica-lite:peglib:0.6.3`
 
 Migrating from 0.5.x? See [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md).
 Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
@@ -29,7 +29,7 @@ Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.6.2</version>
+    <version>0.6.3</version>
 </dependency>
 ```
 
@@ -284,7 +284,7 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.6.2</version>
+    <version>0.6.3</version>
     <executions>
         <execution>
             <goals><goal>generate-v6</goal></goals>
