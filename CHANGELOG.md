@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-06-06
+
+### Fixed
+
+- (placeholder — release in progress)
+
 ## [0.6.1] - 2026-05-12
 
 Patch release closing gaps from the 0.6.0 ship. Adds doc-comment trivia, completes
