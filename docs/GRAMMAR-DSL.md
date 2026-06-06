@@ -198,39 +198,33 @@ These appear at the top level of the grammar, alongside `%whitespace`.
 
 ### `%whitespace` shape and v6 per-kind trivia classification
 
-In the v6 (0.6.x) tokens-first lexer, trivia is classified by inspecting the
-matched span's leading prefix: `//` → `LINE_COMMENT`, `///` → `DOC_LINE_COMMENT`,
-`/*` → `BLOCK_COMMENT`, `/**` (followed by non-`/`) → `DOC_BLOCK_COMMENT`,
-otherwise `WHITESPACE`. The check only fires when the entire matched token IS
-the comment.
+In the v6 (0.6.x) tokens-first lexer, each `%whitespace` Choice alternative is
+absorbed into the DFA at its own trivia kind, decided **structurally** by the
+alternative's leading literal: a whitespace char-class alternative → `WHITESPACE`,
+an alternative beginning with `'//'` → `LINE_COMMENT`, with `'/*'` →
+`BLOCK_COMMENT`. The doc variants (`///` → `DOC_LINE_COMMENT`, `/**` followed by
+non-`/` → `DOC_BLOCK_COMMENT`) cannot be told apart from their regular form by
+the grammar alone (both share the same `'//' …` / `'/*' …` alternative), so they
+are refined from the matched span text after the structural base kind is set.
 
-This means **the shape of the `%whitespace` rule matters**. Two equivalent-looking
-forms produce very different token streams:
+As of 0.6.2 **both shapes below produce the same per-kind token stream** — the
+folded `(...)*` form no longer collapses a mixed-trivia run into a single
+`WHITESPACE` token:
 
 ```peg
-# Folds runs into ONE WHITESPACE-kind token — comment classification never fires:
+# Folded form — DfaBuilder.absorbWhitespace absorbs each alternative at its kind:
 %whitespace <- ([ \t\r\n] / '//' [^\n]* / '/*' (!'*/' .)* '*/')*
 
-# Emits one token per chunk — classification works:
+# Split form — equivalent token stream:
 %whitespace <- [ \t\r\n]+ / '//' [^\n]* / '/*' (!'*/' .)* '*/'
 ```
 
-The outer `*` in the first form causes the lexer's longest-match scan to consume
-multi-chunk runs (whitespace + comment + whitespace) as a single token whose
-first char is whitespace — the prefix check fails and the entire run stays
-`KIND_WHITESPACE`. Dropping the outer `*` and making the inner whitespace
-alternative `[ \t\r\n]+` lets each invocation match exactly one chunk; the
-lexer's outer maximal-munch loop iterates and emits separate tokens, each
-classified correctly.
-
-A side benefit: the split form does NOT match the empty string, so the
-"`LEXER rule '%whitespace' matches the empty string`" warning emitted by
-`peglib:generate-v6` goes away.
-
-A 0.6.2 follow-up will add per-iteration trivia tokenization so the folded
-form also produces per-kind tokens, but until then the split form is the
-canonical shape. The example grammar at
-`peglib-core/src/test/resources/java25.peg` uses the split form.
+The folded form's outer `*` is dropped during absorption (the lexer's own
+maximal-munch loop supplies the repetition), and the whitespace char-class
+alternative is absorbed as one-or-more, so the DFA start state never accepts the
+empty string — the `"LEXER rule '%whitespace' matches the empty string"` warning
+does **not** fire for either shape. The canonical example grammar at
+`peglib-core/src/test/resources/java25.peg` uses the folded form.
 
 ### `%suggest`
 

@@ -97,11 +97,34 @@ public final class DfaBuilder {
      *        "contextual keywords fall through to Identifier elsewhere" behavior
      *        that the 0.5.x interpreter got for free via PEG ordered choice.
      */
+    /**
+     * 0.6.2 — inline-expansion plan for a LEXER rule whose body is a sequence of
+     * single-character literals optionally followed by a negative-lookahead
+     * literal (shape {@code literal+ !literal}). Such rules (e.g.
+     * {@code LShift <- '<' '<' !'='}) cannot be compiled to a single DFA accept
+     * state because the {@code Not} lookahead is not regular, AND fusing the
+     * constituent characters into one token would break the deliberate
+     * two-token model for {@code <}/{@code >} that nested generics
+     * ({@code List<List<String>>}) depend on. Instead the generated parser
+     * matches each constituent inline-literal kind as a separate adjacent token
+     * and verifies the negative lookahead, expanding the rule body inline at the
+     * reference site.
+     *
+     * @param literalKinds    inline-literal token kinds for each positive
+     *                        single-char literal, in body order (length &ge; 1)
+     * @param negLookaheadKinds inline-literal token kinds for each trailing
+     *                        {@code !literal} guard, in body order (possibly
+     *                        empty). A match requires that the next non-trivia
+     *                        token is none of these kinds (when byte-adjacent).
+     */
+    public record InlineExpansion(int[] literalKinds, int[] negLookaheadKinds){}
+
     public record TokenKindAssignment(Map<String, Integer> ruleNameToKind,
                                       Map<String, Integer> inlineLiteralToKind,
                                       Map<Integer, KeywordResolution> keywordResolutions,
                                       Map<String, int[]> ruleNameToAliasKinds,
                                       Map<String, int[]> identifierFallbackKinds,
+                                      Map<String, InlineExpansion> inlineExpansions,
                                       int anyCharKind,
                                       String[] kindNameTable){}
 
@@ -244,6 +267,23 @@ public final class DfaBuilder {
                                                  usedNames,
                                                  nextKindRef,
                                                  aliasLiteralsOut);
+        // 0.6.2 — inline-expansion detection. For each LEXER rule whose body is a
+        // sequence of single-char literals with a trailing negative-lookahead
+        // literal (shape {@code literal+ !literal}, e.g. {@code LShift <- '<' '<'
+        // !'='}), the DFA cannot build it (the Not is not regular) AND fusing the
+        // characters into one token would break the two-token model for </> that
+        // nested generics depend on. Allocate inline-literal kinds for each
+        // constituent character, record an InlineExpansion, and REMOVE the rule's
+        // own kind so the parser never references a dead single-token kind.
+        var inlineExpansions = detectInlineExpansions(grammar,
+                                                      classification,
+                                                      ruleNameToKind,
+                                                      ruleNameToAliasKinds,
+                                                      inlineLiteralToKind,
+                                                      kindNames,
+                                                      usedNames,
+                                                      nextKindRef,
+                                                      aliasLiteralsOut);
         // Phase B.0 — keyword resolution. For each skip-prefix rule, walk the
         // referenced literal-set rule and map every keyword text to a token
         // kind. Reuse existing kinds where possible (inline literals or
@@ -286,6 +326,7 @@ public final class DfaBuilder {
                                                       Map.copyOf(keywordResolutions),
                                                       Map.copyOf(ruleNameToAliasKinds),
                                                       Map.copyOf(identifierFallbackKinds),
+                                                      Map.copyOf(inlineExpansions),
                                                       anyCharKind,
                                                       kindNames.toArray(new String[0])));
     }
@@ -436,6 +477,108 @@ public final class DfaBuilder {
             aliases.put(rule.name(), sorted);
         }
         return aliases;
+    }
+
+    /**
+     * 0.6.2 — detect LEXER rules eligible for inline expansion. A rule is
+     * eligible iff (after unwrapping acceptable wrappers and a token boundary)
+     * its body is a {@link Expression.Sequence} of single-character
+     * {@link Expression.Literal}s optionally terminated by a single
+     * {@code !literal} negative lookahead, AND the rule is not already aliased,
+     * not a skip-prefix rule, and is currently kind-assigned as LEXER. For each
+     * eligible rule the constituent inline-literal kinds are allocated (so the
+     * lexer actually produces the single-char tokens) and the rule's own kind is
+     * removed from {@code ruleNameToKind} so the parser never matches it as a
+     * fused single token.
+     *
+     * <p>The shape match deliberately requires the trailing {@code !literal}: a
+     * bare {@code literal+} sequence (e.g. {@code RShiftAssign <- '>' '>' '='})
+     * is DFA-compilable as a single token and is left untouched to preserve the
+     * existing compound-assignment behavior.
+     */
+    private static Map<String, InlineExpansion> detectInlineExpansions(
+        Grammar grammar,
+        RuleClassifier.Classification classification,
+        Map<String, Integer> ruleNameToKind,
+        Map<String, int[]> ruleNameToAliasKinds,
+        Map<String, Integer> inlineLiteralToKind,
+        List<String> kindNames,
+        Set<String> usedNames,
+        int[] nextKindRef,
+        List<InlineLiteral> aliasLiteralsOut) {
+        var result = new LinkedHashMap<String, InlineExpansion>();
+        for ( var rule : grammar.rules()) {
+            if ( classification.kinds().get(rule.name()) != RuleKind.LEXER) {
+            continue;}
+            if ( !ruleNameToKind.containsKey(rule.name())) {
+            continue;}
+            if ( ruleNameToAliasKinds.containsKey(rule.name())) {
+            continue;}
+            if ( classification.keywordSkip().containsKey(rule.name())) {
+            continue;}
+            var shape = matchInlineExpansionShape(rule.expression());
+            if ( shape.isEmpty()) {
+            continue;}
+            var s = shape.unwrap();
+            var literalKinds = new int[s.literals().size()];
+            for ( int i = 0; i < s.literals().size(); i++) {
+            literalKinds[i] = ensureInlineKind(s.literals().get(i), inlineLiteralToKind, kindNames, usedNames, nextKindRef, aliasLiteralsOut);}
+            var negKinds = new int[s.negLookaheads().size()];
+            for ( int i = 0; i < s.negLookaheads().size(); i++) {
+            negKinds[i] = ensureInlineKind(s.negLookaheads().get(i), inlineLiteralToKind, kindNames, usedNames, nextKindRef, aliasLiteralsOut);}
+            result.put(rule.name(), new InlineExpansion(literalKinds, negKinds));
+            ruleNameToKind.remove(rule.name());
+        }
+        return result;
+    }
+
+    private record ExpansionShape(List<Expression.Literal> literals, List<Expression.Literal> negLookaheads){}
+
+    /**
+     * Match the {@code literal+ (!literal)*} inline-expansion shape. Returns the
+     * positive single-char literals and the trailing negative-lookahead literals
+     * (e.g. {@code RShift <- '>' '>' !'>' !'='} yields positives {@code [>,>]}
+     * and negatives {@code [>,=]}), or {@code Option.none()} when the body
+     * doesn't fit. Every positive element must be a non-empty, case-sensitive
+     * single-character literal; every trailing {@code !literal} must likewise be
+     * a single-char case-sensitive literal, and all negatives must follow all
+     * positives. At least one trailing negative lookahead is required: a bare
+     * literal sequence is DFA-compilable as a single token and left untouched.
+     */
+    private static Option<ExpansionShape> matchInlineExpansionShape(Expression expr) {
+        var unwrapped = unwrapAcceptableWrappers(expr);
+        if ( ! (unwrapped instanceof Expression.Sequence seq)) {
+        return Option.none();}
+        var elements = seq.elements();
+        if ( elements.isEmpty()) {
+        return Option.none();}
+        var positives = new ArrayList<Expression.Literal>();
+        var negLookaheads = new ArrayList<Expression.Literal>();
+        for ( var element : elements) {
+            var el = unwrapAcceptableWrappers(element);
+            if ( el instanceof Expression.Not not) {
+                var notInner = unwrapAcceptableWrappers(not.expression());
+                if ( ! (notInner instanceof Expression.Literal notLit) || !isSingleCharLiteral(notLit)) {
+                return Option.none();}
+                negLookaheads.add(notLit);
+            } else
+            if ( el instanceof Expression.Literal lit && isSingleCharLiteral(lit)) {
+                // A positive literal after a negative lookahead is not the
+                // supported shape (negatives must be strictly trailing).
+                if ( !negLookaheads.isEmpty()) {
+                return Option.none();}
+                positives.add(lit);
+            } else
+            {
+            return Option.none();}
+        }
+        if ( positives.isEmpty() || negLookaheads.isEmpty()) {
+        return Option.none();}
+        return Option.some(new ExpansionShape(positives, negLookaheads));
+    }
+
+    private static boolean isSingleCharLiteral(Expression.Literal lit) {
+        return lit.text().length() == 1 && !lit.caseInsensitive();
     }
 
     /**
@@ -636,13 +779,11 @@ public final class DfaBuilder {
             absorbLiteralFragment(nfa, lit, kind, priorityRef, globalStart);
         }
         if ( grammar.whitespace().isPresent()) {
-        tryAbsorb(nfa,
-                  "%whitespace",
-                  grammar.whitespace().unwrap(),
-                  KIND_WHITESPACE,
-                  priorityRef,
-                  globalStart,
-                  skipped);}
+        absorbWhitespace(nfa,
+                         grammar.whitespace().unwrap(),
+                         priorityRef,
+                         globalStart,
+                         skipped);}
         for ( var rule : grammar.rules()) {
             if ( classification.kinds().get(rule.name()) != RuleKind.LEXER) {
             continue;}
@@ -651,6 +792,11 @@ public final class DfaBuilder {
             // to them. Compiling them anyway would waste states and (more
             // importantly) the DFA build would fail on the !CharClass guard.
             if ( assignment.ruleNameToAliasKinds().containsKey(rule.name())) {
+            continue;}
+            // 0.6.2 — inline-expanded rules (e.g. LShift) have no own token kind;
+            // the parser matches their constituent inline-literal kinds directly.
+            // They must not be compiled as standalone DFA accepts.
+            if ( assignment.inlineExpansions().containsKey(rule.name())) {
             continue;}
             int kind = assignment.ruleNameToKind().get(rule.name());
             // Phase B.0 — for skip-prefix rules, compile the body expression only.
@@ -665,6 +811,141 @@ public final class DfaBuilder {
         if ( assignment.anyCharKind() >= 0) {
         absorbAnyCharFallback(nfa, assignment.anyCharKind(), priorityRef, globalStart);}
         return nfa;
+    }
+
+    /**
+     * 0.6.2 — absorb the {@code %whitespace} body with per-alternative trivia
+     * kinds, so that a single coalescing {@code (...)*} wrapper around a Choice
+     * of trivia kinds (whitespace / line comment / block comment / doc variants)
+     * does NOT collapse an entire mixed-trivia run into one {@code KIND_WHITESPACE}
+     * token. Each Choice alternative becomes its own NFA accept fragment whose
+     * kind is decided structurally (by the alternative's leading literal), not by
+     * a post-match prefix sniff of the matched text.
+     *
+     * <p>Recognised body shapes (after unwrapping Group/TokenBoundary/etc.):
+     * <ul>
+     *   <li>{@code ZeroOrMore(Choice)} / {@code OneOrMore(Choice)} — the canonical
+     *       "fold the whole trivia run" shape. The outer repetition is dropped and
+     *       each alternative is absorbed individually; the lexer's own maximal-munch
+     *       loop performs the iteration, emitting one token per alternative match
+     *       with the correct kind.</li>
+     *   <li>{@code ZeroOrMore(expr)} / {@code OneOrMore(expr)} where {@code expr} is
+     *       not a Choice — treated as a 1-alternative choice.</li>
+     *   <li>a bare {@code Choice} or single expression — treated directly.</li>
+     * </ul>
+     *
+     * <p>Each absorbed alternative is forced to match at least one character
+     * (a bare whitespace char-class alternative is wrapped as one-or-more) so the
+     * DFA start state never accepts the empty string — the unsplit form therefore
+     * does NOT trigger the empty-match warning of the folded-{@code *} shape.
+     *
+     * <p>Falls back to the previous whole-body {@link #tryAbsorb} (with kind
+     * {@code KIND_WHITESPACE} and the post-match prefix sniff) only when the body
+     * does not fit any recognised shape — preserving behaviour for exotic
+     * {@code %whitespace} bodies.
+     */
+    private static void absorbWhitespace(Nfa nfa,
+                                         Expression whitespaceBody,
+                                         int[] priorityRef,
+                                         int globalStart,
+                                         List<SkippedRule> skipped) {
+        var alternatives = whitespaceAlternatives(whitespaceBody);
+        if ( alternatives.isEmpty()) {
+            tryAbsorb(nfa, "%whitespace", whitespaceBody, KIND_WHITESPACE, priorityRef, globalStart, skipped);
+            return;
+        }
+        int absorbed = 0;
+        for ( var alt : alternatives) {
+            int kind = classifyWhitespaceAlternativeKind(alt);
+            var oneOrMore = ensureNonEmptyWhitespaceAlternative(alt);
+            var result = compileExpression(nfa, oneOrMore, "%whitespace");
+            if ( !result.isSuccess()) {
+            continue;}
+            var fragment = result.unwrap();
+            nfa.addEpsilon(globalStart, fragment.start);
+            nfa.markAccept(fragment.accept, kind, priorityRef[0]);
+            priorityRef[0]++;
+            absorbed++;
+        }
+        // If no alternative compiled (e.g. all used unsupported constructs), fall
+        // back to the legacy whole-body path so whitespace lexing still works.
+        if ( absorbed == 0) {
+        tryAbsorb(nfa, "%whitespace", whitespaceBody, KIND_WHITESPACE, priorityRef, globalStart, skipped);}
+    }
+
+    /**
+     * Return the top-level alternatives of a {@code %whitespace} body for
+     * per-kind absorption, or an empty list when the body does not fit a
+     * recognised shape (signalling the caller to use the legacy whole-body path).
+     * The outer {@code ZeroOrMore}/{@code OneOrMore} wrapper is stripped; the
+     * lexer's maximal-munch loop supplies the repetition.
+     */
+    private static List<Expression> whitespaceAlternatives(Expression body) {
+        var unwrapped = unwrapAcceptableWrappers(body);
+        Expression inner;
+        if ( unwrapped instanceof Expression.ZeroOrMore zom) {
+        inner = unwrapAcceptableWrappers(zom.expression());} else
+        if ( unwrapped instanceof Expression.OneOrMore oom) {
+        inner = unwrapAcceptableWrappers(oom.expression());} else
+        {
+        inner = unwrapped;}
+        if ( inner instanceof Expression.Choice choice) {
+        return List.copyOf(choice.alternatives());}
+        return List.of(inner);
+    }
+
+    /**
+     * Decide the {@link TokenArray}-equivalent trivia kind for a single
+     * {@code %whitespace} alternative by inspecting its leading literal. Mirrors
+     * the longest-prefix precedence used by the split-rule + post-match-sniff
+     * path: {@code /**} (doc block) before {@code /*} (block); {@code ///} (doc
+     * line) before {@code //} (line). Anything else — including a leading
+     * whitespace char-class — maps to {@link #KIND_WHITESPACE}.
+     */
+    private static int classifyWhitespaceAlternativeKind(Expression alternative) {
+        var prefix = leadingLiteralText(alternative);
+        if ( prefix.startsWith("/**")) {
+        return KIND_DOC_BLOCK_COMMENT;}
+        if ( prefix.startsWith("/*")) {
+        return KIND_BLOCK_COMMENT;}
+        if ( prefix.startsWith("///")) {
+        return KIND_DOC_LINE_COMMENT;}
+        if ( prefix.startsWith("//")) {
+        return KIND_LINE_COMMENT;}
+        return KIND_WHITESPACE;
+    }
+
+    /**
+     * Extract the leading literal text of an alternative: the text of its first
+     * {@link Expression.Literal} element (when the alternative is a Sequence) or
+     * the alternative itself (when it is a bare Literal). Returns the empty
+     * string for any other shape (e.g. a leading char class).
+     */
+    private static String leadingLiteralText(Expression alternative) {
+        var unwrapped = unwrapAcceptableWrappers(alternative);
+        if ( unwrapped instanceof Expression.Literal lit) {
+        return lit.text();}
+        if ( unwrapped instanceof Expression.Sequence seq && !seq.elements().isEmpty()) {
+            var first = unwrapAcceptableWrappers(seq.elements().get(0));
+            if ( first instanceof Expression.Literal lit) {
+            return lit.text();}
+        }
+        return "";
+    }
+
+    /**
+     * Ensure a whitespace alternative matches at least one character so that no
+     * absorbed fragment makes the DFA start state accept the empty string. A
+     * bare char-class alternative (e.g. {@code [ \t\r\n]}) is wrapped as
+     * one-or-more so a maximal whitespace run is still consumed as one token;
+     * all other alternatives (literal-prefixed comment patterns) already match
+     * a non-empty opening delimiter and are returned unchanged.
+     */
+    private static Expression ensureNonEmptyWhitespaceAlternative(Expression alternative) {
+        var unwrapped = unwrapAcceptableWrappers(alternative);
+        if ( unwrapped instanceof Expression.CharClass cc) {
+        return new Expression.OneOrMore(cc.span(), cc);}
+        return alternative;
     }
 
     private static void absorbLiteralFragment(Nfa nfa,

@@ -807,7 +807,7 @@ Reference machine: same Apple Silicon used for 0.5.x bench session.
 | First-call (cold compile) | n/a | **≤ 600 ms** (one-time) | — |
 | Subsequent parse (warm cache) | n/a | reference parse target | — |
 
-For comparison: javac parses 1900-LOC Java in ~9 ms (parse-only mode). 0.6.0 target of ~10 ms for reference fixture brings peglib to **parity-with-or-faster-than javac** on Java parsing — while emitting strictly more output (CST + trivia tokens, vs javac's parse-only AST).
+For comparison: measured javac parse-only for the 1900-LOC reference is ≈2.2 ms; peglib's warm reference parse (≈2.68 ms as of 0.6.2) is ≈1.2× javac — **parity-class with javac** on Java parsing while emitting strictly more output (CST + trivia tokens, vs javac's parse-only AST).
 
 ---
 

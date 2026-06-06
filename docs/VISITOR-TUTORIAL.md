@@ -93,7 +93,7 @@ Configure `peglib-maven-plugin` in your `pom.xml`:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.6.1</version>
+    <version>0.6.2</version>
     <executions>
         <execution>
             <goals><goal>generate-v6</goal></goals>
@@ -483,7 +483,7 @@ emitting either the original token text or your transformed version per node.
   for dropping actions in favor of `GVisitor<T>`.
 - [`peglib-core/src/main/java/org/pragmatica/peg/v6/generator/VisitorGenerator.java`](../peglib-core/src/main/java/org/pragmatica/peg/v6/generator/VisitorGenerator.java)
   — the codegen source. Read it once; it's short.
-- [`peglib-core/src/main/java/org/pragmatica/peg/v6/cst/CstArray.java`](../peglib-core/src/main/java/org/pragmatica/peg/v6/cst/CstArray.java)
+- [`peglib-core/src/main/java/org/pragmatica/peg/v6/cst/CstArray.java`](../peglib-runtime/src/main/java/org/pragmatica/peg/v6/cst/CstArray.java)
   — full CST API surface: `children`, `descendants`, `viewAt`, `kindAt`,
   `kindNameAt`, `firstChildAt`, `nextSiblingAt`, `textAt`, `spanStart`,
   `spanEnd`, `leadingTriviaTokens`, `trailingTriviaTokens`.

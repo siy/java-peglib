@@ -1,9 +1,9 @@
 package org.pragmatica.peg.v6.lexer;
 
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.v6.generator.LexerGenerator;
 import org.pragmatica.peg.v6.token.TokenArray;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -109,7 +109,6 @@ class TriviaClassificationTest {
         .isEqualTo(input);
     }
 
-    @Disabled("Block-comment alternative inside Choice doesn't route through compileDelimitedBlock; lexer cannot lex `/*...*/` from this grammar shape. Fix in a future task.")
     @Test
     void blockComment_isClassifiedAsBlockComment() {
         var engine = engineFor(GRAMMAR_WITH_COMMENTS);
@@ -127,7 +126,6 @@ class TriviaClassificationTest {
         .isEqualTo(input);
     }
 
-    @Disabled("Block-comment alternative inside Choice doesn't lex; defer until lexer driver supports per-iteration trivia tokens.")
     @Test
     void mixedContent_classifiesEachTriviaTokenByItsPrefix() {
         var engine = engineFor(GRAMMAR_WITH_COMMENTS);
@@ -325,5 +323,146 @@ class TriviaClassificationTest {
         assertThat(tokens2.isTrivia(0))
         .as("DOC_BLOCK_COMMENT is trivia")
         .isTrue();
+    }
+
+    // ---- 0.6.2 — unsplit (folded) %whitespace per-kind absorption -------------
+    //
+    // The unsplit form `([ \t\r\n] / '//' [^\n]* / '/*' (!'*/' .)* '*/')*` used to
+    // coalesce an entire mixed-trivia run into ONE KIND_WHITESPACE token. 0.6.2's
+    // DfaBuilder.absorbWhitespace absorbs each Choice alternative at its own trivia
+    // kind so the lexer emits one correctly-classified token per chunk — producing
+    // a token stream byte-identical to the split form.
+
+    /** Unsplit folded form — the shape this task makes work. */
+    private static final String GRAMMAR_UNSPLIT = """
+        Word <- [a-zA-Z]+
+        %whitespace <- ([ \\t\\r\\n] / '//' [^\\n]* / '/*' (!'*/' .)* '*/')*
+        """;
+
+    /** Split per-kind form — the c4169b6 workaround shape, used as the parity oracle. */
+    private static final String GRAMMAR_SPLIT = """
+        Word <- [a-zA-Z]+
+        %whitespace <- [ \\t\\r\\n]+ / '//' [^\\n]* / '/*' (!'*/' .)* '*/'
+        """;
+
+    private static void assertTokenArraysIdentical(TokenArray a, TokenArray b, String input) {
+        assertThat(a.count())
+        .as("token count for input <%s>", input)
+        .isEqualTo(b.count());
+        for (int i = 0; i < a.count(); i++ ) {
+            assertThat(a.kindAt(i))
+            .as("kind of token %d for input <%s>", i, input)
+            .isEqualTo(b.kindAt(i));
+            assertThat(a.startAt(i))
+            .as("start of token %d for input <%s>", i, input)
+            .isEqualTo(b.startAt(i));
+            assertThat(a.endAt(i))
+            .as("end of token %d for input <%s>", i, input)
+            .isEqualTo(b.endAt(i));
+        }
+    }
+
+    private static void assertSplitUnsplitParity(String input) {
+        var unsplit = engineFor(GRAMMAR_UNSPLIT)
+                          .lex(input);
+        var split = engineFor(GRAMMAR_SPLIT)
+                        .lex(input);
+        assertTokenArraysIdentical(unsplit, split, input);
+        assertThat(reconstruct(unsplit))
+        .isEqualTo(input);
+    }
+
+    @Test
+    void unsplitWhitespace_producesIdenticalTokenArrayToSplit_mixedTrivia() {
+        assertSplitUnsplitParity("  // hi\n/* blk */  hello");
+    }
+
+    @Test
+    void unsplitWhitespace_producesIdenticalTokenArrayToSplit_docVariants() {
+        assertSplitUnsplitParity("/// doc\n/** doc */ x");
+    }
+
+    @Test
+    void unsplitWhitespace_producesIdenticalTokenArrayToSplit_consecutiveBlockComments() {
+        assertSplitUnsplitParity("/*a*//*b*/");
+    }
+
+    @Test
+    void unsplitWhitespace_producesIdenticalTokenArrayToSplit_consecutiveLineComments() {
+        assertSplitUnsplitParity("//x\n//y\n");
+    }
+
+    @Test
+    void unsplitWhitespace_classifiesEachTriviaTokenByKind() {
+        var tokens = engineFor(GRAMMAR_UNSPLIT)
+                         .lex("  // hi\n/* blk */  x");
+        // Expected: WS, LINE_COMMENT, WS(\n), BLOCK_COMMENT, WS, Word(x).
+        assertThat(countByKind(tokens, TokenArray.KIND_LINE_COMMENT))
+        .as("one LINE_COMMENT")
+        .isEqualTo(1);
+        assertThat(countByKind(tokens, TokenArray.KIND_BLOCK_COMMENT))
+        .as("one BLOCK_COMMENT")
+        .isEqualTo(1);
+        int nonTrivia = 0;
+        for (int i = 0; i < tokens.count(); i++ ) {
+            if (!tokens.isTrivia(i)) {
+                nonTrivia++ ;
+            }
+        }
+        assertThat(nonTrivia)
+        .as("only the Word token is non-trivia")
+        .isEqualTo(1);
+        assertThat(reconstruct(tokens))
+        .isEqualTo("  // hi\n/* blk */  x");
+    }
+
+    @Test
+    void unsplitWhitespace_zeroTrivia_noEmptyTokensNoInfiniteLoop() {
+        var tokens = engineFor(GRAMMAR_UNSPLIT)
+                         .lex("hello");
+        assertThat(tokens.count())
+        .isEqualTo(1);
+        assertThat(tokens.isTrivia(0))
+        .isFalse();
+        for (int i = 0; i < tokens.count(); i++ ) {
+            assertThat(tokens.endAt(i))
+            .as("token %d is non-empty", i)
+            .isGreaterThan(tokens.startAt(i));
+        }
+        assertThat(reconstruct(tokens))
+        .isEqualTo("hello");
+    }
+
+    @Test
+    void unsplitWhitespace_roundTripsViaReconstruct_mixedTrivia() {
+        var input = "  // hi\n/* blk */\n/// doc\n/** db */  end";
+        var tokens = engineFor(GRAMMAR_UNSPLIT)
+                         .lex(input);
+        assertThat(reconstruct(tokens))
+        .isEqualTo(input);
+    }
+
+    @Test
+    void unsplitWhitespace_doesNotEmitEmptyMatchWarning() {
+        assertThat(generationWarnings(GRAMMAR_UNSPLIT))
+        .as("unsplit %whitespace must not trip the empty-match warning")
+        .isEmpty();
+    }
+
+    private static java.util.List<String> generationWarnings(String grammarText) {
+        var grammar = GrammarParser.parse(grammarText)
+                                   .unwrap();
+        var classification = RuleClassifier.classify(grammar)
+                                           .unwrap();
+        var built = DfaBuilder.build(grammar, classification)
+                              .unwrap();
+        return LexerGenerator.generate(grammar,
+                                       classification,
+                                       built.dfa(),
+                                       built.kinds(),
+                                       "test.pkg",
+                                       "GLexer")
+                             .unwrap()
+                             .warnings();
     }
 }

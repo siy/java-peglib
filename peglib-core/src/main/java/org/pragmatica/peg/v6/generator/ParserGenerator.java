@@ -59,7 +59,8 @@ public final class ParserGenerator {
     ParserGenerationError.StartRuleNotParser,
     ParserGenerationError.UnsupportedExpression,
     ParserGenerationError.UnknownLiteral,
-    ParserGenerationError.UnknownReference {
+    ParserGenerationError.UnknownReference,
+    ParserGenerationError.SkippedRuleReferenced {
         record InvalidIdentifier(String component, String value) implements ParserGenerationError {
             @Override public String message() {
                 return "Invalid Java identifier for " + component + ": '" + value + "'";
@@ -96,6 +97,25 @@ public final class ParserGenerator {
                 return "Rule '" + ruleName + "' references undefined rule '" + referencedRule + "'";
             }
         }
+
+        /**
+         * 0.6.2 — loud guard. A PARSER/MIXED rule references a LEXER rule that
+         * was assigned a token kind but skipped by the DFA builder (unsupported
+         * lookahead / non-regular body) and has neither an alias set nor an
+         * inline-expansion path. The lexer can never produce that kind, so the
+         * generated reference {@code if (peek() != KIND_X)} would always fail —
+         * silently breaking every use of the rule. Fail generation naming both
+         * rules instead of emitting a broken parser.
+         */
+        record SkippedRuleReferenced(String ruleName, String referencedRule, String reason)
+        implements ParserGenerationError {
+            @Override public String message() {
+                return "Rule '" + ruleName + "' references LEXER rule '" + referencedRule
+                       + "' which was assigned a token kind but the lexer cannot produce it (skipped by the "
+                       + "DFA builder) and it has no alias or inline-expansion path. The generated reference would "
+                       + "never match. Original skip reason: " + reason;
+            }
+        }
     }
 
     public record GeneratedParser(String packageName, String className, String source) {
@@ -111,6 +131,24 @@ public final class ParserGenerator {
                                                    DfaBuilder.TokenKindAssignment kinds,
                                                    String packageName,
                                                    String className) {
+        return generate(grammar, classification, kinds, Map.of(), packageName, className);
+    }
+
+    /**
+     * 0.6.2 — generation with the DFA builder's skipped-rule reasons (rule name →
+     * skip reason). References to a skipped LEXER rule that has a live token kind
+     * but no alias / inline-expansion path are rejected with
+     * {@link ParserGenerationError.SkippedRuleReferenced} rather than silently
+     * emitting a dead-kind match. The {@link #generate(Grammar, RuleClassifier.Classification,
+     * DfaBuilder.TokenKindAssignment, String, String) 5-arg overload} passes an empty
+     * map (no guard) for callers that only inspect generated source.
+     */
+    public static Result<GeneratedParser> generate(Grammar grammar,
+                                                   RuleClassifier.Classification classification,
+                                                   DfaBuilder.TokenKindAssignment kinds,
+                                                   Map<String, String> skippedReasons,
+                                                   String packageName,
+                                                   String className) {
         // Internal entry: callers are PegParser/tests with validated inputs.
         if ( !isValidQualifiedPackage(packageName)) {
         return new ParserGenerationError.InvalidIdentifier("packageName", String.valueOf(packageName)).result();}
@@ -123,7 +161,7 @@ public final class ParserGenerator {
         var startKind = classification.kinds().get(startRule.name());
         if ( startKind != RuleKind.PARSER && startKind != RuleKind.MIXED) {
         return new ParserGenerationError.StartRuleNotParser(startRule.name(), startKind).result();}
-        return new Renderer(grammar, classification, kinds, packageName, className).render();
+        return new Renderer(grammar, classification, kinds, skippedReasons, packageName, className).render();
     }
 
     /** Render the full parser source. Stateful to keep helper methods readable. */
@@ -149,14 +187,20 @@ public final class ParserGenerator {
         // int[] of acceptable kinds (idKind + all fallback kinds).
         private final Map<String, int[]> idFallbackArrays;
 
+        // 0.6.2 — DFA-builder skipped-rule reasons (rule name → reason). Used to
+        // reject references to a skipped LEXER rule with a dead token kind.
+        private final Map<String, String> skippedReasons;
+
         Renderer(Grammar grammar,
                  RuleClassifier.Classification classification,
                  DfaBuilder.TokenKindAssignment kinds,
+                 Map<String, String> skippedReasons,
                  String packageName,
                  String className) {
             this.grammar = grammar;
             this.classification = classification;
             this.kinds = kinds;
+            this.skippedReasons = skippedReasons;
             this.packageName = packageName;
             this.className = className;
             this.ruleMap = grammar.ruleMap();
@@ -1041,12 +1085,29 @@ public final class ParserGenerator {
                 emitAliasMatch(ref.ruleName(), aliasKinds, ctx);
                 return Result.unitResult();
             }
+            // 0.6.2 — LEXER rule expanded inline as a multi-token match. The rule
+            // (e.g. {@code LShift <- '<' '<' !'='}) has no single DFA token kind;
+            // instead match each constituent single-char inline-literal kind as
+            // an adjacent token (byte-contiguous, so {@code < <} with trivia in
+            // between does NOT match) and verify the trailing negative lookahead.
+            var expansion = kinds.inlineExpansions().get(ref.ruleName());
+            if ( expansion != null) {
+                emitInlineExpansion(ref.ruleName(), expansion, ctx);
+                return Result.unitResult();
+            }
             // LEXER reference — consume one token of the matching kind.
             var kind = kinds.ruleNameToKind().get(ref.ruleName());
             if ( kind == null) {
             // Rule was demoted to LEXER but DFA didn't pick it up (e.g. skipped).
             // Fall back to ANY_CHAR or report.
             return new ParserGenerationError.UnknownReference(ctx.ruleName, ref.ruleName()).result();}
+            // 0.6.2 — loud guard. The rule has a live kind but no alias and no
+            // inline expansion, and the DFA builder skipped it: the lexer cannot
+            // produce this kind, so a {@code peek() != KIND_X} match here would
+            // always fail. Reject generation naming both rules.
+            var skipReason = skippedReasons.get(ref.ruleName());
+            if ( skipReason != null) {
+            return new ParserGenerationError.SkippedRuleReferenced(ctx.ruleName, ref.ruleName(), skipReason).result();}
             usedTokenKinds.add(kind);
             // Phase 0.6.0 — identifier fallback. If the referenced rule is a
             // skip-prefix rule (e.g. {@code Identifier <- !Keyword [a-zA-Z_$]...}),
@@ -1072,6 +1133,64 @@ public final class ParserGenerator {
                          .append(" }\n");
             ctx.sb.append(indent(ctx.depth)).append("advance();\n");
             return Result.unitResult();
+        }
+
+        /**
+         * 0.6.2 — emit a multi-token inline expansion for a LEXER rule of shape
+         * {@code literal+ !literal?} (e.g. {@code LShift <- '<' '<' !'='}). The
+         * rule has no fused DFA token; instead each constituent single-char
+         * inline-literal kind is matched as a separate token. Consecutive
+         * positive literals must be byte-adjacent (the previous token's end
+         * offset equals the next token's start offset) so that {@code < <} with
+         * intervening trivia does NOT match as {@code <<}. After the positive
+         * literals, an optional negative-lookahead literal kind is verified: the
+         * current (non-trivia) token must NOT be that kind. On any mismatch the
+         * generated code calls {@code fail(...)} and dispatches {@code ctx.failAction}.
+         */
+        private void emitInlineExpansion(String ruleName, DfaBuilder.InlineExpansion expansion, EmitContext ctx) {
+            var indent = indent(ctx.depth);
+            var literalKinds = expansion.literalKinds();
+            for ( var k : literalKinds) {
+            usedTokenKinds.add(k);}
+            for ( var k : expansion.negLookaheadKinds()) {
+            usedTokenKinds.add(k);}
+            var failTag = escapeJavaString(ruleName);
+            var ruleKind = ruleKindConst(ctx);
+            var prevVar = "__ie_prev_" + ctx.nextLabelId();
+            ctx.sb.append(indent).append("int ").append(prevVar).append(" = -1;\n");
+            for ( int i = 0; i < literalKinds.length; i++) {
+                var kindConst = "KIND_" + sanitize(kinds.kindNameTable() [literalKinds[i]]);
+                if ( i == 0) {
+                    ctx.sb.append(indent).append("if (peek() != ").append(kindConst)
+                          .append(") { fail(\"").append(failTag).append("\", ").append(ruleKind)
+                          .append("); ").append(ctx.failAction).append(" }\n");
+                } else
+                {
+                    // Adjacency: the previously consumed (non-trivia) token must be
+                    // byte-contiguous with the current one — no trivia, no gap — to
+                    // count as a fused multi-char operator. {@code < <} (spaced) has
+                    // an intervening whitespace token and therefore does NOT match.
+                    ctx.sb.append(indent).append("if (peek() != ").append(kindConst)
+                          .append(" || ").append(prevVar).append(" < 0 || tokens.endAt(").append(prevVar)
+                          .append(") != tokens.startAt(pos)")
+                          .append(") { fail(\"").append(failTag).append("\", ").append(ruleKind)
+                          .append("); ").append(ctx.failAction).append(" }\n");
+                }
+                ctx.sb.append(indent).append(prevVar).append(" = pos;\n");
+                ctx.sb.append(indent).append("advance();\n");
+            }
+            for ( var negKind : expansion.negLookaheadKinds()) {
+                var negConst = "KIND_" + sanitize(kinds.kindNameTable() [negKind]);
+                // Negative lookahead: the next non-trivia token must not be the
+                // guarded kind while byte-adjacent to the last consumed token. A
+                // non-adjacent token of that kind is a separate operator and does
+                // not violate the lookahead.
+                ctx.sb.append(indent).append("if (peek() == ").append(negConst)
+                      .append(" && ").append(prevVar).append(" >= 0 && tokens.endAt(").append(prevVar)
+                      .append(") == tokens.startAt(pos)")
+                      .append(") { fail(\"").append(failTag).append("\", ").append(ruleKind)
+                      .append("); ").append(ctx.failAction).append(" }\n");
+            }
         }
 
         /**
