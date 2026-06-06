@@ -1,6 +1,6 @@
 # peglib — Handover
 
-**Last updated:** 2026-06-06 — 0.6.2 release branch (release-0.6.2)
+**Last updated:** 2026-06-06 — 0.6.2 SHIPPED to Maven Central
 
 ---
 
@@ -23,6 +23,13 @@
 2. **Per-iteration `%whitespace` tokenization** — folded `%whitespace <- (...)*` now emits per-kind trivia tokens via per-alternative DFA absorption. The c4169b6 canonical-grammar split workaround is **REVERTED** in `java25.peg`; the empty-match warning is gone for the folded form; 2 previously-disabled trivia tests re-enabled.
 
 Skips moved 4 → 2 (remaining: `LexerGeneratorTest` parity 1, `TriviaAdversarialTest$OptionalCutFailurePending` 1).
+
+### Ship state
+
+- **PR #36 merged** → `main` at `5c8126d`, tagged `v0.6.2` (2026-06-06).
+- **Deployed to Maven Central**, deployment `8ac8bbfd-51ec-4cc6-ab4e-25f596320c75`, auto-published — all 7 artifacts live at `repo1.maven.org/maven2/org/pragmatica-lite/*/0.6.2/`.
+- **Anomaly for next release**: deploy total 24:56 min — `peglib-playground` alone took 24:06 (build/test/shade long pole; rest of reactor normal). Investigate before 0.6.3.
+- **Remaining backlog unchanged**: jbct v6 API migration (jbct repo), token pool (H), lexer modes (I), JBCT plugin bump (K), upstream JBCT formatter convergence bug (`-Djbct.skip=true` still required).
 
 ---
 
