@@ -779,13 +779,11 @@ public final class DfaBuilder {
             absorbLiteralFragment(nfa, lit, kind, priorityRef, globalStart);
         }
         if ( grammar.whitespace().isPresent()) {
-        tryAbsorb(nfa,
-                  "%whitespace",
-                  grammar.whitespace().unwrap(),
-                  KIND_WHITESPACE,
-                  priorityRef,
-                  globalStart,
-                  skipped);}
+        absorbWhitespace(nfa,
+                         grammar.whitespace().unwrap(),
+                         priorityRef,
+                         globalStart,
+                         skipped);}
         for ( var rule : grammar.rules()) {
             if ( classification.kinds().get(rule.name()) != RuleKind.LEXER) {
             continue;}
@@ -813,6 +811,141 @@ public final class DfaBuilder {
         if ( assignment.anyCharKind() >= 0) {
         absorbAnyCharFallback(nfa, assignment.anyCharKind(), priorityRef, globalStart);}
         return nfa;
+    }
+
+    /**
+     * 0.6.2 — absorb the {@code %whitespace} body with per-alternative trivia
+     * kinds, so that a single coalescing {@code (...)*} wrapper around a Choice
+     * of trivia kinds (whitespace / line comment / block comment / doc variants)
+     * does NOT collapse an entire mixed-trivia run into one {@code KIND_WHITESPACE}
+     * token. Each Choice alternative becomes its own NFA accept fragment whose
+     * kind is decided structurally (by the alternative's leading literal), not by
+     * a post-match prefix sniff of the matched text.
+     *
+     * <p>Recognised body shapes (after unwrapping Group/TokenBoundary/etc.):
+     * <ul>
+     *   <li>{@code ZeroOrMore(Choice)} / {@code OneOrMore(Choice)} — the canonical
+     *       "fold the whole trivia run" shape. The outer repetition is dropped and
+     *       each alternative is absorbed individually; the lexer's own maximal-munch
+     *       loop performs the iteration, emitting one token per alternative match
+     *       with the correct kind.</li>
+     *   <li>{@code ZeroOrMore(expr)} / {@code OneOrMore(expr)} where {@code expr} is
+     *       not a Choice — treated as a 1-alternative choice.</li>
+     *   <li>a bare {@code Choice} or single expression — treated directly.</li>
+     * </ul>
+     *
+     * <p>Each absorbed alternative is forced to match at least one character
+     * (a bare whitespace char-class alternative is wrapped as one-or-more) so the
+     * DFA start state never accepts the empty string — the unsplit form therefore
+     * does NOT trigger the empty-match warning of the folded-{@code *} shape.
+     *
+     * <p>Falls back to the previous whole-body {@link #tryAbsorb} (with kind
+     * {@code KIND_WHITESPACE} and the post-match prefix sniff) only when the body
+     * does not fit any recognised shape — preserving behaviour for exotic
+     * {@code %whitespace} bodies.
+     */
+    private static void absorbWhitespace(Nfa nfa,
+                                         Expression whitespaceBody,
+                                         int[] priorityRef,
+                                         int globalStart,
+                                         List<SkippedRule> skipped) {
+        var alternatives = whitespaceAlternatives(whitespaceBody);
+        if ( alternatives.isEmpty()) {
+            tryAbsorb(nfa, "%whitespace", whitespaceBody, KIND_WHITESPACE, priorityRef, globalStart, skipped);
+            return;
+        }
+        int absorbed = 0;
+        for ( var alt : alternatives) {
+            int kind = classifyWhitespaceAlternativeKind(alt);
+            var oneOrMore = ensureNonEmptyWhitespaceAlternative(alt);
+            var result = compileExpression(nfa, oneOrMore, "%whitespace");
+            if ( !result.isSuccess()) {
+            continue;}
+            var fragment = result.unwrap();
+            nfa.addEpsilon(globalStart, fragment.start);
+            nfa.markAccept(fragment.accept, kind, priorityRef[0]);
+            priorityRef[0]++;
+            absorbed++;
+        }
+        // If no alternative compiled (e.g. all used unsupported constructs), fall
+        // back to the legacy whole-body path so whitespace lexing still works.
+        if ( absorbed == 0) {
+        tryAbsorb(nfa, "%whitespace", whitespaceBody, KIND_WHITESPACE, priorityRef, globalStart, skipped);}
+    }
+
+    /**
+     * Return the top-level alternatives of a {@code %whitespace} body for
+     * per-kind absorption, or an empty list when the body does not fit a
+     * recognised shape (signalling the caller to use the legacy whole-body path).
+     * The outer {@code ZeroOrMore}/{@code OneOrMore} wrapper is stripped; the
+     * lexer's maximal-munch loop supplies the repetition.
+     */
+    private static List<Expression> whitespaceAlternatives(Expression body) {
+        var unwrapped = unwrapAcceptableWrappers(body);
+        Expression inner;
+        if ( unwrapped instanceof Expression.ZeroOrMore zom) {
+        inner = unwrapAcceptableWrappers(zom.expression());} else
+        if ( unwrapped instanceof Expression.OneOrMore oom) {
+        inner = unwrapAcceptableWrappers(oom.expression());} else
+        {
+        inner = unwrapped;}
+        if ( inner instanceof Expression.Choice choice) {
+        return List.copyOf(choice.alternatives());}
+        return List.of(inner);
+    }
+
+    /**
+     * Decide the {@link TokenArray}-equivalent trivia kind for a single
+     * {@code %whitespace} alternative by inspecting its leading literal. Mirrors
+     * the longest-prefix precedence used by the split-rule + post-match-sniff
+     * path: {@code /**} (doc block) before {@code /*} (block); {@code ///} (doc
+     * line) before {@code //} (line). Anything else — including a leading
+     * whitespace char-class — maps to {@link #KIND_WHITESPACE}.
+     */
+    private static int classifyWhitespaceAlternativeKind(Expression alternative) {
+        var prefix = leadingLiteralText(alternative);
+        if ( prefix.startsWith("/**")) {
+        return KIND_DOC_BLOCK_COMMENT;}
+        if ( prefix.startsWith("/*")) {
+        return KIND_BLOCK_COMMENT;}
+        if ( prefix.startsWith("///")) {
+        return KIND_DOC_LINE_COMMENT;}
+        if ( prefix.startsWith("//")) {
+        return KIND_LINE_COMMENT;}
+        return KIND_WHITESPACE;
+    }
+
+    /**
+     * Extract the leading literal text of an alternative: the text of its first
+     * {@link Expression.Literal} element (when the alternative is a Sequence) or
+     * the alternative itself (when it is a bare Literal). Returns the empty
+     * string for any other shape (e.g. a leading char class).
+     */
+    private static String leadingLiteralText(Expression alternative) {
+        var unwrapped = unwrapAcceptableWrappers(alternative);
+        if ( unwrapped instanceof Expression.Literal lit) {
+        return lit.text();}
+        if ( unwrapped instanceof Expression.Sequence seq && !seq.elements().isEmpty()) {
+            var first = unwrapAcceptableWrappers(seq.elements().get(0));
+            if ( first instanceof Expression.Literal lit) {
+            return lit.text();}
+        }
+        return "";
+    }
+
+    /**
+     * Ensure a whitespace alternative matches at least one character so that no
+     * absorbed fragment makes the DFA start state accept the empty string. A
+     * bare char-class alternative (e.g. {@code [ \t\r\n]}) is wrapped as
+     * one-or-more so a maximal whitespace run is still consumed as one token;
+     * all other alternatives (literal-prefixed comment patterns) already match
+     * a non-empty opening delimiter and are returned unchanged.
+     */
+    private static Expression ensureNonEmptyWhitespaceAlternative(Expression alternative) {
+        var unwrapped = unwrapAcceptableWrappers(alternative);
+        if ( unwrapped instanceof Expression.CharClass cc) {
+        return new Expression.OneOrMore(cc.span(), cc);}
+        return alternative;
     }
 
     private static void absorbLiteralFragment(Nfa nfa,

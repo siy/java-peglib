@@ -128,15 +128,26 @@ public final class LexerEngine {
                 if ( override != null) {
                 lastAcceptKind = override;}
             }
-            // Phase A.6 / 0.6.1 — content-based trivia classification. WHITESPACE tokens
-            // whose text begins with a comment prefix are reclassified into the matching
-            // (regular or doc) line/block-comment kind. Pure whitespace runs never start
-            // with '/', so this is a sound prefix check.
-            //   //         → LINE_COMMENT          (also /+ that isn't doc; see below)
+            // Phase A.6 / 0.6.1 / 0.6.2 — content-based trivia refinement. Two
+            // entry conditions:
+            //   1. legacy fallback: a coalesced WHITESPACE token whose text begins
+            //      with a comment prefix (folded-%whitespace path that did not go
+            //      through structural per-alternative absorption);
+            //   2. structural base kind: DfaBuilder.absorbWhitespace already
+            //      assigned LINE_COMMENT / BLOCK_COMMENT structurally, but the
+            //      grammar's single alternative cannot distinguish the doc variant
+            //      (/// vs //, /** vs /*) — only the matched text can.
+            // In both cases the matched span text is inspected to pick the (regular
+            // or doc) line/block-comment kind. Pure whitespace runs never start
+            // with '/', so the WHITESPACE branch is a sound prefix check.
+            //   //         → LINE_COMMENT
             //   ///        → DOC_LINE_COMMENT      (3 or more slashes)
             //   /* ... */  → BLOCK_COMMENT
             //   /** ... */ → DOC_BLOCK_COMMENT     (NOT the smallest empty block /**/)
-            if ( lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {
+            if ( (lastAcceptKind == TokenArray.KIND_WHITESPACE
+                  || lastAcceptKind == TokenArray.KIND_LINE_COMMENT
+                  || lastAcceptKind == TokenArray.KIND_BLOCK_COMMENT)
+                 && lastAcceptEnd > pos + 1) {
                 char c0 = input.charAt(pos);
                 char c1 = input.charAt(pos + 1);
                 if ( c0 == '/') {

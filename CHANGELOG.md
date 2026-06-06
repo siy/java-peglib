@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does not fuse) with trailing negative lookaheads. Selfhost fixture (40K LOC) now
   parses with 0 diagnostics; both previously `@Disabled` `Java25SelfHostDiagTest`
   assertions re-enabled.
+- Per-iteration `%whitespace` tokenization: an unsplit folded `%whitespace <- (ws / comment / ...)*`
+  rule coalesced an entire trivia run into a single token classified only by prefix-sniffing.
+  The DFA builder now absorbs each closure alternative as its own structurally-classified trivia
+  kind, so the lexer emits one correctly-kinded token per iteration. The canonical `java25.peg`
+  `%whitespace` grammar-split workaround is reverted; the empty-match lexer warning no longer
+  fires for the folded form. Two previously `@Disabled` block-comment trivia tests re-enabled.
 
 ### Added
 

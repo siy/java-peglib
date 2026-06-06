@@ -297,12 +297,18 @@ public final class LexerGenerator {
             sb.append("                }\n");
             sb.append("            }\n");
         }
-        // Phase A.6 / 0.6.1 — content-based trivia classification (mirrors LexerEngine).
+        // Phase A.6 / 0.6.1 / 0.6.2 — content-based trivia refinement (mirrors LexerEngine).
+        // Fires for the legacy coalesced WHITESPACE token AND for structurally-assigned
+        // LINE_COMMENT / BLOCK_COMMENT base kinds whose doc variant can only be told
+        // apart by the matched text.
         // //         → LINE_COMMENT          (also // without third '/')
         // ///        → DOC_LINE_COMMENT      (3+ slashes)
         // /* ... */  → BLOCK_COMMENT
         // /** ... */ → DOC_BLOCK_COMMENT     (NOT '/**/' — smallest empty block)
-        sb.append("            if (lastAcceptKind == TokenArray.KIND_WHITESPACE && lastAcceptEnd > pos + 1) {\n");
+        sb.append("            if ((lastAcceptKind == TokenArray.KIND_WHITESPACE\n");
+        sb.append("                 || lastAcceptKind == TokenArray.KIND_LINE_COMMENT\n");
+        sb.append("                 || lastAcceptKind == TokenArray.KIND_BLOCK_COMMENT)\n");
+        sb.append("                && lastAcceptEnd > pos + 1) {\n");
         sb.append("                char c0 = input.charAt(pos);\n");
         sb.append("                char c1 = input.charAt(pos + 1);\n");
         sb.append("                if (c0 == '/') {\n");
