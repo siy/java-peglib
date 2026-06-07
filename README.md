@@ -343,6 +343,7 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 | Version | Date | What |
 |---|---|---|
+| **0.6.3** | 2026-06-07 | Patch release. Legacy interpreter cut-failure symmetry: `Optional`/`ZeroOrMore`/`OneOrMore`/bounded repetition now restore the pending-trivia snapshot on `CutFailure`. Test suite reaches zero skips (1424 tests). |
 | **0.6.2** | 2026-06-06 | Patch release. Shift operators (`<<`/`>>`/`>>>`) in field/local-var initializer context fixed via inline expansion of DFA-skipped lexer rules; loud `SkippedRuleReferenced` guard. Per-iteration `%whitespace` tokenization (folded form emits per-kind trivia; grammar-split workaround reverted). Selfhost fixture now parses with 0 diagnostics. |
 | **0.6.1** | 2026-05-12 | Patch release. Doc-comment trivia kinds (`KIND_DOC_LINE_COMMENT`, `KIND_DOC_BLOCK_COMMENT`), per-rule `%recover` runtime, `%checkpoint` directive parsing, named captures and back-references restored, `MIXED`-rule char-level fallback, diagnostic cap honored. |
 | **0.6.0** | 2026-05-11 | Clean-slate redesign. Tokens-first lex-then-parse, flat `int[]` CST, visitor pattern, always-on recovery, true partial reparse. ~12x faster than 0.5.x; parity-class with `javac`. **BREAKING** — see [migration guide](docs/MIGRATION-0.5-TO-0.6.md). |
