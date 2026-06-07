@@ -1,6 +1,32 @@
 # peglib — Handover
 
-**Last updated:** 2026-06-06 — 0.6.2 SHIPPED to Maven Central
+**Last updated:** 2026-06-07 — 0.6.3 SHIPPED to Maven Central
+
+---
+
+## Session 8 — 0.6.3 (2026-06-07)
+
+### State at a glance
+
+| | |
+|---|---|
+| **Release** | **v0.6.3** — PR #37 merged → `main` at `f025a22`, tagged, published |
+| **Maven Central** | deployment `8980d093-7621-44ec-8a74-642234248f2d`, auto-published, 7 artifacts; deploy 6:45 min (normal queue) |
+| **Tests** | **1424 passing** across 7 modules, 0 failures, **0 skips** (first zero-skip state) |
+
+### What landed in session 8 (0.6.3 patch items)
+
+1. **Legacy `PegEngine` cut-failure symmetry** — `Optional`, `ZeroOrMore`, `OneOrMore`, and bounded `{n,m}` repetition all swallowed the pending-trivia snapshot on the `CutFailure` path (regular failure restored it). All four now restore symmetrically. Formerly `@Disabled` cut test re-enabled + 4 new combinator tests. Legacy interpreter only — no v6 hot-path impact, no bench needed.
+2. **`LexerGeneratorTest.parity_triviaClassification_lineAndBlockComments` re-enabled** — both skip reasons (block-comment-in-Choice routing, whitespace-run coalescing) were already resolved by the 0.6.2 folded-`%whitespace` fix; passed as written.
+3. **0.6.2 deploy-time "anomaly" closed as non-issue** — the 24:56 was Maven Central's publish-queue wait attributed to the last reactor module; 0.6.3 deployed in 6:45 with identical config, confirming.
+
+### Remaining backlog (unchanged, all 0.7+/external)
+
+- Token pool / arena (H) · lexer modes (I) — 0.7 features
+- JBCT plugin bump (K) — blocked on upstream formatter fix (>0.25.0); `-Djbct.skip=true` still required
+- jbct v6 API migration — jbct repo
+- Lexer-rule arbitrary lookahead ("Phase B") — only `literal+ (!literal)*` shape supported (0.6.2 inline expansion); other shapes fail loudly at `fromGrammar`
+- Stale note: project CLAUDE.md still says named captures are rejected at `fromGrammar` — restored in 0.6.1; fix on next CLAUDE.md touch
 
 ---
 
