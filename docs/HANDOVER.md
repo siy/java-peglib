@@ -28,7 +28,7 @@ Skips moved 4 → 2 (remaining: `LexerGeneratorTest` parity 1, `TriviaAdversaria
 
 - **PR #36 merged** → `main` at `5c8126d`, tagged `v0.6.2` (2026-06-06).
 - **Deployed to Maven Central**, deployment `8ac8bbfd-51ec-4cc6-ab4e-25f596320c75`, auto-published — all 7 artifacts live at `repo1.maven.org/maven2/org/pragmatica-lite/*/0.6.2/`.
-- **Anomaly for next release**: deploy total 24:56 min — `peglib-playground` alone took 24:06 (build/test/shade long pole; rest of reactor normal). Investigate before 0.6.3.
+- **Deploy-time note (investigated, resolved — no action)**: 0.6.2 deploy total 24:56 min looked like a `peglib-playground` problem (24:06 in reactor summary) but the log shows playground's own work finished in seconds; the time was `central-publishing-maven-plugin`'s `Waiting until Deployment ... is published` poll — Maven Central's server-side publish queue — attributed to the last reactor module. 0.6.1 took ~4-5 min through the same mechanism. Keep `waitUntil=published` (sync confirmation is worth the wait on a rare operation).
 - **Remaining backlog unchanged**: jbct v6 API migration (jbct repo), token pool (H), lexer modes (I), JBCT plugin bump (K), upstream JBCT formatter convergence bug (`-Djbct.skip=true` still required).
 
 ---

@@ -188,7 +188,6 @@ class LexerGeneratorTest {
                   "True false TRUE foo");
     }
 
-    @org.junit.jupiter.api.Disabled("Block-comment alternative inside Choice doesn't route through compileDelimitedBlock; lexer driver also coalesces %whitespace runs into a single token. Defer to later phase.")
     @Test
     void parity_triviaClassification_lineAndBlockComments() {
         // Phase A.6 — generated lexer mirrors the engine's content-based trivia

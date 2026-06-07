@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-06-07
+
+### Fixed
+
+- Legacy interpreter (`PegEngine`): `Optional`, `ZeroOrMore`, `OneOrMore`, and bounded
+  repetition swallowed the pending-trivia snapshot on the `CutFailure` path — the cut
+  failure propagated without restoring `entryPendingSnapshot`/`iterPendingSnapshot`,
+  unlike the regular-failure path. All four combinators now restore symmetrically.
+  Previously `@Disabled` cut-failure test re-enabled plus 4 new combinator tests.
+- Re-enabled `LexerGeneratorTest.parity_triviaClassification_lineAndBlockComments` —
+  the folded `%whitespace` per-kind trivia fix (0.6.2) resolved both reasons for the
+  skip (block-comment-in-Choice routing and whitespace-run coalescing). The full test
+  suite now runs with **zero skips** (1424 tests across 7 modules).
+
 ## [0.6.2] - 2026-06-06
 
 ### Fixed
