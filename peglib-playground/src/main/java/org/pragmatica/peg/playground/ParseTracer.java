@@ -1,10 +1,12 @@
 package org.pragmatica.peg.playground;
 
 import org.pragmatica.peg.tree.CstNode;
-import org.pragmatica.peg.tree.Trivia;
+import org.pragmatica.peg.v6.cst.CstArray;
+import org.pragmatica.peg.v6.token.TokenArray;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /**
  * Passive recorder of tracer events for a single parse run. The tracer is
@@ -14,19 +16,29 @@ import java.util.List;
  * <p>Typical usage in the playground server / REPL:
  * <pre>
  *   var tracer = ParseTracer.start();
- *   var result = parser.parseCst(input);
- *   tracer.walkCst(result.unwrap());
- *   var stats = tracer.stats(result, diagnosticsSize);
+ *   var result = parser.parse(input);
+ *   var walk = tracer.walkCst(result.cst());
+ *   var stats = tracer.stats(walk.nodes(), walk.trivia(), result.diagnostics().size());
  * </pre>
  *
- * <p>A parse-time instrumentation hook would require engine changes; v1
- * intentionally avoids that. Rule-entry / success / failure events are
- * synthesised from the resulting CST (one entry per non-terminal node),
- * which is a faithful representation of the rules that <em>successfully</em>
- * produced tree content. Backtracked attempts are not visible — this is a
- * known limitation and documented in docs/PLAYGROUND.md.
+ * <p>The tracer is <em>not</em> an engine hook. A parse-time instrumentation
+ * hook would require generated-parser changes; this design intentionally
+ * avoids that. Rule-entry / success / failure events are synthesised by
+ * walking the finished CST (one entry per node), which is a faithful
+ * representation of the rules that <em>successfully</em> produced tree
+ * content. Backtracked attempts are not visible — this is a known limitation
+ * and documented in docs/PLAYGROUND.md.
+ *
+ * <p>0.6.x note — the packrat counters ({@link #cacheHits()},
+ * {@link #cacheMisses()}, {@link #cachePuts()}) and {@link #cutsFired()}
+ * remain on the API because {@link Stats} and the playground frontend consume
+ * them, but the 0.6.x lex-then-parse pipeline has no memoization and elides
+ * cuts at lex time, so nothing increments them during a v6 walk.
  */
 public final class ParseTracer {
+    /** Rule name reported for error-flagged CST nodes, which carry no grammar rule of their own. */
+    private static final String ERROR_RULE = "<error>";
+
     private final long startNanos;
     private final List<TraceRecord> records = new ArrayList<>();
     private int ruleEntries;
@@ -109,52 +121,70 @@ public final class ParseTracer {
     }
 
     /**
-     * Walk the CST and synthesise RULE_ENTER / RULE_SUCCESS events from
-     * node structure. Each non-terminal contributes one enter + one
-     * success event (terminals + tokens become enter+success for the
-     * rule they carry). Call exactly once per parse after the CST is
+     * Walk a flat {@link CstArray} and synthesise RULE_ENTER / RULE_SUCCESS
+     * events from node structure. Each non-error node contributes one enter
+     * event before its children and one success event after them; each
+     * error-flagged node contributes a RULE_FAILURE event plus a NOTE naming
+     * the skipped region. Call exactly once per parse after the CST is
      * available. Also tallies node and trivia counts.
+     *
+     * <p>The walk descends through error nodes as well, so {@link WalkResult#nodes()}
+     * always agrees with {@link #countNodes(CstArray)} and covers every node
+     * reachable from the root.
      */
-    public WalkResult walkCst(CstNode root) {
-        var walker = new WalkState();
-        walker.visit(root);
-        return new WalkResult(walker.nodes, walker.trivia);
+    public WalkResult walkCst(CstArray cst) {
+        return new WalkResult(visitAll(cst),
+                              countTrivia(cst));
+    }
+
+    private int visitAll(CstArray cst) {
+        if (isEmpty(cst)) {
+            return 0;
+        }
+        var walker = new ArrayWalkState(cst);
+        walker.visit(cst.rootIndex());
+        return walker.nodes;
     }
 
     public record WalkResult(int nodes, int trivia) {}
 
-    private final class WalkState {
+    /**
+     * Index-based walker over a {@link CstArray}. Classification uses the flat
+     * accessors ({@link CstArray#isError}, {@link CstArray#children}) rather
+     * than {@link CstArray#viewAt} so no per-node view record is allocated.
+     */
+    private final class ArrayWalkState {
+        private final CstArray cst;
         int nodes;
-        int trivia;
 
-        void visit(CstNode node) {
+        ArrayWalkState(CstArray cst) {
+            this.cst = cst;
+        }
+
+        void visit(int nodeIdx) {
             nodes++ ;
-            trivia += node.leadingTrivia()
-                          .size() + node.trailingTrivia()
-                                       .size();
-            int offset = node.span()
-                             .startOffset();
-            switch (node) {
-                case CstNode.NonTerminal nt -> {
-                    recordRuleEnter(nt.rule(), offset);
-                    for (var child : nt.children()) {
-                        visit(child);
-                    }
-                    recordRuleSuccess(nt.rule(), offset);
-                }
-                case CstNode.Terminal t -> {
-                    recordRuleEnter(t.rule(), offset);
-                    recordRuleSuccess(t.rule(), offset);
-                }
-                case CstNode.Token tk -> {
-                    recordRuleEnter(tk.rule(), offset);
-                    recordRuleSuccess(tk.rule(), offset);
-                }
-                case CstNode.Error err -> {
-                    recordRuleFailure("<error>", offset);
-                    note("error region: " + err.skippedText());
-                }
+            if (cst.isError(nodeIdx)) {
+                visitError(nodeIdx);
+            }else {
+                visitRule(nodeIdx);
             }
+        }
+
+        private void visitError(int nodeIdx) {
+            recordRuleFailure(ERROR_RULE,
+                              cst.spanStart(nodeIdx));
+            note("error region: " + cst.textAt(nodeIdx));
+            cst.children(nodeIdx)
+               .forEach(this::visit);
+        }
+
+        private void visitRule(int nodeIdx) {
+            var rule = cst.kindNameAt(nodeIdx);
+            var offset = cst.spanStart(nodeIdx);
+            recordRuleEnter(rule, offset);
+            cst.children(nodeIdx)
+               .forEach(this::visit);
+            recordRuleSuccess(rule, offset);
         }
     }
 
@@ -204,8 +234,119 @@ public final class ParseTracer {
     }
 
     /**
-     * Tally trivia on a node recursively; public helper for callers that
-     * need the count without constructing a WalkResult.
+     * THE trivia definition for the playground: the number of DISTINCT trivia
+     * tokens in the parse. Every whitespace / comment token is counted exactly
+     * once.
+     *
+     * <p>This must not be computed by summing
+     * {@link CstArray#leadingTriviaTokens}/{@link CstArray#trailingTriviaTokens}
+     * over nodes. Those scan strictly OUTSIDE a node's token span, so in the
+     * 0.6.x flat CST — where a rule node usually spans many tokens rather than
+     * one leaf per token — interior trivia is attributed to no node at all
+     * (yielding 0), while trivia between two sibling leaves is attributed to
+     * both (yielding double). Neither is the count the user is shown.
+     *
+     * <p>{@link org.pragmatica.peg.playground.v6.PlaygroundEngineV6
+     * PlaygroundEngineV6} delegates here for {@link Stats#triviaCount()}, and
+     * {@link #walkCst(CstArray)} reports the same number, so the tracer's
+     * {@code walk.trivia()} and the engine's stats line cannot drift apart.
+     */
+    public static int countTrivia(CstArray cst) {
+        return countTriviaTokens(cst.tokens());
+    }
+
+    /** Trivia tally over a raw token stream; see {@link #countTrivia(CstArray)}. */
+    public static int countTriviaTokens(TokenArray tokens) {
+        return (int) IntStream.range(0, tokens.count())
+                              .filter(tokens::isTrivia)
+                              .count();
+    }
+
+    /**
+     * Count nodes reachable from the root of a {@link CstArray}.
+     */
+    public static int countNodes(CstArray cst) {
+        if (isEmpty(cst)) {
+            return 0;
+        }
+        return (int) cst.descendants(cst.rootIndex())
+                        .count();
+    }
+
+    /**
+     * Classify a token kind to one of the five well-known trivia kinds.
+     * Useful for JSON encoding when the frontend wants to distinguish
+     * whitespace from the four comment flavours. Non-trivia kinds report
+     * {@code "content"}.
+     */
+    public static String triviaKind(int tokenKind) {
+        return switch (tokenKind) {
+            case TokenArray.KIND_WHITESPACE -> "whitespace";
+            case TokenArray.KIND_LINE_COMMENT -> "line-comment";
+            case TokenArray.KIND_BLOCK_COMMENT -> "block-comment";
+            case TokenArray.KIND_DOC_LINE_COMMENT -> "doc-line-comment";
+            case TokenArray.KIND_DOC_BLOCK_COMMENT -> "doc-block-comment";
+            default -> "content";
+        };
+    }
+
+    private static boolean isEmpty(CstArray cst) {
+        return cst.nodeCount() == 0 || cst.rootIndex() == CstArray.NO_NODE;
+    }
+
+    // ------------------------------------------------------------------
+    // LEGACY 0.5.x SHIM — delete together with PlaygroundEngine / PlaygroundRepl
+    // and the org.pragmatica.peg.tree package. These three overloads exist only
+    // because PlaygroundEngine still walks the recursive CstNode tree; nothing
+    // else references them.
+    // ------------------------------------------------------------------
+
+    /**
+     * Legacy recursive-CST walk. Superseded by {@link #walkCst(CstArray)}.
+     */
+    public WalkResult walkCst(CstNode root) {
+        var walker = new WalkState();
+        walker.visit(root);
+        return new WalkResult(walker.nodes, walker.trivia);
+    }
+
+    private final class WalkState {
+        int nodes;
+        int trivia;
+
+        void visit(CstNode node) {
+            nodes++ ;
+            trivia += node.leadingTrivia()
+                          .size() + node.trailingTrivia()
+                                       .size();
+            int offset = node.span()
+                             .startOffset();
+            switch (node) {
+                case CstNode.NonTerminal nt -> {
+                    recordRuleEnter(nt.rule(), offset);
+                    for (var child : nt.children()) {
+                        visit(child);
+                    }
+                    recordRuleSuccess(nt.rule(), offset);
+                }
+                case CstNode.Terminal t -> {
+                    recordRuleEnter(t.rule(), offset);
+                    recordRuleSuccess(t.rule(), offset);
+                }
+                case CstNode.Token tk -> {
+                    recordRuleEnter(tk.rule(), offset);
+                    recordRuleSuccess(tk.rule(), offset);
+                }
+                case CstNode.Error err -> {
+                    recordRuleFailure(ERROR_RULE, offset);
+                    note("error region: " + err.skippedText());
+                }
+            }
+        }
+    }
+
+    /**
+     * Legacy recursive trivia tally. Superseded by {@link #countTrivia(CstArray)}.
      */
     public static int countTrivia(CstNode root) {
         int count = root.leadingTrivia()
@@ -220,7 +361,7 @@ public final class ParseTracer {
     }
 
     /**
-     * Count nodes recursively.
+     * Legacy recursive node tally. Superseded by {@link #countNodes(CstArray)}.
      */
     public static int countNodes(CstNode root) {
         int count = 1;
@@ -230,18 +371,5 @@ public final class ParseTracer {
             }
         }
         return count;
-    }
-
-    /**
-     * Classify a trivia instance to one of the three well-known kinds.
-     * Useful for JSON encoding when the frontend wants to distinguish
-     * whitespace from comments.
-     */
-    public static String triviaKind(Trivia trivia) {
-        return switch (trivia) {
-            case Trivia.Whitespace _ -> "whitespace";
-            case Trivia.LineComment _ -> "line-comment";
-            case Trivia.BlockComment _ -> "block-comment";
-        };
     }
 }

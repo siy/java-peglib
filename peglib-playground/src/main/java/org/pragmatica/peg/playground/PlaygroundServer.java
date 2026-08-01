@@ -1,13 +1,13 @@
 package org.pragmatica.peg.playground;
 
 import org.pragmatica.lang.Cause;
-import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
-import org.pragmatica.peg.error.RecoveryStrategy;
-import org.pragmatica.peg.playground.PlaygroundEngine.ParseOutcome;
-import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
 import org.pragmatica.peg.playground.internal.JsonDecoder;
 import org.pragmatica.peg.playground.internal.JsonEncoder;
+import org.pragmatica.peg.playground.internal.JsonEncoder.Diagnostics;
+import org.pragmatica.peg.playground.v6.PlaygroundEngineV6;
+import org.pragmatica.peg.playground.v6.PlaygroundEngineV6.ParseOutcome;
+import org.pragmatica.peg.playground.v6.PlaygroundEngineV6.ParseRequest;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,7 +16,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -119,40 +118,86 @@ public final class PlaygroundServer {
         // 0.4.0 — Result.lift wraps the JSON-parse adapter; the validate step
         // stays as a pure Result so the bad-request branch surfaces both
         // decode and missing-field failures uniformly.
-        var requestResult = parseRequestBody(body);
-        if (requestResult.isFailure()) {
-            sendJson(exchange, 400, badRequestPayload(requestResult));
-            return;
-        }
-        var result = PlaygroundEngine.run(requestResult.unwrap());
-        if (result.isFailure()) {
-            sendJson(exchange, 200, grammarErrorPayload(result.toString()));
-            return;
-        }
-        sendJson(exchange, 200, buildResponse(result.unwrap()));
+        var response = parseRequestBody(body).fold(PlaygroundServer::badRequest,
+                                                   PlaygroundServer::runParse);
+        sendJson(exchange,
+                 response.status(),
+                 response.payload());
     }
 
-    private static Map<String, Object> grammarErrorPayload(String message) {
+    /** An HTTP status paired with the JSON body to render at it. */
+    private record JsonResponse(int status, Map<String, Object> payload) {
+        static JsonResponse jsonResponse(int status, Map<String, Object> payload) {
+            return new JsonResponse(status, payload);
+        }
+    }
+
+    private static JsonResponse badRequest(Cause cause) {
+        return JsonResponse.jsonResponse(400,
+                                         Map.of("error", "bad request", "detail", cause.message()));
+    }
+
+    /**
+     * Grammar-compile failures are a normal playground outcome, not an HTTP
+     * error: both branches render into a 200 payload the SPA understands.
+     */
+    private static JsonResponse runParse(ParseRequest request) {
+        return JsonResponse.jsonResponse(200,
+                                         PlaygroundEngineV6.run(request)
+                                                           .fold(PlaygroundServer::grammarErrorPayload,
+                                                                 PlaygroundServer::buildResponse));
+    }
+
+    private static Map<String, Object> grammarErrorPayload(Cause cause) {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("ok", Boolean.FALSE);
-        payload.put("grammarError", message);
+        payload.put("grammarError", cause.message());
         payload.put("tree", null);
         payload.put("diagnostics", List.of());
         payload.put("stats", Stats.empty());
         return payload;
     }
 
+    /**
+     * 0.6.x — every parse yields a tree, so {@code ok} reduces to "no
+     * diagnostics were recorded"; the legacy "did we get a node at all" test
+     * no longer has a false case.
+     */
     private static Map<String, Object> buildResponse(ParseOutcome outcome) {
         var payload = new LinkedHashMap<String, Object>();
-        payload.put("ok",
-                    outcome.hasNode() && !outcome.hasErrors());
-        payload.put("tree",
-                    outcome.node()
-                           .fold(() -> null,
-                                 node -> node));
-        payload.put("diagnostics", outcome.diagnostics());
-        payload.put("stats", outcome.stats());
+        payload.put("ok", !outcome.hasErrors());
+        payload.put("tree", outcome.cst());
+        payload.put("diagnostics",
+                    Diagnostics.diagnostics(outcome.diagnostics(),
+                                            outcome.cst()
+                                                   .input()));
+        payload.put("stats", statsWithTrace(outcome));
         return payload;
+    }
+
+    /**
+     * Re-walk the finished CST with a {@link ParseTracer} so the response
+     * carries the {@code ruleEntries} counter the SPA's stats line displays.
+     * Timing and diagnostic counts stay as the engine measured them — the
+     * tracer runs after the parse and its own clock would report walk time,
+     * not parse time. {@code walk.trivia()} and the engine's
+     * {@code triviaCount} are the same number by construction (both come from
+     * {@link ParseTracer#countTrivia}). Packrat and cut counters are
+     * structurally zero in 0.6.x (no memoization; cuts are elided at lex time).
+     */
+    private static Stats statsWithTrace(ParseOutcome outcome) {
+        var tracer = ParseTracer.start();
+        var walk = tracer.walkCst(outcome.cst());
+        var measured = outcome.stats();
+        return new Stats(measured.timeMicros(),
+                         walk.nodes(),
+                         walk.trivia(),
+                         tracer.ruleEntries(),
+                         0,
+                         0,
+                         0,
+                         0,
+                         measured.diagnosticCount());
     }
 
     /**
@@ -167,24 +212,19 @@ public final class PlaygroundServer {
                      .flatMap(PlaygroundServer::buildRequest);
     }
 
+    /**
+     * 0.6.x — the grammar is the configuration (spec decision 9), so a parse
+     * request carries only grammar text and input. The 0.5.x {@code startRule},
+     * {@code packrat}, {@code recovery} and {@code mode} fields are gone; any
+     * still present in an inbound body are ignored rather than rejected.
+     */
     private static Result<ParseRequest> buildRequest(Map<String, Object> obj) {
         String grammar = stringField(obj, "grammar", "");
         if (grammar.isEmpty()) {
             return new BadRequest("grammar field is required").result();
         }
-        return Result.success(new ParseRequest(
-        grammar,
-        stringField(obj, "input", ""),
-        optionalString(obj, "startRule"),
-        booleanField(obj, "packrat", true),
-        parseRecovery(stringField(obj, "recovery", "BASIC")),
-        booleanField(obj, "trivia", true),
-        "ast".equalsIgnoreCase(stringField(obj, "mode", "cst"))));
-    }
-
-    private static Map<String, Object> badRequestPayload(Result<ParseRequest> failed) {
-        var detail = failed.fold(Cause::message, _ -> "");
-        return Map.of("error", "bad request", "detail", detail);
+        return Result.success(new ParseRequest(grammar,
+                                               stringField(obj, "input", "")));
     }
 
     /** Adapter-boundary cause for parse-request decoding/validation failures. */
@@ -197,38 +237,11 @@ public final class PlaygroundServer {
         }
     }
 
-    private static RecoveryStrategy parseRecovery(String raw) {
-        if (raw == null) {
-            return RecoveryStrategy.BASIC;
-        }
-        try{
-            return RecoveryStrategy.valueOf(raw.toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException ex) {
-            return RecoveryStrategy.BASIC;
-        }
-    }
-
     private static String stringField(Map<String, Object> obj, String key, String fallback) {
         Object value = obj.get(key);
         return value instanceof String s
                ? s
                : fallback;
-    }
-
-    private static boolean booleanField(Map<String, Object> obj, String key, boolean fallback) {
-        Object value = obj.get(key);
-        if (value instanceof Boolean b) {
-            return b;
-        }
-        return fallback;
-    }
-
-    private static Option<String> optionalString(Map<String, Object> obj, String key) {
-        Object value = obj.get(key);
-        if (value instanceof String s && !s.isBlank()) {
-            return Option.some(s);
-        }
-        return Option.none();
     }
 
     // === static file handler ===

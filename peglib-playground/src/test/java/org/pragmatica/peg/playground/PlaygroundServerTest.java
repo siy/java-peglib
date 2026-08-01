@@ -10,11 +10,28 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PlaygroundServerTest {
+
+    /**
+     * 0.6.x request bodies carry grammar and input only — the 0.5.x
+     * {@code recovery} / {@code packrat} / {@code startRule} / {@code mode}
+     * knobs no longer exist server-side.
+     */
+    private static final String VALID_BODY = """
+            {"grammar":"Sum <- Number '+' Number\\nNumber <- [0-9]+\\n%whitespace <- [ \\\\t]*\\n",
+             "input":"12 + 34"}
+            """;
+
+    /** Parses with recovery: 'x' is unexpected where 'b' was required. */
+    private static final String FAILING_BODY = """
+            {"grammar":"Pair <- Head 'b'\\nHead <- 'a' '#'\\n",
+             "input":"a#x"}
+            """;
 
     private PlaygroundServer server;
     private HttpClient client;
@@ -34,15 +51,7 @@ class PlaygroundServerTest {
 
     @Test
     void parseEndpoint_returnsValidJsonWithTreeAndStats() throws Exception {
-        String body = """
-                {"grammar":"Number <- < [0-9]+ >\\n%whitespace <- [ \\\\t]*\\n",
-                 "input":"42",
-                 "recovery":"BASIC",
-                 "packrat":true,
-                 "trivia":true}
-                """;
-
-        var response = post("/parse", body);
+        var response = post("/parse", VALID_BODY);
         assertThat(response.statusCode()).isEqualTo(200);
 
         Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
@@ -55,6 +64,58 @@ class PlaygroundServerTest {
         Map<String, Object> stats = (Map<String, Object>) parsed.get("stats");
         assertThat(stats.get("nodeCount")).isInstanceOf(Long.class);
         assertThat(((Long) stats.get("nodeCount"))).isGreaterThan(0L);
+    }
+
+    /**
+     * Guards the wire contract {@code playground.js} renders against: the tree
+     * node keys {@code renderNode} reads and the stats keys {@code renderStats}
+     * interpolates. {@code ruleEntries} additionally proves the ParseTracer
+     * walk is still wired into the response.
+     */
+    @Test
+    void parseEndpoint_emitsJsonShapeTheFrontendRenders() throws Exception {
+        var response = post("/parse", VALID_BODY);
+
+        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> tree = (Map<String, Object>) parsed.get("tree");
+        assertThat(tree).containsKeys("kind", "rule", "start", "end", "line", "column");
+        assertThat(tree.get("kind")).isEqualTo("non-terminal");
+        assertThat(tree.get("children")).isInstanceOf(List.class);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stats = (Map<String, Object>) parsed.get("stats");
+        assertThat(stats).containsKeys("timeMicros",
+                                       "nodeCount",
+                                       "triviaCount",
+                                       "ruleEntries",
+                                       "diagnosticCount");
+        assertThat((Long) stats.get("ruleEntries")).isGreaterThan(0L);
+    }
+
+    @Test
+    void parseEndpoint_diagnosticsCarrySeverityLineAndColumn() throws Exception {
+        var response = post("/parse", FAILING_BODY);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        assertThat(parsed.get("ok")).isEqualTo(Boolean.FALSE);
+
+        var diagnostics = (List< ? >) parsed.get("diagnostics");
+        assertThat(diagnostics).isNotEmpty();
+        assertThat(asJsonObject(diagnostics.getFirst())).containsKeys("severity",
+                                                                     "message",
+                                                                     "line",
+                                                                     "column",
+                                                                     "start",
+                                                                     "end");
+    }
+
+    /** Decoded JSON objects arrive as raw {@code Object}; AssertJ needs the key type. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asJsonObject(Object value) {
+        return (Map<String, Object>) value;
     }
 
     @Test

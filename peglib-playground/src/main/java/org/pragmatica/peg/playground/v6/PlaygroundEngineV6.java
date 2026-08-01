@@ -1,6 +1,7 @@
 package org.pragmatica.peg.playground.v6;
 
 import org.pragmatica.lang.Result;
+import org.pragmatica.peg.playground.ParseTracer;
 import org.pragmatica.peg.playground.Stats;
 import org.pragmatica.peg.v6.PegParser;
 import org.pragmatica.peg.v6.cst.CstArray;
@@ -51,7 +52,7 @@ public final class PlaygroundEngineV6 {
         long elapsedNanos = System.nanoTime() - startNanos;
         var cst = parseResult.cst();
         int nodeCount = cst.nodeCount();
-        int triviaCount = countTrivia(cst);
+        int triviaCount = ParseTracer.countTrivia(cst);
         var stats = new Stats(elapsedNanos / 1000L,
                               nodeCount,
                               triviaCount,
@@ -62,22 +63,6 @@ public final class PlaygroundEngineV6 {
                               0,                                // cutsFired — n/a (lex-time)
                               parseResult.diagnostics().size());
         return new ParseOutcome(cst, parseResult.diagnostics(), stats);
-    }
-
-    /**
-     * Tally trivia by walking the underlying token array — v6 stores trivia as
-     * positional tokens (whitespace / line-comment / block-comment kinds)
-     * rather than as per-node attachments.
-     */
-    private static int countTrivia(CstArray cst) {
-        var tokens = cst.tokens();
-        int count = 0;
-        for (int i = 0; i < tokens.count(); i++) {
-            if (tokens.isTrivia(i)) {
-                count++;
-            }
-        }
-        return count;
     }
 
     /**
