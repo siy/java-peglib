@@ -29,8 +29,7 @@ Nine decisions (per spec §3 — all implemented or documented):
 ```
 peglib/
 ├── peglib-runtime/         25KB; generated parsers depend ONLY on this + pragmatica-lite:core
-├── peglib-core/            grammar parser, codegen, analyzers, v6 implementation
-├── peglib-incremental/     IncrementalParser; true partial reparse
+├── peglib-core/            grammar parser, codegen, analyzers, v6 implementation, IncrementalParser
 ├── peglib-formatter/       Wadler-Lindig pretty printer on flat CST
 ├── peglib-maven-plugin/    build-time codegen mojo
 └── peglib-playground/      REPL + HTTP UI

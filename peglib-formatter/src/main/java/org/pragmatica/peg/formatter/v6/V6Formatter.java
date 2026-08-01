@@ -13,8 +13,8 @@ import java.util.List;
 
 /**
  * Wadler-style pretty-printer that walks the 0.6.0 flat-array CST
- * ({@link CstArray}). v6 counterpart of
- * {@link org.pragmatica.peg.formatter.Formatter}, sharing the
+ * ({@link CstArray}). Sole formatter entry point since 0.7.0 removed the
+ * 0.5.x recursive-CST formatter; builds on the
  * {@link Doc}/{@link Docs}/{@link Renderer} algebra.
  *
  * <p>Walk: for each node, if a user-supplied {@link V6FormatterRule} is

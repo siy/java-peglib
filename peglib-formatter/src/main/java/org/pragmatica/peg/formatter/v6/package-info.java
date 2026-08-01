@@ -1,7 +1,8 @@
 /**
- * Parallel v6 formatter package — a Wadler-Lindig pretty-printer that walks the
- * 0.6.0 flat-array CST ({@link org.pragmatica.peg.v6.cst.CstArray}) instead of
- * the 0.5.x record-based {@link org.pragmatica.peg.tree.CstNode}.
+ * v6 formatter package — a Wadler-Lindig pretty-printer that walks the 0.6.0
+ * flat-array CST ({@link org.pragmatica.peg.v6.cst.CstArray}). It replaces the
+ * 0.5.x formatter, which walked a recursive record-based CST that no longer
+ * exists.
  *
  * <p>The doc algebra ({@link org.pragmatica.peg.formatter.Doc} /
  * {@link org.pragmatica.peg.formatter.Docs}) and renderer

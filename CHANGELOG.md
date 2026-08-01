@@ -9,7 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+**BREAKING — the entire 0.5.x legacy parser path is gone.** 146 files, ~38,900 lines
+(142 Java files: 55 main, 80 test, 7 JMH). The 0.6.x tokens-first lex-then-parse
+pipeline (`org.pragmatica.peg.v6`) is now the only parser. Grammar-level shared
+infrastructure (`peg.grammar`, `peg.grammar.analysis`, `peg.error.ParseError`,
+`peg.tree.SourceLocation` / `SourceSpan`, `peg.analyzer`, `peg.formatter.Doc` /
+`Docs` / `internal.Renderer`) is retained — the v6 pipeline is built on it.
+
+- **`org.pragmatica.peg.PegParser`** — the 0.5.x entry point. Use
+  `org.pragmatica.peg.v6.PegParser.fromGrammar(String)`.
+- **`org.pragmatica.peg.parser`** (8) — the backtracking interpreter and its
+  configuration: `PegEngine`, `Parser`, `ParsingContext`, `ParserConfig`,
+  `ParseResult`, `ParseResultWithDiagnostics`, `ParseMode`, `PartialParse`.
+  Per 0.6.0 decision 9 ("the grammar IS the configuration"), `ParserConfig` and its
+  17 tuning flags have no successor.
+- **`org.pragmatica.peg.action`** (5) — runtime action blocks: `Action`, `Actions`,
+  `ActionCompiler`, `SemanticValues`, `RuleId`. Superseded by the generated
+  `GVisitor<T>`; inline `{ ... }` action blocks were already dropped in 0.6.0.
+- **`org.pragmatica.peg.generator`** (4) — the 0.5.x source generator:
+  `ParserGenerator`, `ChoiceDispatchAnalyzer`, `PackratAnalyzer`, `ErrorReporting`.
+  Superseded by `v6.generator.{LexerGenerator,ParserGenerator,VisitorGenerator}`.
+- **`org.pragmatica.peg.tree`** (6) — the recursive CST/AST: `CstNode`, `AstNode`,
+  `Trivia`, `TriviaPostPass`, `StringSpan`, `IdGenerator`. The flat `int[]`
+  `v6.cst.CstArray` is the only tree; trivia lives in `TokenArray`.
+- **`org.pragmatica.peg.error`** (2) — `Diagnostic`, `RecoveryStrategy`. Replaced by
+  `v6.diagnostic.{Diagnostic,Severity}` and the single always-on recovery mechanism.
+- **`org.pragmatica.peg.formatter`** (5) — the recursive-CST formatter: `Formatter`,
+  `FormatContext`, `FormatterConfig`, `FormatterRule`, `TriviaPolicy`. Use
+  `peg.formatter.v6.V6Formatter`, which walks `CstArray`.
+- **`peglib-incremental` module** (38 files) — directory, `pom.xml`, README, JMH
+  harness, and its `<module>` / `<dependencyManagement>` entries in the parent POM.
+  The 0.5.x tree-splicing session engine (`Session`, `IncrementalSession`,
+  `TreeSplicer`, `NodeIndex`, `SafePivotAnalyzer`, `LongLongMap`, …) is replaced by
+  `org.pragmatica.peg.v6.incremental.IncrementalParser` in `peglib-core` — a thin
+  caching layer over checkpoint subtrees (0.6.0 decision 7).
+- **`GenerateMojo`** — the 0.5.x codegen mojo. Use `generate-v6` (`GenerateV6Mojo`);
+  `CheckMojo` and `LintMojo` are retained.
+- **`PlaygroundEngine` / `PlaygroundRepl`** — 0.5.x playground drivers, plus the
+  `ParseTracer` legacy `CstNode` shim (three overloads). The v6 playground
+  (`playground.v6`) and `CstArrayTracer` path are unaffected.
+- **JMH benchmarks referencing 0.5.x** (5): `bench.Java25ParseBenchmark`,
+  `bench.PackratStatsProbe`, `v6.perf.Java25V51ParseBenchmark`,
+  `v6.perf.Java25V51GeneratedParseBenchmark`, `v6.perf.Java25LargeFixturesV51Benchmark`.
+  This permanently retires the "11-12x vs 0.5.x-generated" A/B comparison; the
+  remaining v6 benches (`Java25V6ParseBenchmark`, `Java25LargeFixturesBenchmark`,
+  `Java25V6ColdCompileBenchmark`, `IncrementalEditBenchmark`, `JavacParseOnlyBenchmark`)
+  keep the javac baseline, which is the comparison that still means something.
+
 ### Changed
+
+- **`CheckMojo` ported to the v6 pipeline.** It now builds a lex-then-parse parser and
+  treats an empty `ParseResult.diagnostics()` as success (v6 `parse` always returns a
+  tree plus diagnostics rather than failing outright). Note the behavioural edge: the
+  v6 pipeline only emits a parser when the grammar has at least one PARSER or MIXED
+  rule, so an all-literal single-rule grammar classifies as LEXER-only and cannot be
+  smoke-tested.
+- **`CheckpointDirectiveIncrementalTest` relocated** from `peglib-incremental` to
+  `peglib-core` (same package, `org.pragmatica.peg.v6.incremental`). It is the only
+  coverage of the shipped 0.6.1 `%checkpoint` directive wiring.
+- **`GrammarCompositionTest` / `LeftRecursionTest` narrowed to grammar-level scope.**
+  Their end-to-end assertions drove the deleted 0.5.x `PegParser`, and the v6
+  `fromGrammar(String)` has no `GrammarSource` overload, so `%import` composition is
+  now verified at the `GrammarResolver` level. Direct left-recursion *parsing*
+  (Warth-style seed-and-grow) has no v6 successor — v6 rejects every left-recursive
+  grammar at `fromGrammar` — so only the `LeftRecursionAnalysis` detection and the
+  indirect-LR rejection tests remain.
 
 ### Added
 

@@ -33,10 +33,10 @@ import org.apache.maven.plugins.annotations.Parameter;
  * generate-lexer/parser/visitor} pipeline at build time and writes three Java
  * source files under {@code outputDirectory/<packageDir>/}.
  *
- * <p>Unlike {@link GenerateMojo} (which targets the 0.5.x interpreter +
- * standalone-parser path), this mojo emits the lex-then-parse v6 surface and
- * is intended for projects opting in to the new tier-1 throughput engine. It
- * lives next to the legacy mojo so users can migrate one project at a time.
+ * <p>Since 0.7.0 this is the only codegen mojo: the legacy {@code generate}
+ * mojo, which targeted the 0.5.x interpreter, was removed together with the
+ * rest of the 0.5.x path. This mojo emits the lex-then-parse v6 surface, and
+ * the sources it writes depend only on {@code peglib-runtime}.
  *
  * <p>Up-to-date: regeneration is skipped when ALL three target source files
  * are newer than the grammar file. If any one is missing or stale every

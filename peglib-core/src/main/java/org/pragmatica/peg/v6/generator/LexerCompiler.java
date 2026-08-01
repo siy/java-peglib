@@ -23,8 +23,9 @@ import java.util.Map;
 
 /**
  * Phase A.4 — compile a {@link LexerGenerator.Generated} source into a callable
- * {@link CompiledLexer}. In-memory JDK Compiler API pattern; mirrors
- * {@link org.pragmatica.peg.action.ActionCompiler ActionCompiler}.
+ * {@link CompiledLexer}. Uses the in-memory JDK Compiler API pattern: the generated
+ * source is handed to {@code javax.tools.JavaCompiler} through a forwarding file
+ * manager that keeps class bytes in memory, then loaded by a throwaway classloader.
  */
 public final class LexerCompiler {
     private LexerCompiler() {}

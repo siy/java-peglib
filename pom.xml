@@ -38,7 +38,6 @@
     <modules>
         <module>peglib-runtime</module>
         <module>peglib-core</module>
-        <module>peglib-incremental</module>
         <module>peglib-formatter</module>
         <module>peglib-maven-plugin</module>
         <module>peglib-playground</module>
@@ -64,11 +63,6 @@
             <dependency>
                 <groupId>org.pragmatica-lite</groupId>
                 <artifactId>peglib</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.pragmatica-lite</groupId>
-                <artifactId>peglib-incremental</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

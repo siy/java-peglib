@@ -1,6 +1,5 @@
 package org.pragmatica.peg.playground;
 
-import org.pragmatica.peg.tree.CstNode;
 import org.pragmatica.peg.v6.cst.CstArray;
 import org.pragmatica.peg.v6.token.TokenArray;
 
@@ -292,84 +291,5 @@ public final class ParseTracer {
 
     private static boolean isEmpty(CstArray cst) {
         return cst.nodeCount() == 0 || cst.rootIndex() == CstArray.NO_NODE;
-    }
-
-    // ------------------------------------------------------------------
-    // LEGACY 0.5.x SHIM — delete together with PlaygroundEngine / PlaygroundRepl
-    // and the org.pragmatica.peg.tree package. These three overloads exist only
-    // because PlaygroundEngine still walks the recursive CstNode tree; nothing
-    // else references them.
-    // ------------------------------------------------------------------
-
-    /**
-     * Legacy recursive-CST walk. Superseded by {@link #walkCst(CstArray)}.
-     */
-    public WalkResult walkCst(CstNode root) {
-        var walker = new WalkState();
-        walker.visit(root);
-        return new WalkResult(walker.nodes, walker.trivia);
-    }
-
-    private final class WalkState {
-        int nodes;
-        int trivia;
-
-        void visit(CstNode node) {
-            nodes++ ;
-            trivia += node.leadingTrivia()
-                          .size() + node.trailingTrivia()
-                                       .size();
-            int offset = node.span()
-                             .startOffset();
-            switch (node) {
-                case CstNode.NonTerminal nt -> {
-                    recordRuleEnter(nt.rule(), offset);
-                    for (var child : nt.children()) {
-                        visit(child);
-                    }
-                    recordRuleSuccess(nt.rule(), offset);
-                }
-                case CstNode.Terminal t -> {
-                    recordRuleEnter(t.rule(), offset);
-                    recordRuleSuccess(t.rule(), offset);
-                }
-                case CstNode.Token tk -> {
-                    recordRuleEnter(tk.rule(), offset);
-                    recordRuleSuccess(tk.rule(), offset);
-                }
-                case CstNode.Error err -> {
-                    recordRuleFailure(ERROR_RULE, offset);
-                    note("error region: " + err.skippedText());
-                }
-            }
-        }
-    }
-
-    /**
-     * Legacy recursive trivia tally. Superseded by {@link #countTrivia(CstArray)}.
-     */
-    public static int countTrivia(CstNode root) {
-        int count = root.leadingTrivia()
-                        .size() + root.trailingTrivia()
-                                     .size();
-        if (root instanceof CstNode.NonTerminal nt) {
-            for (var child : nt.children()) {
-                count += countTrivia(child);
-            }
-        }
-        return count;
-    }
-
-    /**
-     * Legacy recursive node tally. Superseded by {@link #countNodes(CstArray)}.
-     */
-    public static int countNodes(CstNode root) {
-        int count = 1;
-        if (root instanceof CstNode.NonTerminal nt) {
-            for (var child : nt.children()) {
-                count += countNodes(child);
-            }
-        }
-        return count;
     }
 }

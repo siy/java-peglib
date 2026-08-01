@@ -241,7 +241,7 @@ ParseResult capped = parser.parse(input, /* maxDiagnostics */ 100);
 
 ## Incremental parsing
 
-`peglib-incremental` provides `IncrementalParser` — a stateful wrapper that re-lexes
+`peglib-core` provides `IncrementalParser` — a stateful wrapper that re-lexes
 only the affected window on each edit and reparses only the smallest enclosing
 checkpoint subtree.
 
@@ -267,8 +267,7 @@ edits that span checkpoints fall back to full reparse.
 | Module | Purpose |
 |---|---|
 | `peglib-runtime` | 25 KB; the only dep generated parsers need (plus pragmatica-lite:core) |
-| `peglib` (`peglib-core`) | grammar parser, codegen, analyzers, `PegParser.fromGrammar` |
-| `peglib-incremental` | `IncrementalParser` — windowed re-lex + partial reparse |
+| `peglib` (`peglib-core`) | grammar parser, codegen, analyzers, `PegParser.fromGrammar`, `IncrementalParser` |
 | `peglib-formatter` | Wadler-Lindig pretty printer over `CstArray` |
 | `peglib-maven-plugin` | build-time codegen mojo (`generate-v6`) |
 | `peglib-playground` | REPL + HTTP UI for experimenting with grammars |

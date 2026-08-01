@@ -3,12 +3,15 @@ package org.pragmatica.peg.maven;
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.Unit;
 import org.pragmatica.lang.utils.Causes;
-import org.pragmatica.peg.PegParser;
-import org.pragmatica.peg.parser.Parser;
+import org.pragmatica.peg.v6.Parser;
+import org.pragmatica.peg.v6.PegParser;
+import org.pragmatica.peg.v6.cst.ParseResult;
+import org.pragmatica.peg.v6.diagnostic.Diagnostic;
 
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.stream.Collectors;
 
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -18,12 +21,16 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 
 /**
- * Check a grammar end-to-end: run the analyzer, then build a runtime parser
- * from the grammar and parse a minimal smoke-test input to confirm the
- * grammar is syntactically and semantically viable.
+ * Check a grammar end-to-end: run the analyzer, then build a 0.6.x lex-then-parse
+ * runtime parser from the grammar and parse a minimal smoke-test input to confirm
+ * the grammar is syntactically and semantically viable.
  *
- * <p>If {@code smokeInput} is set, the parser must succeed on it; otherwise
- * the check simply verifies the parser builds.
+ * <p>If {@code smokeInput} is set, the parser must consume it without emitting a
+ * single diagnostic; otherwise the check simply verifies the parser builds.
+ *
+ * <p>Note that the v6 pipeline only emits a parser when the grammar contains at
+ * least one PARSER or MIXED rule — an all-literal single-rule grammar classifies
+ * as LEXER-only and cannot be smoke-tested.
  */
 @Mojo(name = "check", defaultPhase = LifecyclePhase.VERIFY, threadSafe = true)
 public class CheckMojo extends AbstractMojo {
@@ -78,9 +85,32 @@ public class CheckMojo extends AbstractMojo {
         if (smokeInput == null || smokeInput.isEmpty()) {
             return Result.unitResult();
         }
-        return parser.parseCst(smokeInput)
-                     .mapError(c -> Causes.cause("peglib:check failed — smoke parse failed: " + c.message()))
-                     .mapToUnit();
+        return verifySmoke(parser.parse(smokeInput));
+    }
+
+    /**
+     * The v6 {@code parse} never fails outright — it always yields a tree plus a
+     * diagnostics list — so the Result channel is re-established here: an empty
+     * diagnostics list is success, anything else is a Cause carrying the
+     * rendered diagnostics.
+     */
+    private static Result<Unit> verifySmoke(ParseResult result) {
+        return result.isSuccess()
+               ? Result.unitResult()
+               : Causes.cause("peglib:check failed — smoke parse failed: " + describe(result))
+                       .result();
+    }
+
+    private static String describe(ParseResult result) {
+        return result.diagnostics()
+                     .stream()
+                     .map(CheckMojo::describe)
+                     .collect(Collectors.joining("; "));
+    }
+
+    private static String describe(Diagnostic diagnostic) {
+        return diagnostic.severity()
+                         .label() + " at offset " + diagnostic.offset() + ": " + diagnostic.message();
     }
 
     private static Result<String> readGrammar(Path path) {

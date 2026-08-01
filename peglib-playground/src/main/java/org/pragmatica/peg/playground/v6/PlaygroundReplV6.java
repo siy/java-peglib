@@ -15,8 +15,8 @@ import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 0.6.0 v6 CLI REPL: generate-and-compile-in-memory variant of the legacy
- * {@link org.pragmatica.peg.playground.PlaygroundRepl PlaygroundRepl}.
+ * 0.6.0 v6 CLI REPL: generate-and-compile-in-memory REPL, and the only REPL
+ * since 0.7.0 removed the legacy {@code PlaygroundRepl}.
  * Watches the grammar file and parses each non-meta input line through the v6
  * lex+parse pipeline.
  *
