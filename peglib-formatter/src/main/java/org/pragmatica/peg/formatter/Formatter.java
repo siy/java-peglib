@@ -1,5 +1,8 @@
 package org.pragmatica.peg.formatter;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.formatter.Doc;
@@ -8,8 +11,6 @@ import org.pragmatica.peg.formatter.internal.Renderer;
 import org.pragmatica.peg.cst.CstArray;
 import org.pragmatica.peg.token.TokenArray;
 
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Wadler-style pretty-printer that walks the 0.6.0 flat-array CST
@@ -50,6 +51,7 @@ public final class Formatter {
         if (config == null) {
             throw new IllegalArgumentException("config must not be null");
         }
+
         return new Formatter(config);
     }
 
@@ -82,14 +84,18 @@ public final class Formatter {
         if (cst == null) {
             return FormatterError.NULL_CST.result();
         }
+
         var root = cst.rootIndex();
+
         if (root == CstArray.NO_NODE) {
             return Result.success("");
         }
+
         try {
             var doc = walk(cst, root, root);
             var withPrefix = wrapRootWithFileTrivia(cst, root, doc);
             var out = Renderer.render(withPrefix, config.maxLineWidth());
+
             return Result.success(out);
         } catch (RuntimeException e) {
             return new FormatterError.RuleFailed(cst.kindNameAt(root), e).result();
@@ -98,9 +104,11 @@ public final class Formatter {
 
     private Doc walk(CstArray cst, int nodeIdx, int rootIdx) {
         var rule = config.rules().get(cst.kindNameAt(nodeIdx));
+
         if (rule != null) {
             return applyUserRule(cst, nodeIdx, collectChildDocs(cst, nodeIdx, rootIdx), rule);
         }
+
         return defaultFallback(cst, nodeIdx, rootIdx);
     }
 
@@ -108,14 +116,17 @@ public final class Formatter {
         if (cst.firstChildAt(nodeIdx) == CstArray.NO_NODE) {
             return List.of();
         }
+
         var out = new ArrayList<Doc>();
+
         cst.children(nodeIdx).forEach(child -> out.add(walk(cst, child, rootIdx)));
+
         return out;
     }
 
     private Doc applyUserRule(CstArray cst, int nodeIdx, List<Doc> childDocs, FormatterRule rule) {
-        var ctx = new FormatContext(cst, nodeIdx,
-            config.defaultIndent(), config.maxLineWidth(), config.triviaPolicy());
+        var ctx = new FormatContext(cst, nodeIdx, config.defaultIndent(), config.maxLineWidth(), config.triviaPolicy());
+
         return rule.format(ctx, childDocs);
     }
 
@@ -139,25 +150,33 @@ public final class Formatter {
     private Doc defaultFallback(CstArray cst, int nodeIdx, int rootIdx) {
         var first = cst.firstTokenAt(nodeIdx);
         var last = cst.lastTokenAt(nodeIdx);
+
         if (first < 0 || last < 0 || last < first) {
             return Docs.empty();
         }
+
         var tokens = cst.tokens();
         var policy = config.triviaPolicy();
         var parts = new ArrayList<Doc>();
         var cursor = first;
-        for (var iter = cst.children(nodeIdx).iterator(); iter.hasNext(); ) {
+
+        for (var iter = cst.children(nodeIdx).iterator(); iter.hasNext();) {
             var childIdx = iter.nextInt();
             var childFirst = cst.firstTokenAt(childIdx);
             var childLast = cst.lastTokenAt(childIdx);
+
             emitGapTokens(parts, tokens, policy, cursor, childFirst);
             parts.add(walk(cst, childIdx, rootIdx));
-            cursor = (childLast < 0) ? cursor : childLast + 1;
+            cursor = (childLast < 0)
+                     ? cursor
+                     : childLast + 1;
         }
+
         emitGapTokens(parts, tokens, policy, cursor, last + 1);
         if (parts.isEmpty()) {
             return Docs.empty();
         }
+
         return Docs.concat(parts);
     }
 
@@ -167,11 +186,7 @@ public final class Formatter {
      * {@code policy}; content (inline-literal) tokens emit their text directly,
      * splitting embedded newlines into hard line breaks.
      */
-    private static void emitGapTokens(List<Doc> parts,
-                                      TokenArray tokens,
-                                      TriviaPolicy policy,
-                                      int from,
-                                      int to) {
+    private static void emitGapTokens(List<Doc> parts, TokenArray tokens, TriviaPolicy policy, int from, int to) {
         if (from >= to) {
             return;
         }
@@ -179,16 +194,19 @@ public final class Formatter {
         // this lets the policy see whitespace + comment runs as a unit so it can
         // collapse blank lines, strip whitespace, etc. coherently.
         var i = from;
+
         while (i < to) {
             if (tokens.isTrivia(i)) {
                 var runStart = i;
+
                 while (i < to && tokens.isTrivia(i)) {
                     i++;
                 }
+
                 var runEnd = i;
-                var triviaDoc = policy.render(tokens,
-                    java.util.stream.IntStream.range(runStart, runEnd));
-                if (!(triviaDoc instanceof Doc.Empty)) {
+                var triviaDoc = policy.render(tokens, java.util.stream.IntStream.range(runStart, runEnd));
+
+                if (! (triviaDoc instanceof Doc.Empty)) {
                     parts.add(triviaDoc);
                 }
             } else {
@@ -207,18 +225,24 @@ public final class Formatter {
      */
     private static void appendTokenText(List<Doc> parts, TokenArray tokens, int idx) {
         var raw = tokens.textAt(idx).toString();
+
         if (raw.isEmpty()) {
             return;
         }
+
         if (raw.indexOf('\n') < 0) {
             parts.add(Docs.text(raw));
+
             return;
         }
+
         var lines = raw.split("\n", -1);
+
         for (var i = 0; i < lines.length; i++) {
             if (i > 0) {
                 parts.add(new Doc.HardLine());
             }
+
             if (!lines[i].isEmpty()) {
                 parts.add(Docs.text(lines[i]));
             }
@@ -230,17 +254,21 @@ public final class Formatter {
         var firstTok = cst.firstTokenAt(rootIdx);
         var lastTok = cst.lastTokenAt(rootIdx);
         var prefixIndices = (firstTok > 0)
-            ? java.util.stream.IntStream.range(0, firstTok).filter(tokens::isTrivia)
-            : java.util.stream.IntStream.empty();
-        var suffixStart = (lastTok < 0) ? 0 : lastTok + 1;
+                            ? java.util.stream.IntStream.range(0, firstTok).filter(tokens::isTrivia)
+                            : java.util.stream.IntStream.empty();
+        var suffixStart = (lastTok < 0)
+                          ? 0
+                          : lastTok + 1;
         var suffixIndices = (suffixStart < tokens.count())
-            ? java.util.stream.IntStream.range(suffixStart, tokens.count()).filter(tokens::isTrivia)
-            : java.util.stream.IntStream.empty();
+                            ? java.util.stream.IntStream.range(suffixStart, tokens.count()).filter(tokens::isTrivia)
+                            : java.util.stream.IntStream.empty();
         var prefix = config.triviaPolicy().render(tokens, prefixIndices);
         var suffix = config.triviaPolicy().render(tokens, suffixIndices);
+
         if (prefix instanceof Doc.Empty && suffix instanceof Doc.Empty) {
             return rootDoc;
         }
+
         return Docs.concat(prefix, rootDoc, suffix);
     }
 
@@ -248,13 +276,10 @@ public final class Formatter {
     public sealed interface FormatterError extends Cause {
         enum General implements FormatterError {
             NULL_CST("Cannot format a null CstArray");
-
             private final String message;
-
             General(String message) {
                 this.message = message;
             }
-
             @Override
             public String message() {
                 return message;
@@ -266,8 +291,10 @@ public final class Formatter {
         record RuleFailed(String rule, Throwable cause) implements FormatterError {
             @Override
             public String message() {
-                return "Formatter rule for '" + rule + "' threw: "
-                    + cause.getClass().getSimpleName() + ": " + cause.getMessage();
+                return "Formatter rule for '" + rule
+                     + "' threw: " + cause.getClass()
+                                          .getSimpleName()
+                     + ": " + cause.getMessage();
             }
         }
     }

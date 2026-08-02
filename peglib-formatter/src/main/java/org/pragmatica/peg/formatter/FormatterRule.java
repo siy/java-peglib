@@ -1,8 +1,9 @@
 package org.pragmatica.peg.formatter;
 
+import java.util.List;
+
 import org.pragmatica.peg.formatter.Doc;
 
-import java.util.List;
 
 /**
  * Function turning a CST node plus its already-formatted children into a

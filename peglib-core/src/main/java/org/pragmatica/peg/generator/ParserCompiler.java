@@ -1,12 +1,5 @@
 package org.pragmatica.peg.generator;
 
-import org.pragmatica.lang.Cause;
-import org.pragmatica.lang.Option;
-import org.pragmatica.lang.Result;
-import org.pragmatica.peg.cst.CstArray;
-import org.pragmatica.peg.cst.ParseResult;
-import org.pragmatica.peg.token.TokenArray;
-
 import javax.tools.ForwardingJavaFileManager;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -23,6 +16,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Option;
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.ParseResult;
+import org.pragmatica.peg.token.TokenArray;
+
+
 /**
  * Phase B.3 — compile a {@link ParserGenerator.GeneratedParser} into a callable
  * {@link CompiledParser}. Mirrors {@link LexerCompiler}'s in-memory JDK Compiler
@@ -31,23 +32,24 @@ import java.util.Map;
 public final class ParserCompiler {
     private ParserCompiler() {}
 
-    public sealed interface ParserCompileError extends Cause permits ParserCompileError.NoCompilerAvailable,
-    ParserCompileError.CompilationFailed,
-    ParserCompileError.LoadFailed {
+    public sealed interface ParserCompileError extends Cause permits ParserCompileError.NoCompilerAvailable, ParserCompileError.CompilationFailed, ParserCompileError.LoadFailed {
         record NoCompilerAvailable() implements ParserCompileError {
-            @Override public String message() {
+            @Override
+            public String message() {
                 return "No Java compiler available — run with a JDK, not a JRE";
             }
         }
 
         record CompilationFailed(String diagnostics) implements ParserCompileError {
-            @Override public String message() {
+            @Override
+            public String message() {
                 return "Generated parser compilation failed:\n" + diagnostics;
             }
         }
 
         record LoadFailed(String className, Throwable cause) implements ParserCompileError {
-            @Override public String message() {
+            @Override
+            public String message() {
                 return "Failed to load generated parser '" + className + "': " + cause;
             }
         }
@@ -65,9 +67,10 @@ public final class ParserCompiler {
          * malformed inputs no longer raise an exception to the caller.
          */
         public ParseResult parse(TokenArray tokens) {
-            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(),
+                                                                              unwrapCause(t)),
                                () -> (ParseResult) parseMethod.invoke(null, tokens))
-            .unwrap();
+                         .unwrap();
         }
 
         /**
@@ -82,9 +85,10 @@ public final class ParserCompiler {
          * </ul>
          */
         public ParseResult parse(TokenArray tokens, int maxDiagnostics) {
-            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(),
+                                                                              unwrapCause(t)),
                                () -> (ParseResult) parseCappedMethod.invoke(null, tokens, maxDiagnostics))
-            .unwrap();
+                         .unwrap();
         }
 
         /**
@@ -95,9 +99,10 @@ public final class ParserCompiler {
          * the {@code _ROOT}'s first child into a larger CST.
          */
         public ParseResult parseRuleFrom(TokenArray tokens, int fromTokenIdx, int ruleKind) {
-            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(),
+                                                                              unwrapCause(t)),
                                () -> (ParseResult) parseRuleFromMethod.invoke(null, tokens, fromTokenIdx, ruleKind))
-            .unwrap();
+                         .unwrap();
         }
 
         /**
@@ -107,9 +112,10 @@ public final class ParserCompiler {
          */
         @SuppressWarnings("unchecked")
         public Map<String, Integer> ruleKinds() {
-            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(), unwrapCause(t)),
+            return Result.lift(t -> (Cause) new ParserCompileError.LoadFailed(parserClass.getName(),
+                                                                              unwrapCause(t)),
                                () -> (Map<String, Integer>) ruleKindsMethod.invoke(null))
-            .unwrap();
+                         .unwrap();
         }
 
         /**
@@ -129,13 +135,17 @@ public final class ParserCompiler {
 
     public static Result<CompiledParser> compile(ParserGenerator.GeneratedParser source) {
         var compiler = ToolProvider.getSystemJavaCompiler();
-        if ( compiler == null) {
-        return new ParserCompileError.NoCompilerAvailable().result();}
+
+        if (compiler == null) {
+            return new ParserCompileError.NoCompilerAvailable().result();
+        }
+
         return runCompilation(compiler, source).flatMap(ParserCompiler::loadParserClass);
     }
 
     private static Result<CompiledClass> runCompilation(JavaCompiler compiler, ParserGenerator.GeneratedParser source) {
         var fqcn = source.fullyQualifiedName();
+
         try (var standard = compiler.getStandardFileManager(null, null, null)) {
             var fileManager = new InMemoryFileManager(standard);
             var fileObject = new StringJavaFileObject(fqcn, source.source());
@@ -146,14 +156,13 @@ public final class ParserCompiler {
                                         List.of("--release", "25"),
                                         null,
                                         List.of(fileObject));
-            if ( !task.call()) {
-            return new ParserCompileError.CompilationFailed(diagnostics.toString()).result();}
+
+            if (!task.call()) {
+                return new ParserCompileError.CompilationFailed(diagnostics.toString()).result();
+            }
+
             return Result.success(new CompiledClass(fqcn, fileManager));
-        }
-
-
-
-        catch (Exception e) {
+        } catch (Exception e) {
             return new ParserCompileError.LoadFailed(fqcn, e).result();
         }
     }
@@ -163,24 +172,25 @@ public final class ParserCompiler {
             var classLoader = new InMemoryClassLoader(compiled.fileManager(), ParserCompiler.class.getClassLoader());
             var clazz = classLoader.loadClass(compiled.fullyQualifiedName());
             var method = clazz.getDeclaredMethod("parse", TokenArray.class);
+
             method.setAccessible(true);
             var methodCapped = clazz.getDeclaredMethod("parse", TokenArray.class, int.class);
+
             methodCapped.setAccessible(true);
             var parseRuleFrom = clazz.getDeclaredMethod("parseRuleFrom", TokenArray.class, int.class, int.class);
+
             parseRuleFrom.setAccessible(true);
             var ruleKinds = clazz.getDeclaredMethod("ruleKinds");
+
             ruleKinds.setAccessible(true);
+
             return Result.success(new CompiledParser(clazz, method, methodCapped, parseRuleFrom, ruleKinds));
-        }
-
-
-
-        catch (ClassNotFoundException | NoSuchMethodException e) {
+        } catch (ClassNotFoundException | NoSuchMethodException e) {
             return new ParserCompileError.LoadFailed(compiled.fullyQualifiedName(), e).result();
         }
     }
 
-    private record CompiledClass(String fullyQualifiedName, InMemoryFileManager fileManager){}
+    private record CompiledClass(String fullyQualifiedName, InMemoryFileManager fileManager) {}
 
     private static final class StringJavaFileObject extends SimpleJavaFileObject {
         private final String code;
@@ -191,7 +201,8 @@ public final class ParserCompiler {
             this.code = code;
         }
 
-        @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+        @Override
+        public CharSequence getCharContent(boolean ignoreEncodingErrors) {
             return code;
         }
     }
@@ -204,10 +215,15 @@ public final class ParserCompiler {
                   Kind.CLASS);
         }
 
-        @Override public OutputStream openOutputStream() {
-            return new ByteArrayOutputStream() {@Override@SuppressWarnings("JBCT-RET-01") public void close() {
-                bytes = toByteArray();
-            }};
+        @Override
+        public OutputStream openOutputStream() {
+            return new ByteArrayOutputStream() {
+                @Override
+                @SuppressWarnings("JBCT-RET-01")
+                public void close() {
+                    bytes = toByteArray();
+                }
+            };
         }
 
         byte[] bytes() {
@@ -222,12 +238,15 @@ public final class ParserCompiler {
             super(delegate);
         }
 
-        @Override public JavaFileObject getJavaFileForOutput(Location location,
-                                                             String className,
-                                                             JavaFileObject.Kind kind,
-                                                             javax.tools.FileObject sibling) {
+        @Override
+        public JavaFileObject getJavaFileForOutput(Location location,
+                                                   String className,
+                                                   JavaFileObject.Kind kind,
+                                                   javax.tools.FileObject sibling) {
             var fileObject = new ByteArrayJavaFileObject(className);
+
             classFiles.put(className, fileObject);
+
             return fileObject;
         }
 
@@ -250,9 +269,13 @@ public final class ParserCompiler {
         @SuppressWarnings("JBCT-EX-01")
         protected Class<?> findClass(String name) throws ClassNotFoundException {
             var bytesOpt = fileManager.classBytes(name);
-            if ( bytesOpt.isEmpty()) {
-            throw new ClassNotFoundException(name);}
+
+            if (bytesOpt.isEmpty()) {
+                throw new ClassNotFoundException(name);
+            }
+
             var bytes = bytesOpt.unwrap();
+
             return defineClass(name, bytes, 0, bytes.length);
         }
     }

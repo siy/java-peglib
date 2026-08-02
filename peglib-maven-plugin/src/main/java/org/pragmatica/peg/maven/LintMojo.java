@@ -1,5 +1,9 @@
 package org.pragmatica.peg.maven;
 
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.peg.analyzer.Analyzer;
@@ -7,16 +11,13 @@ import org.pragmatica.peg.analyzer.AnalyzerReport;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 
-import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
+
 
 /**
  * Run the grammar analyzer against a grammar file. Fails the build when any
@@ -39,11 +40,12 @@ public class LintMojo extends AbstractMojo {
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
         var report = runAnalyzer();
-        getLog()
-        .info(report.formatRustStyle(grammarFile.toString()));
+
+        getLog().info(report.formatRustStyle(grammarFile.toString()));
         if (report.hasErrors()) {
             throw new MojoFailureException("peglib:lint produced errors — see log above");
         }
+
         if (failOnWarning && report.hasWarnings()) {
             throw new MojoFailureException("peglib:lint produced warnings (failOnWarning=true)");
         }
@@ -66,19 +68,17 @@ public class LintMojo extends AbstractMojo {
         // parse step (when there are no %imports) returns a validated Grammar
         // directly. Lint targets standalone grammar files, so we don't run the
         // resolver here.
-        var pipeline = readGrammar(grammarFile.toPath())
-                       .flatMap(LintMojo::parseGrammar)
-                       .map(Analyzer::analyze);
-        if (pipeline instanceof Result.Failure< ? > failure) {
-            throw new MojoFailureException(failure.cause()
-                                                  .message());
+        var pipeline = readGrammar(grammarFile.toPath()).flatMap(LintMojo::parseGrammar).map(Analyzer::analyze);
+
+        if (pipeline instanceof Result.Failure<?> failure) {
+            throw new MojoFailureException(failure.cause().message());
         }
+
         return pipeline.unwrap();
     }
 
     private static Result<Grammar> parseGrammar(String text) {
-        return GrammarParser.parse(text)
-                            .mapError(c -> Causes.cause("Grammar parse failed: " + c.message()));
+        return GrammarParser.parse(text).mapError(c -> Causes.cause("Grammar parse failed: " + c.message()));
     }
 
     private static Result<String> readGrammar(Path path) {

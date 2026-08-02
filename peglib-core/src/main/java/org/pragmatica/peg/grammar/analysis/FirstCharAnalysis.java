@@ -1,12 +1,13 @@
 package org.pragmatica.peg.grammar.analysis;
 
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 import org.pragmatica.lang.Option;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.Set;
 
 /**
  * Shared first-character analysis helpers for PEG grammars.
@@ -34,12 +35,15 @@ public final class FirstCharAnalysis {
      */
     public static Option<Set<Character>> whitespaceFirstChars(Grammar grammar, Expression expr) {
         var set = new LinkedHashSet<Character>();
+
         if (!collectFirstChars(grammar, expr, set, new HashSet<>())) {
             return Option.none();
         }
+
         if (set.isEmpty()) {
             return Option.none();
         }
+
         return Option.some(set);
     }
 
@@ -81,18 +85,19 @@ public final class FirstCharAnalysis {
     }
 
     private static boolean collectFromLiteral(Expression.Literal lit, Set<Character> out) {
-        if (lit.text()
-               .isEmpty()) {
+        if (lit.text().isEmpty()) {
             return false;
         }
-        char first = lit.text()
-                        .charAt(0);
+
+        char first = lit.text().charAt(0);
+
         if (lit.caseInsensitive()) {
             out.add(Character.toLowerCase(first));
             out.add(Character.toUpperCase(first));
-        }else {
+        } else {
             out.add(first);
         }
+
         return true;
     }
 
@@ -105,6 +110,7 @@ public final class FirstCharAnalysis {
                 return false;
             }
         }
+
         return true;
     }
 
@@ -117,8 +123,10 @@ public final class FirstCharAnalysis {
             if (el instanceof Expression.And || el instanceof Expression.Not) {
                 continue;
             }
+
             return collectFirstChars(grammar, el, out, visiting);
         }
+
         return false;
     }
 
@@ -129,20 +137,20 @@ public final class FirstCharAnalysis {
         if (grammar == null) {
             return false;
         }
+
         if (!visiting.add(ref.ruleName())) {
             return false;
         }
-        var target = grammar.rules()
-                            .stream()
-                            .filter(r -> r.name()
-                                          .equals(ref.ruleName()))
-                            .findFirst();
+
+        var target = grammar.rules().stream().filter(r -> r.name()
+                                                           .equals(ref.ruleName())).findFirst();
+
         if (target.isEmpty()) {
             return false;
         }
+
         return collectFirstChars(grammar,
-                                 target.get()
-                                       .expression(),
+                                 target.get().expression(),
                                  out,
                                  visiting);
     }
@@ -158,39 +166,48 @@ public final class FirstCharAnalysis {
      */
     public static boolean enumerateCharClass(String pattern, boolean caseInsensitive, Set<Character> out) {
         int i = 0;
+
         while (i < pattern.length()) {
             char start = pattern.charAt(i);
+
             if (start == '\\' && i + 1 < pattern.length()) {
                 char escaped = pattern.charAt(i + 1);
                 char ch;
                 int consumed = 2;
+
                 switch (escaped) {
-                    case'n' : ch = '\n'; break;
-                    case'r' : ch = '\r'; break;
-                    case't' : ch = '\t'; break;
-                    case'\\' : ch = '\\'; break;
-                    case']' : ch = ']'; break;
-                    case'-' : ch = '-'; break;
+                    case 'n' : ch = '\n'; break;
+                    case 'r' : ch = '\r'; break;
+                    case 't' : ch = '\t'; break;
+                    case '\\' : ch = '\\'; break;
+                    case ']' : ch = ']'; break;
+                    case '-' : ch = '-'; break;
                     default : return false;
                 }
+
                 addCaseInsensitive(out, ch, caseInsensitive);
                 i += consumed;
                 continue;
             }
+
             if (i + 2 < pattern.length() && pattern.charAt(i + 1) == '-') {
                 char end = pattern.charAt(i + 2);
+
                 if (end - start > 128) {
                     return false;
                 }
-                for (char c = start; c <= end; c++ ) {
+
+                for (char c = start; c <= end; c++) {
                     addCaseInsensitive(out, c, caseInsensitive);
                 }
+
                 i += 3;
-            }else {
+            } else {
                 addCaseInsensitive(out, start, caseInsensitive);
-                i++ ;
+                i++;
             }
         }
+
         return true;
     }
 
@@ -202,7 +219,7 @@ public final class FirstCharAnalysis {
         if (caseInsensitive) {
             out.add(Character.toLowerCase(c));
             out.add(Character.toUpperCase(c));
-        }else {
+        } else {
             out.add(c);
         }
     }

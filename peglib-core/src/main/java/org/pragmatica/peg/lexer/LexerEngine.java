@@ -1,10 +1,11 @@
 package org.pragmatica.peg.lexer;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.pragmatica.peg.token.TokenArray;
 import org.pragmatica.peg.token.TokenArrayBuilder;
 
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Phase A.4 — interpreted lexer driver. Drives a {@link Dfa} over an input string with
@@ -49,6 +50,7 @@ public final class LexerEngine {
     private final Dfa dfa;
     private final String[] kindNameTable;
     private final int whitespaceKind;
+
     private final Map<Integer, DfaBuilder.KeywordResolution> keywordResolutions;
 
     /**
@@ -91,29 +93,38 @@ public final class LexerEngine {
         var builder = new TokenArrayBuilder(input);
         int len = input.length();
         int pos = 0;
-        while ( pos < len) {
+
+        while (pos < len) {
             int state = Dfa.START_STATE;
-            int lastAcceptEnd = - 1;
-            int lastAcceptKind = - 1;
+            int lastAcceptEnd = -1;
+            int lastAcceptKind = -1;
             int cur = pos;
-            while ( cur < len) {
+
+            while (cur < len) {
                 int ch = input.charAt(cur);
                 int next;
-                if ( ch >= Dfa.ALPHABET_SIZE) {
-                next = dfa.nonAsciiTransition(state);} else
-                {
-                next = dfa.transition(state, ch);}
-                if ( next == Dfa.NO_TRANSITION) {
-                break;}
+
+                if (ch >= Dfa.ALPHABET_SIZE) {
+                    next = dfa.nonAsciiTransition(state);
+                } else {
+                    next = dfa.transition(state, ch);
+                }
+
+                if (next == Dfa.NO_TRANSITION) {
+                    break;
+                }
+
                 state = next;
                 cur++;
                 int ak = dfa.acceptKind(state);
-                if ( ak != Dfa.NO_ACCEPT) {
+
+                if (ak != Dfa.NO_ACCEPT) {
                     lastAcceptEnd = cur;
                     lastAcceptKind = ak;
                 }
             }
-            if ( lastAcceptEnd <= pos) {
+
+            if (lastAcceptEnd <= pos) {
                 // No DFA-recognised token at this position. Emit a 1-char synthetic
                 // WHITESPACE token so the input is fully covered and lexing can
                 // progress; the parser will surface this as a trailing-input error.
@@ -123,10 +134,13 @@ public final class LexerEngine {
             }
             // Phase B.0 keyword resolution — remap identifier kinds to keyword kinds when applicable.
             var resolver = keywordResolutions.get(lastAcceptKind);
-            if ( resolver != null) {
+
+            if (resolver != null) {
                 var override = resolver.textToKind().get(input.substring(pos, lastAcceptEnd));
-                if ( override != null) {
-                lastAcceptKind = override;}
+
+                if (override != null) {
+                    lastAcceptKind = override;
+                }
             }
             // Phase A.6 / 0.6.1 / 0.6.2 — content-based trivia refinement. Two
             // entry conditions:
@@ -144,37 +158,35 @@ public final class LexerEngine {
             //   ///        → DOC_LINE_COMMENT      (3 or more slashes)
             //   /* ... */  → BLOCK_COMMENT
             //   /** ... */ → DOC_BLOCK_COMMENT     (NOT the smallest empty block /**/)
-            if ( (lastAcceptKind == TokenArray.KIND_WHITESPACE
-                  || lastAcceptKind == TokenArray.KIND_LINE_COMMENT
-                  || lastAcceptKind == TokenArray.KIND_BLOCK_COMMENT)
-                 && lastAcceptEnd > pos + 1) {
+            if ((lastAcceptKind == TokenArray.KIND_WHITESPACE || lastAcceptKind == TokenArray.KIND_LINE_COMMENT || lastAcceptKind == TokenArray.KIND_BLOCK_COMMENT) && lastAcceptEnd > pos + 1) {
                 char c0 = input.charAt(pos);
                 char c1 = input.charAt(pos + 1);
-                if ( c0 == '/') {
-                    if ( c1 == '/') {
+
+                if (c0 == '/') {
+                    if (c1 == '/') {
                         // Line comment. Doc-line variant requires a third '/'.
-                        if ( lastAcceptEnd > pos + 2 && input.charAt(pos + 2) == '/') {
+                        if (lastAcceptEnd > pos + 2 && input.charAt(pos + 2) == '/') {
                             lastAcceptKind = TokenArray.KIND_DOC_LINE_COMMENT;
                         } else {
                             lastAcceptKind = TokenArray.KIND_LINE_COMMENT;
                         }
-                    } else if ( c1 == '*') {
+                    } else if (c1 == '*') {
                         // Block comment. Doc-block variant requires '/**' followed by
                         // anything except a closing '/'. The 4-char empty block '/**/'
                         // is the smallest regular block comment, NOT Javadoc.
-                        boolean isDoc =
-                            lastAcceptEnd > pos + 2
-                            && input.charAt(pos + 2) == '*'
-                            && !(lastAcceptEnd == pos + 4 && input.charAt(pos + 3) == '/');
+                        boolean isDoc = lastAcceptEnd > pos + 2 && input.charAt(pos + 2) == '*' && !(lastAcceptEnd == pos + 4 && input.charAt(pos + 3) == '/');
+
                         lastAcceptKind = isDoc
                                          ? TokenArray.KIND_DOC_BLOCK_COMMENT
                                          : TokenArray.KIND_BLOCK_COMMENT;
                     }
                 }
             }
+
             builder.append(lastAcceptKind, pos, lastAcceptEnd);
             pos = lastAcceptEnd;
         }
+
         return builder.build(kindNameTable);
     }
 
@@ -186,9 +198,8 @@ public final class LexerEngine {
      * @deprecated prefer the four-arg constructor; kept as a transitional API
      *     while older call sites are updated.
      */
-    @Deprecated public static LexerEngine withoutKeywordResolution(Dfa dfa,
-                                                                   String[] kindNameTable,
-                                                                   int whitespaceKind) {
+    @Deprecated
+    public static LexerEngine withoutKeywordResolution(Dfa dfa, String[] kindNameTable, int whitespaceKind) {
         return new LexerEngine(dfa, kindNameTable, whitespaceKind, new HashMap<>());
     }
 }

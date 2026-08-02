@@ -1,12 +1,13 @@
 package org.pragmatica.peg;
 
+import java.util.Map;
+
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.cst.ParseResult;
 import org.pragmatica.peg.generator.LexerCompiler.CompiledLexer;
 import org.pragmatica.peg.generator.ParserCompiler.CompiledParser;
 import org.pragmatica.peg.token.TokenArray;
 
-import java.util.Map;
 
 /**
  * Phase C.1 — thin facade over a compiled lexer + parser pair built from a
@@ -34,6 +35,7 @@ public final class Parser {
      */
     public ParseResult parse(String input) {
         TokenArray tokens = lexer.lex(input);
+
         return parser.parse(tokens);
     }
 
@@ -49,6 +51,7 @@ public final class Parser {
      */
     public ParseResult parse(String input, int maxDiagnostics) {
         TokenArray tokens = lexer.lex(input);
+
         return parser.parse(tokens, maxDiagnostics);
     }
 

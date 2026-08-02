@@ -1,13 +1,16 @@
 package org.pragmatica.peg.lexer;
+
 public final class Dfa {
     public static final int START_STATE = 0;
-    public static final int NO_TRANSITION = - 1;
-    public static final int NO_ACCEPT = - 1;
+    public static final int NO_TRANSITION = -1;
+    public static final int NO_ACCEPT = -1;
     public static final int ALPHABET_SIZE = 256;
 
     private final int[][] transitions;
     private final int[] acceptKind;
+
     private final int[] acceptPriority;
+
     /**
      * Per-state target for input characters {@code >= ALPHABET_SIZE} (i.e. non-ASCII / BMP-plus).
      * Set by the builder whenever a state's NFA closure contains an NFA edge that accepts
@@ -33,8 +36,10 @@ public final class Dfa {
     }
 
     public int transition(int state, int ch) {
-        if ( ch < 0 || ch >= ALPHABET_SIZE) {
-        return nonAsciiTransition[state];}
+        if (ch < 0 || ch >= ALPHABET_SIZE) {
+            return nonAsciiTransition[state];
+        }
+
         return transitions[state][ch];
     }
 

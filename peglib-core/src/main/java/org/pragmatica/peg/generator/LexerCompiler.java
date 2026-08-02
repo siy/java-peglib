@@ -1,10 +1,5 @@
 package org.pragmatica.peg.generator;
 
-import org.pragmatica.lang.Cause;
-import org.pragmatica.lang.Option;
-import org.pragmatica.lang.Result;
-import org.pragmatica.peg.token.TokenArray;
-
 import javax.tools.ForwardingJavaFileManager;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -21,6 +16,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Option;
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.token.TokenArray;
+
+
 /**
  * Phase A.4 — compile a {@link LexerGenerator.Generated} source into a callable
  * {@link CompiledLexer}. Uses the in-memory JDK Compiler API pattern: the generated
@@ -30,30 +31,31 @@ import java.util.Map;
 public final class LexerCompiler {
     private LexerCompiler() {}
 
-    public sealed interface LexerCompileError extends Cause permits LexerCompileError.NoCompilerAvailable,
-    LexerCompileError.CompilationFailed,
-    LexerCompileError.LoadFailed,
-    LexerCompileError.InvocationFailed {
+    public sealed interface LexerCompileError extends Cause permits LexerCompileError.NoCompilerAvailable, LexerCompileError.CompilationFailed, LexerCompileError.LoadFailed, LexerCompileError.InvocationFailed {
         record NoCompilerAvailable() implements LexerCompileError {
-            @Override public String message() {
+            @Override
+            public String message() {
                 return "No Java compiler available — run with a JDK, not a JRE";
             }
         }
 
         record CompilationFailed(String diagnostics) implements LexerCompileError {
-            @Override public String message() {
+            @Override
+            public String message() {
                 return "Generated lexer compilation failed:\n" + diagnostics;
             }
         }
 
         record LoadFailed(String className, Throwable cause) implements LexerCompileError {
-            @Override public String message() {
+            @Override
+            public String message() {
                 return "Failed to load generated lexer '" + className + "': " + cause;
             }
         }
 
         record InvocationFailed(String className, Throwable cause) implements LexerCompileError {
-            @Override public String message() {
+            @Override
+            public String message() {
                 return "Generated lexer '" + className + "' invocation failed: " + cause;
             }
         }
@@ -61,9 +63,10 @@ public final class LexerCompiler {
 
     public record CompiledLexer(Class<?> lexerClass, Method lexMethod) {
         public TokenArray lex(String input) {
-            return Result.lift(t -> (Cause) new LexerCompileError.InvocationFailed(lexerClass.getName(), unwrapCause(t)),
+            return Result.lift(t -> (Cause) new LexerCompileError.InvocationFailed(lexerClass.getName(),
+                                                                                   unwrapCause(t)),
                                () -> (TokenArray) lexMethod.invoke(null, input))
-            .unwrap();
+                         .unwrap();
         }
 
         private static Throwable unwrapCause(Throwable t) {
@@ -75,13 +78,17 @@ public final class LexerCompiler {
 
     public static Result<CompiledLexer> compile(LexerGenerator.Generated source) {
         var compiler = ToolProvider.getSystemJavaCompiler();
-        if ( compiler == null) {
-        return new LexerCompileError.NoCompilerAvailable().result();}
+
+        if (compiler == null) {
+            return new LexerCompileError.NoCompilerAvailable().result();
+        }
+
         return runCompilation(compiler, source).flatMap(LexerCompiler::loadLexerClass);
     }
 
     private static Result<CompiledClass> runCompilation(JavaCompiler compiler, LexerGenerator.Generated source) {
         var fqcn = source.fullyQualifiedName();
+
         try (var standard = compiler.getStandardFileManager(null, null, null)) {
             var fileManager = new InMemoryFileManager(standard);
             var fileObject = new StringJavaFileObject(fqcn, source.source());
@@ -92,14 +99,13 @@ public final class LexerCompiler {
                                         List.of("--release", "25"),
                                         null,
                                         List.of(fileObject));
-            if ( !task.call()) {
-            return new LexerCompileError.CompilationFailed(diagnostics.toString()).result();}
+
+            if (!task.call()) {
+                return new LexerCompileError.CompilationFailed(diagnostics.toString()).result();
+            }
+
             return Result.success(new CompiledClass(fqcn, fileManager));
-        }
-
-
-
-        catch (Exception e) {
+        } catch (Exception e) {
             return new LexerCompileError.LoadFailed(fqcn, e).result();
         }
     }
@@ -109,18 +115,16 @@ public final class LexerCompiler {
             var classLoader = new InMemoryClassLoader(compiled.fileManager(), LexerCompiler.class.getClassLoader());
             var clazz = classLoader.loadClass(compiled.fullyQualifiedName());
             var method = clazz.getDeclaredMethod("lex", String.class);
+
             method.setAccessible(true);
+
             return Result.success(new CompiledLexer(clazz, method));
-        }
-
-
-
-        catch (ClassNotFoundException | NoSuchMethodException e) {
+        } catch (ClassNotFoundException | NoSuchMethodException e) {
             return new LexerCompileError.LoadFailed(compiled.fullyQualifiedName(), e).result();
         }
     }
 
-    private record CompiledClass(String fullyQualifiedName, InMemoryFileManager fileManager){}
+    private record CompiledClass(String fullyQualifiedName, InMemoryFileManager fileManager) {}
 
     private static final class StringJavaFileObject extends SimpleJavaFileObject {
         private final String code;
@@ -131,7 +135,8 @@ public final class LexerCompiler {
             this.code = code;
         }
 
-        @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+        @Override
+        public CharSequence getCharContent(boolean ignoreEncodingErrors) {
             return code;
         }
     }
@@ -144,10 +149,15 @@ public final class LexerCompiler {
                   Kind.CLASS);
         }
 
-        @Override public OutputStream openOutputStream() {
-            return new ByteArrayOutputStream() {@Override@SuppressWarnings("JBCT-RET-01") public void close() {
-                bytes = toByteArray();
-            }};
+        @Override
+        public OutputStream openOutputStream() {
+            return new ByteArrayOutputStream() {
+                @Override
+                @SuppressWarnings("JBCT-RET-01")
+                public void close() {
+                    bytes = toByteArray();
+                }
+            };
         }
 
         byte[] bytes() {
@@ -162,12 +172,15 @@ public final class LexerCompiler {
             super(delegate);
         }
 
-        @Override public JavaFileObject getJavaFileForOutput(Location location,
-                                                             String className,
-                                                             JavaFileObject.Kind kind,
-                                                             javax.tools.FileObject sibling) {
+        @Override
+        public JavaFileObject getJavaFileForOutput(Location location,
+                                                   String className,
+                                                   JavaFileObject.Kind kind,
+                                                   javax.tools.FileObject sibling) {
             var fileObject = new ByteArrayJavaFileObject(className);
+
             classFiles.put(className, fileObject);
+
             return fileObject;
         }
 
@@ -190,9 +203,13 @@ public final class LexerCompiler {
         @SuppressWarnings("JBCT-EX-01")
         protected Class<?> findClass(String name) throws ClassNotFoundException {
             var bytesOpt = fileManager.classBytes(name);
-            if ( bytesOpt.isEmpty()) {
-            throw new ClassNotFoundException(name);}
+
+            if (bytesOpt.isEmpty()) {
+                throw new ClassNotFoundException(name);
+            }
+
             var bytes = bytesOpt.unwrap();
+
             return defineClass(name, bytes, 0, bytes.length);
         }
     }

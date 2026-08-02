@@ -2,6 +2,7 @@ package org.pragmatica.peg.analyzer;
 
 import java.util.List;
 
+
 /**
  * Result of running the {@link Analyzer} on a {@link org.pragmatica.peg.grammar.Grammar}.
  *
@@ -47,6 +48,7 @@ public record AnalyzerReport(List<Finding> findings) {
      */
     public String formatRustStyle(String grammarPath) {
         var sb = new StringBuilder();
+
         for (var f : findings) {
             sb.append(severityWord(f.severity()))
               .append('[')
@@ -54,15 +56,14 @@ public record AnalyzerReport(List<Finding> findings) {
               .append("]: ")
               .append(f.message())
               .append('\n');
-            sb.append("  --> ")
-              .append(grammarPath);
-            if (!f.ruleName()
-                  .isEmpty()) {
-                sb.append(": ")
-                  .append(f.ruleName());
+            sb.append("  --> ").append(grammarPath);
+            if (!f.ruleName().isEmpty()) {
+                sb.append(": ").append(f.ruleName());
             }
+
             sb.append("\n\n");
         }
+
         sb.append("analyzer: ")
           .append(count(Finding.Severity.ERROR))
           .append(" error")
@@ -78,6 +79,7 @@ public record AnalyzerReport(List<Finding> findings) {
           .append(", ")
           .append(count(Finding.Severity.INFO))
           .append(" info\n");
+
         return sb.toString();
     }
 

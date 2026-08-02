@@ -3,6 +3,7 @@ package org.pragmatica.peg.formatter;
 import java.util.HashMap;
 import java.util.Map;
 
+
 /**
  * Immutable configuration for a {@link Formatter}.
  *
@@ -13,22 +14,26 @@ import java.util.Map;
  * @since 0.6.0
  */
 public record FormatterConfig(int defaultIndent,
-                                int maxLineWidth,
-                                TriviaPolicy triviaPolicy,
-                                Map<String, FormatterRule> rules) {
+                              int maxLineWidth,
+                              TriviaPolicy triviaPolicy,
+                              Map<String, FormatterRule> rules) {
     public FormatterConfig {
         if (defaultIndent < 0) {
             throw new IllegalArgumentException("defaultIndent must be >= 0");
         }
+
         if (maxLineWidth <= 0) {
             throw new IllegalArgumentException("maxLineWidth must be > 0");
         }
+
         if (triviaPolicy == null) {
             throw new IllegalArgumentException("triviaPolicy must not be null");
         }
+
         if (rules == null) {
             throw new IllegalArgumentException("rules must not be null");
         }
+
         rules = Map.copyOf(rules);
     }
 
@@ -56,6 +61,7 @@ public record FormatterConfig(int defaultIndent,
             if (rules == null) {
                 throw new IllegalArgumentException("rules must not be null");
             }
+
             rules = Map.copyOf(rules);
         }
 
@@ -63,6 +69,7 @@ public record FormatterConfig(int defaultIndent,
             if (amount < 0) {
                 throw new IllegalArgumentException("defaultIndent must be >= 0");
             }
+
             return new Builder(amount, maxLineWidth, triviaPolicy, rules);
         }
 
@@ -70,6 +77,7 @@ public record FormatterConfig(int defaultIndent,
             if (width <= 0) {
                 throw new IllegalArgumentException("maxLineWidth must be > 0");
             }
+
             return new Builder(defaultIndent, width, triviaPolicy, rules);
         }
 
@@ -77,6 +85,7 @@ public record FormatterConfig(int defaultIndent,
             if (policy == null) {
                 throw new IllegalArgumentException("triviaPolicy must not be null");
             }
+
             return new Builder(defaultIndent, maxLineWidth, policy, rules);
         }
 
@@ -84,11 +93,15 @@ public record FormatterConfig(int defaultIndent,
             if (ruleName == null || ruleName.isEmpty()) {
                 throw new IllegalArgumentException("ruleName must be non-empty");
             }
+
             if (rule == null) {
                 throw new IllegalArgumentException("rule must not be null");
             }
+
             var next = new HashMap<>(rules);
+
             next.put(ruleName, rule);
+
             return new Builder(defaultIndent, maxLineWidth, triviaPolicy, next);
         }
 

@@ -1,5 +1,7 @@
 package org.pragmatica.peg.playground;
 
+import java.util.List;
+
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.playground.ParseTracer;
 import org.pragmatica.peg.playground.Stats;
@@ -8,7 +10,6 @@ import org.pragmatica.peg.cst.CstArray;
 import org.pragmatica.peg.cst.ParseResult;
 import org.pragmatica.peg.diagnostic.Diagnostic;
 
-import java.util.List;
 
 /**
  * 0.6.0 facade for the playground. Wraps the
@@ -42,8 +43,7 @@ public final class PlaygroundEngine {
      * only the lex+parse cost.
      */
     public static Result<ParseOutcome> run(ParseRequest request) {
-        return PegParser.fromGrammar(request.grammar())
-                        .map(parser -> executeParse(parser, request));
+        return PegParser.fromGrammar(request.grammar()).map(parser -> executeParse(parser, request));
     }
 
     private static ParseOutcome executeParse(org.pragmatica.peg.Parser parser, ParseRequest request) {
@@ -56,12 +56,23 @@ public final class PlaygroundEngine {
         var stats = new Stats(elapsedNanos / 1000L,
                               nodeCount,
                               triviaCount,
-                              0,                                // ruleEntries — n/a
-                              0,                                // cacheHits — no packrat
-                              0,                                // cacheMisses — no packrat
-                              0,                                // cachePuts — no packrat
-                              0,                                // cutsFired — n/a (lex-time)
-                              parseResult.diagnostics().size());
+                              0,
+
+        // ruleEntries — n/a
+        0,
+
+        // cacheHits — no packrat
+        0,
+
+        // cacheMisses — no packrat
+        0,
+
+        // cachePuts — no packrat
+        0,
+
+        // cutsFired — n/a (lex-time)
+        parseResult.diagnostics().size());
+
         return new ParseOutcome(cst, parseResult.diagnostics(), stats);
     }
 
@@ -78,7 +89,7 @@ public final class PlaygroundEngine {
      */
     public record ParseOutcome(CstArray cst, List<Diagnostic> diagnostics, Stats stats) {
         public boolean hasErrors() {
-            return !diagnostics.isEmpty();
+            return ! diagnostics.isEmpty();
         }
     }
 }

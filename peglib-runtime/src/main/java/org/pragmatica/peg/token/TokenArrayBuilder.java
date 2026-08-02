@@ -2,6 +2,7 @@ package org.pragmatica.peg.token;
 
 import java.util.Arrays;
 
+
 /**
  * Append-style mutable builder for {@link TokenArray}. Single-shot: one call to
  * {@link #build(String[])} produces the array; subsequent calls fail fast.
@@ -28,6 +29,7 @@ public final class TokenArrayBuilder {
 
     public TokenArrayBuilder(String input, int initialCapacity) {
         var cap = Math.max(initialCapacity, 1);
+
         this.input = input;
         this.starts = new int[cap];
         this.ends = new int[cap];
@@ -58,30 +60,39 @@ public final class TokenArrayBuilder {
         var trimmedEnds = trim(ends, size);
         var trimmedKinds = trim(kinds, size);
         var nameTableCopy = kindNameTable.clone();
+
         built = true;
         starts = null;
         ends = null;
         kinds = null;
+
         return new TokenArray(input, trimmedStarts, trimmedEnds, trimmedKinds, size, nameTableCopy);
     }
 
     private void ensureCapacity(int required) {
-        if ( required <= starts.length) {
-        return;}
-        var newCap = starts.length;
-        while ( newCap < required) {
-            newCap = newCap<< 1;
-            if ( newCap < 0) {
-            newCap = Integer.MAX_VALUE - 8;}
+        if (required <= starts.length) {
+            return;
         }
+
+        var newCap = starts.length;
+
+        while (newCap < required) {
+            newCap = newCap << 1;
+            if (newCap < 0) {
+                newCap = Integer.MAX_VALUE - 8;
+            }
+        }
+
         starts = Arrays.copyOf(starts, newCap);
         ends = Arrays.copyOf(ends, newCap);
         kinds = Arrays.copyOf(kinds, newCap);
     }
 
     private static int[] trim(int[] src, int length) {
-        if ( src.length == length) {
-        return src;}
+        if (src.length == length) {
+            return src;
+        }
+
         return Arrays.copyOf(src, length);
     }
 }

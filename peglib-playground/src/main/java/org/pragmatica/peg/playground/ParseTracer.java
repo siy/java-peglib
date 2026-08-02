@@ -1,11 +1,12 @@
 package org.pragmatica.peg.playground;
 
-import org.pragmatica.peg.cst.CstArray;
-import org.pragmatica.peg.token.TokenArray;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
+
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.token.TokenArray;
+
 
 /**
  * Passive recorder of tracer events for a single parse run. The tracer is
@@ -59,7 +60,7 @@ public final class ParseTracer {
     }
 
     public void recordRuleEnter(String rule, int offset) {
-        ruleEntries++ ;
+        ruleEntries++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_ENTER, rule, offset, elapsedNanos(), ""));
     }
 
@@ -72,27 +73,27 @@ public final class ParseTracer {
     }
 
     public void recordCacheHit(String rule, int offset) {
-        cacheHits++ ;
+        cacheHits++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_HIT, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCacheMiss(String rule, int offset) {
-        cacheMisses++ ;
+        cacheMisses++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_MISS, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCachePut(String rule, int offset) {
-        cachePuts++ ;
+        cachePuts++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_PUT, rule, offset, elapsedNanos(), ""));
     }
 
     public void recordCutFired(String rule, int offset) {
-        cutsFired++ ;
+        cutsFired++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CUT_FIRED, rule, offset, elapsedNanos(), "cut"));
     }
 
     public void note(String detail) {
-        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.NOTE, "", - 1, elapsedNanos(), detail));
+        records.add(TraceRecord.traceRecord(TraceRecord.EventKind.NOTE, "", -1, elapsedNanos(), detail));
     }
 
     public List<TraceRecord> records() {
@@ -132,16 +133,18 @@ public final class ParseTracer {
      * reachable from the root.
      */
     public WalkResult walkCst(CstArray cst) {
-        return new WalkResult(visitAll(cst),
-                              countTrivia(cst));
+        return new WalkResult(visitAll(cst), countTrivia(cst));
     }
 
     private int visitAll(CstArray cst) {
         if (isEmpty(cst)) {
             return 0;
         }
+
         var walker = new ArrayWalkState(cst);
+
         walker.visit(cst.rootIndex());
+
         return walker.nodes;
     }
 
@@ -161,28 +164,26 @@ public final class ParseTracer {
         }
 
         void visit(int nodeIdx) {
-            nodes++ ;
+            nodes++;
             if (cst.isError(nodeIdx)) {
                 visitError(nodeIdx);
-            }else {
+            } else {
                 visitRule(nodeIdx);
             }
         }
 
         private void visitError(int nodeIdx) {
-            recordRuleFailure(ERROR_RULE,
-                              cst.spanStart(nodeIdx));
+            recordRuleFailure(ERROR_RULE, cst.spanStart(nodeIdx));
             note("error region: " + cst.textAt(nodeIdx));
-            cst.children(nodeIdx)
-               .forEach(this::visit);
+            cst.children(nodeIdx).forEach(this::visit);
         }
 
         private void visitRule(int nodeIdx) {
             var rule = cst.kindNameAt(nodeIdx);
             var offset = cst.spanStart(nodeIdx);
+
             recordRuleEnter(rule, offset);
-            cst.children(nodeIdx)
-               .forEach(this::visit);
+            cst.children(nodeIdx).forEach(this::visit);
             recordRuleSuccess(rule, offset);
         }
     }
@@ -194,6 +195,7 @@ public final class ParseTracer {
      */
     public Stats stats(int nodeCount, int triviaCount, int diagnosticCount) {
         long micros = elapsedNanos() / 1000L;
+
         return new Stats(micros,
                          nodeCount,
                          triviaCount,
@@ -211,6 +213,7 @@ public final class ParseTracer {
      */
     public String pretty() {
         var sb = new StringBuilder();
+
         sb.append("trace (" + records.size() + " events)\n");
         sb.append(String.format("  rule entries: %d, cache hits: %d, misses: %d, puts: %d, cuts fired: %d%n",
                                 ruleEntries,
@@ -221,14 +224,14 @@ public final class ParseTracer {
         for (var rec : records) {
             sb.append(String.format("  %-14s %-30s @%-5d +%dus %s%n",
                                     rec.kind(),
-                                    rec.rule()
-                                       .isEmpty()
+                                    rec.rule().isEmpty()
                                     ? "-"
                                     : rec.rule(),
                                     rec.offset(),
                                     rec.elapsedNanos() / 1000L,
                                     rec.detail()));
         }
+
         return sb.toString();
     }
 
@@ -256,7 +259,8 @@ public final class ParseTracer {
 
     /** Trivia tally over a raw token stream; see {@link #countTrivia(CstArray)}. */
     public static int countTriviaTokens(TokenArray tokens) {
-        return (int) IntStream.range(0, tokens.count())
+        return (int) IntStream.range(0,
+                                     tokens.count())
                               .filter(tokens::isTrivia)
                               .count();
     }
@@ -268,6 +272,7 @@ public final class ParseTracer {
         if (isEmpty(cst)) {
             return 0;
         }
+
         return (int) cst.descendants(cst.rootIndex())
                         .count();
     }

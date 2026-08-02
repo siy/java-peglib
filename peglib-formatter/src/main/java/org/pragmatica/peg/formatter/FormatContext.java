@@ -3,6 +3,7 @@ package org.pragmatica.peg.formatter;
 import org.pragmatica.peg.cst.CstArray;
 import org.pragmatica.peg.cst.CstNode;
 
+
 /**
  * Context passed to every {@link FormatterRule} invocation.
  *
@@ -11,25 +12,24 @@ import org.pragmatica.peg.cst.CstNode;
  *
  * @since 0.6.0
  */
-public record FormatContext(CstArray cst,
-                              int nodeIdx,
-                              int defaultIndent,
-                              int maxLineWidth,
-                              TriviaPolicy triviaPolicy) {
+public record FormatContext(CstArray cst, int nodeIdx, int defaultIndent, int maxLineWidth, TriviaPolicy triviaPolicy) {
     public FormatContext {
         if (cst == null) {
             throw new IllegalArgumentException("FormatContext.cst must not be null");
         }
+
         if (triviaPolicy == null) {
             throw new IllegalArgumentException("FormatContext.triviaPolicy must not be null");
         }
+
         if (nodeIdx < 0 || nodeIdx >= cst.nodeCount()) {
-            throw new IllegalArgumentException(
-                "nodeIdx=" + nodeIdx + " out of bounds [0, " + cst.nodeCount() + ")");
+            throw new IllegalArgumentException("nodeIdx=" + nodeIdx + " out of bounds [0, " + cst.nodeCount() + ")");
         }
+
         if (defaultIndent < 0) {
             throw new IllegalArgumentException("defaultIndent must be >= 0");
         }
+
         if (maxLineWidth <= 0) {
             throw new IllegalArgumentException("maxLineWidth must be > 0");
         }

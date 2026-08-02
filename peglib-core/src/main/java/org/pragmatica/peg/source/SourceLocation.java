@@ -1,4 +1,5 @@
 package org.pragmatica.peg.source;
+
 /**
  * A position in source text (line and column, both 1-based).
  */

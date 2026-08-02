@@ -1,5 +1,10 @@
 package org.pragmatica.peg.incremental;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
@@ -10,10 +15,6 @@ import org.pragmatica.peg.diagnostic.Diagnostic;
 import org.pragmatica.peg.token.LexFn;
 import org.pragmatica.peg.token.TokenArray;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Phase D.2 / D.1.1 — incremental-edit wrapper around a {@link Parser}.
@@ -62,6 +63,7 @@ public final class IncrementalParser {
     private String input;
     private TokenArray tokens;
     private CstArray cst;
+
     private List<Diagnostic> diagnostics;
 
     /**
@@ -86,6 +88,7 @@ public final class IncrementalParser {
         this.ruleKindByName = parser.ruleKinds();
         this.input = initialInput;
         var initial = parser.parse(initialInput);
+
         this.tokens = initial.cst().tokens();
         this.cst = initial.cst();
         this.diagnostics = initial.diagnostics();
@@ -128,19 +131,23 @@ public final class IncrementalParser {
         // Locate the smallest enclosing checkpoint subtree.
         var checkpointNode = cst.findCheckpointAncestor(offset, checkpointRules);
         var partialOpt = tryPartialReparse(checkpointNode, splicedTokens, offset, oldLen, newText);
-        if ( partialOpt.isPresent()) {
+
+        if (partialOpt.isPresent()) {
             var partialResult = partialOpt.unwrap();
+
             partialReparseCount++;
             this.input = newInput;
             this.tokens = splicedTokens;
             this.cst = partialResult.cst();
             this.diagnostics = partialResult.diagnostics();
+
             return partialResult;
         }
         // Full reparse fallback (no enclosing checkpoint, or checkpoint rule has
         // no kind in the parser's table — e.g. a LEXER rule by mistake).
         fullReparseCount++;
         var result = parser.parse(newInput);
+
         this.input = newInput;
         this.tokens = result.cst().tokens();
         this.cst = result.cst();
@@ -148,6 +155,7 @@ public final class IncrementalParser {
         // Sanity: the windowed splice must agree with the parser's fresh lex on
         // input + count. Mismatches indicate a bug in spliceLex; assert in dev builds.
         assert splicedTokens.input().equals(this.tokens.input()) && splicedTokens.count() == this.tokens.count() : "windowed splice diverged from fresh lex (input or token count differs)";
+
         return result;
     }
 
@@ -162,20 +170,28 @@ public final class IncrementalParser {
                                                   int offset,
                                                   int oldLen,
                                                   String newText) {
-        if ( checkpointNode == CstArray.NO_NODE) {
-        return Option.none();}
+        if (checkpointNode == CstArray.NO_NODE) {
+            return Option.none();
+        }
+
         var checkpointKindName = cst.kindNameAt(checkpointNode);
         var ruleKindBoxed = ruleKindByName.get(checkpointKindName);
-        if ( ruleKindBoxed == null) {
-        return Option.none();}
+
+        if (ruleKindBoxed == null) {
+            return Option.none();
+        }
+
         var ruleKind = ruleKindBoxed.intValue();
         // Edit must lie entirely within the checkpoint's byte span; otherwise
         // surrounding context (siblings) might also be invalidated and the
         // partial path is unsafe.
         var cpStart = cst.spanStart(checkpointNode);
         var cpEnd = cst.spanEnd(checkpointNode);
-        if ( offset < cpStart || offset + oldLen > cpEnd) {
-        return Option.none();}
+
+        if (offset < cpStart || offset + oldLen > cpEnd) {
+            return Option.none();
+        }
+
         var oldFirstToken = cst.firstTokenAt(checkpointNode);
         var oldLastToken = cst.lastTokenAt(checkpointNode);
         var oldTokenCount = tokens.count();
@@ -201,10 +217,15 @@ public final class IncrementalParser {
                            ? oldStartByte + editByteDelta
                            : oldStartByte;
         var mappedFirst = findTokenStartingAt(splicedTokens, primaryStart, oldFirstToken);
-        if ( mappedFirst < 0 && primaryStart != oldStartByte) {
-        mappedFirst = findTokenStartingAt(splicedTokens, oldStartByte, oldFirstToken);}
-        if ( mappedFirst < 0) {
-        return Option.none();}
+
+        if (mappedFirst < 0 && primaryStart != oldStartByte) {
+            mappedFirst = findTokenStartingAt(splicedTokens, oldStartByte, oldFirstToken);
+        }
+
+        if (mappedFirst < 0) {
+            return Option.none();
+        }
+
         final var newFirstToken = mappedFirst;
         // Drive the generated parser into the checkpoint rule starting at the
         // mapped token. The result's CST has a synthetic _ROOT wrapping the
@@ -213,27 +234,40 @@ public final class IncrementalParser {
         var subtreeOpt = Result.lift(PartialReparseFailed::new,
                                      () -> parser.parseRuleFrom(splicedTokens, newFirstToken, ruleKind))
                                .option();
-        if ( subtreeOpt.isEmpty()) {
-        return Option.none();}
+
+        if (subtreeOpt.isEmpty()) {
+            return Option.none();
+        }
+
         var subtree = subtreeOpt.unwrap();
         var subCst = subtree.cst();
         var subRoot = subCst.rootIndex();
-        if ( subRoot == CstArray.NO_NODE) {
-        return Option.none();}
+
+        if (subRoot == CstArray.NO_NODE) {
+            return Option.none();
+        }
+
         var grafted = subCst.firstChildAt(subRoot);
-        if ( grafted == CstArray.NO_NODE) {
-        return Option.none();}
+
+        if (grafted == CstArray.NO_NODE) {
+            return Option.none();
+        }
         // The grafted subtree must end exactly where it should — at the token
         // that corresponds to the old checkpoint's last token plus the delta.
         var subLast = subCst.lastTokenAt(grafted);
         var expectedLast = oldLastToken + tokenDelta;
-        if ( subLast != expectedLast) {
-        // The partial parse stopped short or overshot: bail to full reparse
-        // so we don't produce a CST whose siblings now overlap the parsed
-        // region.
-        return Option.none();}
-        if ( !subCst.kindNameAt(grafted).equals(checkpointKindName)) {
-        return Option.none();}
+
+        if (subLast != expectedLast) {
+            // The partial parse stopped short or overshot: bail to full reparse
+            // so we don't produce a CST whose siblings now overlap the parsed
+            // region.
+            return Option.none();
+        }
+
+        if (!subCst.kindNameAt(grafted).equals(checkpointKindName)) {
+            return Option.none();
+        }
+
         var newCst = cst.spliceSubtree(checkpointNode, subCst, grafted, splicedTokens, tokenDelta, true);
         // Diagnostics: keep diagnostics that apply outside the old checkpoint
         // span (with byte offsets shifted past the edit); merge in the partial
@@ -242,6 +276,7 @@ public final class IncrementalParser {
         // the post-edit string).
         var byteDelta = newText.length() - oldLen;
         var mergedDiagnostics = mergeDiagnostics(diagnostics, subtree.diagnostics(), cpStart, cpEnd, byteDelta);
+
         return Option.some(new ParseResult(newCst, mergedDiagnostics));
     }
 
@@ -252,19 +287,27 @@ public final class IncrementalParser {
      */
     private static int findTokenStartingAt(TokenArray arr, int targetStart, int hint) {
         var n = arr.count();
-        if ( n == 0) {
-        return - 1;}
+
+        if (n == 0) {
+            return -1;
+        }
         // Hint search window: scan +/- 4 around the hint first.
         var lo = Math.max(0, hint - 4);
         var hi = Math.min(n, hint + 5);
-        for ( var i = lo; i < hi; i++) {
-        if ( arr.startAt(i) == targetStart) {
-        return i;}}
+
+        for (var i = lo; i < hi; i++) {
+            if (arr.startAt(i) == targetStart) {
+                return i;
+            }
+        }
         // Full scan fallback.
-        for ( var i = 0; i < n; i++) {
-        if ( arr.startAt(i) == targetStart) {
-        return i;}}
-        return - 1;
+        for (var i = 0; i < n; i++) {
+            if (arr.startAt(i) == targetStart) {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     /**
@@ -280,12 +323,22 @@ public final class IncrementalParser {
                                                      int oldEnd,
                                                      int byteDelta) {
         var out = new ArrayList<Diagnostic>(oldDiagnostics.size() + subDiagnostics.size());
-        for ( var d : oldDiagnostics) {
-        if ( d.offset() < oldStart) {
-        out.add(d);} else
-        if ( d.offset() >= oldEnd) {
-        out.add(new Diagnostic(d.severity(), d.offset() + byteDelta, d.length(), d.message(), d.expected(), d.found()));}}
+
+        for (var d : oldDiagnostics) {
+            if (d.offset() < oldStart) {
+                out.add(d);
+            } else if (d.offset() >= oldEnd) {
+                out.add(new Diagnostic(d.severity(),
+                                       d.offset() + byteDelta,
+                                       d.length(),
+                                       d.message(),
+                                       d.expected(),
+                                       d.found()));
+            }
+        }
+
         out.addAll(subDiagnostics);
+
         return out;
     }
 

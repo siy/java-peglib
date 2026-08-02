@@ -1,4 +1,5 @@
 package org.pragmatica.peg.diagnostic;
+
 public enum Severity {
     ERROR("error"),
     WARNING("warning"),

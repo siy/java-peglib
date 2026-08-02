@@ -1,10 +1,5 @@
 package org.pragmatica.peg.playground;
 
-import org.pragmatica.lang.Result;
-import org.pragmatica.peg.playground.PlaygroundEngine.ParseOutcome;
-import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
-import org.pragmatica.peg.diagnostic.Diagnostic;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -13,6 +8,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
+
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.playground.PlaygroundEngine.ParseOutcome;
+import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
+import org.pragmatica.peg.diagnostic.Diagnostic;
+
 
 /**
  * 0.6.0 CLI REPL: generate-and-compile-in-memory REPL, and the only REPL
@@ -40,7 +41,6 @@ public final class PlaygroundRepl {
     private final Path grammarPath;
     private final BufferedReader reader;
     private final PrintStream out;
-
     private String grammarCache = "";
     private long grammarMtime = -1L;
 
@@ -59,16 +59,22 @@ public final class PlaygroundRepl {
         if (args.length < 1) {
             System.err.println("usage: PlaygroundRepl <grammar.peg>");
             System.exit(2);
+
             return;
         }
+
         Path grammar = Path.of(args[0]);
+
         if (!Files.exists(grammar)) {
             System.err.println("grammar not found: " + grammar);
             System.exit(2);
+
             return;
         }
+
         var reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         var repl = new PlaygroundRepl(grammar, reader, System.out);
+
         repl.run();
     }
 
@@ -79,12 +85,15 @@ public final class PlaygroundRepl {
             out.print("peg> ");
             out.flush();
             String line = reader.readLine();
+
             if (line == null) {
                 return;
             }
+
             if (line.isBlank()) {
                 continue;
             }
+
             if (handleCommand(line.trim())) {
                 return;
             }
@@ -101,14 +110,17 @@ public final class PlaygroundRepl {
         if (line.startsWith(":")) {
             return handleMetaCommand(line);
         }
+
         loadGrammarIfChanged();
         runParse(line);
+
         return false;
     }
 
     private boolean handleMetaCommand(String line) throws IOException {
         String[] parts = line.split("\\s+", 2);
         String cmd = parts[0];
+
         switch (cmd) {
             case ":quit", ":q", ":exit" -> {
                 return true;
@@ -118,6 +130,7 @@ public final class PlaygroundRepl {
             case ":status" -> printStatus();
             default -> out.println("unknown command: " + cmd + " (try :help)");
         }
+
         return false;
     }
 
@@ -130,8 +143,7 @@ public final class PlaygroundRepl {
     }
 
     private void printStatus() {
-        out.println(String.format("grammar: %s (mtime=%d, %d chars)",
-                                  grammarPath, grammarMtime, grammarCache.length()));
+        out.println(String.format("grammar: %s (mtime=%d, %d chars)", grammarPath, grammarMtime, grammarCache.length()));
     }
 
     private void forceReload() throws IOException {
@@ -140,11 +152,12 @@ public final class PlaygroundRepl {
     }
 
     private void loadGrammarIfChanged() throws IOException {
-        long mtime = Files.getLastModifiedTime(grammarPath)
-                          .to(TimeUnit.MILLISECONDS);
+        long mtime = Files.getLastModifiedTime(grammarPath).to(TimeUnit.MILLISECONDS);
+
         if (mtime == grammarMtime) {
             return;
         }
+
         grammarMtime = mtime;
         grammarCache = Files.readString(grammarPath, StandardCharsets.UTF_8);
         out.println("(grammar loaded: " + grammarCache.length() + " chars)");
@@ -153,13 +166,16 @@ public final class PlaygroundRepl {
     private void runParse(String input) {
         var request = new ParseRequest(grammarCache, input);
         Result<ParseOutcome> result = PlaygroundEngine.run(request);
-        result.onFailure(cause -> out.println("grammar error: " + cause.message()))
-              .onSuccess(this::reportOutcome);
+
+        result.onFailure(cause -> out.println("grammar error: " + cause.message())).onSuccess(this::reportOutcome);
     }
 
     private void reportOutcome(ParseOutcome outcome) {
         var stats = outcome.stats();
-        String status = outcome.hasErrors() ? "FAIL" : "OK";
+        String status = outcome.hasErrors()
+                        ? "FAIL"
+                        : "OK";
+
         out.println(String.format("%s  nodes=%d trivia=%d  %.3f ms",
                                   status,
                                   stats.nodeCount(),
@@ -167,8 +183,7 @@ public final class PlaygroundRepl {
                                   stats.timeMicros() / 1000.0));
         if (outcome.hasErrors()) {
             for (Diagnostic diag : outcome.diagnostics()) {
-                out.println("  " + diag.severity().label() + ": " + diag.message()
-                    + " (offset=" + diag.offset() + ")");
+                out.println("  " + diag.severity().label() + ": " + diag.message() + " (offset=" + diag.offset() + ")");
             }
         }
     }

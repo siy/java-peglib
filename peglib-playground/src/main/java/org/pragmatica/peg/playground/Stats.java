@@ -1,4 +1,5 @@
 package org.pragmatica.peg.playground;
+
 /**
  * Per-parse statistics returned alongside the CST / diagnostics by the
  * playground server and REPL. Cheaply computable from the tracer event

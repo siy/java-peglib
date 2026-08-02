@@ -1,8 +1,9 @@
 package org.pragmatica.peg.cst;
 
+import java.util.Arrays;
+
 import org.pragmatica.peg.token.TokenArray;
 
-import java.util.Arrays;
 
 /**
  * Append-style mutable builder for {@link CstArray}. Single-shot: one call to
@@ -24,10 +25,10 @@ public final class CstArrayBuilder {
     private final String input;
     private final TokenArray tokens;
     private final String[] ruleTable;
-
     private int[] nodes;
     private int nodeCount;
     private int[] lastChild;
+
     private int lastChildCount;
 
     /**
@@ -47,6 +48,7 @@ public final class CstArrayBuilder {
 
     public CstArrayBuilder(String input, TokenArray tokens, String[] ruleTable, int initialNodeCapacity) {
         var cap = Math.max(initialNodeCapacity, 1);
+
         this.input = input;
         this.tokens = tokens;
         this.ruleTable = ruleTable;
@@ -71,8 +73,10 @@ public final class CstArrayBuilder {
      */
     public int beginNode(int kind, int firstToken, int parent) {
         var newIdx = nodeCount;
+
         ensureNodeCapacity(newIdx + 1);
         var base = newIdx * CstArray.NODE_STRIDE;
+
         nodes[base] = parent;
         nodes[base + 1] = kind;
         nodes[base + 2] = firstToken;
@@ -84,13 +88,17 @@ public final class CstArrayBuilder {
         // Record the would-be previous sibling BEFORE linkAsChildOf overwrites
         // lastChild[parent]. truncate() consults this slot during rollback to
         // restore lastChild[parent] in O(dropped) time.
-        if ( parent != CstArray.NO_NODE && parent < lastChildCount) {
-        lastChildBefore[newIdx] = lastChild[parent];} else
-        {
-        lastChildBefore[newIdx] = CstArray.NO_NODE;}
+        if (parent != CstArray.NO_NODE && parent < lastChildCount) {
+            lastChildBefore[newIdx] = lastChild[parent];
+        } else {
+            lastChildBefore[newIdx] = CstArray.NO_NODE;
+        }
+
         nodeCount++;
-        if ( parent != CstArray.NO_NODE) {
-        linkAsChildOf(parent, newIdx);}
+        if (parent != CstArray.NO_NODE) {
+            linkAsChildOf(parent, newIdx);
+        }
+
         return newIdx;
     }
 
@@ -128,8 +136,9 @@ public final class CstArrayBuilder {
      */
     @SuppressWarnings("JBCT-RET-01")
     public void truncate(int newCount) {
-        if ( newCount == nodeCount) {
-        return;}
+        if (newCount == nodeCount) {
+            return;
+        }
         // Walk the dropped range backward, undoing the link that beginNode
         // recorded for each node. Two writes per dropped node:
         //   1. Restore lastChild[parent] to the pre-link value.
@@ -139,22 +148,28 @@ public final class CstArrayBuilder {
         // means the LAST iteration for any parent restores the value that
         // was current before the FIRST (lowest-index) of that parent's
         // dropped children was added.
-        for ( var i = nodeCount - 1; i >= newCount; i--) {
+        for (var i = nodeCount - 1; i >= newCount; i--) {
             var base = i * CstArray.NODE_STRIDE;
             var parent = nodes[base];
-            if ( parent == CstArray.NO_NODE) {
-            continue;}
+
+            if (parent == CstArray.NO_NODE) {
+                continue;
+            }
+
             var prev = lastChildBefore[i];
-            if ( prev == CstArray.NO_NODE) {
-            nodes[parent * CstArray.NODE_STRIDE + 4] = CstArray.NO_NODE;} else
-            {
-            nodes[prev * CstArray.NODE_STRIDE + 5] = CstArray.NO_NODE;}
+
+            if (prev == CstArray.NO_NODE) {
+                nodes[parent * CstArray.NODE_STRIDE + 4] = CstArray.NO_NODE;
+            } else {
+                nodes[prev * CstArray.NODE_STRIDE + 5] = CstArray.NO_NODE;
+            }
             // Note: parent may itself be in the dropped range (>= newCount).
             // The write into lastChild[parent] is safe because beginNode
             // ensured lastChild has capacity through any parent it ever saw,
             // and writing to a soon-discarded slot is harmless.
             lastChild[parent] = prev;
         }
+
         nodeCount = newCount;
         // Clip lastChildCount so that future linkAsChildOf calls with a parent
         // index in [newCount, oldLastChildCount) take the init path and reset
@@ -162,17 +177,20 @@ public final class CstArrayBuilder {
         // lastChild for parents that were themselves dropped; those writes are
         // stale relative to any node that may be re-allocated at the same
         // index, and clipping forces correct re-initialisation.
-        if ( lastChildCount > newCount) {
-        lastChildCount = newCount;}
+        if (lastChildCount > newCount) {
+            lastChildCount = newCount;
+        }
     }
 
     public CstArray build(int rootIndex) {
         var trimmed = Arrays.copyOf(nodes, nodeCount * CstArray.NODE_STRIDE);
         var ruleTableCopy = ruleTable.clone();
+
         built = true;
         nodes = null;
         lastChild = null;
         lastChildBefore = null;
+
         return new CstArray(input, tokens, trimmed, nodeCount, ruleTableCopy, rootIndex);
     }
 
@@ -182,44 +200,63 @@ public final class CstArrayBuilder {
 
     private void linkAsChildOf(int parent, int child) {
         ensureLastChildCapacity(parent + 1);
-        if ( lastChildCount < parent + 1) {
-            for ( var i = lastChildCount; i < parent + 1; i++) {
-            lastChild[i] = CstArray.NO_NODE;}
+        if (lastChildCount < parent + 1) {
+            for (var i = lastChildCount; i < parent + 1; i++) {
+                lastChild[i] = CstArray.NO_NODE;
+            }
+
             lastChildCount = parent + 1;
         }
+
         var prev = lastChild[parent];
-        if ( prev == CstArray.NO_NODE) {
-        nodes[parent * CstArray.NODE_STRIDE + 4] = child;} else
-        {
-        nodes[prev * CstArray.NODE_STRIDE + 5] = child;}
+
+        if (prev == CstArray.NO_NODE) {
+            nodes[parent * CstArray.NODE_STRIDE + 4] = child;
+        } else {
+            nodes[prev * CstArray.NODE_STRIDE + 5] = child;
+        }
+
         lastChild[parent] = child;
     }
 
     private void ensureNodeCapacity(int requiredNodes) {
         var requiredInts = requiredNodes * CstArray.NODE_STRIDE;
-        if ( requiredInts <= nodes.length) {
-        return;}
-        var newCap = nodes.length;
-        while ( newCap < requiredInts) {
-            newCap = newCap<< 1;
-            if ( newCap < 0) {
-            newCap = Integer.MAX_VALUE - 8;}
+
+        if (requiredInts <= nodes.length) {
+            return;
         }
+
+        var newCap = nodes.length;
+
+        while (newCap < requiredInts) {
+            newCap = newCap << 1;
+            if (newCap < 0) {
+                newCap = Integer.MAX_VALUE - 8;
+            }
+        }
+
         nodes = Arrays.copyOf(nodes, newCap);
         var nodeCap = newCap / CstArray.NODE_STRIDE;
-        if ( lastChildBefore.length < nodeCap) {
-        lastChildBefore = Arrays.copyOf(lastChildBefore, nodeCap);}
+
+        if (lastChildBefore.length < nodeCap) {
+            lastChildBefore = Arrays.copyOf(lastChildBefore, nodeCap);
+        }
     }
 
     private void ensureLastChildCapacity(int required) {
-        if ( required <= lastChild.length) {
-        return;}
-        var newCap = lastChild.length;
-        while ( newCap < required) {
-            newCap = newCap<< 1;
-            if ( newCap < 0) {
-            newCap = Integer.MAX_VALUE - 8;}
+        if (required <= lastChild.length) {
+            return;
         }
+
+        var newCap = lastChild.length;
+
+        while (newCap < required) {
+            newCap = newCap << 1;
+            if (newCap < 0) {
+                newCap = Integer.MAX_VALUE - 8;
+            }
+        }
+
         lastChild = Arrays.copyOf(lastChild, newCap);
     }
 }

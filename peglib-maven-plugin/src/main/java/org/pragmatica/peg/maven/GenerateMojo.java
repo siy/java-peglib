@@ -1,5 +1,11 @@
 package org.pragmatica.peg.maven;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.utils.Causes;
@@ -14,18 +20,13 @@ import org.pragmatica.peg.generator.VisitorGenerator.GeneratedVisitor;
 import org.pragmatica.peg.lexer.DfaBuilder;
 import org.pragmatica.peg.lexer.RuleClassifier;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
+
 
 /**
  * Emit a standalone lexer + parser + visitor source triple
@@ -72,32 +73,39 @@ public class GenerateMojo extends AbstractMojo {
         if (grammarFile == null || !grammarFile.isFile()) {
             throw new MojoFailureException("grammarFile does not exist: " + grammarFile);
         }
+
         var lexerTarget = targetSourceFile(lexerClassName);
         var parserTarget = targetSourceFile(parserClassName);
         var visitorTarget = targetSourceFile(visitorClassName);
+
         if (allUpToDate(lexerTarget, parserTarget, visitorTarget)) {
-            getLog().info("peglib:generate skipped (up-to-date): "
-                + lexerTarget.getFileName() + ", "
-                + parserTarget.getFileName() + ", "
-                + visitorTarget.getFileName());
+            getLog().info("peglib:generate skipped (up-to-date): " + lexerTarget.getFileName()
+                         + ", " + parserTarget.getFileName()
+                         + ", " + visitorTarget.getFileName());
+
             return;
         }
+
         var generated = readGrammar(grammarFile.toPath()).flatMap(this::buildAll);
+
         if (generated instanceof Result.Failure<?> failure) {
             throw new MojoFailureException(failure.cause().message());
         }
+
         var bundle = generated.unwrap();
         var write = writeAll(bundle, lexerTarget, parserTarget, visitorTarget);
+
         if (write instanceof Result.Failure<?> failure) {
             throw new MojoExecutionException(failure.cause().message());
         }
+
         for (var w : bundle.lexer().warnings()) {
             getLog().warn("peglib:generate lexer warning: " + w);
         }
-        getLog().info("peglib:generate wrote "
-            + lexerTarget.getFileName() + ", "
-            + parserTarget.getFileName() + ", "
-            + visitorTarget.getFileName());
+
+        getLog().info("peglib:generate wrote " + lexerTarget.getFileName()
+                     + ", " + parserTarget.getFileName()
+                     + ", " + visitorTarget.getFileName());
     }
 
     record GeneratedBundle(Generated lexer, GeneratedParser parser, GeneratedVisitor visitor) {}
@@ -108,22 +116,32 @@ public class GenerateMojo extends AbstractMojo {
      * sources. Each step is a Result so failures surface as a Cause.
      */
     private Result<GeneratedBundle> buildAll(String grammarText) {
-        return GrammarParser.parse(grammarText)
-            .flatMap(grammar -> RuleClassifier.classify(grammar)
-                .flatMap(classification -> DfaBuilder.build(grammar, classification)
-                    .flatMap(built -> generateBundle(grammar, classification, built))));
+        return GrammarParser.parse(grammarText).flatMap(grammar -> RuleClassifier.classify(grammar).flatMap(classification -> DfaBuilder.build(grammar,
+                                                                                                                                               classification).flatMap(built -> generateBundle(grammar,
+                                                                                                                                                                                               classification,
+                                                                                                                                                                                               built))));
     }
 
     private Result<GeneratedBundle> generateBundle(Grammar grammar,
                                                    RuleClassifier.Classification classification,
                                                    DfaBuilder.Built built) {
-        return LexerGenerator.generate(grammar, classification, built.dfa(), built.kinds(),
-                                       packageName, lexerClassName)
-            .flatMap(lexer -> ParserGenerator.generate(grammar, classification, built.kinds(),
-                                                       packageName, parserClassName)
-                .flatMap(parser -> VisitorGenerator.generate(grammar, classification,
-                                                             packageName, visitorClassName)
-                    .map(visitor -> new GeneratedBundle(lexer, parser, visitor))));
+        return LexerGenerator.generate(grammar,
+                                       classification,
+                                       built.dfa(),
+                                       built.kinds(),
+                                       packageName,
+                                       lexerClassName)
+                             .flatMap(lexer -> ParserGenerator.generate(grammar,
+                                                                        classification,
+                                                                        built.kinds(),
+                                                                        packageName,
+                                                                        parserClassName)
+                                                              .flatMap(parser -> VisitorGenerator.generate(grammar,
+                                                                                                           classification,
+                                                                                                           packageName,
+                                                                                                           visitorClassName).map(visitor -> new GeneratedBundle(lexer,
+                                                                                                                                                                parser,
+                                                                                                                                                                visitor))));
     }
 
     private static Result<String> readGrammar(Path path) {
@@ -138,6 +156,7 @@ public class GenerateMojo extends AbstractMojo {
 
     private static Path writeSourceUnchecked(Path targetFile, String source) throws IOException {
         Files.createDirectories(targetFile.getParent());
+
         return Files.writeString(targetFile, source);
     }
 
@@ -145,25 +164,34 @@ public class GenerateMojo extends AbstractMojo {
                                                Path lexerTarget,
                                                Path parserTarget,
                                                Path visitorTarget) {
-        return writeSource(lexerTarget, bundle.lexer().source())
-            .flatMap(l -> writeSource(parserTarget, bundle.parser().source())
-                .flatMap(p -> writeSource(visitorTarget, bundle.visitor().source())
-                    .map(v -> List.of(l, p, v))));
+        return writeSource(lexerTarget,
+                           bundle.lexer().source()).flatMap(l -> writeSource(parserTarget,
+                                                                             bundle.parser().source()).flatMap(p -> writeSource(visitorTarget,
+                                                                                                                                bundle.visitor()
+                                                                                                                                      .source()).map(v -> List.of(l,
+                                                                                                                                                                  p,
+                                                                                                                                                                  v))));
     }
 
     private Path targetSourceFile(String className) {
         var packagePath = packageName.replace('.', '/');
-        return outputDirectory.toPath().resolve(packagePath).resolve(className + ".java");
+
+        return outputDirectory.toPath()
+                              .resolve(packagePath)
+                              .resolve(className + ".java");
     }
 
     private boolean allUpToDate(Path... targets) {
         long grammarMtime = grammarFile.lastModified();
+
         for (var target : targets) {
             var file = target.toFile();
+
             if (!file.isFile() || file.lastModified() < grammarMtime) {
                 return false;
             }
         }
+
         return true;
     }
 

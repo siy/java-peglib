@@ -2,6 +2,7 @@ package org.pragmatica.peg.formatter;
 
 import java.util.List;
 
+
 /**
  * Static builder functions for {@link Doc} values. Intended for static import.
  *
@@ -77,14 +78,16 @@ public final class Docs {
         if (parts == null || parts.length == 0) {
             return empty();
         }
+
         if (parts.length == 1) {
             return parts[0];
         }
+
         return Doc.concatAll(List.of(parts));
     }
 
     /** Concatenate a list of docs. */
-    public static Doc concat(List< ? extends Doc> parts) {
+    public static Doc concat(List<? extends Doc> parts) {
         return Doc.concatAll(parts);
     }
 
@@ -92,14 +95,17 @@ public final class Docs {
      * Join {@code parts} with {@code separator} between adjacent elements.
      * Returns {@link #empty()} for an empty list.
      */
-    public static Doc join(Doc separator, List< ? extends Doc> parts) {
+    public static Doc join(Doc separator, List<? extends Doc> parts) {
         if (parts == null || parts.isEmpty()) {
             return empty();
         }
+
         Doc acc = parts.getFirst();
-        for (int i = 1; i < parts.size(); i++ ) {
+
+        for (int i = 1; i < parts.size(); i++) {
             acc = new Doc.Concat(new Doc.Concat(acc, separator), parts.get(i));
         }
+
         return acc;
     }
 }

@@ -1,14 +1,5 @@
 package org.pragmatica.peg.playground;
 
-import org.pragmatica.lang.Cause;
-import org.pragmatica.lang.Result;
-import org.pragmatica.peg.playground.internal.JsonDecoder;
-import org.pragmatica.peg.playground.internal.JsonEncoder;
-import org.pragmatica.peg.playground.internal.JsonEncoder.Diagnostics;
-import org.pragmatica.peg.playground.PlaygroundEngine;
-import org.pragmatica.peg.playground.PlaygroundEngine.ParseOutcome;
-import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
@@ -19,8 +10,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.playground.internal.JsonDecoder;
+import org.pragmatica.peg.playground.internal.JsonEncoder;
+import org.pragmatica.peg.playground.internal.JsonEncoder.Diagnostics;
+import org.pragmatica.peg.playground.PlaygroundEngine;
+import org.pragmatica.peg.playground.PlaygroundEngine.ParseOutcome;
+import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+
 
 /**
  * Embedded HTTP server for the peglib playground. Binds to localhost on the
@@ -36,10 +37,8 @@ import com.sun.net.httpserver.HttpServer;
 public final class PlaygroundServer {
     private static final int DEFAULT_PORT = 8080;
     private static final int STATIC_READ_BUFFER = 4096;
-
     /** Max size of an inbound request body (1 MiB). Larger bodies are rejected with HTTP 413. */
     private static final int MAX_REQUEST_BODY_BYTES = 1024 * 1024;
-
     /** Allow-list for static-asset paths after slash normalization. */
     private static final Pattern STATIC_PATH_ALLOWLIST = Pattern.compile("^/[A-Za-z0-9._/-]*$");
 
@@ -62,10 +61,10 @@ public final class PlaygroundServer {
     public static void main(String[] args) throws IOException {
         int port = parsePort(args);
         var server = start(port);
+
         System.out.println("peglib playground: http://localhost:" + server.port());
         System.out.println("press Ctrl-C to stop");
-        Runtime.getRuntime()
-               .addShutdownHook(new Thread(server::stop));
+        Runtime.getRuntime().addShutdownHook(new Thread(server::stop));
     }
 
     /**
@@ -75,13 +74,14 @@ public final class PlaygroundServer {
     public static PlaygroundServer start(int port) throws IOException {
         var address = new InetSocketAddress("localhost", port);
         var server = HttpServer.create(address, 0);
+
         server.createContext("/parse", PlaygroundServer::handleParse);
         server.createContext("/", PlaygroundServer::handleStatic);
         server.setExecutor(null);
         server.start();
+
         return new PlaygroundServer(server,
-                                    server.getAddress()
-                                          .getPort());
+                                    server.getAddress().getPort());
     }
 
     public int port() {
@@ -96,14 +96,18 @@ public final class PlaygroundServer {
     private static void handleParse(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, Map.of("error", "method not allowed"));
+
             return;
         }
+
         String body;
+
         try (InputStream in = exchange.getRequestBody()) {
             // Read one more byte than the cap — if the stream still has data,
             // the request exceeds the limit and is rejected without buffering
             // the whole payload.
             byte[] bytes = in.readNBytes(MAX_REQUEST_BODY_BYTES + 1);
+
             if (bytes.length > MAX_REQUEST_BODY_BYTES) {
                 sendJson(exchange,
                          413,
@@ -111,18 +115,18 @@ public final class PlaygroundServer {
                                 "payload too large",
                                 "detail",
                                 "request body exceeds " + MAX_REQUEST_BODY_BYTES + " bytes"));
+
                 return;
             }
+
             body = new String(bytes, StandardCharsets.UTF_8);
         }
         // 0.4.0 — Result.lift wraps the JSON-parse adapter; the validate step
         // stays as a pure Result so the bad-request branch surfaces both
         // decode and missing-field failures uniformly.
-        var response = parseRequestBody(body).fold(PlaygroundServer::badRequest,
-                                                   PlaygroundServer::runParse);
-        sendJson(exchange,
-                 response.status(),
-                 response.payload());
+        var response = parseRequestBody(body).fold(PlaygroundServer::badRequest, PlaygroundServer::runParse);
+
+        sendJson(exchange, response.status(), response.payload());
     }
 
     /** An HTTP status paired with the JSON body to render at it. */
@@ -143,18 +147,19 @@ public final class PlaygroundServer {
      */
     private static JsonResponse runParse(ParseRequest request) {
         return JsonResponse.jsonResponse(200,
-                                         PlaygroundEngine.run(request)
-                                                           .fold(PlaygroundServer::grammarErrorPayload,
-                                                                 PlaygroundServer::buildResponse));
+                                         PlaygroundEngine.run(request).fold(PlaygroundServer::grammarErrorPayload,
+                                                                            PlaygroundServer::buildResponse));
     }
 
     private static Map<String, Object> grammarErrorPayload(Cause cause) {
         var payload = new LinkedHashMap<String, Object>();
+
         payload.put("ok", Boolean.FALSE);
         payload.put("grammarError", cause.message());
         payload.put("tree", null);
         payload.put("diagnostics", List.of());
         payload.put("stats", Stats.empty());
+
         return payload;
     }
 
@@ -165,13 +170,14 @@ public final class PlaygroundServer {
      */
     private static Map<String, Object> buildResponse(ParseOutcome outcome) {
         var payload = new LinkedHashMap<String, Object>();
+
         payload.put("ok", !outcome.hasErrors());
         payload.put("tree", outcome.cst());
         payload.put("diagnostics",
                     Diagnostics.diagnostics(outcome.diagnostics(),
-                                            outcome.cst()
-                                                   .input()));
+                                            outcome.cst().input()));
         payload.put("stats", statsWithTrace(outcome));
+
         return payload;
     }
 
@@ -189,6 +195,7 @@ public final class PlaygroundServer {
         var tracer = ParseTracer.start();
         var walk = tracer.walkCst(outcome.cst());
         var measured = outcome.stats();
+
         return new Stats(measured.timeMicros(),
                          walk.nodes(),
                          walk.trivia(),
@@ -220,25 +227,26 @@ public final class PlaygroundServer {
      */
     private static Result<ParseRequest> buildRequest(Map<String, Object> obj) {
         String grammar = stringField(obj, "grammar", "");
+
         if (grammar.isEmpty()) {
             return new BadRequest("grammar field is required").result();
         }
-        return Result.success(new ParseRequest(grammar,
-                                               stringField(obj, "input", "")));
+
+        return Result.success(new ParseRequest(grammar, stringField(obj, "input", "")));
     }
 
     /** Adapter-boundary cause for parse-request decoding/validation failures. */
     record BadRequest(String message) implements Cause {
         BadRequest(Throwable t) {
             this(t.getMessage() == null
-                 ? t.getClass()
-                    .getSimpleName()
+                 ? t.getClass().getSimpleName()
                  : t.getMessage());
         }
     }
 
     private static String stringField(Map<String, Object> obj, String key, String fallback) {
         Object value = obj.get(key);
+
         return value instanceof String s
                ? s
                : fallback;
@@ -248,25 +256,31 @@ public final class PlaygroundServer {
     private static void handleStatic(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, Map.of("error", "method not allowed"));
+
             return;
         }
+
         URI uri = exchange.getRequestURI();
         String rawPath = uri.getPath();
         String safePath = sanitizeStaticPath(rawPath);
+
         if (safePath == null) {
             sendPlain(exchange, 400, "bad request");
+
             return;
         }
+
         String resourcePath = "/playground" + safePath;
         byte[] body = readResource(resourcePath);
+
         if (body == null) {
             sendPlain(exchange, 404, "not found: " + safePath);
+
             return;
         }
+
         addSecurityHeaders(exchange);
-        exchange.getResponseHeaders()
-                .add("Content-Type",
-                     contentType(safePath));
+        exchange.getResponseHeaders().add("Content-Type", contentType(safePath));
         exchange.sendResponseHeaders(200, body.length);
         try (var out = exchange.getResponseBody()) {
             out.write(body);
@@ -284,23 +298,27 @@ public final class PlaygroundServer {
         if (rawPath == null || rawPath.isEmpty() || rawPath.equals("/")) {
             return "/index.html";
         }
-        for (int i = 0; i < rawPath.length(); i++ ) {
+
+        for (int i = 0; i < rawPath.length(); i++) {
             char c = rawPath.charAt(i);
+
             if (c < 0x20 || c == '\\') {
                 return null;
             }
         }
         // Collapse repeated slashes; reject any ".." segment.
         String collapsed = rawPath.replaceAll("/+", "/");
+
         for (var segment : collapsed.split("/")) {
             if ("..".equals(segment)) {
                 return null;
             }
         }
-        if (!STATIC_PATH_ALLOWLIST.matcher(collapsed)
-                                  .matches()) {
+
+        if (!STATIC_PATH_ALLOWLIST.matcher(collapsed).matches()) {
             return null;
         }
+
         return collapsed;
     }
 
@@ -311,6 +329,7 @@ public final class PlaygroundServer {
      */
     private static void addSecurityHeaders(HttpExchange exchange) {
         var headers = exchange.getResponseHeaders();
+
         headers.add("X-Content-Type-Options", "nosniff");
         headers.add("X-Frame-Options", "DENY");
         headers.add("Referrer-Policy", "no-referrer");
@@ -322,32 +341,39 @@ public final class PlaygroundServer {
             if (in == null) {
                 return null;
             }
+
             var buffer = new java.io.ByteArrayOutputStream();
             byte[] chunk = new byte[STATIC_READ_BUFFER];
             int n;
+
             while ((n = in.read(chunk)) > 0) {
                 buffer.write(chunk, 0, n);
             }
+
             return buffer.toByteArray();
         }
     }
 
     private static String contentType(String path) {
         if (path.endsWith(".html")) return "text/html; charset=utf-8";
+
         if (path.endsWith(".css")) return "text/css; charset=utf-8";
+
         if (path.endsWith(".js")) return "application/javascript; charset=utf-8";
+
         if (path.endsWith(".json")) return "application/json; charset=utf-8";
+
         if (path.endsWith(".svg")) return "image/svg+xml";
+
         return "application/octet-stream";
     }
 
     // === response helpers ===
     private static void sendJson(HttpExchange exchange, int status, Object payload) throws IOException {
-        byte[] body = JsonEncoder.encode(payload)
-                                 .getBytes(StandardCharsets.UTF_8);
+        byte[] body = JsonEncoder.encode(payload).getBytes(StandardCharsets.UTF_8);
+
         addSecurityHeaders(exchange);
-        exchange.getResponseHeaders()
-                .add("Content-Type", "application/json; charset=utf-8");
+        exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
         exchange.sendResponseHeaders(status, body.length);
         try (var out = exchange.getResponseBody()) {
             out.write(body);
@@ -356,9 +382,9 @@ public final class PlaygroundServer {
 
     private static void sendPlain(HttpExchange exchange, int status, String message) throws IOException {
         byte[] body = message.getBytes(StandardCharsets.UTF_8);
+
         addSecurityHeaders(exchange);
-        exchange.getResponseHeaders()
-                .add("Content-Type", "text/plain; charset=utf-8");
+        exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=utf-8");
         exchange.sendResponseHeaders(status, body.length);
         try (var out = exchange.getResponseBody()) {
             out.write(body);
@@ -366,16 +392,18 @@ public final class PlaygroundServer {
     }
 
     private static int parsePort(String[] args) {
-        for (int i = 0; i < args.length; i++ ) {
+        for (int i = 0; i < args.length; i++) {
             if ("--port".equals(args[i]) && i + 1 < args.length) {
-                try{
+                try {
                     return Integer.parseInt(args[i + 1]);
                 } catch (NumberFormatException ex) {
                     System.err.println("invalid port, using default " + DEFAULT_PORT);
+
                     return DEFAULT_PORT;
                 }
             }
         }
+
         return DEFAULT_PORT;
     }
 }

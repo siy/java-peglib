@@ -2,6 +2,7 @@ package org.pragmatica.peg.cst;
 
 import java.util.stream.IntStream;
 
+
 /**
  * Sealed-pattern view over a node in a {@link CstArray}. Three variants ({@code Branch},
  * {@code Leaf}, {@code Error}) carry no state of their own beyond the {@code (index, array)}
@@ -13,37 +14,36 @@ import java.util.stream.IntStream;
  */
 public sealed interface CstNode permits CstNode.Branch, CstNode.Leaf, CstNode.Error {
     int index();
-
     CstArray array();
-
     int kind();
-
     String kindName();
-
     int spanStart();
-
     int spanEnd();
-
     CharSequence text();
 
     record Branch(int index, CstArray array) implements CstNode {
-        @Override public int kind() {
+        @Override
+        public int kind() {
             return array.kindAt(index);
         }
 
-        @Override public String kindName() {
+        @Override
+        public String kindName() {
             return array.kindNameAt(index);
         }
 
-        @Override public int spanStart() {
+        @Override
+        public int spanStart() {
             return array.spanStart(index);
         }
 
-        @Override public int spanEnd() {
+        @Override
+        public int spanEnd() {
             return array.spanEnd(index);
         }
 
-        @Override public CharSequence text() {
+        @Override
+        public CharSequence text() {
             return array.textAt(index);
         }
 
@@ -53,23 +53,28 @@ public sealed interface CstNode permits CstNode.Branch, CstNode.Leaf, CstNode.Er
     }
 
     record Leaf(int index, CstArray array) implements CstNode {
-        @Override public int kind() {
+        @Override
+        public int kind() {
             return array.kindAt(index);
         }
 
-        @Override public String kindName() {
+        @Override
+        public String kindName() {
             return array.kindNameAt(index);
         }
 
-        @Override public int spanStart() {
+        @Override
+        public int spanStart() {
             return array.spanStart(index);
         }
 
-        @Override public int spanEnd() {
+        @Override
+        public int spanEnd() {
             return array.spanEnd(index);
         }
 
-        @Override public CharSequence text() {
+        @Override
+        public CharSequence text() {
             return array.textAt(index);
         }
 
@@ -79,23 +84,28 @@ public sealed interface CstNode permits CstNode.Branch, CstNode.Leaf, CstNode.Er
     }
 
     record Error(int index, CstArray array) implements CstNode {
-        @Override public int kind() {
+        @Override
+        public int kind() {
             return array.kindAt(index);
         }
 
-        @Override public String kindName() {
+        @Override
+        public String kindName() {
             return array.kindNameAt(index);
         }
 
-        @Override public int spanStart() {
+        @Override
+        public int spanStart() {
             return array.spanStart(index);
         }
 
-        @Override public int spanEnd() {
+        @Override
+        public int spanEnd() {
             return array.spanEnd(index);
         }
 
-        @Override public CharSequence text() {
+        @Override
+        public CharSequence text() {
             return array.textAt(index);
         }
     }

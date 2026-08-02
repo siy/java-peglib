@@ -2,6 +2,7 @@ package org.pragmatica.peg.grammar.analysis;
 
 import org.pragmatica.peg.grammar.Expression;
 
+
 /**
  * Shared expression-shape helpers for PEG grammar analysis.
  *

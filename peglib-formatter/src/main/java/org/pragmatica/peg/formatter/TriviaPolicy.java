@@ -1,15 +1,16 @@
 package org.pragmatica.peg.formatter;
 
-import org.pragmatica.peg.formatter.Doc;
-import org.pragmatica.peg.token.TokenArray;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
 
+import org.pragmatica.peg.formatter.Doc;
+import org.pragmatica.peg.token.TokenArray;
+
 import static org.pragmatica.peg.formatter.Docs.concat;
 import static org.pragmatica.peg.formatter.Docs.empty;
 import static org.pragmatica.peg.formatter.Docs.text;
+
 
 /**
  * Strategy for emitting trivia (whitespace, comments) collected from the
@@ -35,23 +36,18 @@ import static org.pragmatica.peg.formatter.Docs.text;
  */
 @FunctionalInterface
 public interface TriviaPolicy {
-
     /**
      * Render a contiguous run of trivia tokens (in {@code tokenIndices} order
      * over {@code tokens}) into a {@link Doc}. Return
      * {@link org.pragmatica.peg.formatter.Docs#empty()} to drop the run.
      */
     Doc render(TokenArray tokens, IntStream tokenIndices);
-
     /** Preserve every trivia verbatim. Newlines become hard line breaks. */
     TriviaPolicy PRESERVE = (tokens, indices) -> renderTrivia(tokens, indices, false, false);
-
     /** Drop whitespace; keep comments. */
     TriviaPolicy STRIP_WHITESPACE = (tokens, indices) -> renderTrivia(tokens, indices, true, false);
-
     /** Drop every trivia. */
     TriviaPolicy DROP_ALL = (tokens, indices) -> empty();
-
     /** Collapse runs of more than one newline in whitespace down to a single blank line. */
     TriviaPolicy NORMALIZE_BLANK_LINES = (tokens, indices) -> renderTrivia(tokens, indices, false, true);
 
@@ -60,15 +56,22 @@ public interface TriviaPolicy {
                                     boolean stripWhitespace,
                                     boolean normalizeBlankLines) {
         var parts = new ArrayList<Doc>();
+
         indices.forEach(idx -> {
             var kind = tokens.kindAt(idx);
-            var raw = tokens.textAt(idx).toString();
+            var raw = tokens.textAt(idx)
+                            .toString();
+
             switch (kind) {
                 case TokenArray.KIND_WHITESPACE -> {
                     if (stripWhitespace) {
                         return;
                     }
-                    var ws = normalizeBlankLines ? collapseBlankLines(raw) : raw;
+
+                    var ws = normalizeBlankLines
+                             ? collapseBlankLines(raw)
+                             : raw;
+
                     appendWhitespace(parts, ws);
                 }
                 case TokenArray.KIND_LINE_COMMENT, TokenArray.KIND_DOC_LINE_COMMENT -> appendLineComment(parts, raw);
@@ -76,33 +79,44 @@ public interface TriviaPolicy {
                 default -> parts.add(text(raw));
             }
         });
-        return parts.isEmpty() ? empty() : concat(parts);
+
+        return parts.isEmpty()
+               ? empty()
+               : concat(parts);
     }
 
     private static void appendWhitespace(List<Doc> parts, String ws) {
         if (ws.isEmpty()) {
             return;
         }
+
         var run = new StringBuilder();
+
         for (var i = 0; i < ws.length(); i++) {
             var c = ws.charAt(i);
+
             if (c == '\n') {
                 if (!run.isEmpty()) {
                     parts.add(text(run.toString()));
                     run.setLength(0);
                 }
+
                 parts.add(new Doc.HardLine());
             } else {
                 run.append(c);
             }
         }
+
         if (!run.isEmpty()) {
             parts.add(text(run.toString()));
         }
     }
 
     private static void appendLineComment(List<Doc> parts, String raw) {
-        var stripped = raw.endsWith("\n") ? raw.substring(0, raw.length() - 1) : raw;
+        var stripped = raw.endsWith("\n")
+                       ? raw.substring(0, raw.length() - 1)
+                       : raw;
+
         parts.add(text(stripped));
         parts.add(new Doc.HardLine());
     }
@@ -110,27 +124,34 @@ public interface TriviaPolicy {
     private static void appendBlockComment(List<Doc> parts, String raw) {
         if (raw.indexOf('\n') < 0) {
             parts.add(text(raw));
+
             return;
         }
+
         var lines = raw.split("\n", -1);
+
         for (var i = 0; i < lines.length; i++) {
             if (i > 0) {
                 parts.add(new Doc.HardLine());
             }
+
             parts.add(text(lines[i]));
         }
     }
 
     private static String collapseBlankLines(String text) {
         var newlines = 0;
+
         for (var i = 0; i < text.length(); i++) {
             if (text.charAt(i) == '\n') {
                 newlines++;
             }
         }
+
         if (newlines <= 1) {
             return text;
         }
+
         return "\n\n";
     }
 }

@@ -1,9 +1,5 @@
 package org.pragmatica.peg.grammar.analysis;
 
-import org.pragmatica.peg.grammar.Expression;
-import org.pragmatica.peg.grammar.Grammar;
-import org.pragmatica.peg.grammar.Rule;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -11,6 +7,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.pragmatica.peg.grammar.Expression;
+import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.grammar.Rule;
+
 
 /**
  * Left-recursion detection for PEG grammars (0.2.9).
@@ -46,11 +47,13 @@ public final class LeftRecursionAnalysis {
      */
     public static Set<String> directLeftRecursiveRules(Grammar grammar) {
         var result = new LinkedHashSet<String>();
+
         for (var rule : grammar.rules()) {
             if (isDirectLeftRecursive(rule)) {
                 result.add(rule.name());
             }
         }
+
         return result;
     }
 
@@ -68,18 +71,17 @@ public final class LeftRecursionAnalysis {
      */
     private static boolean expressionStartsWithRef(Expression expr, String self) {
         return switch (expr) {
-            case Expression.Reference ref -> ref.ruleName()
-                                                .equals(self);
-            case Expression.Choice ch -> ch.alternatives()
-                                           .stream()
-                                           .anyMatch(alt -> expressionStartsWithRef(alt, self));
+            case Expression.Reference ref -> ref.ruleName().equals(self);
+            case Expression.Choice ch -> ch.alternatives().stream().anyMatch(alt -> expressionStartsWithRef(alt, self));
             case Expression.Sequence seq -> {
                 for (var el : seq.elements()) {
                     if (el instanceof Expression.And || el instanceof Expression.Not) {
                         continue;
                     }
+
                     yield expressionStartsWithRef(el, self);
                 }
+
                 yield false;
             }
             case Expression.Group grp -> expressionStartsWithRef(grp.expression(), self);
@@ -103,17 +105,21 @@ public final class LeftRecursionAnalysis {
     public static List<String> findIndirectCycle(Grammar grammar) {
         Map<String, List<String>> leftRefs = buildLeftRefGraph(grammar);
         var visited = new HashSet<String>();
+
         for (var start : leftRefs.keySet()) {
             if (visited.contains(start)) {
                 continue;
             }
+
             var path = new ArrayList<String>();
             var onPath = new HashSet<String>();
             var cycle = dfs(start, leftRefs, visited, path, onPath);
+
             if (!cycle.isEmpty()) {
                 return cycle;
             }
         }
+
         return List.of();
     }
 
@@ -124,35 +130,46 @@ public final class LeftRecursionAnalysis {
                                     Set<String> onPath) {
         if (onPath.contains(node)) {
             int from = path.indexOf(node);
+
             if (from < 0) {
                 return List.of();
             }
+
             var cycle = new ArrayList<>(path.subList(from, path.size()));
+
             cycle.add(node);
             // Filter direct self-loops (length-2: [A, A]) — direct LR is handled elsewhere.
             if (cycle.size() <= 2) {
                 return List.of();
             }
+
             return cycle;
         }
+
         if (visited.contains(node)) {
             return List.of();
         }
+
         path.add(node);
         onPath.add(node);
         var refs = leftRefs.getOrDefault(node, List.of());
+
         for (var ref : refs) {
             if (ref.equals(node)) {
                 continue;
             }
+
             var found = dfs(ref, leftRefs, visited, path, onPath);
+
             if (!found.isEmpty()) {
                 return found;
             }
         }
+
         path.remove(path.size() - 1);
         onPath.remove(node);
         visited.add(node);
+
         return List.of();
     }
 
@@ -163,11 +180,14 @@ public final class LeftRecursionAnalysis {
      */
     private static Map<String, List<String>> buildLeftRefGraph(Grammar grammar) {
         var g = new HashMap<String, List<String>>();
+
         for (var rule : grammar.rules()) {
             var refs = new ArrayList<String>();
+
             collectLeftRefs(rule.expression(), refs);
             g.put(rule.name(), refs);
         }
+
         return g;
     }
 
@@ -188,7 +208,9 @@ public final class LeftRecursionAnalysis {
                     if (el instanceof Expression.And || el instanceof Expression.Not) {
                         continue;
                     }
+
                     collectLeftRefs(el, out);
+
                     return;
                 }
             }
