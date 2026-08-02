@@ -14,6 +14,7 @@ import org.pragmatica.json.JsonMapper;
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
+import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.playground.internal.JsonEncoder;
 import org.pragmatica.peg.playground.internal.JsonEncoder.Diagnostics;
@@ -65,7 +66,7 @@ public final class PlaygroundServer {
     @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"})  // JVM entry-point contract: main is void and may declare throws.
     public static void main(String[] args) throws IOException {
         int port = parsePort(args);
-        var server = start(port);
+        var server = start(port).unwrap();
 
         System.out.println("peglib playground: http://localhost:" + server.port());
         System.out.println("press Ctrl-C to stop");
@@ -76,7 +77,13 @@ public final class PlaygroundServer {
      * Start the server on the given port and return the running instance.
      * Pass {@code 0} to let the OS choose an ephemeral port (used in tests).
      */
-    public static PlaygroundServer start(int port) throws IOException {
+    public static Result<PlaygroundServer> start(int port) {
+        return Result.lift(Causes::fromThrowable, () -> bind(port));
+    }
+
+    // JDK-API adapter: HttpServer.create declares IOException.
+    @SuppressWarnings("JBCT-EX-01")
+    private static PlaygroundServer bind(int port) throws IOException {
         var address = new InetSocketAddress("localhost", port);
         var server = HttpServer.create(address, 0);
 
@@ -288,13 +295,15 @@ public final class PlaygroundServer {
 
         String safePath = sanitized.unwrap();
         String resourcePath = "/playground" + safePath;
-        byte[] body = readResource(resourcePath);
+        var resource = readResource(resourcePath);
 
-        if (body == null) {
+        if (resource.isEmpty()) {
             sendPlain(exchange, 404, "not found: " + safePath);
 
             return;
         }
+
+        byte[] body = resource.unwrap();
 
         addSecurityHeaders(exchange);
         exchange.getResponseHeaders().add("Content-Type", contentType(safePath));
@@ -353,10 +362,15 @@ public final class PlaygroundServer {
         headers.add("Cache-Control", "no-store");
     }
 
-    private static byte[] readResource(String path) throws IOException {
+    /**
+     * Read a bundled static asset. Empty when the resource is absent or
+     * unreadable — both render as 404, so the distinction is not actionable
+     * for the caller.
+     */
+    private static Option<byte[]> readResource(String path) {
         try (var in = PlaygroundServer.class.getResourceAsStream(path)) {
             if (in == null) {
-                return null;
+                return Option.none();
             }
 
             var buffer = new java.io.ByteArrayOutputStream();
@@ -367,7 +381,9 @@ public final class PlaygroundServer {
                 buffer.write(chunk, 0, n);
             }
 
-            return buffer.toByteArray();
+            return Option.some(buffer.toByteArray());
+        } catch (IOException e) {
+            return Option.none();
         }
     }
 
@@ -386,6 +402,11 @@ public final class PlaygroundServer {
     }
 
     // === response helpers ===
+    // Response-writing arm of the HttpHandler contract: these are reached only from
+    // handleParse/handleStatic, whose signatures already declare IOException per
+    // com.sun.net.httpserver.HttpHandler. Returning Result here would leave a discarded
+    // Result at every call site inside those void handlers.
+    @SuppressWarnings("JBCT-EX-01")
     private static void sendJson(HttpExchange exchange, int status, Object payload) throws IOException {
         byte[] body = JsonEncoder.encode(payload).getBytes(StandardCharsets.UTF_8);
 
@@ -397,6 +418,7 @@ public final class PlaygroundServer {
         }
     }
 
+    @SuppressWarnings("JBCT-EX-01")  // See sendJson: HttpHandler response-writing contract.
     private static void sendPlain(HttpExchange exchange, int status, String message) throws IOException {
         byte[] body = message.getBytes(StandardCharsets.UTF_8);
 

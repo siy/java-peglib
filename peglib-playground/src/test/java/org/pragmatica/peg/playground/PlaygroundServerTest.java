@@ -37,7 +37,7 @@ class PlaygroundServerTest {
 
     @BeforeEach
     void start() throws Exception {
-        server = PlaygroundServer.start(0);
+        server = PlaygroundServer.start(0).unwrap();
         client = HttpClient.newHttpClient();
     }
 

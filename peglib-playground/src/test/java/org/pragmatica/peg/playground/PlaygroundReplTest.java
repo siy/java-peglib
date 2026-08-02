@@ -50,7 +50,7 @@ class PlaygroundReplTest {
                                         new BufferedReader(new StringReader("")),
                                         out);
 
-        boolean exit = repl.handleCommand(":quit");
+        boolean exit = repl.handleCommand(":quit").unwrap();
         assertThat(exit).isTrue();
     }
 

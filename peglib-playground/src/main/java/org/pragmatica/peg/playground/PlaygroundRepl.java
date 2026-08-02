@@ -9,7 +9,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
+import org.pragmatica.lang.Option;
+import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.lang.Result;
+import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.playground.PlaygroundEngine.ParseOutcome;
 import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
 import org.pragmatica.peg.diagnostic.Diagnostic;
@@ -79,26 +82,51 @@ public final class PlaygroundRepl {
         repl.run();
     }
 
-    public void run() throws IOException {
-        loadGrammarIfChanged();
+    public Result<Unit> run() {
+        var loaded = loadGrammarIfChanged();
+
+        if (loaded instanceof Result.Failure<Unit>) {
+            return loaded;
+        }
+
         banner();
         while (true) {
             out.print("peg> ");
             out.flush();
-            String line = reader.readLine();
+            var read = readLine();
 
-            if (line == null) {
-                return;
+            if (read instanceof Result.Failure<Option<String>>) {
+                return read.mapToUnit();
             }
 
-            if (line.isBlank()) {
+            var line = read.unwrap();
+
+            if (line.isEmpty()) {
+                return Result.unitResult();
+            }
+
+            var text = line.unwrap();
+
+            if (text.isBlank()) {
                 continue;
             }
 
-            if (handleCommand(line.trim())) {
-                return;
+            var handled = handleCommand(text.trim());
+
+            if (handled instanceof Result.Failure<Boolean>) {
+                return handled.mapToUnit();
+            }
+
+            if (handled.unwrap()) {
+                return Result.unitResult();
             }
         }
+    }
+
+    /** Empty option means end of stream. */
+    private Result<Option<String>> readLine() {
+        return Result.lift(Causes::fromThrowable,
+                           () -> Option.option(reader.readLine()));
     }
 
     private void banner() {
@@ -106,33 +134,36 @@ public final class PlaygroundRepl {
         out.println("type ':help' for commands, ':quit' to exit.");
     }
 
-    /** Handle a single input line. Returns {@code true} iff the REPL should exit. */
-    boolean handleCommand(String line) throws IOException {
+    /** Handle a single input line. Success value is {@code true} iff the REPL should exit. */
+    Result<Boolean> handleCommand(String line) {
         if (line.startsWith(":")) {
             return handleMetaCommand(line);
         }
 
-        loadGrammarIfChanged();
-        runParse(line);
-
-        return false;
+        return loadGrammarIfChanged().flatMap(__ -> runParse(line))
+                                   .map(__ -> Boolean.FALSE);
     }
 
-    private boolean handleMetaCommand(String line) throws IOException {
+    private Result<Boolean> handleMetaCommand(String line) {
         String[] parts = line.split("\\s+", 2);
         String cmd = parts[0];
 
-        switch (cmd) {
-            case ":quit", ":q", ":exit" -> {
-                return true;
+        return switch (cmd) {
+            case ":quit", ":q", ":exit" -> Result.success(Boolean.TRUE);
+            case ":help" -> {
+                printHelp();
+                yield Result.success(Boolean.FALSE);
             }
-            case ":help" -> printHelp();
-            case ":reload" -> forceReload();
-            case ":status" -> printStatus();
-            default -> out.println("unknown command: " + cmd + " (try :help)");
-        }
-
-        return false;
+            case ":reload" -> forceReload().map(__ -> Boolean.FALSE);
+            case ":status" -> {
+                printStatus();
+                yield Result.success(Boolean.FALSE);
+            }
+            default -> {
+                out.println("unknown command: " + cmd + " (try :help)");
+                yield Result.success(Boolean.FALSE);
+            }
+        };
     }
 
     private void printHelp() {
@@ -147,28 +178,45 @@ public final class PlaygroundRepl {
         out.println(String.format("grammar: %s (mtime=%d, %d chars)", grammarPath, grammarMtime, grammarCache.length()));
     }
 
-    private void forceReload() throws IOException {
+    private Result<Unit> forceReload() {
         grammarMtime = -1L;
-        loadGrammarIfChanged();
+
+        return loadGrammarIfChanged();
     }
 
-    private void loadGrammarIfChanged() throws IOException {
+    private Result<Unit> loadGrammarIfChanged() {
+        return Result.lift(Causes::fromThrowable, this::reloadIfStale);
+    }
+
+    // JDK-API adapter: the body of a Result.lift(...) throwing lambda. Files.getLastModifiedTime
+    // and Files.readString declare IOException, which lift() exists to capture.
+    @SuppressWarnings("JBCT-EX-01")
+    private Unit reloadIfStale() throws IOException {
         long mtime = Files.getLastModifiedTime(grammarPath).to(TimeUnit.MILLISECONDS);
 
         if (mtime == grammarMtime) {
-            return;
+            return Unit.unit();
         }
 
         grammarMtime = mtime;
         grammarCache = Files.readString(grammarPath, StandardCharsets.UTF_8);
         out.println("(grammar loaded: " + grammarCache.length() + " chars)");
+
+        return Unit.unit();
     }
 
-    private void runParse(String input) {
+    /**
+     * Render one parse. Returns the terminal Result so the chain is consumed
+     * rather than silently dropped (JBCT-RET-07); both branches have already
+     * been reported to the console by the time it is returned.
+     */
+    private Result<Unit> runParse(String input) {
         var request = new ParseRequest(grammarCache, input);
-        Result<ParseOutcome> result = PlaygroundEngine.run(request);
 
-        result.onFailure(cause -> out.println("grammar error: " + cause.message())).onSuccess(this::reportOutcome);
+        return PlaygroundEngine.run(request)
+                               .onFailure(cause -> out.println("grammar error: " + cause.message()))
+                               .onSuccess(this::reportOutcome)
+                               .mapToUnit();
     }
 
     private void reportOutcome(ParseOutcome outcome) {
