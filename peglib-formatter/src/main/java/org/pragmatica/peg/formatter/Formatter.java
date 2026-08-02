@@ -230,8 +230,7 @@ public final class Formatter {
         // Docs.text establishes the newline-free Doc.Text invariant by construction,
         // splitting embedded newlines into HardLine-separated segments — so this is
         // simply a delegation. An empty token yields Doc.Empty, which renders to "".
-        parts.add(Docs.text(tokens.textAt(idx)
-                                  .toString()));
+        parts.add(Docs.text(tokens.textAt(idx).toString()));
     }
 
     private Doc wrapRootWithFileTrivia(CstArray cst, int rootIdx, Doc rootDoc) {
