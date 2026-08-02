@@ -60,7 +60,7 @@ final class FormatterCorpusGateTest {
     @Test
     void allCorpusFixturesFormatWithoutCrash() throws IOException {
         var formatter = Formatter.formatter(
-            FormatterConfig.builder().triviaPolicy(TriviaPolicy.PRESERVE).build());
+            FormatterConfig.builder().triviaPolicy(TriviaPolicy.PRESERVE).build().unwrap());
 
         var crashes = new ArrayList<String>();
         var ruleFailures = new ArrayList<String>();
@@ -113,7 +113,7 @@ final class FormatterCorpusGateTest {
     @Test
     void allCorpusFixturesPreserveNonTriviaTokensRoundTrip() throws IOException {
         var formatter = Formatter.formatter(
-            FormatterConfig.builder().triviaPolicy(TriviaPolicy.PRESERVE).build());
+            FormatterConfig.builder().triviaPolicy(TriviaPolicy.PRESERVE).build().unwrap());
 
         var passes = new ArrayList<String>();
         var diverges = new ArrayList<String>();

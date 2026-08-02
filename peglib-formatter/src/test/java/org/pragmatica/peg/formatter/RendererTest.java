@@ -60,17 +60,15 @@ final class RendererTest {
         }
 
         @Test
-        void rejectsNullDoc() {
-            assertThatThrownBy(() -> Renderer.render(null, 80))
-                .isInstanceOf(IllegalArgumentException.class);
+        void nullDocRendersEmpty() {
+            assertThat(Renderer.render(null, 80)).isEmpty();
         }
 
         @Test
-        void rejectsNonPositiveWidth() {
-            assertThatThrownBy(() -> Renderer.render(empty(), 0))
-                .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> Renderer.render(empty(), -1))
-                .isInstanceOf(IllegalArgumentException.class);
+        void nonPositiveWidthIsClampedToOne() {
+            assertThat(Renderer.render(empty(), 0)).isEmpty();
+            assertThat(Renderer.render(empty(), -1)).isEmpty();
+            assertThat(Renderer.render(text("ab"), 0)).isEqualTo("ab");
         }
     }
 

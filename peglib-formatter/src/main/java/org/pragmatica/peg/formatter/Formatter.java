@@ -46,13 +46,16 @@ public final class Formatter {
         this.config = config;
     }
 
-    /** Create a formatter from the given config. */
+    /**
+     * Create a formatter from the given config.
+     *
+     * <p>A {@code null} config falls back to {@link FormatterConfig#defaultConfig()};
+     * validated configs come from {@link FormatterConfig.Builder#build()}.
+     */
     public static Formatter formatter(FormatterConfig config) {
-        if (config == null) {
-            throw new IllegalArgumentException("config must not be null");
-        }
-
-        return new Formatter(config);
+        return new Formatter(config == null
+                             ? FormatterConfig.defaultConfig()
+                             : config);
     }
 
     /** Convenience entry point for {@link FormatterConfig#builder()}. */

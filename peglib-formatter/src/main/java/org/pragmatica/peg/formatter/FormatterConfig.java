@@ -3,6 +3,9 @@ package org.pragmatica.peg.formatter;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.pragmatica.lang.Result;
+import org.pragmatica.lang.utils.Causes;
+
 
 /**
  * Immutable configuration for a {@link Formatter}.
@@ -11,6 +14,12 @@ import java.util.Map;
  * builder returns a new builder, so the configuration is fully immutable
  * end-to-end.
  *
+ * <p>Validation happens once, in {@link Builder#build()}, which returns a
+ * {@link Result}. The mutators themselves are total, which keeps the fluent
+ * chain readable — {@code builder().defaultIndent(4).maxLineWidth(120).build()}
+ * — while still surfacing invalid combinations as a failure rather than an
+ * exception.
+ *
  * @since 0.6.0
  */
 public record FormatterConfig(int defaultIndent,
@@ -18,23 +27,29 @@ public record FormatterConfig(int defaultIndent,
                               TriviaPolicy triviaPolicy,
                               Map<String, FormatterRule> rules) {
     public FormatterConfig {
+        rules = rules == null
+                ? Map.of()
+                : Map.copyOf(rules);
+    }
+
+    /** Validating factory. The only sanctioned way to build a config from untrusted values. */
+    public static Result<FormatterConfig> formatterConfig(int defaultIndent,
+                                                          int maxLineWidth,
+                                                          TriviaPolicy triviaPolicy,
+                                                          Map<String, FormatterRule> rules) {
         if (defaultIndent < 0) {
-            throw new IllegalArgumentException("defaultIndent must be >= 0");
+            return Causes.cause("defaultIndent must be >= 0, was " + defaultIndent).result();
         }
 
         if (maxLineWidth <= 0) {
-            throw new IllegalArgumentException("maxLineWidth must be > 0");
+            return Causes.cause("maxLineWidth must be > 0, was " + maxLineWidth).result();
         }
 
         if (triviaPolicy == null) {
-            throw new IllegalArgumentException("triviaPolicy must not be null");
+            return Causes.cause("triviaPolicy must not be null").result();
         }
 
-        if (rules == null) {
-            throw new IllegalArgumentException("rules must not be null");
-        }
-
-        rules = Map.copyOf(rules);
+        return Result.success(new FormatterConfig(defaultIndent, maxLineWidth, triviaPolicy, rules));
     }
 
     /** Default values: indent=2, maxLineWidth=80, triviaPolicy=PRESERVE, no rules. */
@@ -58,44 +73,26 @@ public record FormatterConfig(int defaultIndent,
                           TriviaPolicy triviaPolicy,
                           Map<String, FormatterRule> rules) {
         public Builder {
-            if (rules == null) {
-                throw new IllegalArgumentException("rules must not be null");
-            }
-
-            rules = Map.copyOf(rules);
+            rules = rules == null
+                    ? Map.of()
+                    : Map.copyOf(rules);
         }
 
         public Builder defaultIndent(int amount) {
-            if (amount < 0) {
-                throw new IllegalArgumentException("defaultIndent must be >= 0");
-            }
-
             return new Builder(amount, maxLineWidth, triviaPolicy, rules);
         }
 
         public Builder maxLineWidth(int width) {
-            if (width <= 0) {
-                throw new IllegalArgumentException("maxLineWidth must be > 0");
-            }
-
             return new Builder(defaultIndent, width, triviaPolicy, rules);
         }
 
         public Builder triviaPolicy(TriviaPolicy policy) {
-            if (policy == null) {
-                throw new IllegalArgumentException("triviaPolicy must not be null");
-            }
-
             return new Builder(defaultIndent, maxLineWidth, policy, rules);
         }
 
         public Builder rule(String ruleName, FormatterRule rule) {
-            if (ruleName == null || ruleName.isEmpty()) {
-                throw new IllegalArgumentException("ruleName must be non-empty");
-            }
-
-            if (rule == null) {
-                throw new IllegalArgumentException("rule must not be null");
+            if (ruleName == null || ruleName.isEmpty() || rule == null) {
+                return this;
             }
 
             var next = new HashMap<>(rules);
@@ -105,8 +102,9 @@ public record FormatterConfig(int defaultIndent,
             return new Builder(defaultIndent, maxLineWidth, triviaPolicy, next);
         }
 
-        public FormatterConfig build() {
-            return new FormatterConfig(defaultIndent, maxLineWidth, triviaPolicy, rules);
+        /** Validate the accumulated settings and produce the config. */
+        public Result<FormatterConfig> build() {
+            return formatterConfig(defaultIndent, maxLineWidth, triviaPolicy, rules);
         }
     }
 }

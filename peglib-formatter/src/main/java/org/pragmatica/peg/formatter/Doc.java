@@ -39,18 +39,14 @@ public sealed interface Doc {
     /** The empty document. Renders to the empty string in every mode. */
     record Empty() implements Doc {}
 
-    /** Literal text. Must not contain newlines; use {@link Line} for those. */
-    record Text(String value) implements Doc {
-        public Text {
-            if (value == null) {
-                throw new IllegalArgumentException("Text value must not be null");
-            }
-
-            if (value.indexOf('\n') >= 0) {
-                throw new IllegalArgumentException("Text.value must not contain newlines; use Doc.line() for line breaks");
-            }
-        }
-    }
+    /**
+     * Literal text, guaranteed newline-free.
+     *
+     * <p>The invariant is established by construction in {@link Docs#text(String)},
+     * which splits multi-line input into {@code Text} segments separated by
+     * {@link HardLine}. Construct via {@code Docs.text} rather than directly.
+     */
+    record Text(String value) implements Doc {}
 
     /**
      * A "line break" — renders as a single space in flat mode, as a newline
@@ -76,34 +72,16 @@ public sealed interface Doc {
      * Group: the renderer attempts to format {@code inner} in flat mode; if
      * the flat form exceeds the target line width, the whole group breaks.
      */
-    record Group(Doc inner) implements Doc {
-        public Group {
-            if (inner == null) {
-                throw new IllegalArgumentException("Group.inner must not be null");
-            }
-        }
-    }
+    record Group(Doc inner) implements Doc {}
 
     /**
      * Indent: increases the current indent by {@code amount} columns for any
      * break that occurs inside {@code inner}.
      */
-    record Indent(int amount, Doc inner) implements Doc {
-        public Indent {
-            if (inner == null) {
-                throw new IllegalArgumentException("Indent.inner must not be null");
-            }
-        }
-    }
+    record Indent(int amount, Doc inner) implements Doc {}
 
     /** Sequential composition: render {@code left} then {@code right}. */
-    record Concat(Doc left, Doc right) implements Doc {
-        public Concat {
-            if (left == null || right == null) {
-                throw new IllegalArgumentException("Concat operands must not be null");
-            }
-        }
-    }
+    record Concat(Doc left, Doc right) implements Doc {}
 
     /**
      * Convenience: flatten a list of docs into a single {@link Concat} chain

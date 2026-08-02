@@ -98,7 +98,7 @@ final class FormatterTest {
                 // children are: Ident("a"), Terminal("+"), Ident("b")
                 return concat(kids.get(0), text(" "), kids.get(1), text(" "), kids.get(2));
             };
-            var config = FormatterConfig.builder().rule("Sum", sumRule).build();
+            var config = FormatterConfig.builder().rule("Sum", sumRule).build().unwrap();
             var formatter = Formatter.formatter(config);
             assertThat(formatter.format(cst).unwrap()).isEqualTo("a + b");
         }
@@ -107,7 +107,7 @@ final class FormatterTest {
         void ruleCanAccessNodeText() {
             var cst = buildSumA_Plus_B();
             FormatterRule sumRule = (ctx, kids) -> text(ctx.nodeText().toString().toUpperCase());
-            var config = FormatterConfig.builder().rule("Sum", sumRule).build();
+            var config = FormatterConfig.builder().rule("Sum", sumRule).build().unwrap();
             var formatter = Formatter.formatter(config);
             assertThat(formatter.format(cst).unwrap()).isEqualTo("A+B");
         }
@@ -118,7 +118,7 @@ final class FormatterTest {
             FormatterRule throwingRule = (ctx, kids) -> {
                 throw new RuntimeException("boom");
             };
-            var config = FormatterConfig.builder().rule("Sum", throwingRule).build();
+            var config = FormatterConfig.builder().rule("Sum", throwingRule).build().unwrap();
             var formatter = Formatter.formatter(config);
             var result = formatter.format(cst);
             assertThat(result.isFailure()).isTrue();
@@ -160,7 +160,7 @@ final class FormatterTest {
                 .maxLineWidth(10)
                 .rule("Block", blockRule)
                 .rule("Statement", stmtRule)
-                .build();
+                .build().unwrap();
             var formatter = Formatter.formatter(config);
             var out = formatter.format(cst).unwrap();
             // Expected:
@@ -194,7 +194,7 @@ final class FormatterTest {
                 .maxLineWidth(80)
                 .rule("Block", blockRule)
                 .rule("Statement", stmtRule)
-                .build();
+                .build().unwrap();
             var formatter = Formatter.formatter(config);
             var out = formatter.format(cst).unwrap();
             assertThat(out).isEqualTo("{ foo; bar; }");
@@ -209,7 +209,7 @@ final class FormatterTest {
         void preservePolicy_emitsLeadingWhitespace() {
             var cst = buildIdentWithLeadingWhitespace();
             var formatter = Formatter.formatter(
-                FormatterConfig.builder().triviaPolicy(TriviaPolicy.PRESERVE).build());
+                FormatterConfig.builder().triviaPolicy(TriviaPolicy.PRESERVE).build().unwrap());
             var out = formatter.format(cst).unwrap();
             assertThat(out).isEqualTo("  foo");
         }
@@ -218,7 +218,7 @@ final class FormatterTest {
         void dropAllPolicy_removesTrivia() {
             var cst = buildIdentWithLeadingWhitespace();
             var formatter = Formatter.formatter(
-                FormatterConfig.builder().triviaPolicy(TriviaPolicy.DROP_ALL).build());
+                FormatterConfig.builder().triviaPolicy(TriviaPolicy.DROP_ALL).build().unwrap());
             var out = formatter.format(cst).unwrap();
             assertThat(out).isEqualTo("foo");
         }
@@ -239,7 +239,7 @@ final class FormatterTest {
             var cst = builder.build(root);
 
             var formatter = Formatter.formatter(
-                FormatterConfig.builder().triviaPolicy(TriviaPolicy.PRESERVE).build());
+                FormatterConfig.builder().triviaPolicy(TriviaPolicy.PRESERVE).build().unwrap());
             var out = formatter.format(cst).unwrap();
             assertThat(out).isEqualTo("// hi\nfoo");
         }
@@ -261,7 +261,7 @@ final class FormatterTest {
             var cst = builder.build(root);
 
             var formatter = Formatter.formatter(
-                FormatterConfig.builder().triviaPolicy(TriviaPolicy.STRIP_WHITESPACE).build());
+                FormatterConfig.builder().triviaPolicy(TriviaPolicy.STRIP_WHITESPACE).build().unwrap());
             var out = formatter.format(cst).unwrap();
             // Whitespace runs are removed; line-comment is preserved with hard break.
             assertThat(out).isEqualTo("// hi\nfoo");
@@ -282,7 +282,7 @@ final class FormatterTest {
             var cst = builder.build(root);
 
             var formatter = Formatter.formatter(
-                FormatterConfig.builder().triviaPolicy(TriviaPolicy.NORMALIZE_BLANK_LINES).build());
+                FormatterConfig.builder().triviaPolicy(TriviaPolicy.NORMALIZE_BLANK_LINES).build().unwrap());
             var out = formatter.format(cst).unwrap();
             assertThat(out).isEqualTo("\n\nfoo");
         }
@@ -293,33 +293,42 @@ final class FormatterTest {
     class ConfigValidation {
 
         @Test
-        void rejectsNullConfig() {
-            assertThatThrownBy(() -> Formatter.formatter(null))
-                .isInstanceOf(IllegalArgumentException.class);
+        void nullConfigFallsBackToDefaults() {
+            assertThat(Formatter.formatter(null)).isNotNull();
         }
 
         @Test
-        void builderRejectsNegativeIndent() {
-            assertThatThrownBy(() -> FormatterConfig.builder().defaultIndent(-1))
-                .isInstanceOf(IllegalArgumentException.class);
+        void buildRejectsNegativeIndent() {
+            assertThat(FormatterConfig.builder()
+                                      .defaultIndent(-1)
+                                      .build()
+                                      .isFailure()).isTrue();
         }
 
         @Test
-        void builderRejectsNonPositiveWidth() {
-            assertThatThrownBy(() -> FormatterConfig.builder().maxLineWidth(0))
-                .isInstanceOf(IllegalArgumentException.class);
+        void buildRejectsNonPositiveWidth() {
+            assertThat(FormatterConfig.builder()
+                                      .maxLineWidth(0)
+                                      .build()
+                                      .isFailure()).isTrue();
         }
 
         @Test
-        void builderRejectsNullTriviaPolicy() {
-            assertThatThrownBy(() -> FormatterConfig.builder().triviaPolicy(null))
-                .isInstanceOf(IllegalArgumentException.class);
+        void buildRejectsNullTriviaPolicy() {
+            assertThat(FormatterConfig.builder()
+                                      .triviaPolicy(null)
+                                      .build()
+                                      .isFailure()).isTrue();
         }
 
         @Test
-        void builderRejectsEmptyRuleName() {
-            assertThatThrownBy(() -> FormatterConfig.builder().rule("", (ctx, kids) -> Docs.empty()))
-                .isInstanceOf(IllegalArgumentException.class);
+        void builderIgnoresEmptyRuleName() {
+            var config = FormatterConfig.builder()
+                                        .rule("", (ctx, kids) -> Docs.empty())
+                                        .build()
+                                        .unwrap();
+
+            assertThat(config.rules()).isEmpty();
         }
 
         @Test
@@ -333,8 +342,8 @@ final class FormatterTest {
             builder.endNode(root, 0);
             var cst = builder.build(root);
 
-            assertThatThrownBy(() -> new FormatContext(cst, 99, 2, 80, TriviaPolicy.PRESERVE))
-                .isInstanceOf(IllegalArgumentException.class);
+            assertThat(FormatContext.formatContext(cst, 99, 2, 80, TriviaPolicy.PRESERVE)
+                                    .isFailure()).isTrue();
         }
     }
 

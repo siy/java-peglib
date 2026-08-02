@@ -37,16 +37,17 @@ public final class Renderer {
      * Render {@code doc} at the given {@code width}. The rendered string
      * never contains trailing whitespace on non-final lines beyond the
      * indentation explicitly emitted by the doc tree.
+     *
+     * <p>Total: a {@code null} doc renders to the empty string, and a
+     * non-positive width is clamped to 1 column. Callers reaching this method
+     * have already passed through {@code FormatterConfig} validation.
      */
     public static String render(Doc doc, int width) {
         if (doc == null) {
-            throw new IllegalArgumentException("doc must not be null");
+            return "";
         }
 
-        if (width <= 0) {
-            throw new IllegalArgumentException("width must be > 0");
-        }
-
+        var effectiveWidth = Math.max(1, width);
         var sb = new StringBuilder();
         var stack = new ArrayDeque<Frame>();
 
@@ -56,7 +57,7 @@ public final class Renderer {
         while (!stack.isEmpty()) {
             var frame = stack.pop();
 
-            column = step(frame, stack, sb, width, column);
+            column = step(frame, stack, sb, effectiveWidth, column);
         }
 
         return sb.toString();

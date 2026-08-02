@@ -3,6 +3,7 @@ package org.pragmatica.peg.formatter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.pragmatica.peg.formatter.internal.Renderer;
 
 import java.util.List;
 
@@ -27,16 +28,16 @@ final class DocAlgebraTest {
     @DisplayName("Doc constructors")
     class Constructors {
         @Test
-        void textRejectsNull() {
-            assertThatThrownBy(() -> new Doc.Text(null))
-                .isInstanceOf(IllegalArgumentException.class);
+        void textOfNullIsEmpty() {
+            assertThat(Docs.text(null)).isInstanceOf(Doc.Empty.class);
         }
 
         @Test
-        void textRejectsNewlines() {
-            assertThatThrownBy(() -> new Doc.Text("a\nb"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("newlines");
+        void textSplitsNewlinesIntoHardLines() {
+            var doc = Docs.text("a\nb");
+
+            assertThat(doc).isNotInstanceOf(Doc.Text.class);
+            assertThat(Renderer.render(doc, 80)).isEqualTo("a\nb");
         }
 
         @Test
@@ -45,24 +46,19 @@ final class DocAlgebraTest {
         }
 
         @Test
-        void groupRejectsNull() {
-            assertThatThrownBy(() -> new Doc.Group(null))
-                .isInstanceOf(IllegalArgumentException.class);
+        void groupOfNullRendersEmpty() {
+            assertThat(Renderer.render(Docs.group((Doc) null), 80)).isEmpty();
         }
 
         @Test
-        void indentRejectsNull() {
-            assertThatThrownBy(() -> new Doc.Indent(2, null))
-                .isInstanceOf(IllegalArgumentException.class);
+        void indentOfNullRendersEmpty() {
+            assertThat(Renderer.render(Docs.indent(2, (Doc) null), 80)).isEmpty();
         }
 
         @Test
-        void concatRejectsNulls() {
-            var t = new Doc.Text("x");
-            assertThatThrownBy(() -> new Doc.Concat(null, t))
-                .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new Doc.Concat(t, null))
-                .isInstanceOf(IllegalArgumentException.class);
+        void concatIgnoresAbsentOperands() {
+            assertThat(Renderer.render(Docs.concat(Docs.text("x")), 80)).isEqualTo("x");
+            assertThat(Renderer.render(Docs.concat(), 80)).isEmpty();
         }
     }
 
