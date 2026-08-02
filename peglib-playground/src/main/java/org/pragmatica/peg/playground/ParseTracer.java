@@ -64,53 +64,53 @@ public final class ParseTracer {
     public Result<Unit> recordRuleEnter(String rule, int offset) {
         ruleEntries++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_ENTER, rule, offset, elapsedNanos(), ""));
-    
+
         return Result.unitResult();
     }
 
     public Result<Unit> recordRuleSuccess(String rule, int offset) {
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_SUCCESS, rule, offset, elapsedNanos(), ""));
-    
+
         return Result.unitResult();
     }
 
     public Result<Unit> recordRuleFailure(String rule, int offset) {
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_FAILURE, rule, offset, elapsedNanos(), ""));
-    
+
         return Result.unitResult();
     }
 
     public Result<Unit> recordCacheHit(String rule, int offset) {
         cacheHits++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_HIT, rule, offset, elapsedNanos(), ""));
-    
+
         return Result.unitResult();
     }
 
     public Result<Unit> recordCacheMiss(String rule, int offset) {
         cacheMisses++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_MISS, rule, offset, elapsedNanos(), ""));
-    
+
         return Result.unitResult();
     }
 
     public Result<Unit> recordCachePut(String rule, int offset) {
         cachePuts++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_PUT, rule, offset, elapsedNanos(), ""));
-    
+
         return Result.unitResult();
     }
 
     public Result<Unit> recordCutFired(String rule, int offset) {
         cutsFired++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CUT_FIRED, rule, offset, elapsedNanos(), "cut"));
-    
+
         return Result.unitResult();
     }
 
     public Result<Unit> note(String detail) {
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.NOTE, "", -1, elapsedNanos(), detail));
-    
+
         return Result.unitResult();
     }
 

@@ -27,6 +27,15 @@
             <groupId>org.pragmatica-lite</groupId>
             <artifactId>peglib</artifactId>
         </dependency>
+        <!-- 0.7.0 — replaces the hand-written JsonDecoder. Result-native JSON
+             mapping; JsonError extends Cause so it composes with the existing
+             failure channel. Pulls Jackson 3, which is acceptable here: the
+             playground is a dev tool and is not part of the standalone-parser
+             contract (generated parsers depend only on peglib-runtime + core). -->
+        <dependency>
+            <groupId>org.pragmatica-lite</groupId>
+            <artifactId>jackson</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.junit.jupiter</groupId>

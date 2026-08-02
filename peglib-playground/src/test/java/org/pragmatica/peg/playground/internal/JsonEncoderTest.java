@@ -1,5 +1,7 @@
 package org.pragmatica.peg.playground.internal;
 
+import org.pragmatica.peg.playground.TestJson;
+
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.playground.Stats;
 import org.pragmatica.peg.PegParser;
@@ -35,8 +37,9 @@ class JsonEncoderTest {
     @Test
     void encodesObjectPreservingKeys() {
         String encoded = JsonEncoder.encode(Map.of("k", "v", "n", 1L));
-        var decoded = JsonDecoder.decodeObject(encoded);
-        assertThat(decoded).containsEntry("k", "v").containsEntry("n", 1L);
+        var decoded = TestJson.object(encoded);
+        assertThat(decoded).containsEntry("k", "v");
+        assertThat(TestJson.num(decoded, "n")).isEqualTo(1L);
     }
 
     @Test
@@ -49,13 +52,13 @@ class JsonEncoderTest {
     void encodesStatsWithAllFields() {
         var stats = new Stats(123L, 5, 2, 10, 3, 4, 5, 1, 0);
         String encoded = JsonEncoder.encode(stats);
-        var decoded = JsonDecoder.decodeObject(encoded);
-        assertThat(decoded).containsEntry("timeMicros", 123L)
-                           .containsEntry("nodeCount", 5L)
-                           .containsEntry("triviaCount", 2L)
-                           .containsEntry("ruleEntries", 10L)
-                           .containsEntry("cacheHits", 3L)
-                           .containsEntry("cutsFired", 1L);
+        var decoded = TestJson.object(encoded);
+        assertThat(TestJson.num(decoded, "timeMicros")).isEqualTo(123L);
+        assertThat(TestJson.num(decoded, "nodeCount")).isEqualTo(5L);
+        assertThat(TestJson.num(decoded, "triviaCount")).isEqualTo(2L);
+        assertThat(TestJson.num(decoded, "ruleEntries")).isEqualTo(10L);
+        assertThat(TestJson.num(decoded, "cacheHits")).isEqualTo(3L);
+        assertThat(TestJson.num(decoded, "cutsFired")).isEqualTo(1L);
     }
 
     @Test
@@ -65,7 +68,7 @@ class JsonEncoderTest {
                            .parse("12 + 34")
                            .cst();
 
-        var decoded = JsonDecoder.decodeObject(JsonEncoder.encodeTree(cst));
+        var decoded = TestJson.object(JsonEncoder.encodeTree(cst));
 
         assertThat(decoded).containsKeys("kind", "rule", "start", "end", "line", "column");
         assertThat(decoded.get("kind")).isIn("non-terminal", "terminal", "error");
@@ -79,7 +82,7 @@ class JsonEncoderTest {
                            .parse("12 + 34")
                            .cst();
 
-        var decoded = JsonDecoder.decodeObject(JsonEncoder.encodeTree(cst));
+        var decoded = TestJson.object(JsonEncoder.encodeTree(cst));
 
         assertThat(decoded.get("kind")).isEqualTo("non-terminal");
         assertThat(decoded.get("children")).isInstanceOf(List.class);
@@ -110,15 +113,15 @@ class JsonEncoderTest {
         var diagnostic = Diagnostic.error(input.indexOf("two"), 3, "unexpected token", "';'", "two");
 
         var encoded = JsonEncoder.encode(JsonEncoder.Diagnostics.diagnostics(List.of(diagnostic), input));
-        var decoded = (List< ? >) JsonDecoder.decode(encoded);
+        var decoded = (List< ? >) TestJson.any(encoded);
 
         assertThat(decoded).hasSize(1);
         assertThat(asJsonObject(decoded.getFirst())).containsEntry("severity", "error")
                                                     .containsEntry("message", "unexpected token")
-                                                    .containsEntry("line", 2L)
-                                                    .containsEntry("column", 6L)
                                                     .containsEntry("expected", "';'")
                                                     .containsEntry("found", "two");
+        assertThat(TestJson.num(asJsonObject(decoded.getFirst()), "line")).isEqualTo(2L);
+        assertThat(TestJson.num(asJsonObject(decoded.getFirst()), "column")).isEqualTo(6L);
     }
 
     @Test

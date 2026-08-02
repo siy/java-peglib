@@ -3,7 +3,6 @@ package org.pragmatica.peg.playground;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.pragmatica.peg.playground.internal.JsonDecoder;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -54,7 +53,7 @@ class PlaygroundServerTest {
         var response = post("/parse", VALID_BODY);
         assertThat(response.statusCode()).isEqualTo(200);
 
-        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        Map<String, Object> parsed = TestJson.object(response.body());
         assertThat(parsed).containsKey("tree");
         assertThat(parsed).containsKey("stats");
         assertThat(parsed).containsKey("diagnostics");
@@ -62,8 +61,8 @@ class PlaygroundServerTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> stats = (Map<String, Object>) parsed.get("stats");
-        assertThat(stats.get("nodeCount")).isInstanceOf(Long.class);
-        assertThat(((Long) stats.get("nodeCount"))).isGreaterThan(0L);
+        assertThat(stats.get("nodeCount")).isInstanceOf(Number.class);
+        assertThat(TestJson.num(stats, "nodeCount")).isGreaterThan(0L);
     }
 
     /**
@@ -76,7 +75,7 @@ class PlaygroundServerTest {
     void parseEndpoint_emitsJsonShapeTheFrontendRenders() throws Exception {
         var response = post("/parse", VALID_BODY);
 
-        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        Map<String, Object> parsed = TestJson.object(response.body());
 
         @SuppressWarnings("unchecked")
         Map<String, Object> tree = (Map<String, Object>) parsed.get("tree");
@@ -91,7 +90,7 @@ class PlaygroundServerTest {
                                        "triviaCount",
                                        "ruleEntries",
                                        "diagnosticCount");
-        assertThat((Long) stats.get("ruleEntries")).isGreaterThan(0L);
+        assertThat(TestJson.num(stats, "ruleEntries")).isGreaterThan(0L);
     }
 
     @Test
@@ -99,7 +98,7 @@ class PlaygroundServerTest {
         var response = post("/parse", FAILING_BODY);
 
         assertThat(response.statusCode()).isEqualTo(200);
-        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        Map<String, Object> parsed = TestJson.object(response.body());
         assertThat(parsed.get("ok")).isEqualTo(Boolean.FALSE);
 
         var diagnostics = (List< ? >) parsed.get("diagnostics");
@@ -125,7 +124,7 @@ class PlaygroundServerTest {
         var response = post("/parse", body);
 
         assertThat(response.statusCode()).isEqualTo(400);
-        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        Map<String, Object> parsed = TestJson.object(response.body());
         assertThat(parsed.get("error")).isEqualTo("bad request");
     }
 
@@ -136,7 +135,7 @@ class PlaygroundServerTest {
         var response = post("/parse", body);
 
         assertThat(response.statusCode()).isEqualTo(200);
-        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        Map<String, Object> parsed = TestJson.object(response.body());
         assertThat(parsed.get("ok")).isEqualTo(Boolean.FALSE);
     }
 

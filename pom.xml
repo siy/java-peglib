@@ -79,6 +79,11 @@
                 <version>${pragmatica-lite.version}</version>
             </dependency>
             <dependency>
+                <groupId>org.pragmatica-lite</groupId>
+                <artifactId>jackson</artifactId>
+                <version>${pragmatica-lite.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>org.junit.jupiter</groupId>
                 <artifactId>junit-jupiter</artifactId>
                 <version>${junit.version}</version>

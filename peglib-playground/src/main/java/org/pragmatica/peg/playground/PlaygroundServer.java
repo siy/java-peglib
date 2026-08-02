@@ -10,11 +10,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import org.pragmatica.json.JsonMapper;
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.Unit;
-import org.pragmatica.peg.playground.internal.JsonDecoder;
 import org.pragmatica.peg.playground.internal.JsonEncoder;
 import org.pragmatica.peg.playground.internal.JsonEncoder.Diagnostics;
 import org.pragmatica.peg.playground.PlaygroundEngine;
@@ -43,6 +43,8 @@ public final class PlaygroundServer {
     private static final int MAX_REQUEST_BODY_BYTES = 1024 * 1024;
     /** Allow-list for static-asset paths after slash normalization. */
     private static final Pattern STATIC_PATH_ALLOWLIST = Pattern.compile("^/[A-Za-z0-9._/-]*$");
+    /** Result-native JSON mapper; replaces the hand-written decoder as of 0.7.0. */
+    private static final JsonMapper JSON = JsonMapper.defaultJsonMapper();
 
     private final HttpServer httpServer;
     private final int port;
@@ -60,7 +62,7 @@ public final class PlaygroundServer {
      * than through {@code main}'s untyped boundary. This method merely
      * starts the server and registers a shutdown hook.
      */
-    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"}) // JVM entry-point contract: main is void and may declare throws.
+    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"})  // JVM entry-point contract: main is void and may declare throws.
     public static void main(String[] args) throws IOException {
         int port = parsePort(args);
         var server = start(port);
@@ -98,7 +100,7 @@ public final class PlaygroundServer {
     }
 
     // === /parse handler ===
-    @SuppressWarnings("JBCT-EX-01") // com.sun.net.httpserver.HttpHandler contract: handle(HttpExchange) throws IOException.
+    @SuppressWarnings("JBCT-EX-01")  // com.sun.net.httpserver.HttpHandler contract: handle(HttpExchange) throws IOException.
     private static void handleParse(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, Map.of("error", "method not allowed"));
@@ -214,15 +216,22 @@ public final class PlaygroundServer {
     }
 
     /**
-     * 0.4.0 — JBCT adapter boundary: {@link Result#lift} captures any
-     * {@link IllegalArgumentException} raised by {@link JsonDecoder#decodeObject}
-     * and the validation step propagates the missing-grammar failure through
-     * the same monadic channel.
+     * 0.7.0 — decoding goes through {@link JsonMapper}, which is already
+     * Result-native, so the former {@code Result.lift} adapter around the
+     * hand-written decoder is gone. A malformed body surfaces as a
+     * {@code JsonError} cause, remapped to {@link BadRequest} so the handler
+     * still answers 400.
      */
     static Result<ParseRequest> parseRequestBody(String body) {
-        return Result.lift(BadRequest::new,
-                           () -> JsonDecoder.decodeObject(body))
-                     .flatMap(PlaygroundServer::buildRequest);
+        return JSON.readString(body, Map.class)
+                   .mapError(cause -> new BadRequest(cause.message()))
+                   .map(PlaygroundServer::asStringKeyedMap)
+                   .flatMap(PlaygroundServer::buildRequest);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asStringKeyedMap(Map<?, ?> raw) {
+        return (Map<String, Object>) raw;
     }
 
     /**
@@ -259,7 +268,7 @@ public final class PlaygroundServer {
     }
 
     // === static file handler ===
-    @SuppressWarnings("JBCT-EX-01") // com.sun.net.httpserver.HttpHandler contract: handle(HttpExchange) throws IOException.
+    @SuppressWarnings("JBCT-EX-01")  // com.sun.net.httpserver.HttpHandler contract: handle(HttpExchange) throws IOException.
     private static void handleStatic(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, Map.of("error", "method not allowed"));
