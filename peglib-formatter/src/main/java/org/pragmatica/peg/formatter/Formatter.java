@@ -227,29 +227,11 @@ public final class Formatter {
      * via {@link Doc.HardLine} keeps the round-trip token stream intact.
      */
     private static void appendTokenText(List<Doc> parts, TokenArray tokens, int idx) {
-        var raw = tokens.textAt(idx).toString();
-
-        if (raw.isEmpty()) {
-            return;
-        }
-
-        if (raw.indexOf('\n') < 0) {
-            parts.add(Docs.text(raw));
-
-            return;
-        }
-
-        var lines = raw.split("\n", -1);
-
-        for (var i = 0; i < lines.length; i++) {
-            if (i > 0) {
-                parts.add(new Doc.HardLine());
-            }
-
-            if (!lines[i].isEmpty()) {
-                parts.add(Docs.text(lines[i]));
-            }
-        }
+        // Docs.text establishes the newline-free Doc.Text invariant by construction,
+        // splitting embedded newlines into HardLine-separated segments — so this is
+        // simply a delegation. An empty token yields Doc.Empty, which renders to "".
+        parts.add(Docs.text(tokens.textAt(idx)
+                                  .toString()));
     }
 
     private Doc wrapRootWithFileTrivia(CstArray cst, int rootIdx, Doc rootDoc) {

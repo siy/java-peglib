@@ -159,6 +159,21 @@ class Java25ParserGateTest {
                 hardFailures.add(fname + ": RECONSTRUCTION MISMATCH — " + describeMismatch(input, reconstructed));
                 continue;
             }
+            // CST shape sanity. Round-trip via tokens succeeds even when the parser
+            // matched empty alternatives and bailed out, so byte-equality alone is
+            // not a sufficient gate: a run that produced ~11 nodes per 1900-LOC
+            // fixture once passed reconstruction cleanly while the CST was empty.
+            // For this grammar a source line yields roughly N/3..N nodes; assert the
+            // lower bound, which is the side that catches the collapse.
+            int loc = (int) input.lines()
+                                 .count();
+            int minNodes = loc / 3;
+
+            if (loc > 20 && cst.nodeCount() < minNodes) {
+                hardFailures.add(fname + ": CST SHAPE — " + cst.nodeCount() + " nodes for " + loc
+                                 + " LOC (expected >= " + minNodes + "); parser likely matched empty alternatives");
+                continue;
+            }
             String summary = fname + " (" + input.length() + " B, " + tokens.count() + " tok, " + cst.nodeCount()
                              + " nodes, " + (p1 - p0) + " ms)";
             if (result.diagnostics()
