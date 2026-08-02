@@ -21,7 +21,7 @@ OpensDirective <- 'opens' ^ QualifiedName ('to' QualifiedName (',' QualifiedName
 UsesDirective <- 'uses' ^ QualifiedName ';'
 ProvidesDirective <- 'provides' ^ QualifiedName 'with' QualifiedName (',' QualifiedName)* ';'
 
-TypeDecl <- Annotation* Modifier* TypeKind
+TypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
 TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
 ClassDecl <- ClassKW ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
 InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
@@ -30,7 +30,7 @@ AnnotationDecl <- '@' InterfaceKW ^ Identifier AnnotationBody
 ClassKW <- < 'class' ![a-zA-Z0-9_$] >
 InterfaceKW <- < 'interface' ![a-zA-Z0-9_$] >
 AnnotationBody <- '{' AnnotationMember* '}'
-AnnotationMember <- Annotation* Modifier* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
+AnnotationMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
 AnnotationElemDecl <- Type Identifier '(' ')' ('default' AnnotationElem)? ';'
 EnumDecl <- EnumKW ^ Identifier ImplementsClause? EnumBody
 # Lookahead ensures this is a record declaration (record Name(...)) not:
@@ -46,7 +46,7 @@ TypeParams <- '<' TypeParam (',' TypeParam)* '>'
 TypeParam <- Identifier ('extends' Type ('&' Type)*)?
 
 ClassBody <- '{' ClassMember* '}'
-ClassMember <- Annotation* Modifier* Member / InitializerBlock / ';'
+ClassMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* Member / InitializerBlock / ';'
 Member <- ConstructorDecl / TypeKind / MethodDecl / FieldDecl
 InitializerBlock <- 'static'? Block
 EnumBody <- '{' EnumConsts? (';' ClassMember*)? '}'
@@ -71,7 +71,7 @@ ConstructorDecl <- TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 # === Blocks and Statements (JLS 14) ===
 Block <- '{' BlockStmt* '}'
 BlockStmt <- LocalVar / LocalTypeDecl / Stmt
-LocalTypeDecl <- Annotation* Modifier* TypeKind
+LocalTypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
 LocalVar <- Annotation* Modifier* LocalVarType VarDecls ';'
 LocalVarType <- < 'var' ![a-zA-Z0-9_$] > / Type
 # Statement keywords use helper rules to combine keyword + word boundary as single token
@@ -185,6 +185,23 @@ QualifiedName <- Identifier (&('.' Identifier) '.' Identifier)*
 Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
 
 Modifier <- < ('public' / 'protected' / 'private' / 'static' / 'final' / 'abstract' / 'native' / 'synchronized' / 'transient' / 'volatile' / 'strictfp' / 'default' / 'sealed' / 'non-sealed') ![a-zA-Z0-9_$] >
+# JEP 401 (Value Objects, preview in JDK 28) — 'value' is a contextual keyword.
+# It is a modifier ONLY in type-declaration position; everywhere else it must stay
+# an ordinary identifier ('var value = 3', 'int value;', 'value.foo()'), and it is
+# by far the most common identifier of any contextual keyword Java has added.
+#
+# Two deliberate choices keep that safe:
+#   1. The '(Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))*' group is spelled inline at exactly the four
+#      sites where a TypeKind can follow — TypeDecl, ClassMember, LocalTypeDecl,
+#      AnnotationMember. LocalVar / Param / Catch / Resource / LambdaParam keep
+#      plain Modifier*, so statement contexts never try the 'value' alternative.
+#      (A named DeclModifier rule cannot be used here: RuleClassifier types it as
+#      LEXER, and a lexer rule may not reference another rule — fromGrammar rejects
+#      it with SkippedRuleReferenced.)
+#   2. The lookahead references Modifier only, so 'value' cannot recurse into
+#      itself. It commits only when a class/record keyword genuinely follows,
+#      across any intervening modifiers ('sealed abstract value class X').
+ValueKW <- < 'value' ![a-zA-Z0-9_$] >
 Annotation <- '@' !'interface' QualifiedName ('(' AnnotationValue? ')')?
 AnnotationValue <- Identifier '=' AnnotationElem (',' Identifier '=' AnnotationElem)* / AnnotationElem
 AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)* ','?)? '}' / Ternary

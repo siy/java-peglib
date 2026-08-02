@@ -111,11 +111,13 @@ e{n,m}      # Bounded repetition
 
 # Directives
 %whitespace <- [ \t\r\n]*
-%recover <CharSet> Rule       # per-rule sync set (start-rule applied currently)
+%recover <CharSet> Rule       # per-rule sync set (implemented per-rule since 0.6.1)
 %checkpoint Rule              # incremental-reparse boundary
 ```
 
-**Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`); named captures `$name<e>` and back-references `$name` (rejected at `fromGrammar`).
+**Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`).
+
+Named captures `$name<e>` and back-references `$name` were dropped in 0.6.0 but **restored in 0.6.1** — they are supported at runtime via `ParserGenerator`'s capture map. `NamedCaptureDetector` no longer exists.
 
 ## API Usage
 
@@ -150,11 +152,17 @@ class TypeChecker extends GVisitor<Type> {
 
 ## Trivia Handling
 
-Trivia (whitespace, line comments, block comments) lives in `TokenArray` as tokens with kinds 0/1/2:
+Trivia lives in `TokenArray` as tokens. There are **five** reserved kinds, not three —
+`FIRST_USER_KIND` is 5, and `isTriviaKind` covers all of them:
 
-- `TokenArray.KIND_WHITESPACE`
-- `TokenArray.KIND_LINE_COMMENT`
-- `TokenArray.KIND_BLOCK_COMMENT`
+- `TokenArray.KIND_WHITESPACE` (0)
+- `TokenArray.KIND_LINE_COMMENT` (1)
+- `TokenArray.KIND_BLOCK_COMMENT` (2)
+- `TokenArray.KIND_DOC_LINE_COMMENT` (3) — added 0.6.1
+- `TokenArray.KIND_DOC_BLOCK_COMMENT` (4) — added 0.6.1
+
+Code that switches on trivia kind must handle the doc-comment variants; omitting them is a
+silent classification bug, not a compile error.
 
 Access via `cst.leadingTriviaTokens(nodeIdx)` and `trailingTriviaTokens(nodeIdx)`. Round-trip reconstruction: `cst.reconstruct()` concatenates all tokens including trivia.
 
@@ -163,7 +171,7 @@ Access via `cst.leadingTriviaTokens(nodeIdx)` and `trailingTriviaTokens(nodeIdx)
 One always-on mechanism (panic-mode synchronization):
 
 1. Parser hits unexpected token
-2. Walks forward to sync set (grammar's `%recover` or default `{ ; , } ) ] }`)
+2. Walks forward to sync set (grammar's `%recover`, or the default `DEFAULT_SYNC_LITERALS` = `;` `,` `}` `)` `]`)
 3. Emits `Error` node covering skipped range
 4. Records `Diagnostic`
 5. Resumes parsing
@@ -188,34 +196,59 @@ Contextual keywords are matched by specific rules and **fall through to Identifi
 | `sealed`, `non-sealed` | class modifier | method/field names |
 | `permits` | sealed class | method/field names |
 | `when` | pattern guard | method/field names |
+| `value` | **type declaration only** (`value class`, `value record`, `abstract value class`, `sealed abstract value class`) | everywhere else — and it is the single most common identifier of any contextual keyword Java has added (`var value = 3`, `int value;`, `value.foo()`) |
 | `module`, `open`, `opens`, `requires`, `exports`, `provides`, `uses`, `with`, `to` | module declarations | regular code |
 
 In 0.6.0's tokens-first parser, contextual keywords get **Identifier-fallback** at codegen time: where the parser references `Identifier`, it also accepts inline-literal kinds whose text is identifier-shaped and not in the hard-keyword set. See `DfaBuilder.buildIdentifierFallbacks` and `ParserGenerator.emitIdentifierFallback`.
 
+**A contextual keyword whose disambiguation needs lookahead cannot live in a named rule.** `RuleClassifier` types any rule whose body references only lexer rules as LEXER, and a lexer rule may not reference another rule — `fromGrammar` then rejects it with `SkippedRuleReferenced`. Spell the lookahead inline inside the PARSER rule that needs it. This is why `value` appears as the literal group
+
+```peg
+(Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))*
+```
+
+at its four use sites rather than as a tidy `DeclModifier` rule. Both a `DeclModifier <- Modifier / ValueMod` rule and a `ValueMod <- ValueKW &(...)` rule were tried first; each was rejected by the guard.
+
 ## Build Commands
 
 ```bash
-mvn install                                                            # full reactor
-mvn -pl peglib-core test                                               # core tests only
-mvn -pl peglib-core -am -Pbench -DskipTests -Djbct.skip=true package   # build bench jar
+mvn install                                          # full reactor, lint + format-check included
+mvn -pl peglib-core test                             # core tests only
+mvn -pl peglib-core -am -Pbench -DskipTests package   # build bench jar
 cd peglib-core && java -jar target/benchmarks.jar <BenchClass> -wi 3 -i 5 -f 1
 ```
 
-`-Djbct.skip=true` is required for `mvn install` due to a JBCT 0.25.0 formatter convergence bug on 5 files (lint passes cleanly without skip — the bug is in format-check only). Tracked as upstream.
+The benchmarks resolve `src/test/resources/java25.peg` **relative to the working directory**, so
+they must be run from `peglib-core/` — from the repo root every iteration fails with
+`NoSuchFileException`.
+
+`-Djbct.skip=true` is no longer required. The 0.25.0 formatter convergence bug is fixed in
+1.0.0-rc2 (two consecutive `jbct:format` passes are byte-identical), so `mvn install` runs clean
+with lint and format-check enabled. The flag still works as an escape hatch via the `jbct.skip`
+property, which defaults to `false` in the parent pom.
 
 Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof async:libPath=...;event=cpu;output=collapsed;dir=/tmp/profile`.
 
 ## Tests
 
-**1440 tests across 7 modules**, 0 failures, 4 pre-existing skips. See `docs/HANDOVER.md` §"State at a glance" for breakdown.
+**528 tests across 5 modules**, 0 failures, 0 skips. The count dropped from 1445 in 0.6.3 because
+the 0.5.x interpreter and its parity suites were deleted, not because coverage was lost.
 
 Notable test classes for verification gates:
 - `Java25CorpusGateTest` — 20 format-examples fixtures lex round-trip
-- `Java25ParserGateTest` — same fixtures parse round-trip
+- `Java25ParserGateTest` — same fixtures parse round-trip, **plus CST-shape sanity**
+  (`nodeCount >= LOC/3`), which is the gate that catches an empty-CompilationUnit collapse
+  that byte-equal reconstruction alone would pass
 - `FactoryClassGeneratorDiagTest` — real-world 1900-LOC parse (0 diagnostics)
+- `ModernJavaSyntaxProbe` — prints which post-Java-25 forms the grammar accepts (value classes,
+  primitive patterns, known gaps). Not a gate; a measurement to start from
 - `IncrementalEditBenchmark` — edit latency p50/p99 in `src/jmh/`
-- `Java25LargeFixturesBenchmark` — warm parse vs 0.5.x-gen
+- `Java25LargeFixturesBenchmark` — warm parse on reference + selfhost fixtures
 - `JavacParseOnlyBenchmark` — vs javac via `JavacTask.parse()`
+
+The 0.5.x A/B comparison benchmarks were deleted with the legacy path, so the historical
+"11-12× faster than 0.5.x-gen" figure can no longer be reproduced in-tree. Treat it as a
+dated claim, not a live measurement.
 
 ---
 
