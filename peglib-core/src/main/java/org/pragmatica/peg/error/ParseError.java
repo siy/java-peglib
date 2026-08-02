@@ -1,7 +1,7 @@
 package org.pragmatica.peg.error;
 
 import org.pragmatica.lang.Cause;
-import org.pragmatica.peg.tree.SourceLocation;
+import org.pragmatica.peg.source.SourceLocation;
 
 /**
  * Parse error with location and context information.

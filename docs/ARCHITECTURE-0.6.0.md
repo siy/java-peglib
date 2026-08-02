@@ -200,7 +200,7 @@ class TypeChecker extends GVisitor<Type> {
 **Rationale.** AST is "CST minus trivia AND minus single-child wrapper rules." For lint/format, CST is the right shape. Users wanting an AST-shape build their own via Visitor; wrapper-collapse is 20 lines of visitor code.
 
 **Removed.**
-- `org.pragmatica.peg.tree.AstNode` package (~400 LOC)
+- `org.pragmatica.peg.source.AstNode` package (~400 LOC)
 - `parseAst()` API
 - AST conversion code in generator emit
 - AST-related tests
@@ -488,9 +488,9 @@ peglib/                           (parent pom)
 **peglib-core:**
 - DROP: `org.pragmatica.peg.parser.PegEngine` (interpreter)
 - DROP: `org.pragmatica.peg.action.*` (action support)
-- DROP: `org.pragmatica.peg.tree.AstNode.*` (AST type)
-- DROP: `org.pragmatica.peg.tree.TriviaPostPass.*` (post-pass machinery)
-- DROP: `org.pragmatica.peg.tree.StringSpan.*` (subsumed by token-array text access)
+- DROP: `org.pragmatica.peg.source.AstNode.*` (AST type)
+- DROP: `org.pragmatica.peg.source.TriviaPostPass.*` (post-pass machinery)
+- DROP: `org.pragmatica.peg.source.StringSpan.*` (subsumed by token-array text access)
 - DROP: `org.pragmatica.peg.parser.ParserConfig.*` (no config record)
 - KEEP: `org.pragmatica.peg.grammar.*` (grammar IR + lexer + parser, mostly unchanged)
 - ADD: `org.pragmatica.peg.lexer.*` (lexer DFA construction + emission)

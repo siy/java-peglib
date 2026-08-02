@@ -2,8 +2,8 @@ package org.pragmatica.peg.playground.internal;
 
 import org.junit.jupiter.api.Test;
 import org.pragmatica.peg.playground.Stats;
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.diagnostic.Diagnostic;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.diagnostic.Diagnostic;
 
 import java.util.List;
 import java.util.Map;

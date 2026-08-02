@@ -82,7 +82,7 @@
                          layout. Skip remains true until either the formatter is fixed
                          upstream or those files are hand-formatted. The JBCT-rule refactor
                          itself is complete and the v6 codebase is now structurally compliant. -->
-                    <sourceDirectory>${project.basedir}/src/main/java/org/pragmatica/peg/v6</sourceDirectory>
+                    <sourceDirectory>${project.basedir}/src/main/java/org/pragmatica/peg</sourceDirectory>
                     <skip>true</skip>
                 </configuration>
                 <executions>

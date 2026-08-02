@@ -39521,7 +39521,7 @@ private Map<Class<? extends RuleId>,
     /**
      * Re-derive leading/trailing trivia attribution from
      * (input, span, %whitespace) after the engine returns its CST.
-     * Mirrors org.pragmatica.peg.tree.TriviaPostPass at the runtime.
+     * Mirrors org.pragmatica.peg.source.TriviaPostPass at the runtime.
      */
     private static final class TriviaPostPass {
         private TriviaPostPass() {}

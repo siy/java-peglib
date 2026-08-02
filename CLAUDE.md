@@ -29,16 +29,16 @@ Nine decisions (per spec §3 — all implemented or documented):
 ```
 peglib/
 ├── peglib-runtime/         25KB; generated parsers depend ONLY on this + pragmatica-lite:core
-├── peglib-core/            grammar parser, codegen, analyzers, v6 implementation, IncrementalParser
+├── peglib-core/            grammar parser, codegen, analyzers, implementation, IncrementalParser
 ├── peglib-formatter/       Wadler-Lindig pretty printer on flat CST
 ├── peglib-maven-plugin/    build-time codegen mojo
 └── peglib-playground/      REPL + HTTP UI
 ```
 
-## Source Files (v6, in peglib-core/peglib-runtime)
+## Source Files (peglib-core/peglib-runtime)
 
 ```
-peglib-runtime/src/main/java/org/pragmatica/peg/v6/
+peglib-runtime/src/main/java/org/pragmatica/peg/
 ├── token/
 │   ├── TokenArray.java              flat int[] tokens; spliceLex for incremental
 │   ├── TokenArrayBuilder.java
@@ -52,7 +52,7 @@ peglib-runtime/src/main/java/org/pragmatica/peg/v6/
     ├── Severity.java
     └── Diagnostic.java              Rust-style format
 
-peglib-core/src/main/java/org/pragmatica/peg/v6/
+peglib-core/src/main/java/org/pragmatica/peg/
 ├── PegParser.java                   entry: fromGrammar(text) → Result<Parser>
 ├── Parser.java                      facade: parse(input) → ParseResult
 ├── lexer/
@@ -189,7 +189,7 @@ mvn -pl peglib-core -am -Pbench -DskipTests -Djbct.skip=true package   # build b
 cd peglib-core && java -jar target/benchmarks.jar <BenchClass> -wi 3 -i 5 -f 1
 ```
 
-`-Djbct.skip=true` is required for `mvn install` due to a JBCT 0.25.0 formatter convergence bug on 5 v6 files (lint passes cleanly without skip — the bug is in format-check only). Tracked as upstream.
+`-Djbct.skip=true` is required for `mvn install` due to a JBCT 0.25.0 formatter convergence bug on 5 files (lint passes cleanly without skip — the bug is in format-check only). Tracked as upstream.
 
 Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof async:libPath=...;event=cpu;output=collapsed;dir=/tmp/profile`.
 

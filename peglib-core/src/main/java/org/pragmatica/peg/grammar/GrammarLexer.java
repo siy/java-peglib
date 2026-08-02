@@ -1,7 +1,7 @@
 package org.pragmatica.peg.grammar;
 
-import org.pragmatica.peg.tree.SourceLocation;
-import org.pragmatica.peg.tree.SourceSpan;
+import org.pragmatica.peg.source.SourceLocation;
+import org.pragmatica.peg.source.SourceSpan;
 
 import java.util.ArrayList;
 import java.util.List;

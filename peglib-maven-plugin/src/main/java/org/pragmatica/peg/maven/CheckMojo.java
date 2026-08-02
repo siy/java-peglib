@@ -3,10 +3,10 @@ package org.pragmatica.peg.maven;
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.Unit;
 import org.pragmatica.lang.utils.Causes;
-import org.pragmatica.peg.v6.Parser;
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.cst.ParseResult;
-import org.pragmatica.peg.v6.diagnostic.Diagnostic;
+import org.pragmatica.peg.Parser;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.cst.ParseResult;
+import org.pragmatica.peg.diagnostic.Diagnostic;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -28,7 +28,7 @@ import org.apache.maven.plugins.annotations.Parameter;
  * <p>If {@code smokeInput} is set, the parser must consume it without emitting a
  * single diagnostic; otherwise the check simply verifies the parser builds.
  *
- * <p>Note that the v6 pipeline only emits a parser when the grammar contains at
+ * <p>Note that the pipeline only emits a parser when the grammar contains at
  * least one PARSER or MIXED rule — an all-literal single-rule grammar classifies
  * as LEXER-only and cannot be smoke-tested.
  */
@@ -89,7 +89,7 @@ public class CheckMojo extends AbstractMojo {
     }
 
     /**
-     * The v6 {@code parse} never fails outright — it always yields a tree plus a
+     * The {@code parse} never fails outright — it always yields a tree plus a
      * diagnostics list — so the Result channel is re-established here: an empty
      * diagnostics list is success, anything else is a Cause carrying the
      * rendered diagnostics.

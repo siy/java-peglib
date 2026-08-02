@@ -137,7 +137,7 @@ Skips moved 4 → 2 (remaining: `LexerGeneratorTest` parity 1, `TriviaAdversaria
 1. **JBCT plugin bumped** 0.4.1 → 0.25.0 (fixed parser crash on `DfaBuilder.java`)
 2. **v6 JBCT-0.25.0 conformance refactor**: 123 lint errors → 0 (throws → `Result`, nulls → `Option`, `Result<Void>` → `Result<Unit>`, hot-path void mutators retained with `@SuppressWarnings("JBCT-RET-01")`)
 3. **peglib-runtime module extracted** (25KB jar): standalone-parser invariant met. Generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core.
-4. **V6Formatter corpus validation**: 20/20 round-trip; found and fixed 2 real bugs (multi-line leaf text crashed `Doc.Text`; inline-literal tokens dropped by `Docs.concat`)
+4. **Formatter corpus validation**: 20/20 round-trip; found and fixed 2 real bugs (multi-line leaf text crashed `Doc.Text`; inline-literal tokens dropped by `Docs.concat`)
 5. **Bounded-scan truncate** (CstArrayBuilder): 24-48× hot-path speedup
 6. **DFA Unicode support**: non-ASCII chars in comments/strings/identifiers now work
 7. **Asymmetric delimited blocks**: `'/*' (!'*/' .)* '*/'` inside Choice now routes through `compileDelimitedBlock`
@@ -235,7 +235,7 @@ Phase A-F per spec §7 — all implemented or documented as known limitations:
 1. **Bounded-scan truncate** (CstArrayBuilder): 24-48× speedup on the hot path — eliminated the 75% CPU dominant cost
 2. **JBCT 0.25.0 v6 conformance**: 0 lint errors after refactor (throws → Result, nulls → Option, void mutators @SuppressWarnings)
 3. **peglib-runtime module**: standalone-parser invariant met; 25KB jar
-4. **V6Formatter corpus validation**: 20/20 round-trip; 2 bugs found and fixed
+4. **Formatter corpus validation**: 20/20 round-trip; 2 bugs found and fixed
 5. **DFA Unicode handling**: non-ASCII chars in comments/strings now work
 6. **Asymmetric delimited blocks**: block comments inside Choice now route through compileDelimitedBlock
 7. **Identifier fallback**: contextual keywords (open/module/record/yield) accepted as identifiers
@@ -282,7 +282,7 @@ See §11 below for the 9-decision summary. See `docs/ARCHITECTURE-0.6.0.md` for 
 | | |
 |---|---|
 | **Active branch** | `release-0.6.0` (NOT yet committed beyond `c60a610`; all v6 work in untracked files) |
-| **Working tree** | All v6 code in NEW files under `peglib-core/src/{main,test}/java/org/pragmatica/peg/v6/**`; **0.5.x untouched** (parallel-package strategy succeeded) |
+| **Working tree** | All v6 code in NEW files under `peglib-core/src/{main,test}/java/org/pragmatica/peg/**`; **0.5.x untouched** (parallel-package strategy succeeded) |
 | **Test count** | peglib-core: **1019 + 1 skip, all green** (up from 805 baseline; +214 new in v6 packages) |
 | **Java25 corpus** | **12/20 fixtures parse cleanly**; 8 still recover with diagnostics (grammar/parser quality issues — see §3) |
 | **Cold compile** | 261-919ms (under spec target 600ms when JVM warm) |
@@ -321,7 +321,7 @@ See §11 below for the 9-decision summary. See `docs/ARCHITECTURE-0.6.0.md` for 
 ### Code surface added
 
 ```
-peglib-core/src/main/java/org/pragmatica/peg/v6/
+peglib-core/src/main/java/org/pragmatica/peg/
 ├── PegParser.java                          (entry point + cache)
 ├── Parser.java                             (facade)
 ├── token/
@@ -351,7 +351,7 @@ peglib-core/src/main/java/org/pragmatica/peg/v6/
     └── IncrementalParser.java              (simple-first wrapper)
 ```
 
-Tests in `peglib-core/src/test/java/org/pragmatica/peg/v6/**` (29 test classes, 214 tests).
+Tests in `peglib-core/src/test/java/org/pragmatica/peg/**` (29 test classes, 214 tests).
 
 ---
 
@@ -442,7 +442,7 @@ Don't run until at least 18/20 fixtures parse cleanly.
 
 ## 5. Files NOT to commit until reviewed
 
-- All v6 packages (`org.pragmatica.peg.v6.*` and tests) — large surface area; want spec-compliance review first
+- All v6 packages (`org.pragmatica.peg.*` and tests) — large surface area; want spec-compliance review first
 - `peglib-core/src/test/resources/java25.peg` was NOT modified in Session 2
 - No 0.5.x source files modified
 
@@ -491,7 +491,7 @@ This handover is the entry point for the next session. It is self-contained: rea
 Cumulative across the post-Move-B + trivia-rework + StringSpan + Cleanup A-G arcs:
 
 - **Trivia rework:** `triviaPostPass=true` is the new default. Context-independent attribution by post-pass. Long-standing trivia bugs (5 historical + Step 4 era) closed.
-- **StringSpan:** new public type `org.pragmatica.peg.tree.StringSpan` for lazy substring materialization. CstNode.Terminal/Token internals migrated to `StringSpan textSpan`; `.text(): String` accessor preserved via lazy materialization.
+- **StringSpan:** new public type `org.pragmatica.peg.source.StringSpan` for lazy substring materialization. CstNode.Terminal/Token internals migrated to `StringSpan textSpan`; `.text(): String` accessor preserved via lazy materialization.
 - **Perf:** selfhost (37k LOC) -5% under legacy buffer-driven path (the perf-critical workload is faster). Reference (1900 LOC) +30% over legacy (intrinsic post-pass overhead; bounded; no real workload affected).
 - **Lever B for incremental engine:** trivia-context-loss blocker resolved. Fallback-rule-bypass blocker remains separately scoped.
 
@@ -586,7 +586,7 @@ Per spec §7, Phase A is the lexer foundation. ~1 week. Critical-path: every sub
 
 The 0.6.0 implementation is a clean-slate rebuild that doesn't need to live in `peglib-core` at first. Suggestion:
 
-- Create a NEW package `org.pragmatica.peg.v6.*` (or similar) inside `peglib-core` for the 0.6.0 code
+- Create a NEW package `org.pragmatica.peg.*` (or similar) inside `peglib-core` for the 0.6.0 code
 - Existing 0.5.x packages (`org.pragmatica.peg.parser.*`, `org.pragmatica.peg.action.*`, etc.) stay UNTOUCHED until late in the cycle
 - This means tests of both old and new can coexist; bench can compare directly; rollback is trivial if something goes wrong
 - Late-cycle (Phase F): delete old packages once 0.6.0 is fully validated
@@ -757,7 +757,7 @@ peglib/
 └── peglib-playground/               (REPL + HTTP UI)
 ```
 
-For 0.6.0 work, the proposal in §3.4 is to add a NEW package `org.pragmatica.peg.v6.*` inside `peglib-core` rather than rewriting in place. This lets old and new coexist during the cycle.
+For 0.6.0 work, the proposal in §3.4 is to add a NEW package `org.pragmatica.peg.*` inside `peglib-core` rather than rewriting in place. This lets old and new coexist during the cycle.
 
 ---
 

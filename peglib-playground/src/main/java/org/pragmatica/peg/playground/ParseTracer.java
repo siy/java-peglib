@@ -1,7 +1,7 @@
 package org.pragmatica.peg.playground;
 
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.token.TokenArray;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.token.TokenArray;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +32,7 @@ import java.util.stream.IntStream;
  * {@link #cacheMisses()}, {@link #cachePuts()}) and {@link #cutsFired()}
  * remain on the API because {@link Stats} and the playground frontend consume
  * them, but the 0.6.x lex-then-parse pipeline has no memoization and elides
- * cuts at lex time, so nothing increments them during a v6 walk.
+ * cuts at lex time, so nothing increments them during a walk.
  */
 public final class ParseTracer {
     /** Rule name reported for error-flagged CST nodes, which carry no grammar rule of their own. */
@@ -245,8 +245,8 @@ public final class ParseTracer {
      * (yielding 0), while trivia between two sibling leaves is attributed to
      * both (yielding double). Neither is the count the user is shown.
      *
-     * <p>{@link org.pragmatica.peg.playground.v6.PlaygroundEngineV6
-     * PlaygroundEngineV6} delegates here for {@link Stats#triviaCount()}, and
+     * <p>{@link org.pragmatica.peg.playground.PlaygroundEngine
+     * PlaygroundEngine} delegates here for {@link Stats#triviaCount()}, and
      * {@link #walkCst(CstArray)} reports the same number, so the tracer's
      * {@code walk.trivia()} and the engine's stats line cannot drift apart.
      */

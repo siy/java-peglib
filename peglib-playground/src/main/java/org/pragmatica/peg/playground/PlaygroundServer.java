@@ -5,9 +5,9 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.peg.playground.internal.JsonDecoder;
 import org.pragmatica.peg.playground.internal.JsonEncoder;
 import org.pragmatica.peg.playground.internal.JsonEncoder.Diagnostics;
-import org.pragmatica.peg.playground.v6.PlaygroundEngineV6;
-import org.pragmatica.peg.playground.v6.PlaygroundEngineV6.ParseOutcome;
-import org.pragmatica.peg.playground.v6.PlaygroundEngineV6.ParseRequest;
+import org.pragmatica.peg.playground.PlaygroundEngine;
+import org.pragmatica.peg.playground.PlaygroundEngine.ParseOutcome;
+import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -143,7 +143,7 @@ public final class PlaygroundServer {
      */
     private static JsonResponse runParse(ParseRequest request) {
         return JsonResponse.jsonResponse(200,
-                                         PlaygroundEngineV6.run(request)
+                                         PlaygroundEngine.run(request)
                                                            .fold(PlaygroundServer::grammarErrorPayload,
                                                                  PlaygroundServer::buildResponse));
     }

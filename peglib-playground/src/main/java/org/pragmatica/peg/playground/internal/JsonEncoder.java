@@ -2,10 +2,10 @@ package org.pragmatica.peg.playground.internal;
 
 import org.pragmatica.peg.playground.ParseTracer;
 import org.pragmatica.peg.playground.Stats;
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.cst.CstNode;
-import org.pragmatica.peg.v6.diagnostic.Diagnostic;
-import org.pragmatica.peg.v6.token.TokenArray;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.CstNode;
+import org.pragmatica.peg.diagnostic.Diagnostic;
+import org.pragmatica.peg.token.TokenArray;
 
 import java.util.Arrays;
 import java.util.List;

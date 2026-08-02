@@ -42,9 +42,9 @@ If you only consume a generated parser, depend on `peglib-runtime` (25 KB) inste
 ### Parse some text
 
 ```java
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.cst.ParseResult;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.ParseResult;
 
 var parser = PegParser.fromGrammar("""
     Start  <- '#' Number
@@ -71,8 +71,8 @@ sub-millisecond.
 ### Walk the CST
 
 ```java
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.cst.CstNode;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.CstNode;
 
 void walk(CstArray cst, int idx) {
     switch (cst.viewAt(idx)) {
@@ -246,7 +246,7 @@ only the affected window on each edit and reparses only the smallest enclosing
 checkpoint subtree.
 
 ```java
-import org.pragmatica.peg.v6.incremental.IncrementalParser;
+import org.pragmatica.peg.incremental.IncrementalParser;
 
 var inc = new IncrementalParser(parser, "int x = 1;");
 ParseResult after = inc.edit(/* offset */ 8, /* oldLen */ 1, "42");
@@ -269,7 +269,7 @@ edits that span checkpoints fall back to full reparse.
 | `peglib-runtime` | 25 KB; the only dep generated parsers need (plus pragmatica-lite:core) |
 | `peglib` (`peglib-core`) | grammar parser, codegen, analyzers, `PegParser.fromGrammar`, `IncrementalParser` |
 | `peglib-formatter` | Wadler-Lindig pretty printer over `CstArray` |
-| `peglib-maven-plugin` | build-time codegen mojo (`generate-v6`) |
+| `peglib-maven-plugin` | build-time codegen mojo (`generate`) |
 | `peglib-playground` | REPL + HTTP UI for experimenting with grammars |
 
 ---
@@ -286,7 +286,7 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
     <version>0.7.0</version>
     <executions>
         <execution>
-            <goals><goal>generate-v6</goal></goals>
+            <goals><goal>generate</goal></goals>
             <configuration>
                 <grammarFile>src/main/peg/MyGrammar.peg</grammarFile>
                 <outputDirectory>${project.build.directory}/generated-sources/peg</outputDirectory>
@@ -323,7 +323,7 @@ data.
 mvn install -Djbct.skip=true
 ```
 
-`-Djbct.skip=true` works around a JBCT 0.25.0 formatter-convergence issue on a few v6
+`-Djbct.skip=true` works around a JBCT 0.25.0 formatter-convergence issue on a few
 files; lint itself passes cleanly.
 
 Run tests for a single module:

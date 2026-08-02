@@ -4,8 +4,8 @@
  *
  * <p>This package holds no CST walker of its own: it contributes the document
  * model and the renderer that turns a document into text. The CST-walking entry
- * point lives in {@link org.pragmatica.peg.formatter.v6.V6Formatter}, which
- * builds documents from a {@link org.pragmatica.peg.v6.cst.CstArray} and renders
+ * point lives in {@link org.pragmatica.peg.formatter.Formatter}, which
+ * builds documents from a {@link org.pragmatica.peg.cst.CstArray} and renders
  * them with the types below.
  *
  * <p>Contents:

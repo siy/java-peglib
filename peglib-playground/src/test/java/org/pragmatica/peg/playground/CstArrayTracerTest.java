@@ -1,11 +1,11 @@
 package org.pragmatica.peg.playground;
 
 import org.junit.jupiter.api.Test;
-import org.pragmatica.peg.playground.v6.PlaygroundEngineV6;
-import org.pragmatica.peg.playground.v6.PlaygroundEngineV6.ParseRequest;
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.token.TokenArray;
+import org.pragmatica.peg.playground.PlaygroundEngine;
+import org.pragmatica.peg.playground.PlaygroundEngine.ParseRequest;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.token.TokenArray;
 
 import java.util.List;
 import java.util.stream.IntStream;
@@ -127,7 +127,7 @@ class CstArrayTracerTest {
      */
     @Test
     void countTrivia_matchesEngineStatsTriviaCount() {
-        var outcome = PlaygroundEngineV6.run(new ParseRequest(GRAMMAR, " 12 + 34"))
+        var outcome = PlaygroundEngine.run(new ParseRequest(GRAMMAR, " 12 + 34"))
                                         .expect("engine should compile and parse");
 
         assertThat(outcome.stats()

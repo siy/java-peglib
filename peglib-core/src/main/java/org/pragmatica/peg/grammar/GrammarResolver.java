@@ -2,7 +2,7 @@ package org.pragmatica.peg.grammar;
 
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.error.ParseError;
-import org.pragmatica.peg.tree.SourceLocation;
+import org.pragmatica.peg.source.SourceLocation;
 
 import java.util.ArrayList;
 import java.util.HashMap;

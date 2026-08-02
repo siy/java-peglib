@@ -4,7 +4,7 @@ import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.error.ParseError;
 import org.pragmatica.peg.grammar.analysis.LeftRecursionAnalysis;
-import org.pragmatica.peg.tree.SourceLocation;
+import org.pragmatica.peg.source.SourceLocation;
 
 import java.util.List;
 import java.util.Map;
