@@ -8,7 +8,19 @@ Current branch: `main` at `v0.6.0`.
 
 ## Agent Usage
 
-**MANDATE:** Use ONLY `jbct-coder` agent for ALL coding/fixing in this project. Use `build-runner` for `mvn` invocations. Use `chore-runner` for git/changelog work.
+**Preferred, not absolute.** Default to `jbct-coder` for multi-file or open-ended coding, `build-runner`
+for `mvn`, `chore-runner` for git/changelog. The point is keeping noisy output out of the main context —
+not delegation for its own sake.
+
+Work inline instead when any of these hold:
+- the user asks for it inline (this overrides everything below);
+- the change is targeted and predictable — a few edits whose result you can verify by reading;
+- delegating would cost more than the work itself (see the global "Delegation" rule on setup cost);
+- the harness this session restricts spawning agents. A session-level instruction not to spawn agents
+  outranks this file.
+
+`mvn` inline is acceptable when the output is filtered to a summary, e.g.
+`mvn install -Djbct.skip=true 2>&1 | grep -E "Tests run:|BUILD"`. Unfiltered reactor output is not.
 
 ## Architecture (0.6.0)
 
@@ -225,7 +237,22 @@ Notable test classes for verification gates:
 
 - **DFA alphabet is 0..255 + per-state non-ASCII transition slot.** Don't try to extend alphabet to full Unicode — too expensive. For `.` (Any) and negated `CharClass`, emit a separate non-ASCII edge; the driver checks it when `ch >= 256`. (from 0.6.0 ship: line/block comments and strings broke on em-dash until the non-ASCII slot landed.)
 
-- **Generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core.** If `peglib-core` shows up in generated source imports, the standalone-parser invariant is broken. Grep generated source for verification.
+- **Generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core.** Verify against this
+  explicit allow-list — generated `GLexer`/`GParser`/`GVisitor` source may import *only*:
+  `org.pragmatica.peg.token.*`, `org.pragmatica.peg.cst.*`, `org.pragmatica.peg.diagnostic.*`
+  (all three live in peglib-runtime), plus `org.pragmatica.lang.*` and `java.*`.
+  Anything else — notably `org.pragmatica.peg.generator.*`, `.lexer.*`, `.grammar.*`, `.analyzer.*`,
+  `.incremental.*` — means the standalone-parser invariant is broken.
+
+  **The old "grep for peglib-core" heuristic no longer works.** Before 0.7.0 the split was visible in
+  the package name (`peg.v6.generator` vs `peg.v6.token`); after collapsing `v6` away, core and runtime
+  share the `org.pragmatica.peg` root and are distinguishable only by subpackage. Check the allow-list,
+  not the module name.
+
+  **You cannot grep `target/` for this.** `LexerCompiler` and `ParserCompiler` compile generated source
+  in memory via the JDK Compiler API — nothing is written to disk. To verify, invoke
+  `LexerGenerator` / `ParserGenerator` / `VisitorGenerator` directly against a real grammar and inspect
+  the returned source.
 
 - **Block comments inside Choice need explicit routing through `compileDelimitedBlock`.** The `'/*' (!'*/' .)* '*/'` pattern won't match correctly otherwise — the DFA can't handle `Not(Literal)` inside Choice alternatives. (from 0.6.0 ship: this is why block comments in `%whitespace` failed to lex until asymmetric `compileDelimitedBlock` was added.)
 
