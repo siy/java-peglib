@@ -197,17 +197,17 @@ class PlaygroundServerTest {
 
     @Test
     void sanitizeStaticPath_acceptsNormalizedAssets() {
-        assertThat(PlaygroundServer.sanitizeStaticPath("/")).isEqualTo("/index.html");
-        assertThat(PlaygroundServer.sanitizeStaticPath("/playground.js")).isEqualTo("/playground.js");
-        assertThat(PlaygroundServer.sanitizeStaticPath("//playground.js")).isEqualTo("/playground.js");
+        assertThat(PlaygroundServer.sanitizeStaticPath("/").unwrap()).isEqualTo("/index.html");
+        assertThat(PlaygroundServer.sanitizeStaticPath("/playground.js").unwrap()).isEqualTo("/playground.js");
+        assertThat(PlaygroundServer.sanitizeStaticPath("//playground.js").unwrap()).isEqualTo("/playground.js");
     }
 
     @Test
     void sanitizeStaticPath_rejectsTraversalAndControlChars() {
-        assertThat(PlaygroundServer.sanitizeStaticPath("/../secret")).isNull();
-        assertThat(PlaygroundServer.sanitizeStaticPath("/foo/../bar")).isNull();
-        assertThat(PlaygroundServer.sanitizeStaticPath("/foo\\bar")).isNull();
-        assertThat(PlaygroundServer.sanitizeStaticPath("/foobar")).isNull();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/../secret").isEmpty()).isTrue();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foo/../bar").isEmpty()).isTrue();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foo\\bar").isEmpty()).isTrue();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foobar").isEmpty()).isTrue();
     }
 
     private HttpResponse<String> post(String path, String body) throws Exception {

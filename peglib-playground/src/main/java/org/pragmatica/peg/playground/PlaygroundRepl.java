@@ -55,6 +55,7 @@ public final class PlaygroundRepl {
      * runs in {@link #run()}; failures from the engine surface through the
      * monadic {@code Result} channel into {@link #runParse(String)}.
      */
+    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"}) // JVM entry-point contract: main is void and may declare throws.
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
             System.err.println("usage: PlaygroundRepl <grammar.peg>");

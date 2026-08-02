@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
 
+import org.pragmatica.lang.Result;
+import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.cst.CstArray;
 import org.pragmatica.peg.token.TokenArray;
 
@@ -59,41 +61,57 @@ public final class ParseTracer {
         return System.nanoTime() - startNanos;
     }
 
-    public void recordRuleEnter(String rule, int offset) {
+    public Result<Unit> recordRuleEnter(String rule, int offset) {
         ruleEntries++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_ENTER, rule, offset, elapsedNanos(), ""));
+    
+        return Result.unitResult();
     }
 
-    public void recordRuleSuccess(String rule, int offset) {
+    public Result<Unit> recordRuleSuccess(String rule, int offset) {
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_SUCCESS, rule, offset, elapsedNanos(), ""));
+    
+        return Result.unitResult();
     }
 
-    public void recordRuleFailure(String rule, int offset) {
+    public Result<Unit> recordRuleFailure(String rule, int offset) {
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.RULE_FAILURE, rule, offset, elapsedNanos(), ""));
+    
+        return Result.unitResult();
     }
 
-    public void recordCacheHit(String rule, int offset) {
+    public Result<Unit> recordCacheHit(String rule, int offset) {
         cacheHits++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_HIT, rule, offset, elapsedNanos(), ""));
+    
+        return Result.unitResult();
     }
 
-    public void recordCacheMiss(String rule, int offset) {
+    public Result<Unit> recordCacheMiss(String rule, int offset) {
         cacheMisses++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_MISS, rule, offset, elapsedNanos(), ""));
+    
+        return Result.unitResult();
     }
 
-    public void recordCachePut(String rule, int offset) {
+    public Result<Unit> recordCachePut(String rule, int offset) {
         cachePuts++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CACHE_PUT, rule, offset, elapsedNanos(), ""));
+    
+        return Result.unitResult();
     }
 
-    public void recordCutFired(String rule, int offset) {
+    public Result<Unit> recordCutFired(String rule, int offset) {
         cutsFired++;
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.CUT_FIRED, rule, offset, elapsedNanos(), "cut"));
+    
+        return Result.unitResult();
     }
 
-    public void note(String detail) {
+    public Result<Unit> note(String detail) {
         records.add(TraceRecord.traceRecord(TraceRecord.EventKind.NOTE, "", -1, elapsedNanos(), detail));
+    
+        return Result.unitResult();
     }
 
     public List<TraceRecord> records() {
@@ -163,13 +181,15 @@ public final class ParseTracer {
             this.cst = cst;
         }
 
-        void visit(int nodeIdx) {
+        Result<Unit> visit(int nodeIdx) {
             nodes++;
             if (cst.isError(nodeIdx)) {
                 visitError(nodeIdx);
             } else {
                 visitRule(nodeIdx);
             }
+
+            return Result.unitResult();
         }
 
         private void visitError(int nodeIdx) {

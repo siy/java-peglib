@@ -11,7 +11,9 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
+import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.playground.internal.JsonDecoder;
 import org.pragmatica.peg.playground.internal.JsonEncoder;
 import org.pragmatica.peg.playground.internal.JsonEncoder.Diagnostics;
@@ -58,6 +60,7 @@ public final class PlaygroundServer {
      * than through {@code main}'s untyped boundary. This method merely
      * starts the server and registers a shutdown hook.
      */
+    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"}) // JVM entry-point contract: main is void and may declare throws.
     public static void main(String[] args) throws IOException {
         int port = parsePort(args);
         var server = start(port);
@@ -88,11 +91,14 @@ public final class PlaygroundServer {
         return port;
     }
 
-    public void stop() {
+    public Result<Unit> stop() {
         httpServer.stop(0);
+
+        return Result.unitResult();
     }
 
     // === /parse handler ===
+    @SuppressWarnings("JBCT-EX-01") // com.sun.net.httpserver.HttpHandler contract: handle(HttpExchange) throws IOException.
     private static void handleParse(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, Map.of("error", "method not allowed"));
@@ -253,6 +259,7 @@ public final class PlaygroundServer {
     }
 
     // === static file handler ===
+    @SuppressWarnings("JBCT-EX-01") // com.sun.net.httpserver.HttpHandler contract: handle(HttpExchange) throws IOException.
     private static void handleStatic(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, Map.of("error", "method not allowed"));
@@ -262,14 +269,15 @@ public final class PlaygroundServer {
 
         URI uri = exchange.getRequestURI();
         String rawPath = uri.getPath();
-        String safePath = sanitizeStaticPath(rawPath);
+        var sanitized = sanitizeStaticPath(rawPath);
 
-        if (safePath == null) {
+        if (sanitized.isEmpty()) {
             sendPlain(exchange, 400, "bad request");
 
             return;
         }
 
+        String safePath = sanitized.unwrap();
         String resourcePath = "/playground" + safePath;
         byte[] body = readResource(resourcePath);
 
@@ -294,16 +302,16 @@ public final class PlaygroundServer {
      * collapsing repeated slashes. Returns the sanitized path or {@code null}
      * when the input is unsafe.
      */
-    static String sanitizeStaticPath(String rawPath) {
+    static Option<String> sanitizeStaticPath(String rawPath) {
         if (rawPath == null || rawPath.isEmpty() || rawPath.equals("/")) {
-            return "/index.html";
+            return Option.some("/index.html");
         }
 
         for (int i = 0; i < rawPath.length(); i++) {
             char c = rawPath.charAt(i);
 
             if (c < 0x20 || c == '\\') {
-                return null;
+                return Option.none();
             }
         }
         // Collapse repeated slashes; reject any ".." segment.
@@ -311,15 +319,15 @@ public final class PlaygroundServer {
 
         for (var segment : collapsed.split("/")) {
             if ("..".equals(segment)) {
-                return null;
+                return Option.none();
             }
         }
 
         if (!STATIC_PATH_ALLOWLIST.matcher(collapsed).matches()) {
-            return null;
+            return Option.none();
         }
 
-        return collapsed;
+        return Option.some(collapsed);
     }
 
     /**
