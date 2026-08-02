@@ -69,6 +69,7 @@ public class GenerateMojo extends AbstractMojo {
      * Result.failure(cause) into MojoFailureException(cause.message()).
      */
     @Override
+    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"})  // Maven AbstractMojo contract: execute() is void and signals failure by throwing.
     public void execute() throws MojoExecutionException, MojoFailureException {
         if (grammarFile == null || !grammarFile.isFile()) {
             throw new MojoFailureException("grammarFile does not exist: " + grammarFile);
@@ -154,6 +155,9 @@ public class GenerateMojo extends AbstractMojo {
                            () -> writeSourceUnchecked(targetFile, source));
     }
 
+    // JDK-API adapter: the body of a Result.lift(...) throwing lambda. Files.createDirectories
+    // and Files.writeString declare IOException, which lift() is precisely there to capture.
+    @SuppressWarnings("JBCT-EX-01")
     private static Path writeSourceUnchecked(Path targetFile, String source) throws IOException {
         Files.createDirectories(targetFile.getParent());
 
@@ -196,26 +200,32 @@ public class GenerateMojo extends AbstractMojo {
     }
 
     /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setGrammarFile(File grammarFile) {
         this.grammarFile = grammarFile;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setOutputDirectory(File outputDirectory) {
         this.outputDirectory = outputDirectory;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setPackageName(String packageName) {
         this.packageName = packageName;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setLexerClassName(String lexerClassName) {
         this.lexerClassName = lexerClassName;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setParserClassName(String parserClassName) {
         this.parserClassName = parserClassName;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setVisitorClassName(String visitorClassName) {
         this.visitorClassName = visitorClassName;
     }

@@ -51,13 +51,20 @@ public class CheckMojo extends AbstractMojo {
      * MojoFailureException(cause.message()).
      */
     @Override
+    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"})  // Maven AbstractMojo contract: execute() is void and signals failure by throwing.
     public void execute() throws MojoExecutionException, MojoFailureException {
         // Step 1: lint
         var lint = new LintMojo();
 
         lint.setGrammarFile(grammarFile);
         lint.setFailOnWarning(failOnWarning);
-        var report = lint.runAnalyzer();
+        var outcome = lint.runAnalyzer();
+
+        if (outcome instanceof Result.Failure<?> failure) {
+            throw new MojoFailureException(failure.cause().message());
+        }
+
+        var report = outcome.unwrap();
 
         getLog().info(report.formatRustStyle(grammarFile.toString()));
         if (report.hasErrors()) {
@@ -119,14 +126,17 @@ public class CheckMojo extends AbstractMojo {
     }
 
     /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setGrammarFile(File grammarFile) {
         this.grammarFile = grammarFile;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setFailOnWarning(boolean failOnWarning) {
         this.failOnWarning = failOnWarning;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setSmokeInput(String smokeInput) {
         this.smokeInput = smokeInput;
     }

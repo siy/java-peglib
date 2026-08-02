@@ -38,8 +38,15 @@ public class LintMojo extends AbstractMojo {
      * translates Result.failure(cause) into MojoFailureException(cause.message()).
      */
     @Override
+    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"})  // Maven AbstractMojo contract: execute() is void and signals failure by throwing.
     public void execute() throws MojoExecutionException, MojoFailureException {
-        var report = runAnalyzer();
+        var outcome = runAnalyzer();
+
+        if (outcome instanceof Result.Failure<?> failure) {
+            throw new MojoFailureException(failure.cause().message());
+        }
+
+        var report = outcome.unwrap();
 
         getLog().info(report.formatRustStyle(grammarFile.toString()));
         if (report.hasErrors()) {
@@ -52,29 +59,26 @@ public class LintMojo extends AbstractMojo {
     }
 
     /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setGrammarFile(File grammarFile) {
         this.grammarFile = grammarFile;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setFailOnWarning(boolean failOnWarning) {
         this.failOnWarning = failOnWarning;
     }
 
-    AnalyzerReport runAnalyzer() throws MojoExecutionException, MojoFailureException {
+    Result<AnalyzerReport> runAnalyzer() {
         if (grammarFile == null || !grammarFile.isFile()) {
-            throw new MojoFailureException("grammarFile does not exist: " + grammarFile);
+            return Causes.cause("grammarFile does not exist: " + grammarFile).result();
         }
         // 0.4.0 — Grammar.grammar(...) factory validates at construction; the
         // parse step (when there are no %imports) returns a validated Grammar
         // directly. Lint targets standalone grammar files, so we don't run the
         // resolver here.
-        var pipeline = readGrammar(grammarFile.toPath()).flatMap(LintMojo::parseGrammar).map(Analyzer::analyze);
-
-        if (pipeline instanceof Result.Failure<?> failure) {
-            throw new MojoFailureException(failure.cause().message());
-        }
-
-        return pipeline.unwrap();
+        return readGrammar(grammarFile.toPath()).flatMap(LintMojo::parseGrammar)
+                          .map(Analyzer::analyze);
     }
 
     private static Result<Grammar> parseGrammar(String text) {
