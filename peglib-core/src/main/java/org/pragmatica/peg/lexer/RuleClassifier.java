@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.pragmatica.lang.Unit;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.grammar.Expression;
@@ -425,7 +426,7 @@ public final class RuleClassifier {
         boolean hasTerminals = false;
         final Set<String> referencedRules = new HashSet<>();
 
-        void walk(Expression expr) {
+        Result<Unit> walk(Expression expr) {
             switch (expr) {
                 case Expression.Literal __ -> hasTerminals = true;
                 case Expression.CharClass __ -> {
@@ -459,6 +460,8 @@ public final class RuleClassifier {
                 case Expression.Group g -> walk(g.expression());
                 case Expression.Cut __ -> {}
             }
+
+            return Result.unitResult();
         }
     }
 }

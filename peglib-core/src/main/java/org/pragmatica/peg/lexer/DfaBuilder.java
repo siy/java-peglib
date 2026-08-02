@@ -15,6 +15,7 @@ import java.util.Set;
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
+import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 
@@ -2220,9 +2221,9 @@ public final class DfaBuilder {
             return id;
         }
 
-        void ensureCapacity(int needed) {
+        Result<Unit> ensureCapacity(int needed) {
             if (needed <= acceptKind.length) {
-                return;
+                return Result.unitResult();
             }
 
             int newCap = Math.max(needed, acceptKind.length * 2);
@@ -2235,16 +2236,20 @@ public final class DfaBuilder {
             charEdgeLens = Arrays.copyOf(charEdgeLens, newCap);
             nonAsciiEdges = Arrays.copyOf(nonAsciiEdges, newCap);
             nonAsciiEdgeLens = Arrays.copyOf(nonAsciiEdgeLens, newCap);
+
+            return Result.unitResult();
         }
 
-        void markAccept(int state, int kind, int priority) {
+        Result<Unit> markAccept(int state, int kind, int priority) {
             if (acceptKind[state] == Dfa.NO_ACCEPT || priority < acceptPriority[state]) {
                 acceptKind[state] = kind;
                 acceptPriority[state] = priority;
             }
+
+            return Result.unitResult();
         }
 
-        void addEpsilon(int from, int to) {
+        Result<Unit> addEpsilon(int from, int to) {
             int[] arr = epsilon[from];
 
             if (arr == null) {
@@ -2261,9 +2266,11 @@ public final class DfaBuilder {
 
             arr[len] = to;
             epsilonLen[from] = len + 1;
+
+            return Result.unitResult();
         }
 
-        void addCharEdge(int from, int ch, int to) {
+        Result<Unit> addCharEdge(int from, int ch, int to) {
             int[][] perChar = charEdges[from];
 
             if (perChar == null) {
@@ -2287,13 +2294,15 @@ public final class DfaBuilder {
 
             arr[len] = to;
             charEdgeLens[from][ch] = len + 1;
+
+            return Result.unitResult();
         }
 
         /**
          * 0.6.0 — add a non-ASCII edge {@code from --> to}. The lexer follows this
          * transition when the input character is &ge; {@link Dfa#ALPHABET_SIZE}.
          */
-        void addNonAsciiEdge(int from, int to) {
+        Result<Unit> addNonAsciiEdge(int from, int to) {
             int[] arr = nonAsciiEdges[from];
             int len = nonAsciiEdgeLens[from];
 
@@ -2309,6 +2318,8 @@ public final class DfaBuilder {
 
             arr[len] = to;
             nonAsciiEdgeLens[from] = len + 1;
+
+            return Result.unitResult();
         }
     }
 }

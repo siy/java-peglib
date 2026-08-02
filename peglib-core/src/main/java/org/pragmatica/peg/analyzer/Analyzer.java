@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
@@ -193,11 +194,11 @@ public final class Analyzer {
         for (var alt : alternatives) {
             var ch = literalFirstChar(alt);
 
-            if (ch == null) {
+            if (ch.isEmpty()) {
                 return;
             }
 
-            firstChars.add(ch);
+            ch.onPresent(firstChars::add);
         }
 
         var byChar = new HashMap<Character, List<Integer>>();
@@ -218,24 +219,24 @@ public final class Analyzer {
     }
 
     /**
-     * Walk transparent wrappers to the first literal prefix character. Returns null
-     * if any alternative is not literal-prefixed. Mirrors ChoiceDispatchAnalyzer logic.
+     * Walk transparent wrappers to the first literal prefix character. Empty
+     * if the expression is not literal-prefixed. Mirrors ChoiceDispatchAnalyzer logic.
      */
-    private static Character literalFirstChar(Expression expr) {
+    private static Option<Character> literalFirstChar(Expression expr) {
         return switch (expr) {
             case Expression.Literal lit -> lit.text().isEmpty()
-                                           ? null
-                                           : lit.text().charAt(0);
+                                           ? Option.none()
+                                           : Option.some(lit.text().charAt(0));
             case Expression.Sequence seq -> firstLiteralOfSequence(seq);
             case Expression.Group grp -> literalFirstChar(grp.expression());
             case Expression.TokenBoundary tb -> literalFirstChar(tb.expression());
             case Expression.Ignore ig -> literalFirstChar(ig.expression());
             case Expression.Capture cap -> literalFirstChar(cap.expression());
-            default -> null;
+            default -> Option.none();
         };
     }
 
-    private static Character firstLiteralOfSequence(Expression.Sequence seq) {
+    private static Option<Character> firstLiteralOfSequence(Expression.Sequence seq) {
         for (var el : seq.elements()) {
             if (el instanceof Expression.And || el instanceof Expression.Not) {
                 continue;
@@ -244,7 +245,7 @@ public final class Analyzer {
             return literalFirstChar(el);
         }
 
-        return null;
+        return Option.none();
     }
 
     // === Check 3: Nullable rules ===

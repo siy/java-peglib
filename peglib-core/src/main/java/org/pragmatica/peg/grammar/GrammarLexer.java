@@ -26,9 +26,21 @@ public final class GrammarLexer {
         this.column = 1;
     }
 
+    /**
+     * Tokenize grammar text.
+     *
+     * <p>Oversized input is reported as a single {@link GrammarToken.Error} rather
+     * than an exception — {@link GrammarParser#parse} already scans for error
+     * tokens and converts them to a {@code Result.failure}, so this reuses the
+     * existing error channel instead of introducing a second one.
+     */
     public static List<GrammarToken> tokenize(String input) {
         if (input.length() > MAX_INPUT_SIZE) {
-            throw new IllegalArgumentException("Grammar input exceeds maximum size of " + MAX_INPUT_SIZE + " characters");
+            var origin = new SourceSpan(1, 1, 0, 1, 1, 0);
+
+            return List.of(new GrammarToken.Error(origin,
+                                                  "Grammar input exceeds maximum size of " + MAX_INPUT_SIZE
+                                                 + " characters"));
         }
 
         return new GrammarLexer(input).tokenizeAll();

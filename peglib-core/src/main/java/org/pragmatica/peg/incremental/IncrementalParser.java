@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.pragmatica.lang.Unit;
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
@@ -401,11 +402,13 @@ public final class IncrementalParser {
      * Restore mutable state from a snapshot taken on this same parser. References
      * are copied verbatim; this is an O(1) operation.
      */
-    public void restore(Snapshot snapshot) {
+    public Result<Unit> restore(Snapshot snapshot) {
         this.input = snapshot.input();
         this.tokens = snapshot.tokens();
         this.cst = snapshot.cst();
         this.diagnostics = snapshot.diagnostics();
+
+        return Result.unitResult();
     }
 
     /**

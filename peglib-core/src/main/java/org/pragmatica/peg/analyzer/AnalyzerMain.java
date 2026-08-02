@@ -29,6 +29,7 @@ public final class AnalyzerMain {
      * {@link GrammarParser#parse} surface validation errors as
      * {@code Result.failure}.
      */
+    @SuppressWarnings("JBCT-RET-01")  // JVM entry-point contract: main must return void.
     public static void main(String[] args) {
         if (args.length != 1) {
             System.err.println("Usage: peglib-analyze <grammar.peg>");

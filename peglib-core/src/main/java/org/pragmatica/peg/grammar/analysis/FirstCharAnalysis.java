@@ -4,6 +4,8 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import org.pragmatica.lang.Result;
+import org.pragmatica.lang.Unit;
 import org.pragmatica.lang.Option;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
@@ -215,12 +217,14 @@ public final class FirstCharAnalysis {
      * Adds {@code c} to {@code out}, also adding its opposite-case variant
      * when {@code caseInsensitive}.
      */
-    public static void addCaseInsensitive(Set<Character> out, char c, boolean caseInsensitive) {
+    public static Result<Unit> addCaseInsensitive(Set<Character> out, char c, boolean caseInsensitive) {
         if (caseInsensitive) {
             out.add(Character.toLowerCase(c));
             out.add(Character.toUpperCase(c));
         } else {
             out.add(c);
         }
+
+        return Result.unitResult();
     }
 }
