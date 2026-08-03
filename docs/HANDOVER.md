@@ -1,6 +1,89 @@
 # peglib — Handover
 
-**Last updated:** 2026-06-07 — 0.6.3 SHIPPED to Maven Central
+**Last updated:** 2026-08-03 — 0.7.0 IN PROGRESS on `release-0.7.0` (not shipped)
+
+---
+
+## Session 9 — 0.7.0 (2026-08-01 → 08-03) — IN PROGRESS
+
+### State at a glance
+
+| | |
+|---|---|
+| **Branch** | `release-0.7.0`, 15 commits ahead of `main`. **Not merged, not tagged, not pushed.** |
+| **Build** | `mvn install` — **no `-Djbct.skip=true`** — BUILD SUCCESS |
+| **Tests** | **528 across 5 modules**, 0 failures, 0 errors, 0 skips |
+| **JBCT** | **0 hard errors**, 0 unformatted files, ~709 warnings (not gated) |
+| **Reactor** | 5 modules — `peglib-incremental` was deleted |
+| **Working tree** | clean |
+
+### What landed
+
+1. **The 0.5.x legacy path is gone.** 146 files, ~38,900 lines: the `PegEngine` interpreter,
+   `action`, 0.5.x `generator`, recursive `tree`, the whole `peglib-incremental` module, and
+   `GenerateMojo`. Shared infrastructure survived: `peg.grammar`, `LeftRecursionAnalysis`,
+   `ParseError`, the span types, and the `Doc`/`Docs`/`Renderer` algebra.
+2. **`org.pragmatica.peg.v6.*` collapsed into `org.pragmatica.peg.*`**, `V6`-prefixed class
+   names lost the marker, `peg.tree` → `peg.source`, and the mojo goal `generate-v6` → `generate`.
+3. **JBCT plugin and `pragmatica-lite:core` both to 1.0.0-rc2**, plugin moved to the parent pom,
+   `skip=false`, all five modules linted. **The core bump broke nothing** — 528 tests passed
+   unchanged across a major version jump.
+4. **All 105 JBCT hard errors resolved.** Refactored where possible; suppressed only where a
+   platform contract forbids the alternative (Maven `AbstractMojo`, `main`, `HttpHandler`,
+   `Result.lift` adapter bodies), each with a written reason.
+5. **`JsonDecoder` deleted in favour of `org.pragmatica-lite:jackson`** — 274 lines removed.
+6. **JEP 401 value classes**, plus `outer.new`, annotated type params, hex floats.
+7. **CST-shape sanity gate** added to `Java25ParserGateTest`.
+
+### Where to pick up — ordered
+
+1. **JEP 512 compact source files / implicitly declared classes.** The one remaining known gap,
+   and the only one that is *finalized* Java 25 rather than preview. `ModernJavaSyntaxProbe`
+   reports 18/19 with this the sole failure.
+
+   `OrdinaryUnit <- PackageDecl? ImportDecl* TypeDecl*` cannot express a top-level method or
+   field. The shape to try:
+   ```peg
+   OrdinaryUnit <- PackageDecl? ImportDecl* (TypeDecl / TopLevelMember)*
+   TopLevelMember <- Annotation* Modifier* (MethodDecl / FieldDecl)
+   ```
+   **Order matters:** `TypeDecl` must stay first or ordinary files change CST shape and the
+   corpus gates will move. Verify with `ModernJavaSyntaxProbe` then the full corpus gate, and
+   watch the new CST-shape assertion — it will catch a collapse that reconstruction would not.
+
+2. **Decide a policy for the 709 warnings.** Not build-gated. Dominated by `JBCT-UTIL-02`
+   (~186, `Verify.Is::` suggestions) and `JBCT-PAT-01` (~138, raw loops). Many `PAT-01` hits are
+   in `CstArray` / `TokenArray` / `CstArrayBuilder` — converting those loops to streams on the
+   parse hot path would be a bad trade. This needs a decision, not a backlog.
+
+3. **Ship 0.7.0**: PR, merge, tag, deploy. Nothing is pushed yet.
+
+4. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
+   deferred: it has zero lint errors and its output shape is what `playground.js` renders, so
+   swapping it risks the SPA wire format for no lint benefit.
+
+### Things worth not re-learning
+
+- **A contextual keyword needing lookahead cannot live in a named rule.** `RuleClassifier` types
+  any rule whose body references only lexer rules as LEXER, and lexer rules may not reference
+  other rules — `fromGrammar` rejects it with `SkippedRuleReferenced`. Two attempts
+  (`DeclModifier`, then `ValueMod`) both failed before the lookahead was spelled inline inside
+  the PARSER rules. The 0.6.2 guard did its job: loud failure, not a silent dead token kind.
+- **`value` is the highest-risk contextual keyword yet** — far more common as an ordinary
+  identifier than `record` or `sealed`. It is confined to declaration-modifier position for
+  exactly that reason; `LocalVar` / `Param` / `Catch` / `Resource` keep plain `Modifier*`.
+- **The JMH benchmarks resolve the grammar relative to CWD** and must be run from `peglib-core/`.
+  From the repo root every iteration fails with `NoSuchFileException` and JMH still reports a
+  clean-looking empty result table.
+- **`IncrementalEditBenchmark` on `selfhost` cannot resolve differences below ~15%** on this
+  machine. An unchanged jar measured 20944 µs and 23254 µs on consecutive runs. Do not read a
+  single-run delta there as a regression — re-run before believing it.
+- **The 0.5.x A/B benchmarks were deleted with the legacy path.** The historical "11-12× faster
+  than 0.5.x-gen" figure is no longer reproducible in-tree. Treat it as dated, not live.
+- **The keep-set during a large delete is easy to over-scope.** `grammar/analysis/` was kept
+  whole; only `LeftRecursionAnalysis` was live. `ExpressionShape` and `FirstCharAnalysis` (264
+  LOC) survived a full session and were removed later — after one of them had been pointlessly
+  refactored. Verify liveness per file, not per package.
 
 ---
 

@@ -2,9 +2,11 @@
 
 ## Project Status
 
-**0.6.0 shipped to Maven Central** (2026-05-11). Tokens-first lex-then-parse redesign. Generated parsers run within 1.2-1.8× of javac time on real Java 25, 11-12× faster than the 0.5.x source-generated parser. See `docs/HANDOVER.md` for state and `docs/ARCHITECTURE-0.6.0.md` for design.
+**0.6.3 is the latest shipped release** (Maven Central, 2026-06-07). Work in progress on
+`release-0.7.0`, which is **breaking**: the 0.5.x interpreter path and the `peglib-incremental`
+artifact are removed, and `org.pragmatica.peg.v6.*` has collapsed into `org.pragmatica.peg.*`.
 
-Current branch: `main` at `v0.6.0`.
+See `docs/HANDOVER.md` for current state and next steps, `docs/ARCHITECTURE-0.6.0.md` for design.
 
 ## Agent Usage
 
@@ -73,13 +75,21 @@ peglib-core/src/main/java/org/pragmatica/peg/
 │   ├── DfaBuilder.java              NFA→DFA + inline literals + aliases + delimited-block
 │   └── LexerEngine.java
 ├── analyzer/
+│   ├── Analyzer.java                grammar linter behind peglib:lint / peglib:check
+│   ├── AnalyzerMain.java            CLI entry point
+│   ├── AnalyzerReport.java, Finding.java
 │   ├── LeftRecursionDetector.java   rejects at fromGrammar with witness
-│   └── NamedCaptureDetector.java    rejects at fromGrammar (not yet supported at runtime)
+│   └── LeftRecursionCause.java
+├── grammar/                         shared front-end: GrammarParser, GrammarLexer,
+│                                    GrammarResolver, Grammar, Expression, Rule, Import
+│   └── analysis/LeftRecursionAnalysis.java
+├── error/ParseError.java
+├── source/                          SourceLocation, SourceSpan
 ├── generator/
 │   ├── LexerGenerator.java          emits GLexer.java
 │   ├── ParserGenerator.java         emits GParser.java; boolean control flow
 │   ├── VisitorGenerator.java        emits GVisitor.java
-│   ├── LexerCompiler.java           JDK Compiler API
+│   ├── LexerCompiler.java           JDK Compiler API — compiles IN MEMORY, nothing hits target/
 │   └── ParserCompiler.java
 └── incremental/
     └── IncrementalParser.java       snapshot/restore; partial reparse via checkpoint

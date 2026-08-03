@@ -36,13 +36,15 @@ the next prompt. Built-in meta commands:
 
 | Command | Purpose |
 |---------|---------|
-| `:trace on\|off` | Toggle verbose trace output |
-| `:packrat on\|off` | Toggle the packrat cache |
-| `:trivia on\|off` | Toggle trivia capture |
-| `:recovery NONE\|BASIC\|ADVANCED` | Switch recovery strategy |
-| `:start <rule>` | Override the start rule |
 | `:reload` | Force grammar reload |
 | `:status` | Show current settings |
+| `:help` | List commands |
+| `:quit` / `:q` / `:exit` | Exit |
+
+The 0.5.x toggles (`:packrat`, `:recovery`, `:start`, `:trivia`, `:trace`) were
+removed in 0.7.0. Under the 0.6.x design the grammar *is* the configuration
+(spec decision 9): there is no packrat cache, recovery is always on, trivia is
+always captured as tokens, and the start rule comes from the grammar.
 | `:quit` | Exit |
 
 Example session:
@@ -97,18 +99,17 @@ Request body (JSON):
 ```json
 {
   "grammar": "Number <- < [0-9]+ >\n%whitespace <- [ \\t]*\n",
-  "input": "42",
-  "startRule": "Number",
-  "mode": "cst",
-  "recovery": "BASIC",
-  "packrat": true,
-  "trivia": true
+  "input": "42"
 }
 ```
 
-Fields `grammar` and `input` are required. All other fields are optional and
-default to: start rule = grammar default; mode = `cst`; recovery = `BASIC`;
-packrat = true; trivia = true.
+`grammar` and `input` are the only fields. The 0.5.x knobs (`startRule`,
+`mode`, `recovery`, `packrat`, `trivia`) were removed in 0.7.0 — the grammar is
+the configuration. Any of them still present in an inbound body is ignored
+rather than rejected, so old clients keep working.
+
+Decoding is handled by `org.pragmatica-lite:jackson`; a malformed body yields
+HTTP 400 with the mapper's message in `detail`.
 
 Response body (JSON):
 
@@ -148,13 +149,7 @@ grammar failure), accumulated diagnostics, stats, and a tracer with the full
 event log.
 
 ```java
-var request = new PlaygroundEngine.ParseRequest(
-        grammarText, inputText,
-        Option.some("Number"),
-        true,                        // packrat
-        RecoveryStrategy.BASIC,
-        true,                        // captureTrivia
-        false);                      // astMode
+var request = new PlaygroundEngine.ParseRequest(grammarText, inputText);
 var outcome = PlaygroundEngine.run(request).unwrap();
 System.out.println(outcome.stats());
 outcome.tracer().records().forEach(System.out::println);

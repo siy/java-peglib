@@ -75,7 +75,58 @@ infrastructure (`peg.grammar`, `peg.grammar.analysis`, `peg.error.ParseError`,
   grammar at `fromGrammar` — so only the `LeftRecursionAnalysis` detection and the
   indirect-LR rejection tests remain.
 
+- **Package collapse: `org.pragmatica.peg.v6.*` → `org.pragmatica.peg.*`.** With the 0.5.x
+  path gone the `v6` suffix distinguished nothing. Class names lost the marker too
+  (`V6Formatter` → `Formatter`, `PlaygroundEngineV6` → `PlaygroundEngine`, …), and
+  `org.pragmatica.peg.tree` — reduced to two span types — became `org.pragmatica.peg.source`.
+  Migration is a package rename: `import org.pragmatica.peg.v6.cst.CstArray` becomes
+  `import org.pragmatica.peg.cst.CstArray`.
+- **Maven plugin goal renamed `generate-v6` → `generate`.** The old `generate` goal died with
+  `GenerateMojo` (0.5.x), so the v6 mojo took the name. **Breaking:** update
+  `<goal>generate-v6</goal>` to `<goal>generate</goal>`.
+- **`org.pragmatica-lite:core` bumped 0.24.0 → 1.0.0-rc2**, alongside the JBCT plugin. This is
+  part of the published contract: generated parsers depend on peglib-runtime + this artifact.
+- **`FormatterConfig.Builder.build()` now returns `Result<FormatterConfig>`.** Validation moved
+  from throwing setters to a single checked step, so the fluent chain is unchanged and only the
+  terminal call differs. `FormatContext` gained a validating `formatContext(...)` factory; its
+  canonical constructor no longer validates.
+- **`Docs.text(String)` is now total.** `null`/empty yields `Doc.Empty`, and embedded newlines
+  are split into `HardLine`-separated segments, establishing the `Doc.Text` newline-free
+  invariant by construction rather than by throwing. The `Doc` records dropped their defensive
+  compact-constructor checks; the `Docs` factories keep `null` out of the tree instead.
+- **`PlaygroundServer.start(int)` returns `Result<PlaygroundServer>`**, and `PlaygroundRepl`'s
+  command chain is Result-based. The playground request body accepts only `{grammar, input}`;
+  the 0.5.x knobs are ignored rather than rejected.
+- **JSON decoding delegated to `org.pragmatica-lite:jackson`.** The hand-written 274-line
+  `JsonDecoder` is gone. Note a behavioural difference: it boxed every JSON number as `Long`,
+  whereas Jackson narrows to `Integer` when the value fits. This adds Jackson 3 as a transitive
+  dependency of `peglib-playground` only — the standalone-parser contract is unaffected.
+- **`-Djbct.skip=true` is no longer needed.** The 0.25.0 formatter convergence bug is fixed in
+  1.0.0-rc2; `mvn install` runs clean with lint and format-check on across all five modules.
+  The `jbct.skip` property remains, defaulting to `false`.
+
 ### Added
+
+- **JEP 401 value classes (preview, JDK 28).** `value class`, `value record`,
+  `abstract value class`, `sealed abstract value class … permits`, and
+  `value class X extends Y` all parse. `value` is contextual: it is a modifier only in
+  type-declaration position, so `var value = 3`, `int value;`, `value.foo()` and
+  `void m(int value)` continue to parse as ordinary identifiers.
+- **Qualified inner-class creation** — `outer.new Inner()`.
+- **Annotated type parameters** — `class A<@NonNull T> { }`.
+- **Hex floating-point literals** — `0x1.8p3`.
+- **CST-shape sanity gate** in `Java25ParserGateTest`: each corpus fixture must yield at least
+  `LOC/3` CST nodes. Byte-equal reconstruction alone passes even when the parser matched empty
+  alternatives and bailed, which previously hid an empty-`CompilationUnit` regression for two
+  sessions.
+- **`ModernJavaSyntaxProbe`** — prints which post-Java-25 forms the grammar accepts, so grammar
+  work starts from measurement instead of assumption.
+
+### Verified, not changed
+
+- **JEP 530/532 primitive types in patterns** (`o instanceof int i`, `case int i ->`,
+  `P(int x, int y)`) already parsed via `TypePattern → LocalVarType → Type → PrimType`.
+  No grammar change was required; fixtures were added to prove it.
 
 ## [0.6.3] - 2026-06-07
 
