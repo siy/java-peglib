@@ -43,7 +43,7 @@ ImplementsClause <- 'implements' ^ TypeList
 PermitsClause <- 'permits' ^ TypeList
 TypeList <- Type (',' Type)*
 TypeParams <- '<' TypeParam (',' TypeParam)* '>'
-TypeParam <- Identifier ('extends' Type ('&' Type)*)?
+TypeParam <- Annotation* Identifier ('extends' Type ('&' Type)*)?
 
 ClassBody <- '{' ClassMember* '}'
 ClassMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* Member / InitializerBlock / ';'
@@ -156,7 +156,7 @@ Additive <- Multiplicative ((!'+=' '+' / !'-=' !'->' '-') Multiplicative)*
 Multiplicative <- Unary ((!'*=' '*' / !'/=' '/' / !'%=' '%') Unary)*
 Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
 Postfix <- Primary PostOp*
-PostOp <- '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
+PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
 Primary <- Literal / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- Type ('.' < 'class' > / '::' TypeArgs? (< 'new' > / Identifier))
 Lambda <- LambdaParams '->' (Expr / Block)
@@ -209,7 +209,7 @@ AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)* ','?)? 
 Literal <- < ('null' / 'true' / 'false') ![a-zA-Z0-9_$] > / CharLit / StringLit / NumLit
 CharLit <- < '\'' ([^'\\] / '\\' .)* '\'' >
 StringLit <- < '"""' (!'"""' .)* '"""' > / < '"' ([^"\\] / '\\' .)* '"' >
-NumLit <- < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\-]? [0-9_]+)? [fFdD]? >
+NumLit <- < '0' [xX] [0-9a-fA-F_]* ('.' [0-9a-fA-F_]*)? [pP] [+\-]? [0-9_]+ [fFdD]? > / < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\-]? [0-9_]+)? [fFdD]? >
 
 # Hard keywords only - contextual keywords (var, yield, record, sealed, non-sealed, permits, when, module) are handled by their specific rules
 Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'double' / 'do' / 'else' / 'enum' / 'extends' / 'false' / 'finally' / 'final' / 'float' / 'for' / 'goto' / 'implements' / 'import' / 'instanceof' / 'interface' / 'int' / 'if' / 'long' / 'native' / 'new' / 'null' / 'package' / 'private' / 'protected' / 'public' / 'return' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throws' / 'throw' / 'transient' / 'true' / 'try' / 'void' / 'volatile' / 'while') ![a-zA-Z0-9_$]
