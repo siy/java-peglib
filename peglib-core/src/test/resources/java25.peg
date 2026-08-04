@@ -8,7 +8,16 @@
 
 # === Compilation Units (JLS 7.3-7.8) ===
 CompilationUnit <- ModuleDecl / OrdinaryUnit
-OrdinaryUnit <- PackageDecl? ImportDecl* TypeDecl*
+# JEP 512 (Compact Source Files and Instance Main Methods) — final in Java 25.
+# A compact source file has top-level methods/fields with no enclosing class; the
+# compiler wraps them in an implicitly declared class.
+#
+# TypeDecl MUST stay the first alternative. It and TopLevelMember share the
+# 'Annotation* Modifier*' prefix, so reversing them would let TopLevelMember
+# win on ordinary files and change their CST shape — which the corpus gates and
+# the CST-shape assertion would both flag.
+OrdinaryUnit <- PackageDecl? ImportDecl* (TypeDecl / TopLevelMember)*
+TopLevelMember <- Annotation* Modifier* (MethodDecl / FieldDecl)
 PackageDecl <- Annotation* 'package' ^ QualifiedName ';'
 ImportDecl  <- 'import' ^ ('module' QualifiedName ';' / 'static'? QualifiedName ('.' '*')? ';')
 

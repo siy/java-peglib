@@ -1,16 +1,16 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-03 — 0.7.0 IN PROGRESS on `release-0.7.0` (not shipped)
+**Last updated:** 2026-08-04 — 0.7.0 feature-complete on `release-0.7.0` (not shipped)
 
 ---
 
-## Session 9 — 0.7.0 (2026-08-01 → 08-03) — IN PROGRESS
+## Session 9 — 0.7.0 (2026-08-01 → 08-04) — FEATURE COMPLETE, NOT SHIPPED
 
 ### State at a glance
 
 | | |
 |---|---|
-| **Branch** | `release-0.7.0`, 15 commits ahead of `main`. **Not merged, not tagged, not pushed.** |
+| **Branch** | `release-0.7.0`, 19 commits ahead of `main`. **Not merged, not tagged, not pushed.** |
 | **Build** | `mvn install` — **no `-Djbct.skip=true`** — BUILD SUCCESS |
 | **Tests** | **528 across 5 modules**, 0 failures, 0 errors, 0 skips |
 | **JBCT** | **0 hard errors**, 0 unformatted files, ~709 warnings (not gated) |
@@ -34,31 +34,22 @@
 5. **`JsonDecoder` deleted in favour of `org.pragmatica-lite:jackson`** — 274 lines removed.
 6. **JEP 401 value classes**, plus `outer.new`, annotated type params, hex floats.
 7. **CST-shape sanity gate** added to `Java25ParserGateTest`.
+8. **JEP 512 compact source files** — `void main() { }` with no enclosing class now parses.
+   `TypeDecl` stays the first alternative of `OrdinaryUnit`, verified by corpus node counts
+   being byte-identical before and after (884/1040/1904/586/605/833/135/447).
+
+`ModernJavaSyntaxProbe` now reports **19/19**; no known grammar gaps remain.
 
 ### Where to pick up — ordered
 
-1. **JEP 512 compact source files / implicitly declared classes.** The one remaining known gap,
-   and the only one that is *finalized* Java 25 rather than preview. `ModernJavaSyntaxProbe`
-   reports 18/19 with this the sole failure.
-
-   `OrdinaryUnit <- PackageDecl? ImportDecl* TypeDecl*` cannot express a top-level method or
-   field. The shape to try:
-   ```peg
-   OrdinaryUnit <- PackageDecl? ImportDecl* (TypeDecl / TopLevelMember)*
-   TopLevelMember <- Annotation* Modifier* (MethodDecl / FieldDecl)
-   ```
-   **Order matters:** `TypeDecl` must stay first or ordinary files change CST shape and the
-   corpus gates will move. Verify with `ModernJavaSyntaxProbe` then the full corpus gate, and
-   watch the new CST-shape assertion — it will catch a collapse that reconstruction would not.
-
-2. **Decide a policy for the 709 warnings.** Not build-gated. Dominated by `JBCT-UTIL-02`
+1. **Decide a policy for the 709 warnings.** Not build-gated. Dominated by `JBCT-UTIL-02`
    (~186, `Verify.Is::` suggestions) and `JBCT-PAT-01` (~138, raw loops). Many `PAT-01` hits are
    in `CstArray` / `TokenArray` / `CstArrayBuilder` — converting those loops to streams on the
    parse hot path would be a bad trade. This needs a decision, not a backlog.
 
-3. **Ship 0.7.0**: PR, merge, tag, deploy. Nothing is pushed yet.
+2. **Ship 0.7.0**: PR, merge, tag, deploy. Nothing is pushed yet.
 
-4. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
+3. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
    deferred: it has zero lint errors and its output shape is what `playground.js` renders, so
    swapping it risks the SPA wire format for no lint benefit.
 

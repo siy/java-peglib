@@ -112,6 +112,10 @@ infrastructure (`peg.grammar`, `peg.grammar.analysis`, `peg.error.ParseError`,
   `value class X extends Y` all parse. `value` is contextual: it is a modifier only in
   type-declaration position, so `var value = 3`, `int value;`, `value.foo()` and
   `void m(int value)` continue to parse as ordinary identifiers.
+- **JEP 512 compact source files / implicitly declared classes** (final in Java 25) — a
+  top-level `void main() { }` with no enclosing class parses. `OrdinaryUnit` gained a
+  `TopLevelMember` alternative, ordered after `TypeDecl` so ordinary files keep their exact
+  CST shape (verified: corpus node counts unchanged).
 - **Qualified inner-class creation** — `outer.new Inner()`.
 - **Annotated type parameters** — `class A<@NonNull T> { }`.
 - **Hex floating-point literals** — `0x1.8p3`.
