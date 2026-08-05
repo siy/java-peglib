@@ -48,7 +48,7 @@ This matches the documented rule in `docs/TRIVIA-ATTRIBUTION.md:32-42` for *subs
 ## Minimal reproducer
 
 ```java
-// peglib-core/src/test/java/org/pragmatica/peg/tree/FirstMemberTriviaTest.java (new test)
+// peglib-core/src/test/java/org/pragmatica/peg/source/FirstMemberTriviaTest.java (new test)
 @Test
 void firstMemberReceivesLeadingTrivia() {
     var input = """
@@ -78,7 +78,7 @@ A simpler unit-scale reproducer that doesn't need the full Java grammar — any 
 
 ## Root cause (file:line references)
 
-The bug is the interaction of three pieces in `peglib-core/src/main/java/org/pragmatica/peg/tree/TriviaPostPass.java`:
+The bug is the interaction of three pieces in `peglib-core/src/main/java/org/pragmatica/peg/source/TriviaPostPass.java`:
 
 ### 1. `rebuildNonTerminal:409`
 
@@ -162,7 +162,7 @@ If the parent has a known opening-delimiter terminal in its first slot, use its 
 
 ## Suggested tests
 
-`peglib-core/src/test/java/org/pragmatica/peg/tree/TriviaPostPassTest.java` covers round-trip reconstruction, corpus fixtures, structural divergence, and adversarial parity. **There is no test that specifically asserts on `leadingTrivia()` of the first child of a delimited container.** Adding:
+`peglib-core/src/test/java/org/pragmatica/peg/source/TriviaPostPassTest.java` covers round-trip reconstruction, corpus fixtures, structural divergence, and adversarial parity. **There is no test that specifically asserts on `leadingTrivia()` of the first child of a delimited container.** Adding:
 
 1. **First-child trivia preservation** — input like `class X { /// doc \n int y; }`; assert first member's leadingTrivia contains the LineComment. This is the direct test for the bug.
 2. **Trivia adjacent to `{`** — input with both whitespace and comments immediately after `{`; assert both are captured.

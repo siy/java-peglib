@@ -1,9 +1,5 @@
 package org.pragmatica.peg.grammar;
 
-import org.pragmatica.lang.Result;
-import org.pragmatica.peg.error.ParseError;
-import org.pragmatica.peg.tree.SourceLocation;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -12,6 +8,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.error.ParseError;
+import org.pragmatica.peg.source.SourceLocation;
+
 
 /**
  * 0.2.8 — Resolves {@code %import} directives by inlining imported rules
@@ -51,10 +52,10 @@ public final class GrammarResolver {
      * unchanged; otherwise composes all imported rules into it.
      */
     public static Result<Grammar> resolve(Grammar root, GrammarSource source) {
-        if (root.imports()
-                .isEmpty()) {
+        if (root.imports().isEmpty()) {
             return Result.success(root);
         }
+
         return new GrammarResolver(source).resolveRoot(root);
     }
 
@@ -62,47 +63,50 @@ public final class GrammarResolver {
      * Convenience — parse the root grammar text, then resolve imports.
      */
     public static Result<Grammar> resolveText(String rootText, GrammarSource source) {
-        return GrammarParser.parse(rootText)
-                            .flatMap(g -> resolve(g, source));
+        return GrammarParser.parse(rootText).flatMap(g -> resolve(g, source));
     }
 
     private Result<Grammar> resolveRoot(Grammar root) {
         var rootRuleNames = new HashSet<String>();
+
         for (var r : root.rules()) {
             rootRuleNames.add(r.name());
         }
         // Composed rule list starts with root rules (unchanged).
         var composedRules = new LinkedHashMap<String, Rule>();
+
         for (var r : root.rules()) {
             composedRules.put(r.name(), r);
         }
+
         for (var imp : root.imports()) {
             // Check explicit collision with a root-defined rule name. Note that the
             // default local name is G_R (grammar-qualified) so an unaliased import
             // of G.R only collides with a root rule literally named "G_R".
             var localName = imp.localName();
+
             if (rootRuleNames.contains(localName)) {
-                return new ParseError.SemanticError(
-                imp.span()
-                   .start(),
-                "Import name collision: '" + localName
-                + "' is already defined in the root grammar; add 'as <LocalName>' to rename").result();
+                return new ParseError.SemanticError(imp.span().start(),
+                                                    "Import name collision: '" + localName
+                                                   + "' is already defined in the root grammar; add 'as <LocalName>' to rename").result();
             }
+
             if (composedRules.containsKey(localName)) {
                 // Two imports resolved to the same local name — a hard error.
-                return new ParseError.SemanticError(
-                imp.span()
-                   .start(),
-                "Import name collision: '" + localName + "' already imported; use different aliases").result();
+                return new ParseError.SemanticError(imp.span().start(),
+                                                    "Import name collision: '" + localName
+                                                   + "' already imported; use different aliases").result();
             }
+
             var importedGrammar = loadGrammarOrFail(imp.grammarName(),
-                                                    imp.span()
-                                                       .start(),
+                                                    imp.span().start(),
                                                     List.of(imp.grammarName()));
+
             if (importedGrammar instanceof Result.Failure<Grammar> f) {
                 return f.cause()
                         .result();
             }
+
             var g = importedGrammar.unwrap();
             // Detect cycle in the imports of the imported grammar, starting from
             // the importer's own grammar name. We walk %import declarations
@@ -110,19 +114,23 @@ public final class GrammarResolver {
             // grammar name isn't reachable from itself.
             var cycleCheck = detectCycle(g,
                                          new ArrayList<>(List.of(imp.grammarName())));
+
             if (cycleCheck instanceof Result.Failure<Boolean> f) {
                 return f.cause()
                         .result();
             }
             // Build transitive closure of rule names needed from this imported grammar.
             var ruleMap = g.ruleMap();
+
             if (!ruleMap.containsKey(imp.ruleName())) {
-                return new ParseError.SemanticError(
-                imp.span()
-                   .start(),
-                "Imported rule '" + imp.ruleName() + "' not found in grammar '" + imp.grammarName() + "'").result();
+                return new ParseError.SemanticError(imp.span().start(),
+                                                    "Imported rule '" + imp.ruleName()
+                                                   + "' not found in grammar '" + imp.grammarName()
+                                                   + "'").result();
             }
+
             var closure = new LinkedHashSet<String>();
+
             collectClosure(imp.ruleName(), ruleMap, closure);
             // For each rule in the closure: rename to prefixed form (or alias for the root target),
             // rewrite references, and add to the composed rule list iff the root doesn't already
@@ -130,9 +138,10 @@ public final class GrammarResolver {
             for (var originalName : closure) {
                 var rule = ruleMap.get(originalName);
                 String renamedName;
+
                 if (originalName.equals(imp.ruleName())) {
                     renamedName = localName;
-                }else {
+                } else {
                     renamedName = Import.prefixedName(imp.grammarName(), originalName);
                 }
                 // Root shadows transitive imports by prefixed-name too (unlikely
@@ -144,20 +153,23 @@ public final class GrammarResolver {
                     // transitive rule twice.
                     continue;
                 }
+
                 var rewritten = rewriteReferences(rule,
                                                   renamedName,
                                                   ref -> {
                                                       // References within the imported grammar → prefix (or alias for the target).
-                if (ref.equals(imp.ruleName())) {
+                                                      if (ref.equals(imp.ruleName())) {
                                                       return localName;
                                                   }
+
                                                       if (ruleMap.containsKey(ref)) {
                                                       return Import.prefixedName(imp.grammarName(), ref);
                                                   }
                                                       // Reference leaves the imported grammar (unknown) — keep as-is; the
-                // composed grammar's validate() will catch it.
-                return ref;
+                                                      // composed grammar's validate() will catch it.
+                                                      return ref;
                                                   });
+
                 composedRules.put(renamedName, rewritten);
             }
         }
@@ -171,43 +183,53 @@ public final class GrammarResolver {
         // composition preserves them so an incremental engine wrapping the
         // composed grammar sees every boundary declared anywhere upstream.
         var composedCheckpoints = new LinkedHashSet<String>(root.checkpointRules());
+
         for (var imp : root.imports()) {
             var cached = loadedGrammars.get(imp.grammarName());
+
             if (cached != null) {
                 composedCheckpoints.addAll(cached.checkpointRules());
             }
         }
-        return Grammar.grammar(
-        new ArrayList<>(composedRules.values()),
-        root.startRule(),
-        root.whitespace(),
-        root.word(),
-        root.suggestRules(),
-        List.of(),
-        root.recoverSets(),
-        Set.copyOf(composedCheckpoints));
+
+        return Grammar.grammar(new ArrayList<>(composedRules.values()),
+                               root.startRule(),
+                               root.whitespace(),
+                               root.word(),
+                               root.suggestRules(),
+                               List.of(),
+                               root.recoverSets(),
+                               Set.copyOf(composedCheckpoints));
     }
 
     private Result<Grammar> loadGrammarOrFail(String grammarName, SourceLocation errorLocation, List<String> chain) {
         var cached = loadedGrammars.get(grammarName);
+
         if (cached != null) {
             return Result.success(cached);
         }
+
         var loaded = source.load(grammarName);
+
         if (loaded.isEmpty()) {
-            return new ParseError.SemanticError(
-            errorLocation,
-            "Grammar '" + grammarName + "' not found via configured GrammarSource" + " (import chain: " + String.join(" -> ",
-                                                                                                                      chain)
-            + ")").result();
+            return new ParseError.SemanticError(errorLocation,
+                                                "Grammar '" + grammarName
+                                               + "' not found via configured GrammarSource"
+                                               + " (import chain: " + String.join(" -> ", chain)
+                                               + ")").result();
         }
+
         var parsed = GrammarParser.parse(loaded.unwrap());
+
         if (parsed instanceof Result.Failure<Grammar> f) {
             return f.cause()
                     .result();
         }
+
         var g = parsed.unwrap();
+
         loadedGrammars.put(grammarName, g);
+
         return Result.success(g);
     }
 
@@ -218,32 +240,37 @@ public final class GrammarResolver {
     private Result<Boolean> detectCycle(Grammar g, List<String> chain) {
         for (var imp : g.imports()) {
             if (chain.contains(imp.grammarName())) {
-                return new ParseError.SemanticError(
-                imp.span()
-                   .start(),
-                "Cyclic grammar import detected: " + String.join(" -> ", chain) + " -> " + imp.grammarName()).result();
+                return new ParseError.SemanticError(imp.span().start(),
+                                                    "Cyclic grammar import detected: " + String.join(" -> ", chain)
+                                                   + " -> " + imp.grammarName()).result();
             }
+
             var loaded = loadGrammarOrFail(imp.grammarName(),
-                                           imp.span()
-                                              .start(),
+                                           imp.span().start(),
                                            appendChain(chain, imp.grammarName()));
+
             if (loaded instanceof Result.Failure<Grammar> f) {
                 return f.cause()
                         .result();
             }
+
             var newChain = appendChain(chain, imp.grammarName());
             var sub = detectCycle(loaded.unwrap(), newChain);
+
             if (sub instanceof Result.Failure<Boolean> f) {
                 return f.cause()
                         .result();
             }
         }
+
         return Result.success(true);
     }
 
     private static List<String> appendChain(List<String> chain, String name) {
         var out = new ArrayList<>(chain);
+
         out.add(name);
+
         return out;
     }
 
@@ -257,10 +284,13 @@ public final class GrammarResolver {
         if (!acc.add(rootRule)) {
             return;
         }
+
         var rule = ruleMap.get(rootRule);
+
         if (rule == null) {
             return;
         }
+
         collectReferencedRules(rule.expression(), ruleMap, acc);
     }
 
@@ -268,8 +298,7 @@ public final class GrammarResolver {
         switch (expr) {
             case Expression.Reference ref -> {
                 if (ruleMap.containsKey(ref.ruleName()) && acc.add(ref.ruleName())) {
-                    collectReferencedRules(ruleMap.get(ref.ruleName())
-                                                  .expression(),
+                    collectReferencedRules(ruleMap.get(ref.ruleName()).expression(),
                                            ruleMap,
                                            acc);
                 }
@@ -295,8 +324,7 @@ public final class GrammarResolver {
             case Expression.Capture c -> collectReferencedRules(c.expression(), ruleMap, acc);
             case Expression.CaptureScope c -> collectReferencedRules(c.expression(), ruleMap, acc);
             case Expression.Group g -> collectReferencedRules(g.expression(), ruleMap, acc);
-            case Expression.Literal _, Expression.CharClass _, Expression.Any _,
-            Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {}
+            case Expression.Literal _, Expression.CharClass _, Expression.Any _, Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {}
         }
     }
 
@@ -310,6 +338,7 @@ public final class GrammarResolver {
                                           String newName,
                                           java.util.function.Function<String, String> mapper) {
         var newExpr = rewriteExpr(rule.expression(), mapper);
+
         return new Rule(rule.span(),
                         newName,
                         newExpr,
@@ -325,15 +354,10 @@ public final class GrammarResolver {
             case Expression.Reference ref -> new Expression.Reference(ref.span(),
                                                                       mapper.apply(ref.ruleName()));
             case Expression.Sequence seq -> new Expression.Sequence(seq.span(),
-                                                                    seq.elements()
-                                                                       .stream()
-                                                                       .map(e -> rewriteExpr(e, mapper))
-                                                                       .toList());
+                                                                    seq.elements().stream().map(e -> rewriteExpr(e,
+                                                                                                                 mapper)).toList());
             case Expression.Choice ch -> new Expression.Choice(ch.span(),
-                                                               ch.alternatives()
-                                                                 .stream()
-                                                                 .map(e -> rewriteExpr(e, mapper))
-                                                                 .toList());
+                                                               ch.alternatives().stream().map(e -> rewriteExpr(e, mapper)).toList());
             case Expression.ZeroOrMore z -> new Expression.ZeroOrMore(z.span(), rewriteExpr(z.expression(), mapper));
             case Expression.OneOrMore o -> new Expression.OneOrMore(o.span(), rewriteExpr(o.expression(), mapper));
             case Expression.Optional o -> new Expression.Optional(o.span(), rewriteExpr(o.expression(), mapper));

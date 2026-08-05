@@ -1,6 +1,7 @@
 package org.pragmatica.peg.grammar;
 
-import org.pragmatica.peg.tree.SourceSpan;
+import org.pragmatica.peg.source.SourceSpan;
+
 
 /**
  * Token types for grammar lexer.

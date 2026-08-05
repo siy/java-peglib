@@ -1,9 +1,10 @@
 package org.pragmatica.peg.grammar;
 
-import org.pragmatica.lang.Option;
-import org.pragmatica.peg.tree.SourceSpan;
-
 import java.util.List;
+
+import org.pragmatica.lang.Option;
+import org.pragmatica.peg.source.SourceSpan;
+
 
 /**
  * PEG expression types - the building blocks of grammar rules.

@@ -1,301 +1,139 @@
 package org.pragmatica.peg;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
 import org.pragmatica.lang.Result;
-import org.pragmatica.peg.action.Actions;
-import org.pragmatica.peg.error.RecoveryStrategy;
-import org.pragmatica.peg.generator.ErrorReporting;
-import org.pragmatica.peg.generator.ParserGenerator;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
-import org.pragmatica.peg.grammar.GrammarResolver;
-import org.pragmatica.peg.grammar.GrammarSource;
-import org.pragmatica.peg.parser.Parser;
-import org.pragmatica.peg.parser.ParserConfig;
-import org.pragmatica.peg.parser.PegEngine;
+import org.pragmatica.peg.analyzer.LeftRecursionCause;
+import org.pragmatica.peg.analyzer.LeftRecursionDetector;
+import org.pragmatica.peg.generator.LexerCompiler;
+import org.pragmatica.peg.generator.LexerCompiler.CompiledLexer;
+import org.pragmatica.peg.generator.LexerGenerator;
+import org.pragmatica.peg.generator.ParserCompiler;
+import org.pragmatica.peg.generator.ParserCompiler.CompiledParser;
+import org.pragmatica.peg.generator.ParserGenerator;
+import org.pragmatica.peg.lexer.DfaBuilder;
+import org.pragmatica.peg.lexer.RuleClassifier;
+
 
 /**
- * Entry point for creating PEG parsers.
+ * Phase C.1 — top-level entry point for the 0.6.0 generate-compile-cache pipeline.
  *
- * <p>Example usage:
- * <pre>{@code
- * var parser = PegParser.fromGrammar("""
- *     Number <- < [0-9]+ >
- *     %whitespace <- [ \\t]*
- *     """).unwrap();
+ * <p>{@link #fromGrammar(String)} runs the full classify → DFA → generate-lexer →
+ * compile-lexer → generate-parser → compile-parser pipeline on first call (~100-500ms
+ * cold) and caches the resulting {@link Parser} keyed by exact grammar text. Subsequent
+ * calls with the same grammar text return the cached parser in lookup-only time
+ * (sub-millisecond).
  *
- * var result = parser.parseCst("123");
- * }</pre>
+ * <p>Generated class names are uniquified per cache miss with a process-wide
+ * {@link AtomicLong} counter so two different grammars never collide on a class
+ * name in the JVM's class loader.
  */
 public final class PegParser {
+    private static final String GENERATED_PACKAGE = "org.pragmatica.peg.runtime";
+    private static final Map<String, Parser> CACHE = new ConcurrentHashMap<>();
+    private static final AtomicLong GEN_COUNTER = new AtomicLong();
+
     private PegParser() {}
 
     /**
-     * Create a parser from grammar text.
+     * Compile {@code grammarText} into a {@link Parser}, caching the result by
+     * exact text. The pipeline is:
+     * <ol>
+     *   <li>{@link GrammarParser#parse(String)} — text → {@link Grammar}.</li>
+     *   <li>{@link RuleClassifier#classify(Grammar)} — per-rule LEXER/PARSER/MIXED labelling.</li>
+     *   <li>{@link DfaBuilder#build} — combined DFA + token-kind table for all LEXER rules + inline literals.</li>
+     *   <li>{@link LexerGenerator#generate} + {@link LexerCompiler#compile} — emit and load the lexer class.</li>
+     *   <li>{@link ParserGenerator#generate} + {@link ParserCompiler#compile} — emit and load the parser class.</li>
+     * </ol>
      */
     public static Result<Parser> fromGrammar(String grammarText) {
-        return fromGrammar(grammarText, ParserConfig.DEFAULT);
-    }
+        Parser cached = CACHE.get(grammarText);
 
-    /**
-     * Create a parser from grammar text with custom configuration.
-     */
-    public static Result<Parser> fromGrammar(String grammarText, ParserConfig config) {
-        return fromGrammar(grammarText, config, GrammarSource.empty());
-    }
+        if (cached != null) {
+            return Result.success(cached);
+        }
 
-    /**
-     * 0.2.8 — Create a parser from grammar text with a {@link GrammarSource} for
-     * resolving {@code %import} directives. If the grammar declares no imports,
-     * {@code source} is never consulted; default callers can stay on
-     * {@link #fromGrammar(String, ParserConfig)} which uses
-     * {@link GrammarSource#empty()}.
-     */
-    public static Result<Parser> fromGrammar(String grammarText, ParserConfig config, GrammarSource source) {
+        long uid = GEN_COUNTER.incrementAndGet();
+        String lexerClassName = "GLexer_" + uid;
+        String parserClassName = "GParser_" + uid;
+
         return GrammarParser.parse(grammarText)
-                            .flatMap(grammar -> GrammarResolver.resolve(grammar, source))
-                            .flatMap(grammar -> fromGrammar(grammar, config));
+                            .flatMap(PegParser::checkLeftRecursion)
+                            .flatMap(grammar -> RuleClassifier.classify(grammar).flatMap(classification -> DfaBuilder.build(grammar,
+                                                                                                                            classification).flatMap(built -> compileLexer(grammar,
+                                                                                                                                                                          classification,
+                                                                                                                                                                          built,
+                                                                                                                                                                          lexerClassName).flatMap(compiledLexer -> compileParser(grammar,
+                                                                                                                                                                                                                                 classification,
+                                                                                                                                                                                                                                 built,
+                                                                                                                                                                                                                                 parserClassName).map(compiledParser -> cacheAndReturn(grammarText,
+                                                                                                                                                                                                                                                                                       grammar,
+                                                                                                                                                                                                                                                                                       compiledLexer,
+                                                                                                                                                                                                                                                                                       compiledParser))))));
     }
 
-    /**
-     * 0.2.8 — As {@link #fromGrammar(String, ParserConfig, GrammarSource)} with
-     * programmatically attached actions.
-     */
-    public static Result<Parser> fromGrammar(String grammarText,
-                                             ParserConfig config,
-                                             Actions actions,
-                                             GrammarSource source) {
-        return GrammarParser.parse(grammarText)
-                            .flatMap(grammar -> GrammarResolver.resolve(grammar, source))
-                            .flatMap(grammar -> fromGrammar(grammar, config, actions));
+    private static Result<Grammar> checkLeftRecursion(Grammar grammar) {
+        return LeftRecursionDetector.detect(grammar).flatMap(result -> result.hasErrors()
+                                                                       ? LeftRecursionCause.of(result).result()
+                                                                       : Result.success(grammar));
     }
 
-    /**
-     * Create a parser from a pre-parsed grammar.
-     */
-    public static Result<Parser> fromGrammar(Grammar grammar) {
-        return fromGrammar(grammar, ParserConfig.DEFAULT);
+    /** Number of cached grammars; useful for tests verifying cache behaviour. */
+    public static int cacheSize() {
+        return CACHE.size();
     }
 
-    /**
-     * Create a parser from a pre-parsed grammar with custom configuration.
-     *
-     * <p>0.4.0 — {@code grammar} is assumed to be validated; produce one via
-     * {@link Grammar#grammar(java.util.List, org.pragmatica.lang.Option,
-     * org.pragmatica.lang.Option, org.pragmatica.lang.Option, java.util.List,
-     * java.util.List)} or by parsing through {@link GrammarParser#parse(String)}.
-     */
-    public static Result<Parser> fromGrammar(Grammar grammar, ParserConfig config) {
-        return PegEngine.create(grammar, config)
-                        .map(engine -> (Parser) engine);
+    /** Drop every cached parser. Intended for tests that want a clean slate per case. */
+    @SuppressWarnings("JBCT-RET-01")
+    public static void clearCache() {
+        CACHE.clear();
     }
 
-    /**
-     * 0.2.6 — create a parser with programmatically attached lambda actions.
-     * Lambdas override any inline grammar actions for rules whose name matches
-     * the attached {@link org.pragmatica.peg.action.RuleId} class's simple name.
-     * See {@link Actions} for the composable, immutable builder API.
-     */
-    public static Result<Parser> fromGrammar(String grammarText, ParserConfig config, Actions actions) {
-        return GrammarParser.parse(grammarText)
-                            .flatMap(grammar -> fromGrammar(grammar, config, actions));
+    private static Parser cacheAndReturn(String grammarText,
+                                         Grammar grammar,
+                                         CompiledLexer compiledLexer,
+                                         CompiledParser compiledParser) {
+        Parser parser = new Parser(grammar, compiledLexer, compiledParser);
+        Parser existing = CACHE.putIfAbsent(grammarText, parser);
+
+        return existing != null
+               ? existing
+               : parser;
     }
 
-    /**
-     * 0.2.6 — as {@link #fromGrammar(String, ParserConfig, Actions)} but
-     * starting from an already-parsed {@link Grammar}.
-     */
-    public static Result<Parser> fromGrammar(Grammar grammar, ParserConfig config, Actions actions) {
-        return PegEngine.create(grammar, config, actions)
-                        .map(engine -> (Parser) engine);
+    private static Result<CompiledLexer> compileLexer(Grammar grammar,
+                                                      RuleClassifier.Classification classification,
+                                                      DfaBuilder.Built built,
+                                                      String className) {
+        return LexerGenerator.generate(grammar,
+                                       classification,
+                                       built.dfa(),
+                                       built.kinds(),
+                                       GENERATED_PACKAGE,
+                                       className)
+                             .flatMap(LexerCompiler::compile);
     }
 
-    /**
-     * 0.2.6 — as {@link #fromGrammar(String, ParserConfig, Actions)} with the
-     * {@link ParserConfig#DEFAULT} configuration.
-     */
-    public static Result<Parser> fromGrammar(String grammarText, Actions actions) {
-        return fromGrammar(grammarText, ParserConfig.DEFAULT, actions);
-    }
+    private static Result<CompiledParser> compileParser(Grammar grammar,
+                                                        RuleClassifier.Classification classification,
+                                                        DfaBuilder.Built built,
+                                                        String className) {
+        var skippedReasons = built.skipped()
+                                  .stream()
+                                  .collect(java.util.stream.Collectors.toMap(DfaBuilder.SkippedRule::ruleName,
+                                                                             DfaBuilder.SkippedRule::reason,
+                                                                             (a, __) -> a));
 
-    /**
-     * Create a parser from grammar without compiling actions.
-     * Useful for CST-only parsing where actions are not needed.
-     */
-    public static Result<Parser> fromGrammarWithoutActions(Grammar grammar, ParserConfig config) {
-        return PegEngine.createWithoutActions(grammar, config)
-                        .map(engine -> (Parser) engine);
-    }
-
-    /**
-     * Generate standalone parser source code from grammar text.
-     * The generated parser returns Object values.
-     *
-     * @param grammarText the PEG grammar
-     * @param packageName target package for generated class
-     * @param className name of generated parser class
-     * @return generated Java source code, or error if grammar is invalid
-     */
-    public static Result<String> generateParser(String grammarText, String packageName, String className) {
-        return generateParser(grammarText, packageName, className, ParserConfig.DEFAULT);
-    }
-
-    /**
-     * Generate standalone parser source code from grammar text with custom parser configuration.
-     * The generated parser returns Object values.
-     *
-     * @param grammarText the PEG grammar
-     * @param packageName target package for generated class
-     * @param className name of generated parser class
-     * @param config parser configuration (perf flags are consumed at generation time)
-     * @return generated Java source code, or error if grammar is invalid
-     */
-    public static Result<String> generateParser(String grammarText,
-                                                String packageName,
-                                                String className,
-                                                ParserConfig config) {
-        return GrammarResolver.resolveText(grammarText,
-                                           GrammarSource.empty())
-                              .map(grammar -> ParserGenerator.parserGenerator(grammar, packageName, className, config)
-                                                             .generate());
-    }
-
-    /**
-     * Generate standalone CST parser source code from grammar text.
-     * The generated parser returns CstNode with full tree structure and trivia.
-     *
-     * @param grammarText the PEG grammar
-     * @param packageName target package for generated class
-     * @param className name of generated parser class
-     * @return generated Java source code, or error if grammar is invalid
-     */
-    public static Result<String> generateCstParser(String grammarText, String packageName, String className) {
-        return generateCstParser(grammarText, packageName, className, ErrorReporting.BASIC, ParserConfig.DEFAULT);
-    }
-
-    /**
-     * Generate standalone CST parser source code from grammar text with custom parser configuration.
-     * Uses {@code ErrorReporting.BASIC}.
-     *
-     * @param grammarText the PEG grammar
-     * @param packageName target package for generated class
-     * @param className name of generated parser class
-     * @param config parser configuration (perf flags are consumed at generation time)
-     * @return generated Java source code, or error if grammar is invalid
-     */
-    public static Result<String> generateCstParser(String grammarText,
-                                                   String packageName,
-                                                   String className,
-                                                   ParserConfig config) {
-        return generateCstParser(grammarText, packageName, className, ErrorReporting.BASIC, config);
-    }
-
-    /**
-     * Generate standalone CST parser source code from grammar text with configurable error reporting.
-     * The generated parser returns CstNode with full tree structure and trivia.
-     *
-     * @param grammarText the PEG grammar
-     * @param packageName target package for generated class
-     * @param className name of generated parser class
-     * @param errorReporting BASIC for simple errors, ADVANCED for Rust-style diagnostics
-     * @return generated Java source code, or error if grammar is invalid
-     */
-    public static Result<String> generateCstParser(String grammarText,
-                                                   String packageName,
-                                                   String className,
-                                                   ErrorReporting errorReporting) {
-        return generateCstParser(grammarText, packageName, className, errorReporting, ParserConfig.DEFAULT);
-    }
-
-    /**
-     * Generate standalone CST parser source code with both error reporting and parser configuration.
-     *
-     * @param grammarText the PEG grammar
-     * @param packageName target package for generated class
-     * @param className name of generated parser class
-     * @param errorReporting BASIC for simple errors, ADVANCED for Rust-style diagnostics
-     * @param config parser configuration (perf flags are consumed at generation time)
-     * @return generated Java source code, or error if grammar is invalid
-     */
-    public static Result<String> generateCstParser(String grammarText,
-                                                   String packageName,
-                                                   String className,
-                                                   ErrorReporting errorReporting,
-                                                   ParserConfig config) {
-        return GrammarResolver.resolveText(grammarText,
-                                           GrammarSource.empty())
-                              .map(grammar -> ParserGenerator.parserGenerator(grammar,
-                                                                              packageName,
-                                                                              className,
-                                                                              errorReporting,
-                                                                              config)
-                                                             .generateCst());
-    }
-
-    /**
-     * Create a builder for more complex parser configuration.
-     */
-    public static Builder builder(String grammarText) {
-        return new Builder(grammarText);
-    }
-
-    public static final class Builder {
-        private final String grammarText;
-        private boolean packratEnabled = true;
-        private RecoveryStrategy recoveryStrategy = RecoveryStrategy.BASIC;
-        private boolean captureTrivia = true;
-        private boolean triviaPostPass = false;
-
-        private Builder(String grammarText) {
-            this.grammarText = grammarText;
-        }
-
-        public Builder packrat(boolean enabled) {
-            this.packratEnabled = enabled;
-            return this;
-        }
-
-        public Builder recovery(RecoveryStrategy strategy) {
-            this.recoveryStrategy = strategy;
-            return this;
-        }
-
-        public Builder trivia(boolean capture) {
-            this.captureTrivia = capture;
-            return this;
-        }
-
-        /**
-         * 0.5.1 (Step 4 commit 1) — enable the post-parse trivia attribution
-         * pass. When on, the parser re-derives leading/trailing trivia from
-         * {@code (input, span, grammar.whitespace())} after the engine
-         * returns its CST. Default: off.
-         */
-        public Builder triviaPostPass(boolean enabled) {
-            this.triviaPostPass = enabled;
-            return this;
-        }
-
-        public Result<Parser> build() {
-            var base = ParserConfig.parserConfig(packratEnabled, recoveryStrategy, captureTrivia);
-            var config = new ParserConfig(
-            base.packratEnabled(),
-            base.recoveryStrategy(),
-            base.captureTrivia(),
-            base.fastTrackFailure(),
-            base.literalFailureCache(),
-            base.charClassFailureCache(),
-            base.bulkAdvanceLiteral(),
-            base.skipWhitespaceFastPath(),
-            base.reuseEndLocation(),
-            base.choiceDispatch(),
-            base.markResetChildren(),
-            base.inlineLocations(),
-            base.selectivePackrat(),
-            base.packratSkipRules(),
-            base.mutableParseResult(),
-            base.tokenFastPath(),
-            triviaPostPass);
-            return fromGrammar(grammarText, config);
-        }
+        return ParserGenerator.generate(grammar,
+                                        classification,
+                                        built.kinds(),
+                                        skippedReasons,
+                                        GENERATED_PACKAGE,
+                                        className)
+                              .flatMap(ParserCompiler::compile);
     }
 }

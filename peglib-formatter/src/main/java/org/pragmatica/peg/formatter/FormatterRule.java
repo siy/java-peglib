@@ -2,27 +2,18 @@ package org.pragmatica.peg.formatter;
 
 import java.util.List;
 
+import org.pragmatica.peg.formatter.Doc;
+
+
 /**
- * A function that turns a CST node plus its already-formatted children into a
- * {@link Doc}.
+ * Function turning a CST node plus its already-formatted children into a
+ * {@link Doc}. Looked up by rule name during the depth-first walk performed
+ * by {@link Formatter}.
  *
- * <p>The formatter walks the CST depth-first: for each node it first recurses
- * on every child, collecting the resulting {@link Doc}s in order, then looks
- * up the rule by {@link org.pragmatica.peg.tree.CstNode#rule() node.rule()}
- * and invokes {@link #format(FormatContext, List)} with the child docs.
- *
- * <p>A rule's implementation decides how to arrange the child docs —
- * typically via the {@link Docs} static builders. Children absent from a
- * rule's output are effectively dropped; children duplicated are emitted
- * multiple times.
- *
- * @since 0.3.3
+ * @since 0.6.0
  */
 @FunctionalInterface
 public interface FormatterRule {
-    /**
-     * Produce the {@link Doc} for {@code ctx.node()} given its already-
-     * formatted {@code childDocs} (in child order).
-     */
+    /** Produce the doc for {@code ctx.nodeIdx()} given its formatted {@code childDocs}. */
     Doc format(FormatContext ctx, List<Doc> childDocs);
 }

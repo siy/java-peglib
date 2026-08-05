@@ -62,8 +62,8 @@ production builds, use the Maven plugin.
 ### Option A — runtime compile (tutorial path)
 
 ```java
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.Parser;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.Parser;
 
 String grammar = """
     Expr   <- Term (('+' / '-') Term)*
@@ -93,10 +93,10 @@ Configure `peglib-maven-plugin` in your `pom.xml`:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.6.3</version>
+    <version>0.7.0</version>
     <executions>
         <execution>
-            <goals><goal>generate-v6</goal></goals>
+            <goals><goal>generate</goal></goals>
             <configuration>
                 <grammarFile>src/main/peg/Calc.peg</grammarFile>
                 <outputDirectory>${project.build.directory}/generated-sources/peg</outputDirectory>
@@ -113,20 +113,20 @@ After `mvn generate-sources` you'll have three Java files under
 only on `peglib-runtime` + `pragmatica-lite:core`. Subclass `CalcVisitor` directly.
 
 The mojo is implemented by
-[`peglib-maven-plugin/.../GenerateV6Mojo.java`](../peglib-maven-plugin/src/main/java/org/pragmatica/peg/maven/GenerateV6Mojo.java).
+[`peglib-maven-plugin/.../GenerateMojo.java`](../peglib-maven-plugin/src/main/java/org/pragmatica/peg/maven/GenerateMojo.java).
 
 ---
 
 ## Step 3 — Generate the visitor skeleton
 
 The visitor codegen is implemented at
-[`peglib-core/src/main/java/org/pragmatica/peg/v6/generator/VisitorGenerator.java`](../peglib-core/src/main/java/org/pragmatica/peg/v6/generator/VisitorGenerator.java).
+[`peglib-core/src/main/java/org/pragmatica/peg/generator/VisitorGenerator.java`](../peglib-core/src/main/java/org/pragmatica/peg/generator/VisitorGenerator.java).
 For the calculator grammar it emits roughly:
 
 ```java
 package com.example.calc;
 
-import org.pragmatica.peg.v6.cst.CstArray;
+import org.pragmatica.peg.cst.CstArray;
 
 public abstract class CalcVisitor<T> {
 
@@ -193,7 +193,7 @@ If you're on the **build-time codegen** path (Option B), you have a real
 ```java
 package com.example.calc;
 
-import org.pragmatica.peg.v6.cst.CstArray;
+import org.pragmatica.peg.cst.CstArray;
 
 class CalcEval extends CalcVisitor<Integer> {
     @Override
@@ -252,8 +252,8 @@ When you don't have a build-time-generated class to subclass, do the kind dispat
 yourself. You still have `cst.kindNameAt(idx)` to identify rules by name.
 
 ```java
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.cst.CstArray;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.cst.CstArray;
 
 class CalcEvalDirect {
     int eval(CstArray cst, int idx) {
@@ -300,9 +300,9 @@ comparison). Cache the parser's rule-kind map once at startup via
 End-to-end:
 
 ```java
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.Parser;
-import org.pragmatica.peg.v6.cst.ParseResult;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.Parser;
+import org.pragmatica.peg.cst.ParseResult;
 
 public class CalcMain {
     public static void main(String[] args) {
@@ -481,9 +481,9 @@ emitting either the original token text or your transformed version per node.
   map to the visitor pattern, plus broader API changes.
 - [`docs/ARCHITECTURE-0.6.0.md`](ARCHITECTURE-0.6.0.md) §3.3 — design rationale
   for dropping actions in favor of `GVisitor<T>`.
-- [`peglib-core/src/main/java/org/pragmatica/peg/v6/generator/VisitorGenerator.java`](../peglib-core/src/main/java/org/pragmatica/peg/v6/generator/VisitorGenerator.java)
+- [`peglib-core/src/main/java/org/pragmatica/peg/generator/VisitorGenerator.java`](../peglib-core/src/main/java/org/pragmatica/peg/generator/VisitorGenerator.java)
   — the codegen source. Read it once; it's short.
-- [`peglib-core/src/main/java/org/pragmatica/peg/v6/cst/CstArray.java`](../peglib-runtime/src/main/java/org/pragmatica/peg/v6/cst/CstArray.java)
+- [`peglib-core/src/main/java/org/pragmatica/peg/cst/CstArray.java`](../peglib-runtime/src/main/java/org/pragmatica/peg/cst/CstArray.java)
   — full CST API surface: `children`, `descendants`, `viewAt`, `kindAt`,
   `kindNameAt`, `firstChildAt`, `nextSiblingAt`, `textAt`, `spanStart`,
   `spanEnd`, `leadingTriviaTokens`, `trailingTriviaTokens`.

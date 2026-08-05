@@ -3,8 +3,6 @@ package org.pragmatica.peg.grammar;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.pragmatica.lang.Result;
-import org.pragmatica.peg.PegParser;
-import org.pragmatica.peg.parser.ParserConfig;
 
 import java.util.Map;
 
@@ -14,9 +12,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 0.2.8 — Grammar composition via {@code %import} directives.
  *
  * <p>Covers resolver correctness (transitive closure, cycle detection, collision
- * handling, missing grammars), public-API wiring through
- * {@link org.pragmatica.peg.PegParser#fromGrammar(String, ParserConfig, GrammarSource)},
- * and RuleId emission for imported rules.
+ * handling, missing grammars) and grammar loading through
+ * {@link GrammarSource#classpath(ClassLoader)}. Composition is verified purely at
+ * the {@link GrammarResolver} level: the resolved {@link Grammar} is inspected
+ * directly rather than driven through a built parser.
  */
 class GrammarCompositionTest {
 
@@ -198,67 +197,6 @@ class GrammarCompositionTest {
     }
 
     @Nested
-    class PegParserIntegration {
-        @Test
-        void parseAcrossComposedGrammar() {
-            var source = GrammarSource.inMemory(Map.of(
-            "NumLib", """
-                Number <- [0-9]+
-                %whitespace <- [ ]*
-                """
-            ));
-            var rootText = """
-                %import NumLib.Number as Num
-                List <- Num (',' Num)*
-                %whitespace <- [ ]*
-                """;
-            var parser = PegParser.fromGrammar(rootText, ParserConfig.DEFAULT, source).unwrap();
-            var cst = parser.parseCst("1, 2, 3");
-            assertThat(cst.isSuccess()).isTrue();
-        }
-
-        @Test
-        void composedCstMatchesHandInlinedEquivalent() {
-            var source = GrammarSource.inMemory(Map.of(
-            "NumLib", """
-                Number <- [0-9]+
-                """
-            ));
-            var composedText = """
-                %import NumLib.Number
-                Pair <- NumLib_Number '+' NumLib_Number
-                %whitespace <- [ ]*
-                """;
-            var handInlinedText = """
-                Pair <- Number '+' Number
-                Number <- [0-9]+
-                %whitespace <- [ ]*
-                """;
-
-            var composed = PegParser.fromGrammar(composedText, ParserConfig.DEFAULT, source).unwrap();
-            var inlined = PegParser.fromGrammar(handInlinedText).unwrap();
-
-            var input = "1 + 2";
-            var composedCst = composed.parseCst(input);
-            var inlinedCst = inlined.parseCst(input);
-            assertThat(composedCst.isSuccess()).isTrue();
-            assertThat(inlinedCst.isSuccess()).isTrue();
-        }
-
-        @Test
-        void missingSourceProducesMeaningfulError() {
-            var rootText = """
-                %import AbsentGrammar.Foo
-                Start <- AbsentGrammar_Foo
-                """;
-            var result = PegParser.fromGrammar(rootText, ParserConfig.DEFAULT, GrammarSource.empty());
-            assertThat(result.isFailure()).isTrue();
-            var err = ((Result.Failure<?>) result).cause().message();
-            assertThat(err).contains("AbsentGrammar");
-        }
-    }
-
-    @Nested
     class ClasspathLoading {
         @Test
         void classpathSourceLoadsPegResource() {
@@ -291,56 +229,14 @@ class GrammarCompositionTest {
                 Expr <- Lib_Number
                 %whitespace <- [ ]*
                 """;
-            var parser = PegParser.fromGrammar(rootText, ParserConfig.DEFAULT, source).unwrap();
-            assertThat(parser.parseCst("42").isSuccess()).isTrue();
-        }
-    }
-
-    @Nested
-    class RuleIdEmission {
-        @Test
-        void importedRulesAppearInGeneratedRuleIdInterface() {
-            var source = GrammarSource.inMemory(Map.of(
-            "Lib", "Number <- [0-9]+\n"
-            ));
-            var rootText = """
-                %import Lib.Number as Num
-                Expr <- Num
-                """;
             var composed = GrammarResolver.resolveText(rootText, source).unwrap();
-            // After composition, the parser generator sees a flat Grammar — the Num rule
-            // is a regular entry. RuleId.Num and RuleId.Expr must both emit.
-            var generated = PegParser.generateCstParser(
-            "Expr <- Num\nNum <- [0-9]+\n", "gen.cst", "CstParser").unwrap();
-            assertThat(generated).contains("record Num() implements RuleId");
-            assertThat(generated).contains("record Expr() implements RuleId");
 
-            // Same shape when we drive the generator via the composed grammar.
-            var composedSource = org.pragmatica.peg.generator.ParserGenerator
-            .parserGenerator(composed, "gen.cst2", "CstParser2",
-                    org.pragmatica.peg.generator.ErrorReporting.BASIC, ParserConfig.DEFAULT)
-            .generateCst();
-            assertThat(composedSource).contains("record Num() implements RuleId");
-            assertThat(composedSource).contains("record Expr() implements RuleId");
-        }
-
-        @Test
-        void unaliasedImportExposesGrammarQualifiedRuleId() {
-            var source = GrammarSource.inMemory(Map.of(
-            "Lib", "Number <- [0-9]+\n"
-            ));
-            var rootText = """
-                %import Lib.Number
-                Expr <- Lib_Number
-                """;
-            var composed = GrammarResolver.resolveText(rootText, source).unwrap();
-            var generated = org.pragmatica.peg.generator.ParserGenerator
-            .parserGenerator(composed, "gen.cst3", "CstParser3",
-                    org.pragmatica.peg.generator.ErrorReporting.BASIC, ParserConfig.DEFAULT)
-            .generateCst();
-            // Grammar-qualified RuleId record name.
-            assertThat(generated).contains("record LibNumber() implements RuleId");
-            assertThat(generated).contains("record Expr() implements RuleId");
+            // The classpath resource declares `Number <- [0-9]+`; after composition it
+            // must be present under its grammar-qualified name alongside the root rule.
+            assertThat(composed.rule("Lib_Number")).matches(o -> o.isPresent());
+            assertThat(composed.rule("Expr")).matches(o -> o.isPresent());
+            assertThat(composed.imports()).isEmpty();
+            assertThat(composed.rule("Lib_Number").unwrap().expression().toString()).contains("0-9");
         }
     }
 }

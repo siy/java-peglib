@@ -1,7 +1,8 @@
 package org.pragmatica.peg.grammar;
 
 import org.pragmatica.lang.Option;
-import org.pragmatica.peg.tree.SourceSpan;
+import org.pragmatica.peg.source.SourceSpan;
+
 
 /**
  * 0.2.8 — Grammar-level {@code %import} directive.
@@ -24,18 +25,15 @@ import org.pragmatica.peg.tree.SourceSpan;
  * error unless an explicit {@code as} rename is given. For transitively-pulled
  * rules, the root definition silently shadows by name.
  */
-public record Import(
- SourceSpan span,
- String grammarName,
- String ruleName,
- Option<String> alias) {
+public record Import(SourceSpan span, String grammarName, String ruleName, Option<String> alias) {
     /**
      * Local name this import exposes into the composed grammar.
      * When {@code alias} is present, uses the alias verbatim; otherwise
      * returns {@code grammarName_ruleName} (underscore-joined).
      */
     public String localName() {
-        return alias.fold(() -> grammarName + "_" + ruleName, a -> a);
+        return alias.fold(() -> grammarName + "_" + ruleName,
+                          a -> a);
     }
 
     /**

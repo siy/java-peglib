@@ -196,9 +196,9 @@ formatted output; they are purely machine-readable.
 
 These appear at the top level of the grammar, alongside `%whitespace`.
 
-### `%whitespace` shape and v6 per-kind trivia classification
+### `%whitespace` shape and per-kind trivia classification
 
-In the v6 (0.6.x) tokens-first lexer, each `%whitespace` Choice alternative is
+In the 0.6.x tokens-first lexer, each `%whitespace` Choice alternative is
 absorbed into the DFA at its own trivia kind, decided **structurally** by the
 alternative's leading literal: a whitespace char-class alternative → `WHITESPACE`,
 an alternative beginning with `'//'` → `LINE_COMMENT`, with `'/*'` →

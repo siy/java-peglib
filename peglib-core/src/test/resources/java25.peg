@@ -8,7 +8,16 @@
 
 # === Compilation Units (JLS 7.3-7.8) ===
 CompilationUnit <- ModuleDecl / OrdinaryUnit
-OrdinaryUnit <- PackageDecl? ImportDecl* TypeDecl*
+# JEP 512 (Compact Source Files and Instance Main Methods) — final in Java 25.
+# A compact source file has top-level methods/fields with no enclosing class; the
+# compiler wraps them in an implicitly declared class.
+#
+# TypeDecl MUST stay the first alternative. It and TopLevelMember share the
+# 'Annotation* Modifier*' prefix, so reversing them would let TopLevelMember
+# win on ordinary files and change their CST shape — which the corpus gates and
+# the CST-shape assertion would both flag.
+OrdinaryUnit <- PackageDecl? ImportDecl* (TypeDecl / TopLevelMember)*
+TopLevelMember <- Annotation* Modifier* (MethodDecl / FieldDecl)
 PackageDecl <- Annotation* 'package' ^ QualifiedName ';'
 ImportDecl  <- 'import' ^ ('module' QualifiedName ';' / 'static'? QualifiedName ('.' '*')? ';')
 
@@ -21,7 +30,7 @@ OpensDirective <- 'opens' ^ QualifiedName ('to' QualifiedName (',' QualifiedName
 UsesDirective <- 'uses' ^ QualifiedName ';'
 ProvidesDirective <- 'provides' ^ QualifiedName 'with' QualifiedName (',' QualifiedName)* ';'
 
-TypeDecl <- Annotation* Modifier* TypeKind
+TypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
 TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
 ClassDecl <- ClassKW ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
 InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
@@ -30,7 +39,7 @@ AnnotationDecl <- '@' InterfaceKW ^ Identifier AnnotationBody
 ClassKW <- < 'class' ![a-zA-Z0-9_$] >
 InterfaceKW <- < 'interface' ![a-zA-Z0-9_$] >
 AnnotationBody <- '{' AnnotationMember* '}'
-AnnotationMember <- Annotation* Modifier* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
+AnnotationMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
 AnnotationElemDecl <- Type Identifier '(' ')' ('default' AnnotationElem)? ';'
 EnumDecl <- EnumKW ^ Identifier ImplementsClause? EnumBody
 # Lookahead ensures this is a record declaration (record Name(...)) not:
@@ -43,10 +52,10 @@ ImplementsClause <- 'implements' ^ TypeList
 PermitsClause <- 'permits' ^ TypeList
 TypeList <- Type (',' Type)*
 TypeParams <- '<' TypeParam (',' TypeParam)* '>'
-TypeParam <- Identifier ('extends' Type ('&' Type)*)?
+TypeParam <- Annotation* Identifier ('extends' Type ('&' Type)*)?
 
 ClassBody <- '{' ClassMember* '}'
-ClassMember <- Annotation* Modifier* Member / InitializerBlock / ';'
+ClassMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* Member / InitializerBlock / ';'
 Member <- ConstructorDecl / TypeKind / MethodDecl / FieldDecl
 InitializerBlock <- 'static'? Block
 EnumBody <- '{' EnumConsts? (';' ClassMember*)? '}'
@@ -64,14 +73,19 @@ VarDecl <- Identifier Dims? ('=' VarInit)?
 VarInit <- '{' (VarInit (',' VarInit)* ','?)? '}' / Expr
 MethodDecl <- TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? (Block / ';')
 Params <- Param (',' Param)*
-Param <- Annotation* Modifier* Type '...'? Identifier Dims?
+# A receiver parameter (JLS 8.4.1) names 'this' instead of a variable; it exists so
+# 'this' can carry type annotations. Ordered first: for an ordinary parameter the
+# Type matches and the 'this' check fails, so it backtracks to the normal form.
+# Over-permissive on purpose — the JLS allows it only in first position, which is a
+# validation concern, not a parsing one.
+Param <- Annotation* Type < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type '...'? Identifier Dims?
 Throws <- 'throws' ^ TypeList
 ConstructorDecl <- TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 
 # === Blocks and Statements (JLS 14) ===
 Block <- '{' BlockStmt* '}'
 BlockStmt <- LocalVar / LocalTypeDecl / Stmt
-LocalTypeDecl <- Annotation* Modifier* TypeKind
+LocalTypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
 LocalVar <- Annotation* Modifier* LocalVarType VarDecls ';'
 LocalVarType <- < 'var' ![a-zA-Z0-9_$] > / Type
 # Statement keywords use helper rules to combine keyword + word boundary as single token
@@ -156,7 +170,7 @@ Additive <- Multiplicative ((!'+=' '+' / !'-=' !'->' '-') Multiplicative)*
 Multiplicative <- Unary ((!'*=' '*' / !'/=' '/' / !'%=' '%') Unary)*
 Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
 Postfix <- Primary PostOp*
-PostOp <- '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
+PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
 Primary <- Literal / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- Type ('.' < 'class' > / '::' TypeArgs? (< 'new' > / Identifier))
 Lambda <- LambdaParams '->' (Expr / Block)
@@ -185,6 +199,23 @@ QualifiedName <- Identifier (&('.' Identifier) '.' Identifier)*
 Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
 
 Modifier <- < ('public' / 'protected' / 'private' / 'static' / 'final' / 'abstract' / 'native' / 'synchronized' / 'transient' / 'volatile' / 'strictfp' / 'default' / 'sealed' / 'non-sealed') ![a-zA-Z0-9_$] >
+# JEP 401 (Value Objects, preview in JDK 28) — 'value' is a contextual keyword.
+# It is a modifier ONLY in type-declaration position; everywhere else it must stay
+# an ordinary identifier ('var value = 3', 'int value;', 'value.foo()'), and it is
+# by far the most common identifier of any contextual keyword Java has added.
+#
+# Two deliberate choices keep that safe:
+#   1. The '(Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))*' group is spelled inline at exactly the four
+#      sites where a TypeKind can follow — TypeDecl, ClassMember, LocalTypeDecl,
+#      AnnotationMember. LocalVar / Param / Catch / Resource / LambdaParam keep
+#      plain Modifier*, so statement contexts never try the 'value' alternative.
+#      (A named DeclModifier rule cannot be used here: RuleClassifier types it as
+#      LEXER, and a lexer rule may not reference another rule — fromGrammar rejects
+#      it with SkippedRuleReferenced.)
+#   2. The lookahead references Modifier only, so 'value' cannot recurse into
+#      itself. It commits only when a class/record keyword genuinely follows,
+#      across any intervening modifiers ('sealed abstract value class X').
+ValueKW <- < 'value' ![a-zA-Z0-9_$] >
 Annotation <- '@' !'interface' QualifiedName ('(' AnnotationValue? ')')?
 AnnotationValue <- Identifier '=' AnnotationElem (',' Identifier '=' AnnotationElem)* / AnnotationElem
 AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)* ','?)? '}' / Ternary
@@ -192,7 +223,7 @@ AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)* ','?)? 
 Literal <- < ('null' / 'true' / 'false') ![a-zA-Z0-9_$] > / CharLit / StringLit / NumLit
 CharLit <- < '\'' ([^'\\] / '\\' .)* '\'' >
 StringLit <- < '"""' (!'"""' .)* '"""' > / < '"' ([^"\\] / '\\' .)* '"' >
-NumLit <- < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\-]? [0-9_]+)? [fFdD]? >
+NumLit <- < '0' [xX] [0-9a-fA-F_]* ('.' [0-9a-fA-F_]*)? [pP] [+\-]? [0-9_]+ [fFdD]? > / < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\-]? [0-9_]+)? [fFdD]? >
 
 # Hard keywords only - contextual keywords (var, yield, record, sealed, non-sealed, permits, when, module) are handled by their specific rules
 Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'double' / 'do' / 'else' / 'enum' / 'extends' / 'false' / 'finally' / 'final' / 'float' / 'for' / 'goto' / 'implements' / 'import' / 'instanceof' / 'interface' / 'int' / 'if' / 'long' / 'native' / 'new' / 'null' / 'package' / 'private' / 'protected' / 'public' / 'return' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throws' / 'throw' / 'transient' / 'true' / 'try' / 'void' / 'volatile' / 'while') ![a-zA-Z0-9_$]

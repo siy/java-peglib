@@ -1,55 +1,43 @@
 package org.pragmatica.peg.formatter;
 
-import org.pragmatica.lang.Cause;
-import org.pragmatica.lang.Result;
-import org.pragmatica.peg.formatter.internal.Renderer;
-import org.pragmatica.peg.tree.CstNode;
-import org.pragmatica.peg.tree.Trivia;
-
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+
+import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.formatter.Doc;
+import org.pragmatica.peg.formatter.Docs;
+import org.pragmatica.peg.formatter.internal.Renderer;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.token.TokenArray;
+
 
 /**
- * Immutable CST walker for a {@link Doc}-based pretty-printer.
+ * Wadler-style pretty-printer that walks the 0.6.0 flat-array CST
+ * ({@link CstArray}). Sole formatter entry point since 0.7.0 removed the
+ * 0.5.x recursive-CST formatter; builds on the
+ * {@link Doc}/{@link Docs}/{@link Renderer} algebra.
  *
- * <p>Configuration (indent / max line width / trivia policy / per-rule
- * formatters) is captured in a {@link FormatterConfig} record built via
- * {@link FormatterConfig#builder()} (or the convenience {@link #builder()}).
- * A {@link Formatter} is then derived from the config via {@link #formatter}.
+ * <p>Walk: for each node, if a user-supplied {@link FormatterRule} is
+ * registered under its rule name (via {@link CstArray#kindNameAt(int)}) the
+ * rule is invoked with the recursively-walked child docs. Otherwise the
+ * default fallback drives a token-range walk over
+ * {@code [firstTokenAt..lastTokenAt]}, interleaving recursive child walks with
+ * inline-literal tokens (e.g. {@code 'package'}, {@code ';'}) that the
+ * generated parser consumes without producing a CST node, plus any trivia
+ * tokens between siblings (routed through the active {@link TriviaPolicy}).
  *
- * <p>Usage pattern:
+ * <p>Trivia ownership is positional and unique: every trivia token is emitted
+ * exactly once, by the closest enclosing branch's default fallback (for
+ * inter-sibling gaps) or by {@link #wrapRootWithFileTrivia} (for trivia before
+ * the root's first token / after its last token). User-installed rules
+ * receive child docs that are already trivia-aware via this same default
+ * fallback, but a rule that wishes to drop or rewrite inter-child whitespace
+ * is free to do so by ignoring/manipulating the supplied child docs.
  *
- * <pre>{@code
- * import static org.pragmatica.peg.formatter.Docs.*;
+ * <p>Instances are immutable and thread-safe.
  *
- * var config = FormatterConfig.builder()
- *     .defaultIndent(2)
- *     .maxLineWidth(80)
- *     .rule("Block", (ctx, children) ->
- *         group(text("{"),
- *               indent(ctx.defaultIndent(), line(), concat(children)),
- *               line(), text("}")))
- *     .build();
- *
- * var formatter = Formatter.formatter(config);
- * Result<String> out = formatter.format(cst);
- * }</pre>
- *
- * <p>Lookup happens by {@link CstNode#rule() rule name}. If no rule is
- * registered for a node, the formatter falls back to a default that emits the
- * node's text verbatim for {@link CstNode.Terminal}/{@link CstNode.Token}
- * leaves, and the concatenation of children for
- * {@link CstNode.NonTerminal} interior nodes.
- *
- * <p>Trivia handling is driven by {@link TriviaPolicy}. By default trivia is
- * preserved verbatim — each leaf's leading trivia is emitted before the
- * leaf's doc and trailing trivia after. Custom policies can strip whitespace,
- * normalise blank lines, etc.
- *
- * <p>Instances are immutable and thread-safe to use concurrently.
- *
- * @since 0.3.3
+ * @since 0.6.0
  */
 public final class Formatter {
     private final FormatterConfig config;
@@ -58,12 +46,16 @@ public final class Formatter {
         this.config = config;
     }
 
-    /** Create a formatter from the given config. */
+    /**
+     * Create a formatter from the given config.
+     *
+     * <p>A {@code null} config falls back to {@link FormatterConfig#defaultConfig()};
+     * validated configs come from {@link FormatterConfig.Builder#build()}.
+     */
     public static Formatter formatter(FormatterConfig config) {
-        if (config == null) {
-            throw new IllegalArgumentException("config must not be null");
-        }
-        return new Formatter(config);
+        return new Formatter(config == null
+                             ? FormatterConfig.defaultConfig()
+                             : config);
     }
 
     /** Convenience entry point for {@link FormatterConfig#builder()}. */
@@ -71,199 +63,203 @@ public final class Formatter {
         return FormatterConfig.builder();
     }
 
-    /** The configuration backing this formatter. */
     public FormatterConfig config() {
         return config;
     }
 
-    /** Read the configured default indent. */
     public int defaultIndent() {
         return config.defaultIndent();
     }
 
-    /** Read the configured maximum line width. */
     public int maxLineWidth() {
         return config.maxLineWidth();
     }
 
-    /** Read the configured trivia policy. */
     public TriviaPolicy triviaPolicy() {
         return config.triviaPolicy();
     }
 
     /**
-     * Format {@code cst} into a string. Uses an empty source buffer; rules
-     * that rely on {@link FormatContext#nodeText()} should prefer the
-     * {@link #format(CstNode, String)} overload.
+     * Format the entire CST. Returns {@code Result.failure} only if {@code cst}
+     * is null, has no root, or a user rule throws.
      */
-    public Result<String> format(CstNode cst) {
-        return format(cst, "");
-    }
-
-    /**
-     * Format {@code cst} into a string, providing the original {@code source}
-     * the CST was parsed from. Rules can recover exact source slices via
-     * {@link FormatContext#nodeText()}.
-     *
-     * <p>Returns {@code Result.failure} only if {@code cst} is null or a
-     * user rule throws.
-     */
-    public Result<String> format(CstNode cst, String source) {
+    public Result<String> format(CstArray cst) {
         if (cst == null) {
-            return FormatterError.NULL_NODE.result();
+            return FormatterError.NULL_CST.result();
         }
-        if (source == null) {
-            return FormatterError.NULL_SOURCE.result();
+
+        var root = cst.rootIndex();
+
+        if (root == CstArray.NO_NODE) {
+            return Result.success("");
         }
-        try{
-            var doc = walk(cst, source);
-            var out = Renderer.render(doc, config.maxLineWidth());
+
+        try {
+            var doc = walk(cst, root, root);
+            var withPrefix = wrapRootWithFileTrivia(cst, root, doc);
+            var out = Renderer.render(withPrefix, config.maxLineWidth());
+
             return Result.success(out);
         } catch (RuntimeException e) {
-            return new FormatterError.RuleFailed(cst.rule(), e).result();
+            return new FormatterError.RuleFailed(cst.kindNameAt(root), e).result();
         }
     }
 
-    private Doc walk(CstNode node, String source) {
-        var childDocs = collectChildDocs(node, source);
-        var nodeDoc = applyRule(node, source, childDocs);
-        return wrapWithTrivia(node, nodeDoc);
-    }
+    private Doc walk(CstArray cst, int nodeIdx, int rootIdx) {
+        var rule = config.rules().get(cst.kindNameAt(nodeIdx));
 
-    private List<Doc> collectChildDocs(CstNode node, String source) {
-        if (node instanceof CstNode.NonTerminal nt) {
-            var out = new ArrayList<Doc>(nt.children()
-                                           .size());
-            for (var child : nt.children()) {
-                out.add(walk(child, source));
-            }
-            return out;
-        }
-        return List.of();
-    }
-
-    private Doc applyRule(CstNode node, String source, List<Doc> childDocs) {
-        Map<String, FormatterRule> rules = config.rules();
-        var rule = rules.get(node.rule());
         if (rule != null) {
-            var ctx = new FormatContext(node,
-                                        source,
-                                        config.defaultIndent(),
-                                        config.maxLineWidth(),
-                                        config.triviaPolicy());
-            return rule.format(ctx, childDocs);
+            return applyUserRule(cst, nodeIdx, collectChildDocs(cst, nodeIdx, rootIdx), rule);
         }
-        return defaultFallback(node, source, childDocs);
+
+        return defaultFallback(cst, nodeIdx, rootIdx);
     }
 
-    private Doc wrapWithTrivia(CstNode node, Doc nodeDoc) {
-        var triviaPolicy = config.triviaPolicy();
-        var leading = triviaPolicy.transform(node.leadingTrivia());
-        var trailing = triviaPolicy.transform(node.trailingTrivia());
-        if (leading.isEmpty() && trailing.isEmpty()) {
-            return nodeDoc;
+    private List<Doc> collectChildDocs(CstArray cst, int nodeIdx, int rootIdx) {
+        if (cst.firstChildAt(nodeIdx) == CstArray.NO_NODE) {
+            return List.of();
         }
-        var parts = new ArrayList<Doc>(leading.size() + 1 + trailing.size());
-        for (var t : leading) {
-            parts.add(triviaDoc(t));
-        }
-        parts.add(nodeDoc);
-        for (var t : trailing) {
-            parts.add(triviaDoc(t));
-        }
-        return Docs.concat(parts);
+
+        var out = new ArrayList<Doc>();
+
+        cst.children(nodeIdx).forEach(child -> out.add(walk(cst, child, rootIdx)));
+
+        return out;
     }
 
-    private static Doc triviaDoc(Trivia trivia) {
-        return switch (trivia) {
-            case Trivia.Whitespace ws -> whitespaceDoc(ws.text());
-            case Trivia.LineComment lc -> Docs.concat(Docs.text(stripTrailingNewline(lc.text())),
-                                                      Docs.hardline());
-            case Trivia.BlockComment bc -> blockCommentDoc(bc.text());
-        };
-    }
+    private Doc applyUserRule(CstArray cst, int nodeIdx, List<Doc> childDocs, FormatterRule rule) {
+        var ctx = new FormatContext(cst, nodeIdx, config.defaultIndent(), config.maxLineWidth(), config.triviaPolicy());
 
-    private static String stripTrailingNewline(String text) {
-        if (text.endsWith("\n")) {
-            return text.substring(0, text.length() - 1);
-        }
-        return text;
+        return rule.format(ctx, childDocs);
     }
 
     /**
-     * Convert raw whitespace text into a doc: newlines become hard breaks,
-     * runs of spaces become text. Tabs are preserved verbatim.
+     * Default fallback used when no user-supplied rule is registered for a node.
+     * Walks the node's token range {@code [firstTokenAt..lastTokenAt]} and
+     * interleaves child docs (recursing through {@link #walk}) with the source
+     * text of inline tokens and trivia tokens that fall in the gaps between
+     * children. This is essential because the generated parser consumes
+     * inline literals (e.g. {@code 'package'}, {@code ';'}) without wrapping
+     * them as child CST nodes — a naive {@code concat(childDocs)} would silently
+     * drop them. Trivia tokens in the gaps are routed through the active
+     * {@link TriviaPolicy} for whitespace/comment handling.
+     *
+     * <p>Note: trivia immediately preceding the node's first token and following
+     * its last token is intentionally NOT emitted here; the caller (the parent
+     * branch's own {@code defaultFallback}, or {@link #wrapRootWithFileTrivia}
+     * for the root) is responsible for those edges. This keeps every trivia
+     * token emitted exactly once across the whole tree.
      */
-    private static Doc whitespaceDoc(String text) {
-        if (text.isEmpty()) {
+    private Doc defaultFallback(CstArray cst, int nodeIdx, int rootIdx) {
+        var first = cst.firstTokenAt(nodeIdx);
+        var last = cst.lastTokenAt(nodeIdx);
+
+        if (first < 0 || last < 0 || last < first) {
             return Docs.empty();
         }
+
+        var tokens = cst.tokens();
+        var policy = config.triviaPolicy();
         var parts = new ArrayList<Doc>();
-        var run = new StringBuilder();
-        for (int i = 0; i < text.length(); i++ ) {
-            var c = text.charAt(i);
-            if (c == '\n') {
-                if (!run.isEmpty()) {
-                    parts.add(Docs.text(run.toString()));
-                    run.setLength(0);
-                }
-                parts.add(hardBreak());
-            }else {
-                run.append(c);
-            }
+        var cursor = first;
+
+        for (var iter = cst.children(nodeIdx).iterator(); iter.hasNext();) {
+            var childIdx = iter.nextInt();
+            var childFirst = cst.firstTokenAt(childIdx);
+            var childLast = cst.lastTokenAt(childIdx);
+
+            emitGapTokens(parts, tokens, policy, cursor, childFirst);
+            parts.add(walk(cst, childIdx, rootIdx));
+            cursor = (childLast < 0)
+                     ? cursor
+                     : childLast + 1;
         }
-        if (!run.isEmpty()) {
-            parts.add(Docs.text(run.toString()));
+
+        emitGapTokens(parts, tokens, policy, cursor, last + 1);
+        if (parts.isEmpty()) {
+            return Docs.empty();
         }
+
         return Docs.concat(parts);
     }
 
-    private static Doc blockCommentDoc(String text) {
-        if (text.indexOf('\n') < 0) {
-            return Docs.text(text);
+    /**
+     * Emit every token in the half-open range {@code [from, to)} that has not
+     * already been claimed by a child node. Trivia tokens go through
+     * {@code policy}; content (inline-literal) tokens emit their text directly,
+     * splitting embedded newlines into hard line breaks.
+     */
+    private static void emitGapTokens(List<Doc> parts, TokenArray tokens, TriviaPolicy policy, int from, int to) {
+        if (from >= to) {
+            return;
         }
-        var lines = text.split("\n", - 1);
-        var parts = new ArrayList<Doc>(lines.length * 2 - 1);
-        for (int i = 0; i < lines.length; i++ ) {
-            if (i > 0) {
-                parts.add(hardBreak());
-            }
-            parts.add(Docs.text(lines[i]));
-        }
-        return Docs.concat(parts);
-    }
+        // Coalesce contiguous runs of trivia into a single policy invocation —
+        // this lets the policy see whitespace + comment runs as a unit so it can
+        // collapse blank lines, strip whitespace, etc. coherently.
+        var i = from;
 
-    private static Doc hardBreak() {
-        return new Doc.HardLine();
-    }
+        while (i < to) {
+            if (tokens.isTrivia(i)) {
+                var runStart = i;
 
-    private static Doc defaultFallback(CstNode node, String source, List<Doc> childDocs) {
-        return switch (node) {
-            case CstNode.Terminal t -> Docs.text(t.text());
-            case CstNode.Token t -> Docs.text(t.text());
-            case CstNode.NonTerminal nt -> {
-                // If no children contributed text, fall back to extracting the
-                // node's span from the source buffer. This handles the common
-                // case of rules whose CST is essentially a single literal match.
-                if (childDocs.isEmpty() && !source.isEmpty()) {
-                    var span = nt.span();
-                    int start = Math.max(0, span.startOffset());
-                    int end = Math.min(source.length(), span.endOffset());
-                    if (start < end) {
-                        yield Docs.text(source.substring(start, end));
-                    }
+                while (i < to && tokens.isTrivia(i)) {
+                    i++;
                 }
-                yield Docs.concat(childDocs);
+
+                var runEnd = i;
+                var triviaDoc = policy.render(tokens, java.util.stream.IntStream.range(runStart, runEnd));
+
+                if (! (triviaDoc instanceof Doc.Empty)) {
+                    parts.add(triviaDoc);
+                }
+            } else {
+                appendTokenText(parts, tokens, i);
+                i++;
             }
-            case CstNode.Error e -> Docs.text(e.skippedText());
-        };
+        }
+    }
+
+    /**
+     * Append a single content (non-trivia) token's text to {@code parts}, splitting
+     * embedded newlines into hard breaks because {@link Doc.Text} forbids newlines.
+     * Java text blocks and multi-line annotations / character escapes can produce
+     * tokens whose lexed text contains real {@code \n} characters; preserving them
+     * via {@link Doc.HardLine} keeps the round-trip token stream intact.
+     */
+    private static void appendTokenText(List<Doc> parts, TokenArray tokens, int idx) {
+        // Docs.text establishes the newline-free Doc.Text invariant by construction,
+        // splitting embedded newlines into HardLine-separated segments — so this is
+        // simply a delegation. An empty token yields Doc.Empty, which renders to "".
+        parts.add(Docs.text(tokens.textAt(idx).toString()));
+    }
+
+    private Doc wrapRootWithFileTrivia(CstArray cst, int rootIdx, Doc rootDoc) {
+        var tokens = cst.tokens();
+        var firstTok = cst.firstTokenAt(rootIdx);
+        var lastTok = cst.lastTokenAt(rootIdx);
+        var prefixIndices = (firstTok > 0)
+                            ? java.util.stream.IntStream.range(0, firstTok).filter(tokens::isTrivia)
+                            : java.util.stream.IntStream.empty();
+        var suffixStart = (lastTok < 0)
+                          ? 0
+                          : lastTok + 1;
+        var suffixIndices = (suffixStart < tokens.count())
+                            ? java.util.stream.IntStream.range(suffixStart, tokens.count()).filter(tokens::isTrivia)
+                            : java.util.stream.IntStream.empty();
+        var prefix = config.triviaPolicy().render(tokens, prefixIndices);
+        var suffix = config.triviaPolicy().render(tokens, suffixIndices);
+
+        if (prefix instanceof Doc.Empty && suffix instanceof Doc.Empty) {
+            return rootDoc;
+        }
+
+        return Docs.concat(prefix, rootDoc, suffix);
     }
 
     /** Errors a formatter may report. */
     public sealed interface FormatterError extends Cause {
         enum General implements FormatterError {
-            NULL_NODE("Cannot format a null CST node"),
-            NULL_SOURCE("Source buffer must not be null");
+            NULL_CST("Cannot format a null CstArray");
             private final String message;
             General(String message) {
                 this.message = message;
@@ -274,17 +270,15 @@ public final class Formatter {
             }
         }
 
-        /** Convenience alias: null CST node. */
-        FormatterError NULL_NODE = General.NULL_NODE;
-
-        /** Convenience alias: null source buffer. */
-        FormatterError NULL_SOURCE = General.NULL_SOURCE;
+        FormatterError NULL_CST = General.NULL_CST;
 
         record RuleFailed(String rule, Throwable cause) implements FormatterError {
             @Override
             public String message() {
-                return "Formatter rule for '" + rule + "' threw: " + cause.getClass()
-                                                                          .getSimpleName() + ": " + cause.getMessage();
+                return "Formatter rule for '" + rule
+                     + "' threw: " + cause.getClass()
+                                          .getSimpleName()
+                     + ": " + cause.getMessage();
             }
         }
     }

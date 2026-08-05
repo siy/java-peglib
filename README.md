@@ -3,7 +3,7 @@
 A PEG (Parsing Expression Grammar) parser library for Java. Tokens-first lex-then-parse
 architecture, flat int[] CST, visitor pattern, true incremental reparse.
 
-Maven Central: `org.pragmatica-lite:peglib:0.6.3`
+Maven Central: `org.pragmatica-lite:peglib:0.7.0`
 
 Migrating from 0.5.x? See [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md).
 Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
@@ -29,7 +29,7 @@ Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.6.3</version>
+    <version>0.7.0</version>
 </dependency>
 ```
 
@@ -42,9 +42,9 @@ If you only consume a generated parser, depend on `peglib-runtime` (25 KB) inste
 ### Parse some text
 
 ```java
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.cst.ParseResult;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.ParseResult;
 
 var parser = PegParser.fromGrammar("""
     Start  <- '#' Number
@@ -71,8 +71,8 @@ sub-millisecond.
 ### Walk the CST
 
 ```java
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.cst.CstNode;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.CstNode;
 
 void walk(CstArray cst, int idx) {
     switch (cst.viewAt(idx)) {
@@ -241,12 +241,12 @@ ParseResult capped = parser.parse(input, /* maxDiagnostics */ 100);
 
 ## Incremental parsing
 
-`peglib-incremental` provides `IncrementalParser` — a stateful wrapper that re-lexes
+`peglib-core` provides `IncrementalParser` — a stateful wrapper that re-lexes
 only the affected window on each edit and reparses only the smallest enclosing
 checkpoint subtree.
 
 ```java
-import org.pragmatica.peg.v6.incremental.IncrementalParser;
+import org.pragmatica.peg.incremental.IncrementalParser;
 
 var inc = new IncrementalParser(parser, "int x = 1;");
 ParseResult after = inc.edit(/* offset */ 8, /* oldLen */ 1, "42");
@@ -267,10 +267,9 @@ edits that span checkpoints fall back to full reparse.
 | Module | Purpose |
 |---|---|
 | `peglib-runtime` | 25 KB; the only dep generated parsers need (plus pragmatica-lite:core) |
-| `peglib` (`peglib-core`) | grammar parser, codegen, analyzers, `PegParser.fromGrammar` |
-| `peglib-incremental` | `IncrementalParser` — windowed re-lex + partial reparse |
+| `peglib` (`peglib-core`) | grammar parser, codegen, analyzers, `PegParser.fromGrammar`, `IncrementalParser` |
 | `peglib-formatter` | Wadler-Lindig pretty printer over `CstArray` |
-| `peglib-maven-plugin` | build-time codegen mojo (`generate-v6`) |
+| `peglib-maven-plugin` | build-time codegen mojo (`generate`) |
 | `peglib-playground` | REPL + HTTP UI for experimenting with grammars |
 
 ---
@@ -284,10 +283,10 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.6.3</version>
+    <version>0.7.0</version>
     <executions>
         <execution>
-            <goals><goal>generate-v6</goal></goals>
+            <goals><goal>generate</goal></goals>
             <configuration>
                 <grammarFile>src/main/peg/MyGrammar.peg</grammarFile>
                 <outputDirectory>${project.build.directory}/generated-sources/peg</outputDirectory>
@@ -324,7 +323,7 @@ data.
 mvn install -Djbct.skip=true
 ```
 
-`-Djbct.skip=true` works around a JBCT 0.25.0 formatter-convergence issue on a few v6
+`-Djbct.skip=true` works around a JBCT 0.25.0 formatter-convergence issue on a few
 files; lint itself passes cleanly.
 
 Run tests for a single module:
@@ -343,6 +342,7 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 | Version | Date | What |
 |---|---|---|
+| **0.7.0** | 2026-08-05 | **Breaking.** 0.5.x interpreter path removed (146 files, ~38,900 lines) along with the `peglib-incremental` artifact; `org.pragmatica.peg.v6.*` collapsed to `org.pragmatica.peg.*`; maven goal `generate-v6` → `generate`; `pragmatica-lite:core` → 1.0.0-rc2. Adds JEP 401 value classes, `outer.new`, annotated type parameters, hex float literals, and a CST-shape gate. 528 tests, zero JBCT errors. |
 | **0.6.3** | 2026-06-07 | Patch release. Legacy interpreter cut-failure symmetry: `Optional`/`ZeroOrMore`/`OneOrMore`/bounded repetition now restore the pending-trivia snapshot on `CutFailure`. Test suite reaches zero skips (1424 tests). |
 | **0.6.2** | 2026-06-06 | Patch release. Shift operators (`<<`/`>>`/`>>>`) in field/local-var initializer context fixed via inline expansion of DFA-skipped lexer rules; loud `SkippedRuleReferenced` guard. Per-iteration `%whitespace` tokenization (folded form emits per-kind trivia; grammar-split workaround reverted). Selfhost fixture now parses with 0 diagnostics. |
 | **0.6.1** | 2026-05-12 | Patch release. Doc-comment trivia kinds (`KIND_DOC_LINE_COMMENT`, `KIND_DOC_BLOCK_COMMENT`), per-rule `%recover` runtime, `%checkpoint` directive parsing, named captures and back-references restored, `MIXED`-rule char-level fallback, diagnostic cap honored. |

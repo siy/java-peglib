@@ -1,7 +1,8 @@
 package org.pragmatica.peg.grammar;
 
 import org.pragmatica.lang.Option;
-import org.pragmatica.peg.tree.SourceSpan;
+import org.pragmatica.peg.source.SourceSpan;
+
 
 /**
  * A grammar rule: Name <- Expression { action } { error_message "..." }
@@ -15,15 +16,14 @@ import org.pragmatica.peg.tree.SourceSpan;
  * These features are strictly additive: when all three are {@link Option#none()},
  * engine and generator produce byte-identical output to pre-0.2.4 behaviour.
  */
-public record Rule(
- SourceSpan span,
- String name,
- Expression expression,
- Option<String> action,
- Option<String> errorMessage,
- Option<String> expected,
- Option<String> recover,
- Option<String> tag) {
+public record Rule(SourceSpan span,
+                   String name,
+                   Expression expression,
+                   Option<String> action,
+                   Option<String> errorMessage,
+                   Option<String> expected,
+                   Option<String> recover,
+                   Option<String> tag) {
     /**
      * Backwards-compatible constructor matching the pre-0.2.4 signature.
      */

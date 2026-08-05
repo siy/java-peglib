@@ -1,14 +1,24 @@
 package org.pragmatica.peg.maven;
 
-import org.pragmatica.lang.Result;
-import org.pragmatica.lang.utils.Causes;
-import org.pragmatica.peg.PegParser;
-import org.pragmatica.peg.generator.ErrorReporting;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+
+import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Result;
+import org.pragmatica.lang.utils.Causes;
+import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.generator.LexerGenerator;
+import org.pragmatica.peg.generator.LexerGenerator.Generated;
+import org.pragmatica.peg.generator.ParserGenerator;
+import org.pragmatica.peg.generator.ParserGenerator.GeneratedParser;
+import org.pragmatica.peg.generator.VisitorGenerator;
+import org.pragmatica.peg.generator.VisitorGenerator.GeneratedVisitor;
+import org.pragmatica.peg.lexer.DfaBuilder;
+import org.pragmatica.peg.lexer.RuleClassifier;
 
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -17,11 +27,21 @@ import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 
+
 /**
- * Generate a standalone PEG parser Java source file from a grammar.
+ * Emit a standalone lexer + parser + visitor source triple
+ * for the supplied grammar. This mojo runs the {@code classify -> DFA build ->
+ * generate-lexer/parser/visitor} pipeline at build time and writes three Java
+ * source files under {@code outputDirectory/<packageDir>/}.
  *
- * <p>Skips regeneration when the grammar file's modification time is older
- * than the target source file's modification time.
+ * <p>Since 0.7.0 this is the only codegen mojo: the legacy {@code generate}
+ * mojo, which targeted the 0.5.x interpreter, was removed together with the
+ * rest of the 0.5.x path. This mojo emits the lex-then-parse surface, and
+ * the sources it writes depend only on {@code peglib-runtime}.
+ *
+ * <p>Up-to-date: regeneration is skipped when ALL three target source files
+ * are newer than the grammar file. If any one is missing or stale every
+ * artifact is regenerated.
  */
 @Mojo(name = "generate", defaultPhase = LifecyclePhase.GENERATE_SOURCES, threadSafe = true)
 public class GenerateMojo extends AbstractMojo {
@@ -34,11 +54,14 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter(property = "peglib.packageName", required = true)
     private String packageName;
 
-    @Parameter(property = "peglib.className", required = true)
-    private String className;
+    @Parameter(property = "peglib.lexerClassName", defaultValue = "GLexer")
+    private String lexerClassName;
 
-    @Parameter(property = "peglib.errorReporting", defaultValue = "BASIC")
-    private String errorReporting;
+    @Parameter(property = "peglib.parserClassName", defaultValue = "GParser")
+    private String parserClassName;
+
+    @Parameter(property = "peglib.visitorClassName", defaultValue = "GVisitor")
+    private String visitorClassName;
 
     /**
      * JBCT boundary: Maven calls into untyped Java land. The Result pipeline
@@ -46,39 +69,80 @@ public class GenerateMojo extends AbstractMojo {
      * Result.failure(cause) into MojoFailureException(cause.message()).
      */
     @Override
+    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"})  // Maven AbstractMojo contract: execute() is void and signals failure by throwing.
     public void execute() throws MojoExecutionException, MojoFailureException {
         if (grammarFile == null || !grammarFile.isFile()) {
             throw new MojoFailureException("grammarFile does not exist: " + grammarFile);
         }
-        var targetFile = targetSourceFile();
-        if (isUpToDate(targetFile)) {
-            getLog()
-            .info("peglib:generate skipped (up-to-date): " + targetFile);
+
+        var lexerTarget = targetSourceFile(lexerClassName);
+        var parserTarget = targetSourceFile(parserClassName);
+        var visitorTarget = targetSourceFile(visitorClassName);
+
+        if (allUpToDate(lexerTarget, parserTarget, visitorTarget)) {
+            getLog().info("peglib:generate skipped (up-to-date): " + lexerTarget.getFileName()
+                         + ", " + parserTarget.getFileName()
+                         + ", " + visitorTarget.getFileName());
+
             return;
         }
-        var generated = Result.all(parseErrorReporting(errorReporting),
-                                   readGrammar(grammarFile.toPath()))
-                              .flatMap(this::generateSource);
-        if (generated instanceof Result.Failure< ? > failure) {
-            throw new MojoFailureException(failure.cause()
-                                                  .message());
+
+        var generated = readGrammar(grammarFile.toPath()).flatMap(this::buildAll);
+
+        if (generated instanceof Result.Failure<?> failure) {
+            throw new MojoFailureException(failure.cause().message());
         }
-        var write = writeSource(targetFile, generated.unwrap());
-        if (write instanceof Result.Failure< ? > failure) {
-            throw new MojoExecutionException(failure.cause()
-                                                    .message());
+
+        var bundle = generated.unwrap();
+        var write = writeAll(bundle, lexerTarget, parserTarget, visitorTarget);
+
+        if (write instanceof Result.Failure<?> failure) {
+            throw new MojoExecutionException(failure.cause().message());
         }
-        getLog()
-        .info("peglib:generate wrote " + targetFile);
+
+        for (var w : bundle.lexer().warnings()) {
+            getLog().warn("peglib:generate lexer warning: " + w);
+        }
+
+        getLog().info("peglib:generate wrote " + lexerTarget.getFileName()
+                     + ", " + parserTarget.getFileName()
+                     + ", " + visitorTarget.getFileName());
     }
 
-    private Result<String> generateSource(ErrorReporting reporting, String grammarText) {
-        return PegParser.generateCstParser(grammarText, packageName, className, reporting);
+    record GeneratedBundle(Generated lexer, GeneratedParser parser, GeneratedVisitor visitor) {}
+
+    /**
+     * Compose the generator pipeline: parse grammar text, classify rules,
+     * build the DFA + token-kind table, then emit lexer / parser / visitor
+     * sources. Each step is a Result so failures surface as a Cause.
+     */
+    private Result<GeneratedBundle> buildAll(String grammarText) {
+        return GrammarParser.parse(grammarText).flatMap(grammar -> RuleClassifier.classify(grammar).flatMap(classification -> DfaBuilder.build(grammar,
+                                                                                                                                               classification).flatMap(built -> generateBundle(grammar,
+                                                                                                                                                                                               classification,
+                                                                                                                                                                                               built))));
     }
 
-    private static Result<ErrorReporting> parseErrorReporting(String value) {
-        return Result.lift(t -> Causes.cause("Invalid errorReporting: " + value + " (expected BASIC or ADVANCED)"),
-                           () -> ErrorReporting.valueOf(value));
+    private Result<GeneratedBundle> generateBundle(Grammar grammar,
+                                                   RuleClassifier.Classification classification,
+                                                   DfaBuilder.Built built) {
+        return LexerGenerator.generate(grammar,
+                                       classification,
+                                       built.dfa(),
+                                       built.kinds(),
+                                       packageName,
+                                       lexerClassName)
+                             .flatMap(lexer -> ParserGenerator.generate(grammar,
+                                                                        classification,
+                                                                        built.kinds(),
+                                                                        packageName,
+                                                                        parserClassName)
+                                                              .flatMap(parser -> VisitorGenerator.generate(grammar,
+                                                                                                           classification,
+                                                                                                           packageName,
+                                                                                                           visitorClassName).map(visitor -> new GeneratedBundle(lexer,
+                                                                                                                                                                parser,
+                                                                                                                                                                visitor))));
     }
 
     private static Result<String> readGrammar(Path path) {
@@ -91,44 +155,83 @@ public class GenerateMojo extends AbstractMojo {
                            () -> writeSourceUnchecked(targetFile, source));
     }
 
+    // JDK-API adapter: the body of a Result.lift(...) throwing lambda. Files.createDirectories
+    // and Files.writeString declare IOException, which lift() is precisely there to capture.
+    @SuppressWarnings("JBCT-EX-01")
     private static Path writeSourceUnchecked(Path targetFile, String source) throws IOException {
         Files.createDirectories(targetFile.getParent());
+
         return Files.writeString(targetFile, source);
     }
 
-    /** For programmatic invocation from tests. */
-    public void setGrammarFile(File grammarFile) {
-        this.grammarFile = grammarFile;
+    private static Result<List<Path>> writeAll(GeneratedBundle bundle,
+                                               Path lexerTarget,
+                                               Path parserTarget,
+                                               Path visitorTarget) {
+        return writeSource(lexerTarget,
+                           bundle.lexer().source()).flatMap(l -> writeSource(parserTarget,
+                                                                             bundle.parser().source()).flatMap(p -> writeSource(visitorTarget,
+                                                                                                                                bundle.visitor()
+                                                                                                                                      .source()).map(v -> List.of(l,
+                                                                                                                                                                  p,
+                                                                                                                                                                  v))));
     }
 
-    public void setOutputDirectory(File outputDirectory) {
-        this.outputDirectory = outputDirectory;
-    }
-
-    public void setPackageName(String packageName) {
-        this.packageName = packageName;
-    }
-
-    public void setClassName(String className) {
-        this.className = className;
-    }
-
-    public void setErrorReporting(String errorReporting) {
-        this.errorReporting = errorReporting;
-    }
-
-    private Path targetSourceFile() {
+    private Path targetSourceFile(String className) {
         var packagePath = packageName.replace('.', '/');
+
         return outputDirectory.toPath()
                               .resolve(packagePath)
                               .resolve(className + ".java");
     }
 
-    private boolean isUpToDate(Path targetFile) {
-        var file = targetFile.toFile();
-        if (!file.isFile()) {
-            return false;
+    private boolean allUpToDate(Path... targets) {
+        long grammarMtime = grammarFile.lastModified();
+
+        for (var target : targets) {
+            var file = target.toFile();
+
+            if (!file.isFile() || file.lastModified() < grammarMtime) {
+                return false;
+            }
         }
-        return grammarFile.lastModified() <= file.lastModified();
+
+        return true;
+    }
+
+    /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setGrammarFile(File grammarFile) {
+        this.grammarFile = grammarFile;
+    }
+
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setOutputDirectory(File outputDirectory) {
+        this.outputDirectory = outputDirectory;
+    }
+
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setPackageName(String packageName) {
+        this.packageName = packageName;
+    }
+
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setLexerClassName(String lexerClassName) {
+        this.lexerClassName = lexerClassName;
+    }
+
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setParserClassName(String parserClassName) {
+        this.parserClassName = parserClassName;
+    }
+
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setVisitorClassName(String visitorClassName) {
+        this.visitorClassName = visitorClassName;
+    }
+
+    /** Package-name-aware Cause helper for tests. */
+    sealed interface GenerateError extends Cause {
+        record GrammarReadError(String message) implements GenerateError {}
     }
 }

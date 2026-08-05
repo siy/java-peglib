@@ -3,25 +3,41 @@ package org.pragmatica.peg.playground;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.pragmatica.peg.playground.internal.JsonDecoder;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PlaygroundServerTest {
 
+    /**
+     * 0.6.x request bodies carry grammar and input only — the 0.5.x
+     * {@code recovery} / {@code packrat} / {@code startRule} / {@code mode}
+     * knobs no longer exist server-side.
+     */
+    private static final String VALID_BODY = """
+            {"grammar":"Sum <- Number '+' Number\\nNumber <- [0-9]+\\n%whitespace <- [ \\\\t]*\\n",
+             "input":"12 + 34"}
+            """;
+
+    /** Parses with recovery: 'x' is unexpected where 'b' was required. */
+    private static final String FAILING_BODY = """
+            {"grammar":"Pair <- Head 'b'\\nHead <- 'a' '#'\\n",
+             "input":"a#x"}
+            """;
+
     private PlaygroundServer server;
     private HttpClient client;
 
     @BeforeEach
     void start() throws Exception {
-        server = PlaygroundServer.start(0);
+        server = PlaygroundServer.start(0).unwrap();
         client = HttpClient.newHttpClient();
     }
 
@@ -34,18 +50,10 @@ class PlaygroundServerTest {
 
     @Test
     void parseEndpoint_returnsValidJsonWithTreeAndStats() throws Exception {
-        String body = """
-                {"grammar":"Number <- < [0-9]+ >\\n%whitespace <- [ \\\\t]*\\n",
-                 "input":"42",
-                 "recovery":"BASIC",
-                 "packrat":true,
-                 "trivia":true}
-                """;
-
-        var response = post("/parse", body);
+        var response = post("/parse", VALID_BODY);
         assertThat(response.statusCode()).isEqualTo(200);
 
-        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        Map<String, Object> parsed = TestJson.object(response.body());
         assertThat(parsed).containsKey("tree");
         assertThat(parsed).containsKey("stats");
         assertThat(parsed).containsKey("diagnostics");
@@ -53,8 +61,60 @@ class PlaygroundServerTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> stats = (Map<String, Object>) parsed.get("stats");
-        assertThat(stats.get("nodeCount")).isInstanceOf(Long.class);
-        assertThat(((Long) stats.get("nodeCount"))).isGreaterThan(0L);
+        assertThat(stats.get("nodeCount")).isInstanceOf(Number.class);
+        assertThat(TestJson.num(stats, "nodeCount")).isGreaterThan(0L);
+    }
+
+    /**
+     * Guards the wire contract {@code playground.js} renders against: the tree
+     * node keys {@code renderNode} reads and the stats keys {@code renderStats}
+     * interpolates. {@code ruleEntries} additionally proves the ParseTracer
+     * walk is still wired into the response.
+     */
+    @Test
+    void parseEndpoint_emitsJsonShapeTheFrontendRenders() throws Exception {
+        var response = post("/parse", VALID_BODY);
+
+        Map<String, Object> parsed = TestJson.object(response.body());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> tree = (Map<String, Object>) parsed.get("tree");
+        assertThat(tree).containsKeys("kind", "rule", "start", "end", "line", "column");
+        assertThat(tree.get("kind")).isEqualTo("non-terminal");
+        assertThat(tree.get("children")).isInstanceOf(List.class);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stats = (Map<String, Object>) parsed.get("stats");
+        assertThat(stats).containsKeys("timeMicros",
+                                       "nodeCount",
+                                       "triviaCount",
+                                       "ruleEntries",
+                                       "diagnosticCount");
+        assertThat(TestJson.num(stats, "ruleEntries")).isGreaterThan(0L);
+    }
+
+    @Test
+    void parseEndpoint_diagnosticsCarrySeverityLineAndColumn() throws Exception {
+        var response = post("/parse", FAILING_BODY);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        Map<String, Object> parsed = TestJson.object(response.body());
+        assertThat(parsed.get("ok")).isEqualTo(Boolean.FALSE);
+
+        var diagnostics = (List< ? >) parsed.get("diagnostics");
+        assertThat(diagnostics).isNotEmpty();
+        assertThat(asJsonObject(diagnostics.getFirst())).containsKeys("severity",
+                                                                     "message",
+                                                                     "line",
+                                                                     "column",
+                                                                     "start",
+                                                                     "end");
+    }
+
+    /** Decoded JSON objects arrive as raw {@code Object}; AssertJ needs the key type. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asJsonObject(Object value) {
+        return (Map<String, Object>) value;
     }
 
     @Test
@@ -64,7 +124,7 @@ class PlaygroundServerTest {
         var response = post("/parse", body);
 
         assertThat(response.statusCode()).isEqualTo(400);
-        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        Map<String, Object> parsed = TestJson.object(response.body());
         assertThat(parsed.get("error")).isEqualTo("bad request");
     }
 
@@ -75,7 +135,7 @@ class PlaygroundServerTest {
         var response = post("/parse", body);
 
         assertThat(response.statusCode()).isEqualTo(200);
-        Map<String, Object> parsed = JsonDecoder.decodeObject(response.body());
+        Map<String, Object> parsed = TestJson.object(response.body());
         assertThat(parsed.get("ok")).isEqualTo(Boolean.FALSE);
     }
 
@@ -136,17 +196,17 @@ class PlaygroundServerTest {
 
     @Test
     void sanitizeStaticPath_acceptsNormalizedAssets() {
-        assertThat(PlaygroundServer.sanitizeStaticPath("/")).isEqualTo("/index.html");
-        assertThat(PlaygroundServer.sanitizeStaticPath("/playground.js")).isEqualTo("/playground.js");
-        assertThat(PlaygroundServer.sanitizeStaticPath("//playground.js")).isEqualTo("/playground.js");
+        assertThat(PlaygroundServer.sanitizeStaticPath("/").unwrap()).isEqualTo("/index.html");
+        assertThat(PlaygroundServer.sanitizeStaticPath("/playground.js").unwrap()).isEqualTo("/playground.js");
+        assertThat(PlaygroundServer.sanitizeStaticPath("//playground.js").unwrap()).isEqualTo("/playground.js");
     }
 
     @Test
     void sanitizeStaticPath_rejectsTraversalAndControlChars() {
-        assertThat(PlaygroundServer.sanitizeStaticPath("/../secret")).isNull();
-        assertThat(PlaygroundServer.sanitizeStaticPath("/foo/../bar")).isNull();
-        assertThat(PlaygroundServer.sanitizeStaticPath("/foo\\bar")).isNull();
-        assertThat(PlaygroundServer.sanitizeStaticPath("/foobar")).isNull();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/../secret").isEmpty()).isTrue();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foo/../bar").isEmpty()).isTrue();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foo\\bar").isEmpty()).isTrue();
+        assertThat(PlaygroundServer.sanitizeStaticPath("/foobar").isEmpty()).isTrue();
     }
 
     private HttpResponse<String> post(String path, String body) throws Exception {

@@ -1,4 +1,5 @@
 package org.pragmatica.peg.analyzer;
+
 /**
  * A single analyzer finding about a grammar.
  *

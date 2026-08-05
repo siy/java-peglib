@@ -3,48 +3,53 @@ package org.pragmatica.peg.formatter;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.pragmatica.lang.Result;
+import org.pragmatica.lang.utils.Causes;
+
+
 /**
  * Immutable configuration for a {@link Formatter}.
  *
- * <p>Carries the renderer parameters (indent / max line width), the active
- * {@link TriviaPolicy}, and the set of registered {@link FormatterRule}s
- * keyed by CST rule name.
+ * <p>Construct via {@link #builder()}. Each {@code with*} mutator on the
+ * builder returns a new builder, so the configuration is fully immutable
+ * end-to-end.
  *
- * <p>Construct via {@link #builder()} (or {@link Formatter#builder()}, which
- * delegates here). Each {@code with*} method on the builder returns a new
- * builder instance, so configuration is fully immutable end-to-end.
+ * <p>Validation happens once, in {@link Builder#build()}, which returns a
+ * {@link Result}. The mutators themselves are total, which keeps the fluent
+ * chain readable — {@code builder().defaultIndent(4).maxLineWidth(120).build()}
+ * — while still surfacing invalid combinations as a failure rather than an
+ * exception.
  *
- * <pre>{@code
- * var config = FormatterConfig.builder()
- *     .defaultIndent(2)
- *     .maxLineWidth(80)
- *     .triviaPolicy(TriviaPolicy.DROP_ALL)
- *     .rule("Block", (ctx, kids) -> ...)
- *     .build();
- *
- * var formatter = Formatter.formatter(config);
- * }</pre>
- *
- * @since 0.4.0
+ * @since 0.6.0
  */
 public record FormatterConfig(int defaultIndent,
                               int maxLineWidth,
                               TriviaPolicy triviaPolicy,
                               Map<String, FormatterRule> rules) {
     public FormatterConfig {
+        rules = rules == null
+                ? Map.of()
+                : Map.copyOf(rules);
+    }
+
+    /** Validating factory. The only sanctioned way to build a config from untrusted values. */
+    public static Result<FormatterConfig> formatterConfig(int defaultIndent,
+                                                          int maxLineWidth,
+                                                          TriviaPolicy triviaPolicy,
+                                                          Map<String, FormatterRule> rules) {
         if (defaultIndent < 0) {
-            throw new IllegalArgumentException("defaultIndent must be >= 0");
+            return Causes.cause("defaultIndent must be >= 0, was " + defaultIndent).result();
         }
+
         if (maxLineWidth <= 0) {
-            throw new IllegalArgumentException("maxLineWidth must be > 0");
+            return Causes.cause("maxLineWidth must be > 0, was " + maxLineWidth).result();
         }
+
         if (triviaPolicy == null) {
-            throw new IllegalArgumentException("triviaPolicy must not be null");
+            return Causes.cause("triviaPolicy must not be null").result();
         }
-        if (rules == null) {
-            throw new IllegalArgumentException("rules must not be null");
-        }
-        rules = Map.copyOf(rules);
+
+        return Result.success(new FormatterConfig(defaultIndent, maxLineWidth, triviaPolicy, rules));
     }
 
     /** Default values: indent=2, maxLineWidth=80, triviaPolicy=PRESERVE, no rules. */
@@ -62,64 +67,44 @@ public record FormatterConfig(int defaultIndent,
         return new Builder(defaultIndent, maxLineWidth, triviaPolicy, rules);
     }
 
-    /**
-     * Immutable builder for {@link FormatterConfig}. Each {@code with*} /
-     * mutator method returns a new builder; the receiver is unmodified.
-     */
+    /** Immutable builder. Each mutator returns a new builder; the receiver is untouched. */
     public record Builder(int defaultIndent,
                           int maxLineWidth,
                           TriviaPolicy triviaPolicy,
                           Map<String, FormatterRule> rules) {
         public Builder {
-            if (rules == null) {
-                throw new IllegalArgumentException("rules must not be null");
-            }
-            rules = Map.copyOf(rules);
+            rules = rules == null
+                    ? Map.of()
+                    : Map.copyOf(rules);
         }
 
-        /** New builder with updated default indent. */
         public Builder defaultIndent(int amount) {
-            if (amount < 0) {
-                throw new IllegalArgumentException("defaultIndent must be >= 0");
-            }
             return new Builder(amount, maxLineWidth, triviaPolicy, rules);
         }
 
-        /** New builder with updated max line width. */
         public Builder maxLineWidth(int width) {
-            if (width <= 0) {
-                throw new IllegalArgumentException("maxLineWidth must be > 0");
-            }
             return new Builder(defaultIndent, width, triviaPolicy, rules);
         }
 
-        /** New builder with updated trivia policy. */
         public Builder triviaPolicy(TriviaPolicy policy) {
-            if (policy == null) {
-                throw new IllegalArgumentException("triviaPolicy must not be null");
-            }
             return new Builder(defaultIndent, maxLineWidth, policy, rules);
         }
 
-        /**
-         * New builder with the given rule registered (or replaced). Last
-         * registration wins on a per-name basis.
-         */
         public Builder rule(String ruleName, FormatterRule rule) {
-            if (ruleName == null || ruleName.isEmpty()) {
-                throw new IllegalArgumentException("ruleName must be non-empty");
+            if (ruleName == null || ruleName.isEmpty() || rule == null) {
+                return this;
             }
-            if (rule == null) {
-                throw new IllegalArgumentException("rule must not be null");
-            }
+
             var next = new HashMap<>(rules);
+
             next.put(ruleName, rule);
+
             return new Builder(defaultIndent, maxLineWidth, triviaPolicy, next);
         }
 
-        /** Materialise the configured values as a {@link FormatterConfig}. */
-        public FormatterConfig build() {
-            return new FormatterConfig(defaultIndent, maxLineWidth, triviaPolicy, rules);
+        /** Validate the accumulated settings and produce the config. */
+        public Result<FormatterConfig> build() {
+            return formatterConfig(defaultIndent, maxLineWidth, triviaPolicy, rules);
         }
     }
 }

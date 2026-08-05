@@ -1,15 +1,16 @@
 package org.pragmatica.peg.grammar;
 
-import org.pragmatica.lang.Option;
-import org.pragmatica.lang.Result;
-import org.pragmatica.peg.error.ParseError;
-import org.pragmatica.peg.grammar.analysis.LeftRecursionAnalysis;
-import org.pragmatica.peg.tree.SourceLocation;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import org.pragmatica.lang.Option;
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.error.ParseError;
+import org.pragmatica.peg.grammar.analysis.LeftRecursionAnalysis;
+import org.pragmatica.peg.source.SourceLocation;
+
 
 /**
  * A complete PEG grammar — collection of rules with directives.
@@ -50,15 +51,14 @@ import java.util.stream.Collectors;
  * @since 0.4.0 — parse-don't-validate factory replaces the post-construction
  * {@code validate()} method.
  */
-public record Grammar(
- List<Rule> rules,
- Option<String> startRule,
- Option<Expression> whitespace,
- Option<Expression> word,
- List<String> suggestRules,
- List<Import> imports,
- Map<String, Set<Character>> recoverSets,
- Set<String> checkpointRules) {
+public record Grammar(List<Rule> rules,
+                      Option<String> startRule,
+                      Option<Expression> whitespace,
+                      Option<Expression> word,
+                      List<String> suggestRules,
+                      List<Import> imports,
+                      Map<String, Set<Character>> recoverSets,
+                      Set<String> checkpointRules) {
     /**
      * Canonical compact constructor. Applies a defensive copy to
      * {@code checkpointRules} so the record's exposed set is immutable
@@ -132,7 +132,14 @@ public record Grammar(
                                           List<Import> imports,
                                           Map<String, Set<Character>> recoverSets,
                                           Set<String> checkpointRules) {
-        return validate(new Grammar(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, checkpointRules));
+        return validate(new Grammar(rules,
+                                    startRule,
+                                    whitespace,
+                                    word,
+                                    suggestRules,
+                                    imports,
+                                    recoverSets,
+                                    checkpointRules));
     }
 
     /**
@@ -199,9 +206,11 @@ public record Grammar(
      */
     public Option<Rule> effectiveStartRule() {
         var explicitStart = startRule.flatMap(this::rule);
+
         if (explicitStart.isPresent()) {
             return explicitStart;
         }
+
         return rules.isEmpty()
                ? Option.none()
                : Option.some(rules.getFirst());
@@ -231,25 +240,29 @@ public record Grammar(
      * first offence. Pure function over the candidate's rule list.
      */
     private static Result<Grammar> validate(Grammar candidate) {
-        var ruleNames = candidate.rules.stream()
-                                 .map(Rule::name)
-                                 .collect(Collectors.toSet());
+        var ruleNames = candidate.rules.stream().map(Rule::name).collect(Collectors.toSet());
+
         for (var rule : candidate.rules) {
             var undefinedRef = findUndefinedReference(rule.expression(), ruleNames);
+
             if (undefinedRef.isPresent()) {
                 var ref = undefinedRef.unwrap();
-                return new ParseError.SemanticError(
-                ref.span()
-                   .start(),
-                "Undefined rule reference: '" + ref.ruleName() + "'").result();
+
+                return new ParseError.SemanticError(ref.span().start(),
+                                                    "Undefined rule reference: '" + ref.ruleName() + "'").result();
             }
         }
+
         var indirect = LeftRecursionAnalysis.findIndirectCycle(candidate);
+
         if (!indirect.isEmpty()) {
             var chain = String.join(" -> ", indirect);
-            return new ParseError.SemanticError(
-            SourceLocation.START, "indirect left-recursion detected in rule chain " + chain + "; not supported in 0.2.9").result();
+
+            return new ParseError.SemanticError(SourceLocation.START,
+                                                "indirect left-recursion detected in rule chain " + chain
+                                               + "; not supported in 0.2.9").result();
         }
+
         return Result.success(candidate);
     }
 
@@ -262,18 +275,8 @@ public record Grammar(
             case Expression.Reference ref -> ruleNames.contains(ref.ruleName())
                                              ? Option.none()
                                              : Option.some(ref);
-            case Expression.Sequence seq -> seq.elements()
-                                               .stream()
-                                               .map(e -> findUndefinedReference(e, ruleNames))
-                                               .filter(Option::isPresent)
-                                               .findFirst()
-                                               .orElse(Option.none());
-            case Expression.Choice choice -> choice.alternatives()
-                                                   .stream()
-                                                   .map(e -> findUndefinedReference(e, ruleNames))
-                                                   .filter(Option::isPresent)
-                                                   .findFirst()
-                                                   .orElse(Option.none());
+            case Expression.Sequence seq -> seq.elements().stream().map(e -> findUndefinedReference(e, ruleNames)).filter(Option::isPresent).findFirst().orElse(Option.none());
+            case Expression.Choice choice -> choice.alternatives().stream().map(e -> findUndefinedReference(e, ruleNames)).filter(Option::isPresent).findFirst().orElse(Option.none());
             case Expression.ZeroOrMore zom -> findUndefinedReference(zom.expression(), ruleNames);
             case Expression.OneOrMore oom -> findUndefinedReference(oom.expression(), ruleNames);
             case Expression.Optional opt -> findUndefinedReference(opt.expression(), ruleNames);

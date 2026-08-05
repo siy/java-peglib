@@ -19,7 +19,7 @@ For the rationale behind every decision listed here, see [`ARCHITECTURE-0.6.0.md
 | Error recovery | `RecoveryStrategy` enum (NONE/BASIC/ADVANCED), `ErrorReporting` enum at gen-time | One always-on panic-mode mechanism; diagnostics always present |
 | Configuration | `ParserConfig` record (~17 fields) | Grammar directives + single optional `maxDiagnostics` parameter |
 | Incremental engine | `IncrementalSession` + stable `long` IDs + `LongLongMap` + `Cursor` | `IncrementalParser` thin wrapper; token index serves as identity |
-| Entry point | `org.pragmatica.peg.PegParser` | `org.pragmatica.peg.v6.PegParser` (during 0.6.0 development; the `.v6` suffix will collapse to `org.pragmatica.peg` at GA) |
+| Entry point | `org.pragmatica.peg.PegParser` | `org.pragmatica.peg.PegParser` (during 0.6.0 development; the `.v6` suffix will collapse to `org.pragmatica.peg` at GA) |
 | Result type | `Result<CstNode>`, `Result<AstNode>`, `Result<Object>`, `ParseResultWithDiagnostics` | Single `ParseResult(CstArray cst, List<Diagnostic> diagnostics)` |
 
 ---
@@ -45,14 +45,14 @@ The 0.5.x `Builder` knobs (`packrat`, `recovery`, `trivia`, `triviaPostPass`) ar
 
 Removed entirely:
 - `PegEngine` (the interpreter; ~1900 LOC)
-- `Parser` interface — replaced by the concrete `org.pragmatica.peg.v6.Parser` class returned by `PegParser.fromGrammar`
+- `Parser` interface — replaced by the concrete `org.pragmatica.peg.Parser` class returned by `PegParser.fromGrammar`
 - `ParserConfig` record and all 17 fields (packratEnabled, recoveryStrategy, captureTrivia, fastTrackFailure, literalFailureCache, charClassFailureCache, bulkAdvanceLiteral, skipWhitespaceFastPath, reuseEndLocation, choiceDispatch, markResetChildren, inlineLocations, selectivePackrat, packratSkipRules, mutableParseResult, tokenFastPath, triviaPostPass)
 - `ParsingContext` (mutable parsing state with packrat cache)
 - `ParseResult` sealed types (`Success`, `Failure`, `CutFailure`, `PredicateSuccess`, `Ignored`)
 - `ParseResultWithDiagnostics`
 - `ParseMode` (standard / withActions / noWhitespace)
 
-New: `org.pragmatica.peg.v6.cst.ParseResult` is a record with two components — `CstArray cst` and `List<Diagnostic> diagnostics`. There is no per-call configuration record; `Parser.parse(String)` and `Parser.parse(String, int maxDiagnostics)` are the only two methods. `maxDiagnostics` is currently a stub (Phase F).
+New: `org.pragmatica.peg.cst.ParseResult` is a record with two components — `CstArray cst` and `List<Diagnostic> diagnostics`. There is no per-call configuration record; `Parser.parse(String)` and `Parser.parse(String, int maxDiagnostics)` are the only two methods. `maxDiagnostics` is currently a stub (Phase F).
 
 ### `org.pragmatica.peg.action`
 
@@ -65,7 +65,7 @@ Removed entirely:
 
 There is no replacement at the action layer. CST → domain transformation is now a separate concern, performed by user code via the per-grammar generated `GVisitor<T>` stub. See "Pattern: Action-based semantic transform" below.
 
-### `org.pragmatica.peg.tree`
+### `org.pragmatica.peg.source`
 
 Removed:
 - `AstNode` sealed interface and all variants (`Literal`, `Identifier`, `BinaryOp`, etc.)
@@ -76,7 +76,7 @@ Removed:
 - `IdGenerator` and `PerSessionCounter`
 - `SourceLocation`, `SourceSpan` records
 
-New: `org.pragmatica.peg.v6.cst`:
+New: `org.pragmatica.peg.cst`:
 - `CstArray` — flat `int[]` data structure (8 ints per node, ~32 bytes)
 - `CstNode` sealed interface with `Branch`, `Leaf`, `Error` view variants. Views carry only `(int index, CstArray array)` and delegate every accessor to the array.
 - `ParseResult` record
@@ -91,7 +91,7 @@ Removed:
 - `ParseError` sealed interface
 - The 0.5.x `Diagnostic` record (with `severity`, `message`, `line`, `column`, `expected`, `found`, `helpText`)
 
-New: `org.pragmatica.peg.v6.diagnostic.Diagnostic` is a record with `(severity, offset, length, message, expected, found)`. The Rust-style formatter is preserved as `Diagnostic.formatRustStyle(filename, input)`. The `Severity` enum is `org.pragmatica.peg.v6.diagnostic.Severity`.
+New: `org.pragmatica.peg.diagnostic.Diagnostic` is a record with `(severity, offset, length, message, expected, found)`. The Rust-style formatter is preserved as `Diagnostic.formatRustStyle(filename, input)`. The `Severity` enum is `org.pragmatica.peg.diagnostic.Severity`.
 
 ### `org.pragmatica.peg.generator`
 
@@ -109,7 +109,7 @@ Removed:
 - `TreeSplicer`, `NodeIndex`, `LongLongMap`, `IdGenerator`, `SafePivotAnalyzer`
 - Stable `long id` field on `CstNode` records (no replacement; node index in the array IS the identity)
 
-New: `org.pragmatica.peg.v6.incremental.IncrementalParser` — single class, ~150 LOC, holds latest `(input, tokens, cst, diagnostics)` and exposes `edit(offset, oldLen, newText)`.
+New: `org.pragmatica.peg.incremental.IncrementalParser` — single class, ~150 LOC, holds latest `(input, tokens, cst, diagnostics)` and exposes `edit(offset, oldLen, newText)`.
 
 ---
 
@@ -120,7 +120,7 @@ New: `org.pragmatica.peg.v6.incremental.IncrementalParser` — single class, ~15
 Before (0.5.x):
 ```java
 import org.pragmatica.peg.PegParser;
-import org.pragmatica.peg.tree.CstNode;
+import org.pragmatica.peg.source.CstNode;
 import org.pragmatica.lang.Result;
 
 var parser = PegParser.fromGrammar("""
@@ -134,9 +134,9 @@ CstNode cst = result.unwrap();
 
 After (0.6.0):
 ```java
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.cst.ParseResult;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.ParseResult;
 
 var parser = PegParser.fromGrammar("""
     Number <- < [0-9]+ >
@@ -155,7 +155,7 @@ if (!result.isSuccess()) {
 
 Before (0.5.x):
 ```java
-import org.pragmatica.peg.tree.CstNode;
+import org.pragmatica.peg.source.CstNode;
 
 void walk(CstNode node) {
     switch (node) {
@@ -172,8 +172,8 @@ void walk(CstNode node) {
 
 After (0.6.0) — view-based pattern matching:
 ```java
-import org.pragmatica.peg.v6.cst.CstArray;
-import org.pragmatica.peg.v6.cst.CstNode;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.CstNode;
 
 void walk(CstArray cst, int idx) {
     switch (cst.viewAt(idx)) {
@@ -191,7 +191,7 @@ walk(cst, cst.rootIndex());
 
 After (0.6.0) — direct-array hot path:
 ```java
-import org.pragmatica.peg.v6.cst.CstArray;
+import org.pragmatica.peg.cst.CstArray;
 
 void walk(CstArray cst, int idx) {
     if (cst.isError(idx)) {
@@ -247,8 +247,8 @@ Object result = calculator.parse("3 + 5").unwrap();  // Integer 8
 
 After (0.6.0) — `{ ... }` action blocks are rejected at gen time. Transform the CST with a generated `GVisitor<T>` subclass:
 ```java
-import org.pragmatica.peg.v6.PegParser;
-import org.pragmatica.peg.v6.cst.CstArray;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.cst.CstArray;
 // generated per grammar at build time:
 import com.example.gen.GVisitor;
 
@@ -323,7 +323,7 @@ if (result.hasNode()) {
 
 After (0.6.0) — diagnostics are always present:
 ```java
-import org.pragmatica.peg.v6.PegParser;
+import org.pragmatica.peg.PegParser;
 
 var parser = PegParser.fromGrammar(grammar).unwrap();
 var result = parser.parse(input);
@@ -376,8 +376,8 @@ If you previously customised `ParserConfig.recoveryStrategy = RecoveryStrategy.A
 
 Before (0.5.x):
 ```java
-import org.pragmatica.peg.tree.CstNode;
-import org.pragmatica.peg.tree.Trivia;
+import org.pragmatica.peg.source.CstNode;
+import org.pragmatica.peg.source.Trivia;
 
 CstNode node = parser.parseCst("  42  ").unwrap();
 List<Trivia> leading = node.leadingTrivia();
@@ -427,7 +427,7 @@ EditOutcome outcome = session.edit(/* offset */ 8, /* oldLen */ 1, "42");
 
 After (0.6.0):
 ```java
-import org.pragmatica.peg.v6.incremental.IncrementalParser;
+import org.pragmatica.peg.incremental.IncrementalParser;
 
 var inc = new IncrementalParser(parser, "int x = 1;");
 ParseResult result = inc.edit(/* offset */ 8, /* oldLen */ 1, "42");
@@ -504,7 +504,7 @@ Rough rule of thumb: a 0.5.x consumer that only used CST output and never wrote 
 
 ## Known limitations in 0.6.0 (current state)
 
-The 0.6.0 entry-point package is `org.pragmatica.peg.v6` while implementation is in progress. The `.v6` suffix collapses to `org.pragmatica.peg` at GA; the rest of the API is final.
+The 0.6.0 entry-point package is `org.pragmatica.peg` while implementation is in progress. The `.v6` suffix collapses to `org.pragmatica.peg` at GA; the rest of the API is final.
 
 Functionality not yet wired:
 - **Cut operator (`^` / `↑`)** — parsed by the grammar parser but treated as a no-op by the parser generator. PEG ordered-choice semantics still apply; the cut hint is currently ignored. Tracked for Phase F.
@@ -539,25 +539,25 @@ What is fully wired today:
 
 | 0.5.x import | 0.6.0 import |
 |---|---|
-| `org.pragmatica.peg.PegParser` | `org.pragmatica.peg.v6.PegParser` |
-| `org.pragmatica.peg.parser.Parser` | `org.pragmatica.peg.v6.Parser` |
+| `org.pragmatica.peg.PegParser` | `org.pragmatica.peg.PegParser` |
+| `org.pragmatica.peg.parser.Parser` | `org.pragmatica.peg.Parser` |
 | `org.pragmatica.peg.parser.ParserConfig` | _(removed)_ |
-| `org.pragmatica.peg.parser.ParseResultWithDiagnostics` | `org.pragmatica.peg.v6.cst.ParseResult` |
-| `org.pragmatica.peg.tree.CstNode` | `org.pragmatica.peg.v6.cst.CstNode` (views over `CstArray`) |
-| `org.pragmatica.peg.tree.CstNode.Terminal` | `CstNode.Leaf` |
-| `org.pragmatica.peg.tree.CstNode.NonTerminal` | `CstNode.Branch` |
-| `org.pragmatica.peg.tree.CstNode.Token` | `CstNode.Leaf` (token boundary kept on the node's `firstToken`/`lastToken`) |
-| `org.pragmatica.peg.tree.CstNode.Error` | `CstNode.Error` |
-| `org.pragmatica.peg.tree.AstNode` | _(removed; use Visitor)_ |
-| `org.pragmatica.peg.tree.Trivia` | _(removed; trivia is in `TokenArray`)_ |
-| `org.pragmatica.peg.tree.StringSpan` | _(removed; `CstArray.textAt(i)` returns `CharSequence`)_ |
-| `org.pragmatica.peg.tree.SourceSpan` / `SourceLocation` | _(removed; `int` offsets via `spanStart` / `spanEnd`)_ |
+| `org.pragmatica.peg.parser.ParseResultWithDiagnostics` | `org.pragmatica.peg.cst.ParseResult` |
+| `org.pragmatica.peg.source.CstNode` | `org.pragmatica.peg.cst.CstNode` (views over `CstArray`) |
+| `org.pragmatica.peg.source.CstNode.Terminal` | `CstNode.Leaf` |
+| `org.pragmatica.peg.source.CstNode.NonTerminal` | `CstNode.Branch` |
+| `org.pragmatica.peg.source.CstNode.Token` | `CstNode.Leaf` (token boundary kept on the node's `firstToken`/`lastToken`) |
+| `org.pragmatica.peg.source.CstNode.Error` | `CstNode.Error` |
+| `org.pragmatica.peg.source.AstNode` | _(removed; use Visitor)_ |
+| `org.pragmatica.peg.source.Trivia` | _(removed; trivia is in `TokenArray`)_ |
+| `org.pragmatica.peg.source.StringSpan` | _(removed; `CstArray.textAt(i)` returns `CharSequence`)_ |
+| `org.pragmatica.peg.source.SourceSpan` / `SourceLocation` | _(removed; `int` offsets via `spanStart` / `spanEnd`)_ |
 | `org.pragmatica.peg.action.*` | _(removed; use generated `GVisitor<T>`)_ |
-| `org.pragmatica.peg.error.Diagnostic` | `org.pragmatica.peg.v6.diagnostic.Diagnostic` |
+| `org.pragmatica.peg.error.Diagnostic` | `org.pragmatica.peg.diagnostic.Diagnostic` |
 | `org.pragmatica.peg.error.RecoveryStrategy` | _(removed; recovery is always on)_ |
 | `org.pragmatica.peg.generator.ErrorReporting` | _(removed; diagnostics always available)_ |
 | `org.pragmatica.peg.generator.ParserGenerator` | _(internal; invoked via `PegParser.fromGrammar`)_ |
-| `org.pragmatica.peg.incremental.IncrementalSession` | `org.pragmatica.peg.v6.incremental.IncrementalParser` |
+| `org.pragmatica.peg.incremental.IncrementalSession` | `org.pragmatica.peg.incremental.IncrementalParser` |
 | `org.pragmatica.peg.incremental.Cursor` | _(removed; offsets only)_ |
 
 ---

@@ -1,5 +1,9 @@
 package org.pragmatica.peg.maven;
 
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.peg.analyzer.Analyzer;
@@ -7,16 +11,13 @@ import org.pragmatica.peg.analyzer.AnalyzerReport;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 
-import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
+
 
 /**
  * Run the grammar analyzer against a grammar file. Fails the build when any
@@ -37,48 +38,51 @@ public class LintMojo extends AbstractMojo {
      * translates Result.failure(cause) into MojoFailureException(cause.message()).
      */
     @Override
+    @SuppressWarnings({"JBCT-RET-01", "JBCT-EX-01"})  // Maven AbstractMojo contract: execute() is void and signals failure by throwing.
     public void execute() throws MojoExecutionException, MojoFailureException {
-        var report = runAnalyzer();
-        getLog()
-        .info(report.formatRustStyle(grammarFile.toString()));
+        var outcome = runAnalyzer();
+
+        if (outcome instanceof Result.Failure<?> failure) {
+            throw new MojoFailureException(failure.cause().message());
+        }
+
+        var report = outcome.unwrap();
+
+        getLog().info(report.formatRustStyle(grammarFile.toString()));
         if (report.hasErrors()) {
             throw new MojoFailureException("peglib:lint produced errors — see log above");
         }
+
         if (failOnWarning && report.hasWarnings()) {
             throw new MojoFailureException("peglib:lint produced warnings (failOnWarning=true)");
         }
     }
 
     /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setGrammarFile(File grammarFile) {
         this.grammarFile = grammarFile;
     }
 
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setFailOnWarning(boolean failOnWarning) {
         this.failOnWarning = failOnWarning;
     }
 
-    AnalyzerReport runAnalyzer() throws MojoExecutionException, MojoFailureException {
+    Result<AnalyzerReport> runAnalyzer() {
         if (grammarFile == null || !grammarFile.isFile()) {
-            throw new MojoFailureException("grammarFile does not exist: " + grammarFile);
+            return Causes.cause("grammarFile does not exist: " + grammarFile).result();
         }
         // 0.4.0 — Grammar.grammar(...) factory validates at construction; the
         // parse step (when there are no %imports) returns a validated Grammar
         // directly. Lint targets standalone grammar files, so we don't run the
         // resolver here.
-        var pipeline = readGrammar(grammarFile.toPath())
-                       .flatMap(LintMojo::parseGrammar)
-                       .map(Analyzer::analyze);
-        if (pipeline instanceof Result.Failure< ? > failure) {
-            throw new MojoFailureException(failure.cause()
-                                                  .message());
-        }
-        return pipeline.unwrap();
+        return readGrammar(grammarFile.toPath()).flatMap(LintMojo::parseGrammar)
+                          .map(Analyzer::analyze);
     }
 
     private static Result<Grammar> parseGrammar(String text) {
-        return GrammarParser.parse(text)
-                            .mapError(c -> Causes.cause("Grammar parse failed: " + c.message()));
+        return GrammarParser.parse(text).mapError(c -> Causes.cause("Grammar parse failed: " + c.message()));
     }
 
     private static Result<String> readGrammar(Path path) {

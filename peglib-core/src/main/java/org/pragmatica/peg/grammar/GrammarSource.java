@@ -1,13 +1,14 @@
 package org.pragmatica.peg.grammar;
 
-import org.pragmatica.lang.Option;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+
+import org.pragmatica.lang.Option;
+
 
 /**
  * 0.2.8 — Strategy for loading grammar text by name, used by
@@ -65,8 +66,8 @@ public interface GrammarSource {
      * Classpath source using the current thread's context classloader.
      */
     static GrammarSource classpath() {
-        var loader = Thread.currentThread()
-                           .getContextClassLoader();
+        var loader = Thread.currentThread().getContextClassLoader();
+
         return classpath(loader == null
                          ? GrammarSource.class.getClassLoader()
                          : loader);
@@ -101,6 +102,7 @@ public interface GrammarSource {
         @Override
         public Option<String> load(String grammarName) {
             var text = grammars.get(grammarName);
+
             return text == null
                    ? Option.none()
                    : Option.some(text);
@@ -120,10 +122,12 @@ public interface GrammarSource {
         @Override
         public Option<String> load(String grammarName) {
             var resourceName = grammarName + ".peg";
+
             try (var in = loader.getResourceAsStream(resourceName)) {
                 if (in == null) {
                     return Option.none();
                 }
+
                 return Option.some(new String(in.readAllBytes(), StandardCharsets.UTF_8));
             } catch (IOException e) {
                 return Option.none();
@@ -144,10 +148,12 @@ public interface GrammarSource {
         @Override
         public Option<String> load(String grammarName) {
             var file = directory.resolve(grammarName + ".peg");
+
             if (!Files.isRegularFile(file)) {
                 return Option.none();
             }
-            try{
+
+            try {
                 return Option.some(Files.readString(file, StandardCharsets.UTF_8));
             } catch (IOException e) {
                 return Option.none();
@@ -169,10 +175,12 @@ public interface GrammarSource {
         public Option<String> load(String grammarName) {
             for (var source : sources) {
                 var result = source.load(grammarName);
+
                 if (result.isPresent()) {
                     return result;
                 }
             }
+
             return Option.none();
         }
     }

@@ -1,9 +1,10 @@
 package org.pragmatica.peg.formatter.internal;
 
-import org.pragmatica.peg.formatter.Doc;
-
 import java.util.ArrayDeque;
 import java.util.Deque;
+
+import org.pragmatica.peg.formatter.Doc;
+
 
 /**
  * Wadler / Lindig "best" pretty-printer renderer.
@@ -36,79 +37,99 @@ public final class Renderer {
      * Render {@code doc} at the given {@code width}. The rendered string
      * never contains trailing whitespace on non-final lines beyond the
      * indentation explicitly emitted by the doc tree.
+     *
+     * <p>Total: a {@code null} doc renders to the empty string, and a
+     * non-positive width is clamped to 1 column. Callers reaching this method
+     * have already passed through {@code FormatterConfig} validation.
      */
     public static String render(Doc doc, int width) {
         if (doc == null) {
-            throw new IllegalArgumentException("doc must not be null");
+            return "";
         }
-        if (width <= 0) {
-            throw new IllegalArgumentException("width must be > 0");
-        }
+
+        var effectiveWidth = Math.max(1, width);
         var sb = new StringBuilder();
         var stack = new ArrayDeque<Frame>();
+
         stack.push(new Frame(0, Mode.BREAK, doc));
         int column = 0;
+
         while (!stack.isEmpty()) {
             var frame = stack.pop();
-            column = step(frame, stack, sb, width, column);
+
+            column = step(frame, stack, sb, effectiveWidth, column);
         }
+
         return sb.toString();
     }
 
     private static int step(Frame frame, Deque<Frame> stack, StringBuilder sb, int width, int column) {
         var doc = frame.doc();
+
         switch (doc) {
             case Doc.Empty ignored -> {
                 return column;
             }
             case Doc.Text text -> {
                 sb.append(text.value());
+
                 return column + text.value()
-                                   .length();
+                                    .length();
             }
             case Doc.Line ignored -> {
                 if (frame.mode() == Mode.FLAT) {
                     sb.append(' ');
+
                     return column + 1;
                 }
+
                 sb.append('\n');
                 appendSpaces(sb, frame.indent());
+
                 return frame.indent();
             }
             case Doc.Softline ignored -> {
                 if (frame.mode() == Mode.FLAT) {
                     return column;
                 }
+
                 sb.append('\n');
                 appendSpaces(sb, frame.indent());
+
                 return frame.indent();
             }
             case Doc.HardLine ignored -> {
                 sb.append('\n');
                 appendSpaces(sb, frame.indent());
+
                 return frame.indent();
             }
             case Doc.Concat concat -> {
                 stack.push(new Frame(frame.indent(), frame.mode(), concat.right()));
                 stack.push(new Frame(frame.indent(), frame.mode(), concat.left()));
+
                 return column;
             }
             case Doc.Indent indent -> {
                 stack.push(new Frame(frame.indent() + indent.amount(),
                                      frame.mode(),
                                      indent.inner()));
+
                 return column;
             }
             case Doc.Group group -> {
                 Mode mode;
+
                 if (containsHardLine(group.inner())) {
                     mode = Mode.BREAK;
-                }else {
+                } else {
                     mode = fits(group.inner(), frame.indent(), width - column, stack)
                            ? Mode.FLAT
                            : Mode.BREAK;
                 }
+
                 stack.push(new Frame(frame.indent(), mode, group.inner()));
+
                 return column;
             }
         }
@@ -131,7 +152,7 @@ public final class Renderer {
     }
 
     private static void appendSpaces(StringBuilder sb, int count) {
-        for (int i = 0; i < count; i++ ) {
+        for (int i = 0; i < count; i++) {
             sb.append(' ');
         }
     }
@@ -148,24 +169,28 @@ public final class Renderer {
         if (remaining < 0) {
             return false;
         }
+
         var probe = new ArrayDeque<Frame>();
+
         probe.push(new Frame(indent, Mode.FLAT, inner));
         var surroundingIter = surrounding.iterator();
         int budget = remaining;
+
         while (true) {
             Frame f;
+
             if (!probe.isEmpty()) {
                 f = probe.pop();
-            }else if (surroundingIter.hasNext()) {
+            } else if (surroundingIter.hasNext()) {
                 f = surroundingIter.next();
-            }else {
+            } else {
                 return true;
             }
+
             switch (f.doc()) {
                 case Doc.Empty ignored -> {}
                 case Doc.Text text -> {
-                    budget -= text.value()
-                                  .length();
+                    budget -= text.value().length();
                     if (budget < 0) {
                         return false;
                     }
@@ -176,7 +201,7 @@ public final class Renderer {
                         if (budget < 0) {
                             return false;
                         }
-                    }else {
+                    } else {
                         return true;
                     }
                 }

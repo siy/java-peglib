@@ -1,6 +1,86 @@
 # peglib — Handover
 
-**Last updated:** 2026-06-07 — 0.6.3 SHIPPED to Maven Central
+**Last updated:** 2026-08-04 — 0.7.0 feature-complete on `release-0.7.0` (not shipped)
+
+---
+
+## Session 9 — 0.7.0 (2026-08-01 → 08-04) — FEATURE COMPLETE, NOT SHIPPED
+
+### State at a glance
+
+| | |
+|---|---|
+| **Branch** | `release-0.7.0`, 19 commits ahead of `main`. **Not merged, not tagged, not pushed.** |
+| **Build** | `mvn install` — **no `-Djbct.skip=true`** — BUILD SUCCESS |
+| **Tests** | **528 across 5 modules**, 0 failures, 0 errors, 0 skips |
+| **JBCT** | **0 hard errors**, 0 unformatted files, ~709 warnings (not gated) |
+| **Reactor** | 5 modules — `peglib-incremental` was deleted |
+| **Working tree** | clean |
+
+### What landed
+
+1. **The 0.5.x legacy path is gone.** 146 files, ~38,900 lines: the `PegEngine` interpreter,
+   `action`, 0.5.x `generator`, recursive `tree`, the whole `peglib-incremental` module, and
+   `GenerateMojo`. Shared infrastructure survived: `peg.grammar`, `LeftRecursionAnalysis`,
+   `ParseError`, the span types, and the `Doc`/`Docs`/`Renderer` algebra.
+2. **`org.pragmatica.peg.v6.*` collapsed into `org.pragmatica.peg.*`**, `V6`-prefixed class
+   names lost the marker, `peg.tree` → `peg.source`, and the mojo goal `generate-v6` → `generate`.
+3. **JBCT plugin and `pragmatica-lite:core` both to 1.0.0-rc2**, plugin moved to the parent pom,
+   `skip=false`, all five modules linted. **The core bump broke nothing** — 528 tests passed
+   unchanged across a major version jump.
+4. **All 105 JBCT hard errors resolved.** Refactored where possible; suppressed only where a
+   platform contract forbids the alternative (Maven `AbstractMojo`, `main`, `HttpHandler`,
+   `Result.lift` adapter bodies), each with a written reason.
+5. **`JsonDecoder` deleted in favour of `org.pragmatica-lite:jackson`** — 274 lines removed.
+6. **JEP 401 value classes**, plus `outer.new`, annotated type params, hex floats.
+7. **CST-shape sanity gate** added to `Java25ParserGateTest`.
+8. **JEP 512 compact source files** — `void main() { }` with no enclosing class now parses.
+   `TypeDecl` stays the first alternative of `OrdinaryUnit`, verified by corpus node counts
+   being byte-identical before and after (884/1040/1904/586/605/833/135/447).
+
+9. **JBCT warning policy decided and encoded.** Hot path (`peglib-runtime` + `LexerEngine`)
+   carries class-level `@SuppressWarnings({"JBCT-PAT-01", "JBCT-UTIL-02"})` with the reasoning
+   inline; policy written up in CLAUDE.md. 694 → 657 warnings, none gating the build.
+
+`ModernJavaSyntaxProbe` now reports **19/19**; no known grammar gaps remain.
+
+### Where to pick up — ordered
+
+1. **Ship 0.7.0.** Branch is pushed; **PR #38 is open and CI-green** (CI enforced JBCT lint for
+   the first time — it previously never ran, because `skip` was hardcoded true in
+   `peglib-core/pom.xml`). Remaining: merge, tag, deploy. Note CodeRabbit skipped its review
+   (293 files > its 100-file limit), so there is no automated second opinion on this diff.
+
+2. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
+   deferred: it has zero lint errors and its output shape is what `playground.js` renders, so
+   swapping it risks the SPA wire format for no lint benefit.
+
+### Things worth not re-learning
+
+- **A contextual keyword needing lookahead cannot live in a named rule.** `RuleClassifier` types
+  any rule whose body references only lexer rules as LEXER, and lexer rules may not reference
+  other rules — `fromGrammar` rejects it with `SkippedRuleReferenced`. Two attempts
+  (`DeclModifier`, then `ValueMod`) both failed before the lookahead was spelled inline inside
+  the PARSER rules. The 0.6.2 guard did its job: loud failure, not a silent dead token kind.
+- **`value` is the highest-risk contextual keyword yet** — far more common as an ordinary
+  identifier than `record` or `sealed`. It is confined to declaration-modifier position for
+  exactly that reason; `LocalVar` / `Param` / `Catch` / `Resource` keep plain `Modifier*`.
+- **The JMH benchmarks resolve the grammar relative to CWD** and must be run from `peglib-core/`.
+  From the repo root every iteration fails with `NoSuchFileException` and JMH still reports a
+  clean-looking empty result table.
+- **`IncrementalEditBenchmark` on `selfhost` cannot resolve differences below ~15%** on this
+  machine. An unchanged jar measured 20944 µs and 23254 µs on consecutive runs. Do not read a
+  single-run delta there as a regression — re-run before believing it.
+- **The 0.5.x A/B benchmarks were deleted with the legacy path.** The historical "11-12× faster
+  than 0.5.x-gen" figure is no longer reproducible in-tree. Treat it as dated, not live.
+- **Most JBCT warnings are cold-path, not hot-path.** `DfaBuilder` (127) and `ParserGenerator`
+  (113) dominate the count but run once per grammar at `fromGrammar` time — they never touch a
+  warm parse. Only `peglib-runtime` + `LexerEngine` are per-token/per-node. Do not conflate
+  "most warnings" with "performance critical".
+- **The keep-set during a large delete is easy to over-scope.** `grammar/analysis/` was kept
+  whole; only `LeftRecursionAnalysis` was live. `ExpressionShape` and `FirstCharAnalysis` (264
+  LOC) survived a full session and were removed later — after one of them had been pointlessly
+  refactored. Verify liveness per file, not per package.
 
 ---
 
@@ -137,7 +217,7 @@ Skips moved 4 → 2 (remaining: `LexerGeneratorTest` parity 1, `TriviaAdversaria
 1. **JBCT plugin bumped** 0.4.1 → 0.25.0 (fixed parser crash on `DfaBuilder.java`)
 2. **v6 JBCT-0.25.0 conformance refactor**: 123 lint errors → 0 (throws → `Result`, nulls → `Option`, `Result<Void>` → `Result<Unit>`, hot-path void mutators retained with `@SuppressWarnings("JBCT-RET-01")`)
 3. **peglib-runtime module extracted** (25KB jar): standalone-parser invariant met. Generated parsers depend ONLY on peglib-runtime + pragmatica-lite:core.
-4. **V6Formatter corpus validation**: 20/20 round-trip; found and fixed 2 real bugs (multi-line leaf text crashed `Doc.Text`; inline-literal tokens dropped by `Docs.concat`)
+4. **Formatter corpus validation**: 20/20 round-trip; found and fixed 2 real bugs (multi-line leaf text crashed `Doc.Text`; inline-literal tokens dropped by `Docs.concat`)
 5. **Bounded-scan truncate** (CstArrayBuilder): 24-48× hot-path speedup
 6. **DFA Unicode support**: non-ASCII chars in comments/strings/identifiers now work
 7. **Asymmetric delimited blocks**: `'/*' (!'*/' .)* '*/'` inside Choice now routes through `compileDelimitedBlock`
@@ -235,7 +315,7 @@ Phase A-F per spec §7 — all implemented or documented as known limitations:
 1. **Bounded-scan truncate** (CstArrayBuilder): 24-48× speedup on the hot path — eliminated the 75% CPU dominant cost
 2. **JBCT 0.25.0 v6 conformance**: 0 lint errors after refactor (throws → Result, nulls → Option, void mutators @SuppressWarnings)
 3. **peglib-runtime module**: standalone-parser invariant met; 25KB jar
-4. **V6Formatter corpus validation**: 20/20 round-trip; 2 bugs found and fixed
+4. **Formatter corpus validation**: 20/20 round-trip; 2 bugs found and fixed
 5. **DFA Unicode handling**: non-ASCII chars in comments/strings now work
 6. **Asymmetric delimited blocks**: block comments inside Choice now route through compileDelimitedBlock
 7. **Identifier fallback**: contextual keywords (open/module/record/yield) accepted as identifiers
@@ -282,7 +362,7 @@ See §11 below for the 9-decision summary. See `docs/ARCHITECTURE-0.6.0.md` for 
 | | |
 |---|---|
 | **Active branch** | `release-0.6.0` (NOT yet committed beyond `c60a610`; all v6 work in untracked files) |
-| **Working tree** | All v6 code in NEW files under `peglib-core/src/{main,test}/java/org/pragmatica/peg/v6/**`; **0.5.x untouched** (parallel-package strategy succeeded) |
+| **Working tree** | All v6 code in NEW files under `peglib-core/src/{main,test}/java/org/pragmatica/peg/**`; **0.5.x untouched** (parallel-package strategy succeeded) |
 | **Test count** | peglib-core: **1019 + 1 skip, all green** (up from 805 baseline; +214 new in v6 packages) |
 | **Java25 corpus** | **12/20 fixtures parse cleanly**; 8 still recover with diagnostics (grammar/parser quality issues — see §3) |
 | **Cold compile** | 261-919ms (under spec target 600ms when JVM warm) |
@@ -321,7 +401,7 @@ See §11 below for the 9-decision summary. See `docs/ARCHITECTURE-0.6.0.md` for 
 ### Code surface added
 
 ```
-peglib-core/src/main/java/org/pragmatica/peg/v6/
+peglib-core/src/main/java/org/pragmatica/peg/
 ├── PegParser.java                          (entry point + cache)
 ├── Parser.java                             (facade)
 ├── token/
@@ -351,7 +431,7 @@ peglib-core/src/main/java/org/pragmatica/peg/v6/
     └── IncrementalParser.java              (simple-first wrapper)
 ```
 
-Tests in `peglib-core/src/test/java/org/pragmatica/peg/v6/**` (29 test classes, 214 tests).
+Tests in `peglib-core/src/test/java/org/pragmatica/peg/**` (29 test classes, 214 tests).
 
 ---
 
@@ -442,7 +522,7 @@ Don't run until at least 18/20 fixtures parse cleanly.
 
 ## 5. Files NOT to commit until reviewed
 
-- All v6 packages (`org.pragmatica.peg.v6.*` and tests) — large surface area; want spec-compliance review first
+- All v6 packages (`org.pragmatica.peg.*` and tests) — large surface area; want spec-compliance review first
 - `peglib-core/src/test/resources/java25.peg` was NOT modified in Session 2
 - No 0.5.x source files modified
 
@@ -491,7 +571,7 @@ This handover is the entry point for the next session. It is self-contained: rea
 Cumulative across the post-Move-B + trivia-rework + StringSpan + Cleanup A-G arcs:
 
 - **Trivia rework:** `triviaPostPass=true` is the new default. Context-independent attribution by post-pass. Long-standing trivia bugs (5 historical + Step 4 era) closed.
-- **StringSpan:** new public type `org.pragmatica.peg.tree.StringSpan` for lazy substring materialization. CstNode.Terminal/Token internals migrated to `StringSpan textSpan`; `.text(): String` accessor preserved via lazy materialization.
+- **StringSpan:** new public type `org.pragmatica.peg.source.StringSpan` for lazy substring materialization. CstNode.Terminal/Token internals migrated to `StringSpan textSpan`; `.text(): String` accessor preserved via lazy materialization.
 - **Perf:** selfhost (37k LOC) -5% under legacy buffer-driven path (the perf-critical workload is faster). Reference (1900 LOC) +30% over legacy (intrinsic post-pass overhead; bounded; no real workload affected).
 - **Lever B for incremental engine:** trivia-context-loss blocker resolved. Fallback-rule-bypass blocker remains separately scoped.
 
@@ -586,7 +666,7 @@ Per spec §7, Phase A is the lexer foundation. ~1 week. Critical-path: every sub
 
 The 0.6.0 implementation is a clean-slate rebuild that doesn't need to live in `peglib-core` at first. Suggestion:
 
-- Create a NEW package `org.pragmatica.peg.v6.*` (or similar) inside `peglib-core` for the 0.6.0 code
+- Create a NEW package `org.pragmatica.peg.*` (or similar) inside `peglib-core` for the 0.6.0 code
 - Existing 0.5.x packages (`org.pragmatica.peg.parser.*`, `org.pragmatica.peg.action.*`, etc.) stay UNTOUCHED until late in the cycle
 - This means tests of both old and new can coexist; bench can compare directly; rollback is trivial if something goes wrong
 - Late-cycle (Phase F): delete old packages once 0.6.0 is fully validated
@@ -757,7 +837,7 @@ peglib/
 └── peglib-playground/               (REPL + HTTP UI)
 ```
 
-For 0.6.0 work, the proposal in §3.4 is to add a NEW package `org.pragmatica.peg.v6.*` inside `peglib-core` rather than rewriting in place. This lets old and new coexist during the cycle.
+For 0.6.0 work, the proposal in §3.4 is to add a NEW package `org.pragmatica.peg.*` inside `peglib-core` rather than rewriting in place. This lets old and new coexist during the cycle.
 
 ---
 

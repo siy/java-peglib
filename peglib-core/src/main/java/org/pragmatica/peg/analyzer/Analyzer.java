@@ -1,9 +1,5 @@
 package org.pragmatica.peg.analyzer;
 
-import org.pragmatica.peg.grammar.Expression;
-import org.pragmatica.peg.grammar.Grammar;
-import org.pragmatica.peg.grammar.Rule;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -12,6 +8,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.pragmatica.lang.Option;
+import org.pragmatica.peg.grammar.Expression;
+import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.grammar.Rule;
+
 
 /**
  * Static analyzer for PEG grammars. Runs a fixed battery of checks and
@@ -54,6 +56,7 @@ public final class Analyzer {
 
     private AnalyzerReport run() {
         var findings = new ArrayList<Finding>();
+
         findings.addAll(checkUnreachableRules());
         findings.addAll(checkAmbiguousChoices());
         findings.addAll(checkNullableRules());
@@ -62,32 +65,38 @@ public final class Analyzer {
         findings.addAll(checkBackReferences());
         // Stable sort: by rule name, then tag, then severity. Ensures deterministic output.
         findings.sort(Comparator.<Finding, String> comparing(Finding::ruleName)
-                      .thenComparing(Finding::tag)
-                      .thenComparing(f -> f.severity()
-                                           .name()));
+                                .thenComparing(Finding::tag)
+                                .thenComparing(f -> f.severity()
+                                                     .name()));
+
         return new AnalyzerReport(List.copyOf(findings));
     }
 
     // === Check 1: Unreachable rules ===
     private List<Finding> checkUnreachableRules() {
         var start = grammar.effectiveStartRule();
+
         if (start.isEmpty()) {
             return List.of();
         }
+
         var reachable = new HashSet<String>();
         var ruleMap = grammar.ruleMap();
-        String startName = start.unwrap()
-                                .name();
+        String startName = start.unwrap().name();
+
         collectReferences(startName, ruleMap, reachable);
         var findings = new ArrayList<Finding>();
+
         for (var rule : grammar.rules()) {
             if (!reachable.contains(rule.name())) {
-                findings.add(Finding.warning(
-                "grammar.unreachable-rule",
-                rule.name(),
-                "rule '" + rule.name() + "' is unreachable from start rule '" + startName + "'"));
+                findings.add(Finding.warning("grammar.unreachable-rule",
+                                             rule.name(),
+                                             "rule '" + rule.name()
+                                            + "' is unreachable from start rule '" + startName
+                                            + "'"));
             }
         }
+
         return findings;
     }
 
@@ -95,10 +104,13 @@ public final class Analyzer {
         if (!visited.add(ruleName)) {
             return;
         }
+
         var rule = ruleMap.get(ruleName);
+
         if (rule == null) {
             return;
         }
+
         for (var ref : collectReferences(rule.expression())) {
             collectReferences(ref, ruleMap, visited);
         }
@@ -106,17 +118,17 @@ public final class Analyzer {
 
     private static Set<String> collectReferences(Expression expr) {
         var refs = new LinkedHashSet<String>();
+
         gatherReferences(expr, refs);
+
         return refs;
     }
 
     private static void gatherReferences(Expression expr, Set<String> out) {
         switch (expr) {
             case Expression.Reference ref -> out.add(ref.ruleName());
-            case Expression.Sequence seq -> seq.elements()
-                                               .forEach(e -> gatherReferences(e, out));
-            case Expression.Choice ch -> ch.alternatives()
-                                           .forEach(e -> gatherReferences(e, out));
+            case Expression.Sequence seq -> seq.elements().forEach(e -> gatherReferences(e, out));
+            case Expression.Choice ch -> ch.alternatives().forEach(e -> gatherReferences(e, out));
             case Expression.ZeroOrMore zom -> gatherReferences(zom.expression(), out);
             case Expression.OneOrMore oom -> gatherReferences(oom.expression(), out);
             case Expression.Optional opt -> gatherReferences(opt.expression(), out);
@@ -128,17 +140,18 @@ public final class Analyzer {
             case Expression.Capture cap -> gatherReferences(cap.expression(), out);
             case Expression.CaptureScope cs -> gatherReferences(cs.expression(), out);
             case Expression.Group grp -> gatherReferences(grp.expression(), out);
-            case Expression.Literal _, Expression.CharClass _, Expression.Any _,
-            Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {}
+            case Expression.Literal _, Expression.CharClass _, Expression.Any _, Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {}
         }
     }
 
     // === Check 2: Ambiguous choices (first-char overlap with literal prefixes) ===
     private List<Finding> checkAmbiguousChoices() {
         var findings = new ArrayList<Finding>();
+
         for (var rule : grammar.rules()) {
             gatherAmbiguousChoices(rule, rule.expression(), findings);
         }
+
         return findings;
     }
 
@@ -148,10 +161,8 @@ public final class Analyzer {
         }
         // Recurse into children
         switch (expr) {
-            case Expression.Sequence seq -> seq.elements()
-                                               .forEach(e -> gatherAmbiguousChoices(rule, e, findings));
-            case Expression.Choice ch -> ch.alternatives()
-                                           .forEach(e -> gatherAmbiguousChoices(rule, e, findings));
+            case Expression.Sequence seq -> seq.elements().forEach(e -> gatherAmbiguousChoices(rule, e, findings));
+            case Expression.Choice ch -> ch.alternatives().forEach(e -> gatherAmbiguousChoices(rule, e, findings));
             case Expression.ZeroOrMore zom -> gatherAmbiguousChoices(rule, zom.expression(), findings);
             case Expression.OneOrMore oom -> gatherAmbiguousChoices(rule, oom.expression(), findings);
             case Expression.Optional opt -> gatherAmbiguousChoices(rule, opt.expression(), findings);
@@ -173,63 +184,68 @@ public final class Analyzer {
         // alternatives share the same dispatch char. This avoids false positives on
         // char-class / rule-ref-prefixed alternatives where overlap may be resolved downstream.
         var alternatives = choice.alternatives();
+
         if (alternatives.size() < 2) {
             return;
         }
+
         var firstChars = new ArrayList<Character>(alternatives.size());
+
         for (var alt : alternatives) {
             var ch = literalFirstChar(alt);
-            if (ch == null) {
+
+            if (ch.isEmpty()) {
                 return;
             }
-            firstChars.add(ch);
+
+            ch.onPresent(firstChars::add);
         }
+
         var byChar = new HashMap<Character, List<Integer>>();
-        for (int i = 0; i < firstChars.size(); i++ ) {
-            byChar.computeIfAbsent(firstChars.get(i),
-                                   k -> new ArrayList<>())
-                  .add(i);
+
+        for (int i = 0; i < firstChars.size(); i++) {
+            byChar.computeIfAbsent(firstChars.get(i), k -> new ArrayList<>()).add(i);
         }
+
         for (var bucket : byChar.entrySet()) {
-            if (bucket.getValue()
-                      .size() >= 2) {
-                findings.add(Finding.warning(
-                "grammar.ambiguous-choice",
-                rule.name(),
-                "choice alternatives at positions " + bucket.getValue() + " share first char '" + bucket.getKey()
-                + "' (potential ambiguity)"));
+            if (bucket.getValue().size() >= 2) {
+                findings.add(Finding.warning("grammar.ambiguous-choice",
+                                             rule.name(),
+                                             "choice alternatives at positions " + bucket.getValue()
+                                            + " share first char '" + bucket.getKey()
+                                            + "' (potential ambiguity)"));
             }
         }
     }
 
     /**
-     * Walk transparent wrappers to the first literal prefix character. Returns null
-     * if any alternative is not literal-prefixed. Mirrors ChoiceDispatchAnalyzer logic.
+     * Walk transparent wrappers to the first literal prefix character. Empty
+     * if the expression is not literal-prefixed. Mirrors ChoiceDispatchAnalyzer logic.
      */
-    private static Character literalFirstChar(Expression expr) {
+    private static Option<Character> literalFirstChar(Expression expr) {
         return switch (expr) {
-            case Expression.Literal lit -> lit.text()
-                                              .isEmpty()
-                                           ? null
-                                           : lit.text()
-                                                .charAt(0);
+            case Expression.Literal lit -> lit.text().isEmpty()
+                                           ? Option.none()
+                                           : Option.some(lit.text().charAt(0));
             case Expression.Sequence seq -> firstLiteralOfSequence(seq);
             case Expression.Group grp -> literalFirstChar(grp.expression());
             case Expression.TokenBoundary tb -> literalFirstChar(tb.expression());
             case Expression.Ignore ig -> literalFirstChar(ig.expression());
             case Expression.Capture cap -> literalFirstChar(cap.expression());
-            default -> null;
+            default -> Option.none();
         };
     }
 
-    private static Character firstLiteralOfSequence(Expression.Sequence seq) {
+    private static Option<Character> firstLiteralOfSequence(Expression.Sequence seq) {
         for (var el : seq.elements()) {
             if (el instanceof Expression.And || el instanceof Expression.Not) {
                 continue;
             }
+
             return literalFirstChar(el);
         }
-        return null;
+
+        return Option.none();
     }
 
     // === Check 3: Nullable rules ===
@@ -237,6 +253,7 @@ public final class Analyzer {
         var nullable = computeNullableFixedPoint();
         var leftRecursive = computeDirectLeftRecursiveRules();
         var findings = new ArrayList<Finding>();
+
         for (var rule : grammar.rules()) {
             if (Boolean.TRUE.equals(nullable.get(rule.name()))) {
                 var severity = leftRecursive.contains(rule.name())
@@ -245,41 +262,46 @@ public final class Analyzer {
                 var suffix = leftRecursive.contains(rule.name())
                              ? " (left-recursive path — risk of infinite loop)"
                              : "";
-                findings.add(new Finding(
-                severity,
-                "grammar.nullable-rule",
-                rule.name(),
-                "rule '" + rule.name() + "' can match the empty string" + suffix));
+
+                findings.add(new Finding(severity,
+                                         "grammar.nullable-rule",
+                                         rule.name(),
+                                         "rule '" + rule.name() + "' can match the empty string" + suffix));
             }
         }
+
         return findings;
     }
 
     private Map<String, Boolean> computeNullableFixedPoint() {
         var nullable = new HashMap<String, Boolean>();
+
         for (var rule : grammar.rules()) {
             nullable.put(rule.name(), false);
         }
+
         boolean changed = true;
+
         while (changed) {
             changed = false;
             for (var rule : grammar.rules()) {
                 if (Boolean.TRUE.equals(nullable.get(rule.name()))) {
                     continue;
                 }
+
                 if (isNullable(rule.expression(), nullable)) {
                     nullable.put(rule.name(), true);
                     changed = true;
                 }
             }
         }
+
         return nullable;
     }
 
     private static boolean isNullable(Expression expr, Map<String, Boolean> nullable) {
         return switch (expr) {
-            case Expression.Literal lit -> lit.text()
-                                              .isEmpty();
+            case Expression.Literal lit -> lit.text().isEmpty();
             case Expression.CharClass _ -> false;
             case Expression.Any _ -> false;
             case Expression.Reference ref -> Boolean.TRUE.equals(nullable.get(ref.ruleName()));
@@ -308,6 +330,7 @@ public final class Analyzer {
                 return false;
             }
         }
+
         return true;
     }
 
@@ -317,16 +340,19 @@ public final class Analyzer {
                 return true;
             }
         }
+
         return false;
     }
 
     private Set<String> computeDirectLeftRecursiveRules() {
         var result = new HashSet<String>();
+
         for (var rule : grammar.rules()) {
             if (isDirectLeftRecursive(rule)) {
                 result.add(rule.name());
             }
         }
+
         return result;
     }
 
@@ -337,15 +363,16 @@ public final class Analyzer {
     private boolean firstExpressionCanReference(Expression expr, String target, Set<String> visiting) {
         return switch (expr) {
             case Expression.Reference ref -> {
-                if (ref.ruleName()
-                       .equals(target)) {
+                if (ref.ruleName().equals(target)) {
                     yield true;
                 }
+
                 if (!visiting.add(ref.ruleName())) {
                     yield false;
                 }
-                var referenced = grammar.ruleMap()
-                                        .get(ref.ruleName());
+
+                var referenced = grammar.ruleMap().get(ref.ruleName());
+
                 yield referenced != null && firstExpressionCanReference(referenced.expression(), target, visiting);
             }
             case Expression.Sequence seq -> {
@@ -353,8 +380,10 @@ public final class Analyzer {
                     if (el instanceof Expression.And || el instanceof Expression.Not) {
                         continue;
                     }
+
                     yield firstExpressionCanReference(el, target, visiting);
                 }
+
                 yield false;
             }
             case Expression.Choice ch -> {
@@ -363,6 +392,7 @@ public final class Analyzer {
                         yield true;
                     }
                 }
+
                 yield false;
             }
             case Expression.Group grp -> firstExpressionCanReference(grp.expression(), target, visiting);
@@ -377,9 +407,11 @@ public final class Analyzer {
     // === Check 4: Duplicate literals across alternatives ===
     private List<Finding> checkDuplicateLiterals() {
         var findings = new ArrayList<Finding>();
+
         for (var rule : grammar.rules()) {
             gatherDuplicateLiterals(rule, rule.expression(), findings);
         }
+
         return findings;
     }
 
@@ -387,34 +419,33 @@ public final class Analyzer {
         if (expr instanceof Expression.Choice choice) {
             var seen = new HashMap<String, Integer>();
             var duplicates = new LinkedHashSet<String>();
-            for (int i = 0; i < choice.alternatives()
-                                      .size(); i++ ) {
-                var alt = choice.alternatives()
-                                .get(i);
+
+            for (int i = 0; i < choice.alternatives().size(); i++) {
+                var alt = choice.alternatives().get(i);
+
                 if (alt instanceof Expression.Literal lit) {
                     var key = lit.caseInsensitive()
                               ? "(?i)" + lit.text()
                               : lit.text();
+
                     if (seen.containsKey(key)) {
                         duplicates.add(lit.text());
-                    }else {
+                    } else {
                         seen.put(key, i);
                     }
                 }
             }
+
             for (var dup : duplicates) {
-                findings.add(Finding.error(
-                "grammar.duplicate-literal",
-                rule.name(),
-                "rule '" + rule.name() + "' has duplicate literal '" + dup + "' in Choice"));
+                findings.add(Finding.error("grammar.duplicate-literal",
+                                           rule.name(),
+                                           "rule '" + rule.name() + "' has duplicate literal '" + dup + "' in Choice"));
             }
         }
         // Recurse
         switch (expr) {
-            case Expression.Sequence seq -> seq.elements()
-                                               .forEach(e -> gatherDuplicateLiterals(rule, e, findings));
-            case Expression.Choice ch -> ch.alternatives()
-                                           .forEach(e -> gatherDuplicateLiterals(rule, e, findings));
+            case Expression.Sequence seq -> seq.elements().forEach(e -> gatherDuplicateLiterals(rule, e, findings));
+            case Expression.Choice ch -> ch.alternatives().forEach(e -> gatherDuplicateLiterals(rule, e, findings));
             case Expression.ZeroOrMore zom -> gatherDuplicateLiterals(rule, zom.expression(), findings);
             case Expression.OneOrMore oom -> gatherDuplicateLiterals(rule, oom.expression(), findings);
             case Expression.Optional opt -> gatherDuplicateLiterals(rule, opt.expression(), findings);
@@ -433,20 +464,24 @@ public final class Analyzer {
     // === Check 5: Whitespace cycle ===
     private List<Finding> checkWhitespaceCycle() {
         var ws = grammar.whitespace();
+
         if (ws.isEmpty()) {
             return List.of();
         }
+
         var expr = ws.unwrap();
         var refs = collectReferences(expr);
         var visited = new HashSet<String>();
+
         for (var ref : refs) {
             if (isCyclic(ref, visited, new HashSet<>())) {
-                return List.of(Finding.error(
-                "grammar.whitespace-cycle",
-                "",
-                "%whitespace expression transitively references itself through rule '" + ref + "'"));
+                return List.of(Finding.error("grammar.whitespace-cycle",
+                                             "",
+                                             "%whitespace expression transitively references itself through rule '" + ref
+                                            + "'"));
             }
         }
+
         return List.of();
     }
 
@@ -454,48 +489,53 @@ public final class Analyzer {
         if (!pathVisiting.add(ruleName)) {
             return true;
         }
+
         if (!globallyVisited.add(ruleName)) {
             pathVisiting.remove(ruleName);
+
             return false;
         }
-        var rule = grammar.ruleMap()
-                          .get(ruleName);
+
+        var rule = grammar.ruleMap().get(ruleName);
+
         if (rule == null) {
             pathVisiting.remove(ruleName);
+
             return false;
         }
+
         for (var ref : collectReferences(rule.expression())) {
             if (isCyclic(ref, globallyVisited, pathVisiting)) {
                 return true;
             }
         }
+
         pathVisiting.remove(ruleName);
+
         return false;
     }
 
     // === Check 6: BackReferences (forward-compat note) ===
     private List<Finding> checkBackReferences() {
         var findings = new ArrayList<Finding>();
+
         for (var rule : grammar.rules()) {
             if (containsBackReference(rule.expression())) {
-                findings.add(Finding.info(
-                "grammar.has-backreference",
-                rule.name(),
-                "rule '" + rule.name() + "' uses back-reference (incremental parsing will full-reparse this rule)"));
+                findings.add(Finding.info("grammar.has-backreference",
+                                          rule.name(),
+                                          "rule '" + rule.name()
+                                         + "' uses back-reference (incremental parsing will full-reparse this rule)"));
             }
         }
+
         return findings;
     }
 
     private static boolean containsBackReference(Expression expr) {
         return switch (expr) {
             case Expression.BackReference _ -> true;
-            case Expression.Sequence seq -> seq.elements()
-                                               .stream()
-                                               .anyMatch(Analyzer::containsBackReference);
-            case Expression.Choice ch -> ch.alternatives()
-                                           .stream()
-                                           .anyMatch(Analyzer::containsBackReference);
+            case Expression.Sequence seq -> seq.elements().stream().anyMatch(Analyzer::containsBackReference);
+            case Expression.Choice ch -> ch.alternatives().stream().anyMatch(Analyzer::containsBackReference);
             case Expression.ZeroOrMore zom -> containsBackReference(zom.expression());
             case Expression.OneOrMore oom -> containsBackReference(oom.expression());
             case Expression.Optional opt -> containsBackReference(opt.expression());

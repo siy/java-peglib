@@ -1,96 +1,95 @@
 package org.pragmatica.peg.playground;
 
-import org.pragmatica.lang.Option;
-import org.pragmatica.lang.Result;
-import org.pragmatica.peg.PegParser;
-import org.pragmatica.peg.error.Diagnostic;
-import org.pragmatica.peg.error.RecoveryStrategy;
-import org.pragmatica.peg.parser.ParseResultWithDiagnostics;
-import org.pragmatica.peg.parser.Parser;
-import org.pragmatica.peg.parser.ParserConfig;
-import org.pragmatica.peg.tree.CstNode;
-
 import java.util.List;
 
+import org.pragmatica.lang.Result;
+import org.pragmatica.peg.playground.ParseTracer;
+import org.pragmatica.peg.playground.Stats;
+import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.cst.CstArray;
+import org.pragmatica.peg.cst.ParseResult;
+import org.pragmatica.peg.diagnostic.Diagnostic;
+
+
 /**
- * Facade that combines grammar compilation, parsing, tracing, and stats
- * collection into a single call. Used by both the HTTP server and the CLI
- * REPL so behaviour stays consistent across the two surfaces.
+ * 0.6.0 facade for the playground. Wraps the
+ * {@link PegParser#fromGrammar(String) generate-and-compile-in-memory} pipeline
+ * and produces a {@link ParseOutcome} containing the resulting
+ * {@link CstArray}, diagnostics list, and {@link Stats} record.
+ *
+ * <p>Parallels the legacy {@code PlaygroundEngine} 0.5.x interpreter facade;
+ * lives next to it so callers can opt in without breaking existing UI
+ * consumers. Behavioural differences vs the legacy facade:
+ *
+ * <ul>
+ *   <li>No packrat or cut tracing — lex+parse has no packrat cache and
+ *       elides cuts at lex time. The corresponding {@link Stats} fields are
+ *       always {@code 0}.</li>
+ *   <li>Trivia is positional in {@link org.pragmatica.peg.token.TokenArray
+ *       TokenArray}; the trivia counter on {@code Stats} is the count of
+ *       trivia tokens in the lex output, not per-CST-node attachments.</li>
+ *   <li>Tracing is purely a CST-node walk (one rule_enter / rule_success per
+ *       parser-rule node). Backtracked alternatives are not visible, same as
+ *       legacy.</li>
+ * </ul>
  */
 public final class PlaygroundEngine {
     private PlaygroundEngine() {}
 
     /**
-     * Run a parse with the given grammar and input, returning everything
-     * the playground surfaces need.
+     * Compile {@code request.grammar()}, lex+parse {@code request.input()},
+     * and bundle the result. The grammar compile step is cached by exact text
+     * inside {@link PegParser}, so repeated calls with the same grammar pay
+     * only the lex+parse cost.
      */
     public static Result<ParseOutcome> run(ParseRequest request) {
-        return PegParser.fromGrammar(request.grammar(),
-                                     buildConfig(request))
-                        .map(parser -> executeParse(parser, request));
+        return PegParser.fromGrammar(request.grammar()).map(parser -> executeParse(parser, request));
     }
 
-    private static ParseOutcome executeParse(Parser parser, ParseRequest request) {
-        var tracer = ParseTracer.start();
-        var parseResult = parseWithRecovery(parser, request);
-        var nodeOption = parseResult.node();
-        int nodeCount = nodeOption.map(ParseTracer::countNodes)
-                                  .or(0);
-        int triviaCount = nodeOption.map(ParseTracer::countTrivia)
-                                    .or(0);
-        nodeOption.onPresent(tracer::walkCst);
-        var stats = tracer.stats(nodeCount,
-                                 triviaCount,
-                                 parseResult.diagnostics()
-                                            .size());
-        return new ParseOutcome(nodeOption, parseResult.diagnostics(), stats, tracer, parseResult.source());
-    }
+    private static ParseOutcome executeParse(org.pragmatica.peg.Parser parser, ParseRequest request) {
+        long startNanos = System.nanoTime();
+        ParseResult parseResult = parser.parse(request.input());
+        long elapsedNanos = System.nanoTime() - startNanos;
+        var cst = parseResult.cst();
+        int nodeCount = cst.nodeCount();
+        int triviaCount = ParseTracer.countTrivia(cst);
+        var stats = new Stats(elapsedNanos / 1000L,
+                              nodeCount,
+                              triviaCount,
+                              0,
 
-    private static ParseResultWithDiagnostics parseWithRecovery(Parser parser, ParseRequest request) {
-        String input = request.input();
-        return request.startRule()
-                      .filter(rule -> !rule.isBlank())
-                      .fold(() -> parser.parseCstWithDiagnostics(input),
-                            rule -> parser.parseCstWithDiagnostics(input, rule));
-    }
+        // ruleEntries — n/a
+        0,
 
-    private static ParserConfig buildConfig(ParseRequest request) {
-        return ParserConfig.parserConfig(request.packrat(), request.recovery(), request.captureTrivia());
+        // cacheHits — no packrat
+        0,
+
+        // cacheMisses — no packrat
+        0,
+
+        // cachePuts — no packrat
+        0,
+
+        // cutsFired — n/a (lex-time)
+        parseResult.diagnostics().size());
+
+        return new ParseOutcome(cst, parseResult.diagnostics(), stats);
     }
 
     /**
      * Inputs to a single playground parse run.
      *
-     * @param grammar        raw grammar text
-     * @param input          raw input text to parse
-     * @param startRule      explicit start rule, or {@link Option#none()} to use the grammar's default
-     * @param packrat        whether to enable the packrat cache
-     * @param recovery       error recovery strategy
-     * @param captureTrivia  whether to attach trivia to the CST
-     * @param astMode        whether the output pane should present an AST projection (UI-only flag; the engine always returns CST)
+     * @param grammar raw grammar text
+     * @param input   raw input text to parse
      */
-    public record ParseRequest(String grammar,
-                               String input,
-                               Option<String> startRule,
-                               boolean packrat,
-                               RecoveryStrategy recovery,
-                               boolean captureTrivia,
-                               boolean astMode) {}
+    public record ParseRequest(String grammar, String input) {}
 
     /**
      * Everything produced by a single parse run.
      */
-    public record ParseOutcome(Option<CstNode> node,
-                               List<Diagnostic> diagnostics,
-                               Stats stats,
-                               ParseTracer tracer,
-                               String source) {
-        public boolean hasNode() {
-            return node.isPresent();
-        }
-
+    public record ParseOutcome(CstArray cst, List<Diagnostic> diagnostics, Stats stats) {
         public boolean hasErrors() {
-            return !diagnostics.isEmpty();
+            return ! diagnostics.isEmpty();
         }
     }
 }

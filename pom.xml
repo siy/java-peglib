@@ -6,7 +6,7 @@
 
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-parent</artifactId>
-    <version>0.6.3</version>
+    <version>0.7.0</version>
     <packaging>pom</packaging>
 
     <name>Peglib Parent</name>
@@ -38,7 +38,6 @@
     <modules>
         <module>peglib-runtime</module>
         <module>peglib-core</module>
-        <module>peglib-incremental</module>
         <module>peglib-formatter</module>
         <module>peglib-maven-plugin</module>
         <module>peglib-playground</module>
@@ -47,7 +46,10 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>25</maven.compiler.release>
-        <pragmatica-lite.version>0.24.0</pragmatica-lite.version>
+        <pragmatica-lite.version>1.0.0-rc2</pragmatica-lite.version>
+        <jbct.version>1.0.0-rc2</jbct.version>
+        <!-- Default: lint is ON for the whole reactor. Override with -Djbct.skip=true. -->
+        <jbct.skip>false</jbct.skip>
         <junit.version>5.11.0</junit.version>
         <assertj.version>3.26.0</assertj.version>
         <maven.compiler.plugin.version>3.14.0</maven.compiler.plugin.version>
@@ -68,17 +70,17 @@
             </dependency>
             <dependency>
                 <groupId>org.pragmatica-lite</groupId>
-                <artifactId>peglib-incremental</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.pragmatica-lite</groupId>
                 <artifactId>peglib-formatter</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.pragmatica-lite</groupId>
                 <artifactId>core</artifactId>
+                <version>${pragmatica-lite.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.pragmatica-lite</groupId>
+                <artifactId>jackson</artifactId>
                 <version>${pragmatica-lite.version}</version>
             </dependency>
             <dependency>
@@ -111,6 +113,28 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+
+        <!-- JBCT lint + format, inherited by every module.
+             0.7.0: the 0.5.x legacy path is gone, so there is no longer an exempt
+             subtree — the whole reactor is linted. No sourceDirectory override. -->
+        <plugins>
+            <plugin>
+                <groupId>org.pragmatica-lite</groupId>
+                <artifactId>jbct-maven-plugin</artifactId>
+                <version>${jbct.version}</version>
+                <configuration>
+                    <skip>${jbct.skip}</skip>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 
     <profiles>

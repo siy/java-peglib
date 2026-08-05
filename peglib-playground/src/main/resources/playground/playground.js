@@ -3,10 +3,6 @@
 const els = {
     grammar: document.getElementById("grammar"),
     input: document.getElementById("input"),
-    startRule: document.getElementById("start-rule"),
-    mode: document.getElementById("mode"),
-    recovery: document.getElementById("recovery"),
-    packrat: document.getElementById("packrat"),
     trivia: document.getElementById("trivia"),
     autoRefresh: document.getElementById("auto-refresh"),
     parseBtn: document.getElementById("parse-btn"),
@@ -19,15 +15,13 @@ const els = {
 let debounceTimer = null;
 let inflight = null;
 
+// 0.6.x: the grammar is the configuration. There is no start-rule override,
+// no packrat toggle, no recovery strategy and no AST mode — the request
+// carries grammar text and input only.
 function buildRequest() {
     return {
         grammar: els.grammar.value,
         input: els.input.value,
-        startRule: els.startRule.value.trim(),
-        mode: els.mode.value,
-        recovery: els.recovery.value,
-        packrat: els.packrat.checked,
-        trivia: els.trivia.checked,
     };
 }
 
@@ -155,13 +149,10 @@ function scheduleAutoRefresh() {
 }
 
 els.parseBtn.addEventListener("click", parseNow);
-for (const el of [els.grammar, els.input, els.startRule]) {
+for (const el of [els.grammar, els.input]) {
     el.addEventListener("input", scheduleAutoRefresh);
 }
-for (const el of [els.mode, els.recovery]) {
-    el.addEventListener("change", parseNow);
-}
-for (const el of [els.packrat, els.trivia, els.autoRefresh]) {
+for (const el of [els.trivia, els.autoRefresh]) {
     el.addEventListener("change", parseNow);
 }
 
