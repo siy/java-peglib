@@ -73,7 +73,12 @@ VarDecl <- Identifier Dims? ('=' VarInit)?
 VarInit <- '{' (VarInit (',' VarInit)* ','?)? '}' / Expr
 MethodDecl <- TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? (Block / ';')
 Params <- Param (',' Param)*
-Param <- Annotation* Modifier* Type '...'? Identifier Dims?
+# A receiver parameter (JLS 8.4.1) names 'this' instead of a variable; it exists so
+# 'this' can carry type annotations. Ordered first: for an ordinary parameter the
+# Type matches and the 'this' check fails, so it backtracks to the normal form.
+# Over-permissive on purpose — the JLS allows it only in first position, which is a
+# validation concern, not a parsing one.
+Param <- Annotation* Type < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type '...'? Identifier Dims?
 Throws <- 'throws' ^ TypeList
 ConstructorDecl <- TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 
