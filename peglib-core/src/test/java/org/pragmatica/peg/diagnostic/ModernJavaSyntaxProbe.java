@@ -1,6 +1,8 @@
 package org.pragmatica.peg.diagnostic;
 
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import org.pragmatica.peg.PegParser;
 
 import java.nio.file.Files;
@@ -8,9 +10,10 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 
 /**
- * Ground-truth probe for post-Java-25 syntax. Not an assertion gate — it prints
- * which forms the current grammar accepts so the value-class work starts from
- * measurement rather than assumption.
+ * Post-Java-25 syntax gate: JEP 401 value classes, JEP 512 compact source files, and
+ * JEP 530/532 primitive patterns, plus the 'value'-as-ordinary-identifier cases that the
+ * contextual keyword must not break. All 19 pass today and are asserted, so a regression
+ * fails here instead of silently shipping.
  *
  * <p>Run: {@code mvn -pl peglib-core test -Dtest=ModernJavaSyntaxProbe -Djbct.skip=true}
  */
@@ -72,5 +75,9 @@ public class ModernJavaSyntaxProbe {
         }
 
         System.out.println("=== " + (cases.size() - failures) + "/" + cases.size() + " accepted ===");
+
+        assertThat(failures)
+        .as("all 19 forms parsed cleanly when added; non-zero is a regression")
+        .isZero();
     }
 }

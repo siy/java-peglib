@@ -1,6 +1,8 @@
 package org.pragmatica.peg.diagnostic;
 
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import org.pragmatica.peg.PegParser;
 
 import java.nio.file.Files;
@@ -12,7 +14,9 @@ import java.util.LinkedHashMap;
  * unlikely to contain. Deliberately picks awkward-but-legal forms rather than
  * idiomatic ones — the point is to find gaps, not to confirm the happy path.
  *
- * <p>Prints a report; does not assert. Run:
+ * <p>Asserts zero gaps: these 40 constructs all parse today, so any future grammar change
+ * that breaks one fails here rather than being discovered in the field. Add a case when a
+ * gap is found; do not delete one to make the suite pass. Run:
  * {@code mvn -pl peglib-core test -Dtest=JavaCoverageProbe -Djbct.skip=true}
  */
 public class JavaCoverageProbe {
@@ -87,5 +91,9 @@ public class JavaCoverageProbe {
 
         System.out.println("=== " + (cases.size() - failures) + "/" + cases.size()
                            + " accepted; " + failures + " gaps ===");
+
+        assertThat(failures)
+        .as("every construct listed here parsed cleanly when it was added; a non-zero count is a regression")
+        .isZero();
     }
 }
