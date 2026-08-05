@@ -1,16 +1,16 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-04 — 0.7.0 feature-complete on `release-0.7.0` (not shipped)
+**Last updated:** 2026-08-05 — 0.7.0 MERGED + TAGGED; Maven Central deploy PENDING
 
 ---
 
-## Session 9 — 0.7.0 (2026-08-01 → 08-04) — FEATURE COMPLETE, NOT SHIPPED
+## Session 9 — 0.7.0 (2026-08-01 → 08-05) — MERGED + TAGGED, DEPLOY PENDING
 
 ### State at a glance
 
 | | |
 |---|---|
-| **Branch** | `release-0.7.0`, 19 commits ahead of `main`. **Not merged, not tagged, not pushed.** |
+| **Ship state** | PR #38 **merged** → `main` at `dc866ac`; tag **`v0.7.0`** created and pushed. **Maven Central deploy NOT done.** |
 | **Build** | `mvn install` — **no `-Djbct.skip=true`** — BUILD SUCCESS |
 | **Tests** | **528 across 5 modules**, 0 failures, 0 errors, 0 skips |
 | **JBCT** | **0 hard errors**, 0 unformatted files, ~709 warnings (not gated) |
@@ -46,10 +46,22 @@
 
 ### Where to pick up — ordered
 
-1. **Ship 0.7.0.** Branch is pushed; **PR #38 is open and CI-green** (CI enforced JBCT lint for
-   the first time — it previously never ran, because `skip` was hardcoded true in
-   `peglib-core/pom.xml`). Remaining: merge, tag, deploy. Note CodeRabbit skipped its review
-   (293 files > its 100-file limit), so there is no automated second opinion on this diff.
+1. **Deploy 0.7.0 to Maven Central — THE ONLY REMAINING STEP.**
+
+   ```bash
+   git checkout main && git pull          # must be at dc866ac (tag v0.7.0)
+   mvn clean deploy -P release -DperformRelease=true
+   ```
+   Verified not yet published: `repo1.maven.org/.../peglib-runtime/0.7.0/` returns 404.
+   Expect **6 artifacts** this time, not the 7 of 0.6.x — `peglib-incremental` is gone.
+   GPG signing goes through gpg-agent; `waitUntil=published` polls Central's queue, so budget
+   anywhere from ~5 to ~25 min (0.6.3 took 6:45, 0.6.2 took 24:56 — that wait is Central's
+   publish queue, not a build problem).
+
+   After publishing, add the deployment id to the CHANGELOG/HANDOVER as previous releases did.
+
+   Note: CodeRabbit skipped review of PR #38 (293 files > its 100-file limit), so this release
+   shipped without an automated second opinion on the diff.
 
 2. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
    deferred: it has zero lint errors and its output shape is what `playground.js` renders, so
