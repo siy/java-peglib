@@ -1,16 +1,16 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-05 — 0.7.0 MERGED + TAGGED; Maven Central deploy PENDING
+**Last updated:** 2026-08-05 — 0.7.0 SHIPPED to Maven Central
 
 ---
 
-## Session 9 — 0.7.0 (2026-08-01 → 08-05) — MERGED + TAGGED, DEPLOY PENDING
+## Session 9 — 0.7.0 (2026-08-01 → 08-05) — SHIPPED
 
 ### State at a glance
 
 | | |
 |---|---|
-| **Ship state** | PR #38 **merged** → `main` at `dc866ac`; tag **`v0.7.0`** created and pushed. **Maven Central deploy NOT done.** |
+| **Ship state** | **SHIPPED.** PR #38 merged; tag `v0.7.0` at `57ad0d4`; live on Maven Central, deployment `d19659b0-cd3b-4748-b0a8-87fdc5f9a79b`, 6 artifacts, all GPG-signed. |
 | **Build** | `mvn install` — **no `-Djbct.skip=true`** — BUILD SUCCESS |
 | **Tests** | **528 across 5 modules**, 0 failures, 0 errors, 0 skips |
 | **JBCT** | **0 hard errors**, 0 unformatted files, ~709 warnings (not gated) |
@@ -46,22 +46,13 @@
 
 ### Where to pick up — ordered
 
-1. **Deploy 0.7.0 to Maven Central — THE ONLY REMAINING STEP.**
-
-   ```bash
-   git checkout main && git pull          # must be at dc866ac (tag v0.7.0)
-   mvn clean deploy -P release -DperformRelease=true
-   ```
-   Verified not yet published: `repo1.maven.org/.../peglib-runtime/0.7.0/` returns 404.
-   Expect **6 artifacts** this time, not the 7 of 0.6.x — `peglib-incremental` is gone.
-   GPG signing goes through gpg-agent; `waitUntil=published` polls Central's queue, so budget
-   anywhere from ~5 to ~25 min (0.6.3 took 6:45, 0.6.2 took 24:56 — that wait is Central's
-   publish queue, not a build problem).
-
-   After publishing, add the deployment id to the CHANGELOG/HANDOVER as previous releases did.
-
-   Note: CodeRabbit skipped review of PR #38 (293 files > its 100-file limit), so this release
-   shipped without an automated second opinion on the diff.
+1. **Merge `fix/central-publishing-plugin`.** `central-publishing-maven-plugin` was bumped
+   0.6.0 -> 0.11.0 after the release. 0.6.0 cannot deserialize Central's current publish
+   response and dies with `Unrecognized field "warnings"` while polling — it reported
+   `BUILD FAILURE` for a release that had already uploaded and auto-published. Anyone reading
+   only the exit code would have concluded 0.7.0 failed to ship. **Verify a publish by querying
+   repo1 for concrete artifact files, not by trusting the plugin or a directory listing** —
+   directory listings 404 on repo1 even for published artifacts.
 
 2. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
    deferred: it has zero lint errors and its output shape is what `playground.js` renders, so
@@ -85,6 +76,10 @@
   single-run delta there as a regression — re-run before believing it.
 - **The 0.5.x A/B benchmarks were deleted with the legacy path.** The historical "11-12× faster
   than 0.5.x-gen" figure is no longer reproducible in-tree. Treat it as dated, not live.
+- **A published release can report BUILD FAILURE.** See item 1. Check
+  `repo1.maven.org/maven2/org/pragmatica-lite/<artifact>/<v>/<artifact>-<v>.jar` returns 200;
+  the `<release>` field in `maven-metadata.xml` is also authoritative. Do not re-run a deploy
+  on a failure without checking first — the bundle may already be published.
 - **Most JBCT warnings are cold-path, not hot-path.** `DfaBuilder` (127) and `ParserGenerator`
   (113) dominate the count but run once per grammar at `fromGrammar` time — they never touch a
   warm parse. Only `peglib-runtime` + `LexerEngine` are per-token/per-node. Do not conflate
