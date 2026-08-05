@@ -101,6 +101,12 @@ infrastructure (`peg.grammar`, `peg.grammar.analysis`, `peg.error.ParseError`,
   `JsonDecoder` is gone. Note a behavioural difference: it boxed every JSON number as `Long`,
   whereas Jackson narrows to `Integer` when the value fits. This adds Jackson 3 as a transitive
   dependency of `peglib-playground` only — the standalone-parser contract is unaffected.
+- **JBCT warning policy codified.** Warnings do not gate the build and ~657 remain by design.
+  The parse hot path (`peglib-runtime` plus `LexerEngine`) carries class-level
+  `@SuppressWarnings({"JBCT-PAT-01", "JBCT-UTIL-02"})`; the rationale is risk of rewriting the
+  most correctness-critical code in the project, not an unmeasured performance claim. Note the
+  bulk of the remaining warnings sit in `DfaBuilder` and `ParserGenerator`, which run once per
+  grammar at `fromGrammar` time and never touch a warm parse. See CLAUDE.md.
 - **`-Djbct.skip=true` is no longer needed.** The 0.25.0 formatter convergence bug is fixed in
   1.0.0-rc2; `mvn install` runs clean with lint and format-check on across all five modules.
   The `jbct.skip` property remains, defaulting to `false`.
@@ -119,12 +125,20 @@ infrastructure (`peg.grammar`, `peg.grammar.analysis`, `peg.error.ParseError`,
 - **Qualified inner-class creation** — `outer.new Inner()`.
 - **Annotated type parameters** — `class A<@NonNull T> { }`.
 - **Hex floating-point literals** — `0x1.8p3`.
+- **Receiver parameters** (JLS 8.4.1) — `void m(A this)`, the form that lets `this` carry type
+  annotations. Found by the adversarial probe below, not by the corpus.
 - **CST-shape sanity gate** in `Java25ParserGateTest`: each corpus fixture must yield at least
   `LOC/3` CST nodes. Byte-equal reconstruction alone passes even when the parser matched empty
   alternatives and bailed, which previously hid an empty-`CompilationUnit` regression for two
   sessions.
-- **`ModernJavaSyntaxProbe`** — prints which post-Java-25 forms the grammar accepts, so grammar
-  work starts from measurement instead of assumption.
+- **Two grammar coverage gates**, both asserting (a regression fails the build rather than
+  printing a warning):
+  - `ModernJavaSyntaxProbe` (19 cases) — JEP 401 / 512 / 530 forms plus the
+    `value`-as-ordinary-identifier cases the contextual keyword must not break.
+  - `JavaCoverageProbe` (40 cases) — awkward-but-legal Java the selfhost corpus is unlikely to
+    contain: intersection casts, type-annotated arrays, enum constants with bodies, nested
+    record patterns, `try` with an existing resource, generic varargs, `A::new`, unnamed
+    variables. This is what surfaced the receiver-parameter gap.
 
 ### Verified, not changed
 
