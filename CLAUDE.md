@@ -219,6 +219,43 @@ In 0.6.0's tokens-first parser, contextual keywords get **Identifier-fallback** 
 
 at its four use sites rather than as a tidy `DeclModifier` rule. Both a `DeclModifier <- Modifier / ValueMod` rule and a `ValueMod <- ValueKW &(...)` rule were tried first; each was rejected by the guard.
 
+## JBCT warning policy
+
+Warnings do **not** gate the build (only hard errors do). ~690 remain, and that is intentional —
+they are not a backlog. Triage them by asking two questions in order.
+
+**1. Is the rule perf-relevant, or style?**
+
+| Rule | Nature |
+|---|---|
+| `JBCT-PAT-01` (raw loop → functional iteration) | touches iteration on hot code |
+| `JBCT-UTIL-02` (`Verify.Is::negative` etc.) | replaces a primitive compare with a predicate ref |
+| `JBCT-STATIC-01` (static-import `Result.success()`) | style only |
+| `JBCT-SEQ-01` (chain longer than 5 steps) | readability only |
+| `JBCT-VO-01` (record wants a factory) | style only |
+
+The style rules are safe to fix anywhere. Only `PAT-01` / `UTIL-02` interact with the parse path.
+
+**2. Is the code hot, or cold?**
+
+- **Hot — runs per token / per node, on every parse.** `peglib-runtime` in its entirety
+  (`CstArray`, `CstArrayBuilder`, `TokenArray`, `TokenArrayBuilder`) plus `LexerEngine`.
+  These carry a class-level `@SuppressWarnings({"JBCT-PAT-01", "JBCT-UTIL-02"})` with the
+  reasoning inline. **Do not "clean these up".**
+- **Cold — runs once per grammar, at `fromGrammar` time.** `DfaBuilder` (127 warnings),
+  `ParserGenerator` (113), `GrammarParser` (51), `LexerGenerator` (31), `RuleClassifier`,
+  `GrammarResolver`, `Analyzer`. These dominate the count but are *not* on the parse path —
+  they run once and their cost shows up only in cold-compile (~200 ms), never in warm parse.
+  Fixing them is optional and low-value, not forbidden.
+
+**The argument for leaving the hot loops alone is risk, not a benchmark.** No one has measured
+whether streams are slower there, and the JIT frequently handles them well — asserting otherwise
+would be exactly the mental-model error the "profile-first, theorize never" rule warns about.
+The real case is that it is a large mechanical rewrite of the most correctness-critical code in
+the project for no user-visible benefit. If anyone does attempt it, bench it
+(`Java25ParseBenchmark`, `Java25LargeFixturesBenchmark`, run from `peglib-core/`) instead of
+assuming a direction.
+
 ## Build Commands
 
 ```bash

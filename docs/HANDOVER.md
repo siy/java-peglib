@@ -38,18 +38,20 @@
    `TypeDecl` stays the first alternative of `OrdinaryUnit`, verified by corpus node counts
    being byte-identical before and after (884/1040/1904/586/605/833/135/447).
 
+9. **JBCT warning policy decided and encoded.** Hot path (`peglib-runtime` + `LexerEngine`)
+   carries class-level `@SuppressWarnings({"JBCT-PAT-01", "JBCT-UTIL-02"})` with the reasoning
+   inline; policy written up in CLAUDE.md. 694 → 657 warnings, none gating the build.
+
 `ModernJavaSyntaxProbe` now reports **19/19**; no known grammar gaps remain.
 
 ### Where to pick up — ordered
 
-1. **Decide a policy for the 709 warnings.** Not build-gated. Dominated by `JBCT-UTIL-02`
-   (~186, `Verify.Is::` suggestions) and `JBCT-PAT-01` (~138, raw loops). Many `PAT-01` hits are
-   in `CstArray` / `TokenArray` / `CstArrayBuilder` — converting those loops to streams on the
-   parse hot path would be a bad trade. This needs a decision, not a backlog.
+1. **Ship 0.7.0.** Branch is pushed; **PR #38 is open and CI-green** (CI enforced JBCT lint for
+   the first time — it previously never ran, because `skip` was hardcoded true in
+   `peglib-core/pom.xml`). Remaining: merge, tag, deploy. Note CodeRabbit skipped its review
+   (293 files > its 100-file limit), so there is no automated second opinion on this diff.
 
-2. **Ship 0.7.0**: PR, merge, tag, deploy. Nothing is pushed yet.
-
-3. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
+2. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
    deferred: it has zero lint errors and its output shape is what `playground.js` renders, so
    swapping it risks the SPA wire format for no lint benefit.
 
@@ -71,6 +73,10 @@
   single-run delta there as a regression — re-run before believing it.
 - **The 0.5.x A/B benchmarks were deleted with the legacy path.** The historical "11-12× faster
   than 0.5.x-gen" figure is no longer reproducible in-tree. Treat it as dated, not live.
+- **Most JBCT warnings are cold-path, not hot-path.** `DfaBuilder` (127) and `ParserGenerator`
+  (113) dominate the count but run once per grammar at `fromGrammar` time — they never touch a
+  warm parse. Only `peglib-runtime` + `LexerEngine` are per-token/per-node. Do not conflate
+  "most warnings" with "performance critical".
 - **The keep-set during a large delete is easy to over-scope.** `grammar/analysis/` was kept
   whole; only `LeftRecursionAnalysis` was live. `ExpressionShape` and `FirstCharAnalysis` (264
   LOC) survived a full session and were removed later — after one of them had been pointlessly

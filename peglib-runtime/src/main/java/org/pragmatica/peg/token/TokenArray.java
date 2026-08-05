@@ -11,6 +11,21 @@ package org.pragmatica.peg.token;
  * <p>The shape is read-only: instances are produced by {@link TokenArrayBuilder#build}
  * and never mutated thereafter.
  */
+/*
+ * Parse hot path — imperative by design.
+ *
+ * JBCT-PAT-01 (raw loops) and JBCT-UTIL-02 (Verify.Is:: predicates) are suppressed for this
+ * class as a deliberate policy, not an oversight. These methods run per-token / per-node on
+ * every parse, and this is the most correctness-critical code in the project: a mechanical
+ * rewrite to functional iteration would carry real regression risk for no user-visible gain.
+ *
+ * Note the honest framing: this is NOT a claim that streams measure slower here — nobody has
+ * profiled that, and per the project's "profile-first, theorize never" rule such a claim would
+ * be worth little. The argument is risk-versus-benefit, and it stands on that alone. If the
+ * rewrite is ever attempted, bench it (Java25ParseBenchmark / Java25LargeFixturesBenchmark
+ * from peglib-core/) rather than assuming either direction.
+ */
+@SuppressWarnings({"JBCT-PAT-01", "JBCT-UTIL-02"})
 public final class TokenArray {
     public static final int KIND_WHITESPACE = 0;
     public static final int KIND_LINE_COMMENT = 1;
