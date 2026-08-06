@@ -77,6 +77,9 @@ public class JavaRejectionProbe {
         cases.put("lambda-mixed-typed-inferred", "class A { Object o = (Integer a, b) -> a; }");
         cases.put("lambda-mixed-typed-var", "class A { Object o = (Integer a, var b) -> a; }");
 
+        // --- JLS 15.8.2: a class literal is 'TypeName {[]} . class', not a postfix operator ---
+        cases.put("this-dot-class", "class A { Object o = this.class; }");
+
         // JLS 7.3: a stray ';' after the imports is itself a TypeDeclaration, so a later
         // import is illegal. This used to pass because the recovery loop silently re-parsed
         // the remainder as a SECOND compilation unit.
@@ -170,6 +173,15 @@ public class JavaRejectionProbe {
         cases.put("lambda-modifiers-annotations", "class A { Object o = (final var a, @Ann var b) -> a; }");
         cases.put("lambda-varargs-param", "class A { Object o = (int... xs) -> xs; }");
         cases.put("lambda-underscore-param", "class A { Object o = (_, y) -> y; }");
+
+        // Every legal class-literal shape must survive removing '.class' from PostOp.
+        cases.put("class-literal-simple", "class A { Object o = String.class; }");
+        cases.put("class-literal-qualified", "class A { Object o = java.util.Map.class; }");
+        cases.put("class-literal-primitive", "class A { Object o = int.class; void m() { Object v = void.class; } }");
+        cases.put("class-literal-array", "class A { Object o = String[].class; Object p = int[][].class; }");
+        cases.put("qualified-this", "class A { class B { Object o = A.this; } }");
+        cases.put("method-ref-still-works", "class A { Object o = String::valueOf; }");
+        cases.put("annotated-local-var", "class A { void m() { @Ann var v = \"\"; } }");
         cases.put("record-as-identifier", "class A { int record; void record() { } }");
 
         return cases;
