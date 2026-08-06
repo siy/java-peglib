@@ -16,7 +16,7 @@ CompilationUnit <- ModuleDecl / OrdinaryUnit
 # 'Annotation* Modifier*' prefix, so reversing them would let TopLevelMember
 # win on ordinary files and change their CST shape — which the corpus gates and
 # the CST-shape assertion would both flag.
-OrdinaryUnit <- PackageDecl? ImportDecl* (TypeDecl / TopLevelMember)*
+OrdinaryUnit <- PackageDecl? ImportDecl* (TypeDecl / TopLevelMember / ';')*
 TopLevelMember <- Annotation* Modifier* (MethodDecl / FieldDecl)
 PackageDecl <- Annotation* 'package' ^ QualifiedName ';'
 ImportDecl  <- 'import' ^ ('module' QualifiedName ';' / 'static'? QualifiedName ('.' '*')? ';')
@@ -34,13 +34,13 @@ TypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* 
 TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
 ClassDecl <- ClassKW ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
 InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
-AnnotationDecl <- '@' InterfaceKW ^ Identifier AnnotationBody
+AnnotationDecl <- '@' InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? AnnotationBody
 # Type declaration keywords with word boundary (prevents 'class' matching prefix of 'className')
 ClassKW <- < 'class' ![a-zA-Z0-9_$] >
 InterfaceKW <- < 'interface' ![a-zA-Z0-9_$] >
 AnnotationBody <- '{' AnnotationMember* '}'
 AnnotationMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
-AnnotationElemDecl <- Type Identifier '(' ')' ('default' AnnotationElem)? ';'
+AnnotationElemDecl <- TypeParams? Type Identifier '(' Params? ')' Dims? Throws? ('default' AnnotationElem)? (Block / ';')
 EnumDecl <- EnumKW ^ Identifier ImplementsClause? EnumBody
 # Lookahead ensures this is a record declaration (record Name(...)) not:
 # - method call: record(...)
@@ -59,7 +59,7 @@ ClassMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW))
 Member <- ConstructorDecl / TypeKind / MethodDecl / FieldDecl
 InitializerBlock <- 'static'? Block
 EnumBody <- '{' EnumConsts? (';' ClassMember*)? '}'
-EnumConsts <- EnumConst (',' EnumConst)* ','?
+EnumConsts <- EnumConst (',' EnumConst)* ','? / ','
 EnumConst <- Annotation* Identifier ('(' Args? ')')? ClassBody?
 RecordComponents <- RecordComp (',' RecordComp)*
 RecordComp <- Annotation* Type Identifier
@@ -71,14 +71,21 @@ FieldDecl <- Type VarDecls ';'
 VarDecls <- VarDecl (',' VarDecl)*
 VarDecl <- Identifier Dims? ('=' VarInit)?
 VarInit <- '{' (VarInit (',' VarInit)*)? ','? '}' / Expr
-MethodDecl <- TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? (Block / ';')
+MethodDecl <- Annotation* TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? (Block / ';')
 Params <- Param (',' Param)*
 # A receiver parameter (JLS 8.4.1) names 'this' instead of a variable; it exists so
 # 'this' can carry type annotations. Ordered first: for an ordinary parameter the
 # Type matches and the 'this' check fails, so it backtracks to the normal form.
-# Over-permissive on purpose — the JLS allows it only in first position, which is a
-# validation concern, not a parsing one.
-Param <- Annotation* Type < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type '...'? Identifier Dims?
+# Still over-permissive on position — the JLS allows a receiver parameter only in
+# first place, which is a validation concern, not a parsing one.
+#
+# An inner class constructor's receiver is QUALIFIED — 'Inner(Outer Outer.this)' —
+# so the type is followed by an optional qualifying name before 'this'.
+#
+# The ordinary form spells '...' and C-style Dims as ALTERNATIVES, not an optional
+# pair: JLS 8.4.1 forbids combining them, so 'int... x[]' is illegal. The '...' may
+# itself carry type annotations ('int @Ann ... x').
+Param <- Annotation* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type (Annotation* '...' Identifier / Identifier Dims?)
 Throws <- 'throws' ^ TypeList
 ConstructorDecl <- TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 
@@ -128,7 +135,7 @@ YieldKW <- < 'yield' ![a-zA-Z0-9_$] >
 CatchKW <- < 'catch' ![a-zA-Z0-9_$] >
 FinallyKW <- < 'finally' ![a-zA-Z0-9_$] >
 WhenKW <- < 'when' ![a-zA-Z0-9_$] >
-ForCtrl <- ForInit? ';' Expr? ';' ExprList? / LocalVarType Identifier ':' Expr
+ForCtrl <- ForInit? ';' Expr? ';' ExprList? / Annotation* Modifier* LocalVarType Identifier ':' Expr
 ForInit <- LocalVarNoSemi / ExprList
 LocalVarNoSemi <- Annotation* Modifier* LocalVarType VarDecls
 ResourceSpec <- '(' Resource (';' Resource)* ';'? ')'
@@ -138,10 +145,10 @@ Finally <- FinallyKW ^ Block
 SwitchBlock <- '{' SwitchRule* '}'
 SwitchRule <- SwitchLabel '->' (Expr ';' / Block / ThrowKW Expr ';') / SwitchLabel ':' BlockStmt*
 # === Switch Labels and Patterns (JLS 14.11, 14.30) ===
-SwitchLabel <- 'case' ^ ('null' (',' 'default')? / CaseItem (',' CaseItem)* Guard?) / 'default'
+SwitchLabel <- 'case' ^ ('null' ',' 'default' / CaseItem (',' CaseItem)* Guard?) / 'default'
 CaseItem <- Pattern / QualifiedName &('->' / ',' / ':' / 'when') / Expr
 Pattern <- RecordPattern / TypePattern
-TypePattern <- &(LocalVarType Identifier) LocalVarType Identifier / '_'
+TypePattern <- &(Annotation* Modifier* LocalVarType Identifier) Annotation* Modifier* LocalVarType Identifier / '_'
 RecordPattern <- RefType '(' PatternList? ')'
 PatternList <- Pattern (',' Pattern)*
 Guard <- WhenKW Expr
@@ -171,7 +178,7 @@ Multiplicative <- Unary ((!'*=' '*' / !'/=' '/' / !'%=' '%') Unary)*
 Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
 Postfix <- Primary PostOp*
 PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '.' < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
-Primary <- Literal / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / TypeExpr / QualifiedName
+Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- Type ('.' < 'class' > / '::' TypeArgs? (< 'new' > / Identifier))
 Lambda <- LambdaParams '->' (Expr / Block)
 LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
@@ -218,12 +225,28 @@ Modifier <- < ('public' / 'protected' / 'private' / 'static' / 'final' / 'abstra
 ValueKW <- < 'value' ![a-zA-Z0-9_$] >
 Annotation <- '@' !'interface' QualifiedName ('(' AnnotationValue? ')')?
 AnnotationValue <- Identifier '=' AnnotationElem (',' Identifier '=' AnnotationElem)* / AnnotationElem
-AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)* ','?)? '}' / Ternary
+AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)*)? ','? '}' / Ternary
 
 Literal <- < ('null' / 'true' / 'false') ![a-zA-Z0-9_$] > / CharLit / StringLit / NumLit
-CharLit <- < '\'' ([^'\\] / '\\' .)* '\'' >
-StringLit <- < '"""' (!'"""' .)* '"""' > / < '"' ([^"\\] / '\\' .)* '"' >
-NumLit <- < '0' [xX] [0-9a-fA-F_]* ('.' [0-9a-fA-F_]*)? [pP] [+\-]? [0-9_]+ [fFdD]? > / < '0' [xX] [0-9a-fA-F_]+ [lL]? > / < '0' [bB] [01_]+ [lL]? > / < [0-9][0-9_]* ('.' [0-9_]*)? ([eE] [+\-]? [0-9_]+)? [fFdDlL]? > / < '.' [0-9_]+ ([eE] [+\-]? [0-9_]+)? [fFdD]? >
+# JLS 3.10.6: the escape set is closed — b, s, t, n, f, r, ", ', backslash, an octal
+# escape, or a \\u sequence. '\\' . accepted anything, so '\\e' and '\\q' slipped through.
+# A char literal holds EXACTLY one element: '' is empty, and a raw newline may not appear
+# inside either a char or a (non-text-block) string literal.
+CharLit <- < '\'' ([^'\\\n\r] / '\\' ([btnfrs"'\\] / [0-3] [0-7] [0-7] / [0-7] [0-7]? / 'u'+ [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])) '\'' >
+StringLit <- < '"""' (!'"""' .)* '"""' >
+           / < '"' ([^"\\\n\r] / '\\' ([btnfrs"'\\] / [0-3] [0-7] [0-7] / [0-7] [0-7]? / 'u'+ [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]))* '"' >
+# JLS 3.10.1: an underscore may appear only BETWEEN digits — never leading, never
+# trailing, never adjacent to '.', 'x', 'b', or a type suffix. Each digit run is
+# therefore spelled 'digit (digit-or-underscore* digit)?', which permits '1__0' (runs
+# of underscores are legal) while rejecting '1_', '0x_1' and '1_.5'. The runs are
+# written inline rather than factored into a Digits rule: a lexer rule may not
+# reference another rule, and fromGrammar rejects it with SkippedRuleReferenced.
+NumLit <- < '0' [xX] [0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])? ('.' ([0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])?)?)? [pP] [+\-]? [0-9] ([0-9_]* [0-9])? [fFdD]? >
+        / < '0' [xX] '.' [0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])? [pP] [+\-]? [0-9] ([0-9_]* [0-9])? [fFdD]? >
+        / < '0' [xX] [0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])? [lL]? >
+        / < '0' [bB] [01] ([01_]* [01])? [lL]? >
+        / < [0-9] ([0-9_]* [0-9])? ('.' ([0-9] ([0-9_]* [0-9])?)?)? ([eE] [+\-]? [0-9] ([0-9_]* [0-9])?)? [fFdDlL]? >
+        / < '.' [0-9] ([0-9_]* [0-9])? ([eE] [+\-]? [0-9] ([0-9_]* [0-9])?)? [fFdD]? >
 
 # Hard keywords only - contextual keywords (var, yield, record, sealed, non-sealed, permits, when, module) are handled by their specific rules
 Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'double' / 'do' / 'else' / 'enum' / 'extends' / 'false' / 'finally' / 'final' / 'float' / 'for' / 'goto' / 'implements' / 'import' / 'instanceof' / 'interface' / 'int' / 'if' / 'long' / 'native' / 'new' / 'null' / 'package' / 'private' / 'protected' / 'public' / 'return' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throws' / 'throw' / 'transient' / 'true' / 'try' / 'void' / 'volatile' / 'while') ![a-zA-Z0-9_$]
