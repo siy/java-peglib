@@ -1,6 +1,6 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-05 — 0.7.0 SHIPPED to Maven Central
+**Last updated:** 2026-08-06 — 0.7.0 shipped; 0.7.1 cycle open on `release-0.7.1`
 
 ---
 
@@ -46,17 +46,20 @@
 
 ### Where to pick up — ordered
 
-1. **Merge `fix/central-publishing-plugin`.** `central-publishing-maven-plugin` was bumped
-   0.6.0 -> 0.11.0 after the release. 0.6.0 cannot deserialize Central's current publish
-   response and dies with `Unrecognized field "warnings"` while polling — it reported
-   `BUILD FAILURE` for a release that had already uploaded and auto-published. Anyone reading
-   only the exit code would have concluded 0.7.0 failed to ship. **Verify a publish by querying
-   repo1 for concrete artifact files, not by trusting the plugin or a directory listing** —
-   directory listings 404 on repo1 even for published artifacts.
+0.7.0 is shipped and its follow-up (PR #39, publishing-plugin bump) is merged. `release-0.7.1`
+is branched from `main` at `139b7ca` with versions bumped and an empty CHANGELOG section; it
+carries no changes of its own yet.
 
-2. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
-   deferred: it has zero lint errors and its output shape is what `playground.js` renders, so
-   swapping it risks the SPA wire format for no lint benefit.
+1. **Nothing is outstanding for 0.7.0.** The grammar has no known gaps — `ModernJavaSyntaxProbe`
+   19/19 and `JavaCoverageProbe` 40/40, both asserting.
+
+2. **Candidates for 0.7.1**, none urgent:
+   - `JsonEncoder` could follow `JsonDecoder` onto `JsonMapper.writeAsString`. Deferred because
+     its output shape is what `playground.js` renders and it has zero lint errors.
+   - CI pins `java-version: '25-ea'`. It still resolves, but Java 25 went GA in September 2025,
+     so the early-access label is stale and will eventually break. Unrelated to any release.
+   - ~657 JBCT warnings remain by design; see the warning policy in CLAUDE.md before touching
+     any of them.
 
 ### Things worth not re-learning
 
