@@ -215,8 +215,17 @@ PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArg
 Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- Type ('.' < 'class' > / '::' TypeArgs? (< 'new' > / Identifier))
 Lambda <- LambdaParams '->' (Expr / Block)
-LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
-LambdaParam <- Annotation* Modifier* ((< 'var' ![a-zA-Z0-9_$] > / Type) &('...' / Identifier / '_'))? '...'? (Identifier / '_')
+# JLS 15.27.1: a lambda's parameter list must be uniform — all explicitly typed, all
+# 'var', or all inferred. Mixing them ('(var x, y) -> {}') is illegal, which a
+# per-parameter optional type cannot express. The three shapes are therefore spelled
+# as whole-list alternatives. Inferred is tried last: it is a prefix of the other two.
+LambdaParams <- Identifier / '_' / '(' LambdaParamList? ')'
+LambdaParamList <- TypedLambdaParams / VarLambdaParams / InferredLambdaParams
+TypedLambdaParams <- TypedLambdaParam (',' TypedLambdaParam)*
+TypedLambdaParam <- Annotation* Modifier* Type (Annotation* '...')? (Identifier / '_')
+VarLambdaParams <- VarLambdaParam (',' VarLambdaParam)*
+VarLambdaParam <- Annotation* Modifier* < 'var' ![a-zA-Z0-9_$] > (Identifier / '_')
+InferredLambdaParams <- (Identifier / '_') (',' (Identifier / '_'))*
 Args <- Expr (',' Expr)*
 ExprList <- Expr (',' Expr)*
 

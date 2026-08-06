@@ -72,6 +72,11 @@ public class JavaRejectionProbe {
         cases.put("underscore-as-method", "class A { void _() { } }");
         cases.put("underscore-as-param", "class A { void m(int _) { } }");
 
+        // --- JLS 15.27.1: a lambda's parameter list must be uniform ---
+        cases.put("lambda-mixed-var-inferred", "class A { Object o = (var x, y) -> x; }");
+        cases.put("lambda-mixed-typed-inferred", "class A { Object o = (Integer a, b) -> a; }");
+        cases.put("lambda-mixed-typed-var", "class A { Object o = (Integer a, var b) -> a; }");
+
         // JLS 7.3: a stray ';' after the imports is itself a TypeDeclaration, so a later
         // import is illegal. This used to pass because the recovery loop silently re-parsed
         // the remainder as a SECOND compilation unit.
@@ -156,6 +161,15 @@ public class JavaRejectionProbe {
         cases.put("underscore-typed-pattern", "class A { void m(Object o) { switch (o) { case String _ when true -> { } default -> { } } } }");
         cases.put("underscore-record-pattern", "class A { void m(Object o) { if (o instanceof P(String _, var y)) { } } }");
         cases.put("underscore-prefixed-identifiers", "class A { int _x = 1; int __ = 2; int _9 = 3; }");
+
+        // Every uniform lambda parameter shape.
+        cases.put("lambda-inferred-list", "class A { Object o = (a, b) -> a; }");
+        cases.put("lambda-typed-list", "class A { Object o = (Integer a, Integer b) -> a; }");
+        cases.put("lambda-var-list", "class A { Object o = (var a, var b) -> a; }");
+        cases.put("lambda-empty-and-single", "class A { Object o = () -> 1; Object p = x -> x; }");
+        cases.put("lambda-modifiers-annotations", "class A { Object o = (final var a, @Ann var b) -> a; }");
+        cases.put("lambda-varargs-param", "class A { Object o = (int... xs) -> xs; }");
+        cases.put("lambda-underscore-param", "class A { Object o = (_, y) -> y; }");
         cases.put("record-as-identifier", "class A { int record; void record() { } }");
 
         return cases;
