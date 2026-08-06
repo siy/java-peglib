@@ -65,12 +65,12 @@ count, CST node count, and whether `reconstruct()` round-trips byte-identically.
 As of 2026-08-06 on `release-0.7.1`:
 
 ```
-AGREE_CLEAN           5397
-AGREE_REJECT           141
+AGREE_CLEAN           5406
+AGREE_REJECT           139
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            66
-FALSE_REJECT            38
-agreement: 98.16% (5538/5642 scored, 24 excluded)
+FALSE_ACCEPT            68
+FALSE_REJECT            29
+agreement: 98.28% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -110,6 +110,13 @@ The same asymmetry costs 2 files on the restricted-type-name rule (JLS 3.9): we 
 type-use position, which is JLS-correct, but javac's parser accepts `var<String> m()` and
 `case Foo(var(var x, var y))` and defers to Attr. Net +3, so the rule stays and those 2 are
 expected disagreements.
+
+The same applies to `BadLambdaPos.java`. JLS 15.27 makes a lambda an alternative of *Expression*,
+not something reachable from a Primary operand, so `test((int x)-> { } + (int x)-> { })` is not a
+legal expression — javac's parser accepts it and rejects it in Attr. Enforcing the JLS costs that
+one pathological negative test and buys correct parsing of every switch guard ending in a bare
+identifier (`case Integer i when i == j ->`), which previously produced 35 diagnostics on a
+four-line file. Corpus-neutral, unambiguously correct.
 
 ## Triage tips — earned, do not skip
 

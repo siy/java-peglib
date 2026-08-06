@@ -107,6 +107,21 @@ public class JavaCoverageProbe {
         cases.put("annotation-before-typeparams", "class A { public @Ann <T> void m() { } }");
         cases.put("qualified-receiver-param", "class Outer { class Inner { Inner(Outer Outer.this) { } } }");
 
+        // A switch guard ending in a bare IDENTIFIER used to be swallowed as a lambda: with
+        // Lambda reachable from Primary, 'when i == j ->' parsed 'j -> {...}' and ate the
+        // switch rule's own arrow. Guards ending in a literal ('> 2') masked this for a long
+        // time, so both shapes are pinned here.
+        cases.put("guard-ending-in-identifier", "class A { void m(Object o, int j) { switch (o) { case Integer i when i == j -> { } default -> { } } } }");
+        cases.put("guard-ending-in-literal", "class A { void m(Object o) { switch (o) { case String s when s.length() > 2 -> { } default -> { } } } }");
+        cases.put("guard-bare-identifier", "class A { void m(Object o, boolean b) { switch (o) { case Integer i when b -> { } default -> { } } } }");
+        cases.put("lambda-in-annotation-value", "@Anno(value = x -> x) class A { } @interface Anno { Object value(); }");
+        cases.put("lambda-in-ternary", "class A { Object o = true ? (Runnable) () -> { } : null; }");
+        cases.put("lambda-as-assignment-rhs", "class A { Runnable r; void m() { r = () -> { }; } }");
+        cases.put("record-varargs-component", "record R(String... options) { }");
+        cases.put("local-record-varargs", "class A { void m() { record Setup(String... options) { } } }");
+        cases.put("constructor-annotation", "class Outer { class Inner { public @Ann Inner() { } } }");
+        cases.put("annotation-bare-multi-value", "@Target(ElementType.METHOD, ElementType.TYPE) @interface A { }");
+
         // Literals / lexical
         cases.put("text-block", "class A { String s = \"\"\"\n  hi\n  \"\"\"; }");
         cases.put("underscore-literals", "class A { long x = 1_000_000L; int y = 0b1010_1010; }");

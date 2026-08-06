@@ -62,7 +62,7 @@ EnumBody <- '{' EnumConsts? (';' ClassMember*)? '}'
 EnumConsts <- EnumConst (',' EnumConst)* ','? / ','
 EnumConst <- Annotation* Identifier ('(' Args? ')')? ClassBody?
 RecordComponents <- RecordComp (',' RecordComp)*
-RecordComp <- Annotation* Type Identifier
+RecordComp <- Annotation* Type (Annotation* '...')? Identifier
 RecordBody <- '{' RecordMember* '}'
 RecordMember <- CompactConstructor / ClassMember
 CompactConstructor <- Annotation* Modifier* Identifier Block
@@ -87,7 +87,7 @@ Params <- Param (',' Param)*
 # itself carry type annotations ('int @Ann ... x').
 Param <- Annotation* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type (Annotation* '...' Identifier / Identifier Dims?)
 Throws <- 'throws' ^ TypeList
-ConstructorDecl <- TypeParams? Identifier '(' ^ Params? ')' Throws? Block
+ConstructorDecl <- Annotation* TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 
 # === Blocks and Statements (JLS 14) ===
 Block <- '{' BlockStmt* '}'
@@ -151,11 +151,15 @@ Pattern <- RecordPattern / TypePattern
 TypePattern <- &(Annotation* Modifier* LocalVarType Identifier) Annotation* Modifier* LocalVarType Identifier / '_'
 RecordPattern <- RefType '(' PatternList? ')'
 PatternList <- Pattern (',' Pattern)*
-Guard <- WhenKW Expr
+# A guard is a boolean expression, never a lambda (JLS 14.11.1). Going through Expr would
+# try the Lambda alternative first and swallow the switch rule's arrow on a bare-identifier
+# guard: 'case Integer i when b -> {}' parsed 'b -> {}' as the guard. Assignment is Expr
+# minus the top-level Lambda alternative.
+Guard <- WhenKW Assignment
 
-Expr <- Assignment
-Assignment <- Ternary ((URShiftAssign / RShiftAssign / LShiftAssign / '=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Assignment)?
-Ternary <- LogOr ('?' Expr ':' Ternary)?
+Expr <- Lambda / Assignment
+Assignment <- Ternary ((URShiftAssign / RShiftAssign / LShiftAssign / '=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Expr)?
+Ternary <- LogOr ('?' Expr ':' (Lambda / Ternary))?
 LogOr <- LogAnd ('||' LogAnd)*
 LogAnd <- BitOr ('&&' BitOr)*
 BitOr <- BitXor (!'||' !'|=' '|' BitXor)*
@@ -175,10 +179,10 @@ RShiftAssign <- '>' '>' '='
 LShiftAssign <- '<' '<' '='
 Additive <- Multiplicative ((!'+=' '+' / !'-=' !'->' '-') Multiplicative)*
 Multiplicative <- Unary ((!'*=' '*' / !'/=' '/' / !'%=' '%') Unary)*
-Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
+Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' (Lambda / Unary) / Postfix
 Postfix <- Primary PostOp*
 PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '.' < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
-Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / TypeExpr / QualifiedName
+Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- Type ('.' < 'class' > / '::' TypeArgs? (< 'new' > / Identifier))
 Lambda <- LambdaParams '->' (Expr / Block)
 LambdaParams <- Identifier / '_' / '(' LambdaParam? (',' LambdaParam)* ')'
@@ -230,8 +234,10 @@ Modifier <- < ('public' / 'protected' / 'private' / 'static' / 'final' / 'abstra
 #      across any intervening modifiers ('sealed abstract value class X').
 ValueKW <- < 'value' ![a-zA-Z0-9_$] >
 Annotation <- '@' !'interface' QualifiedName ('(' AnnotationValue? ')')?
-AnnotationValue <- Identifier '=' AnnotationElem (',' Identifier '=' AnnotationElem)* / AnnotationElem
-AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)*)? ','? '}' / Ternary
+AnnotationValue <- Identifier '=' AnnotationElem (',' Identifier '=' AnnotationElem)* / AnnotationElem (',' AnnotationElem)*
+# A lambda may appear as an annotation value: '@Anno(value = x -> x)'. javac's parser
+# accepts it and rejects it in Attr. Lambda used to be reachable here via Primary.
+AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)*)? ','? '}' / Lambda / Ternary
 
 Literal <- < ('null' / 'true' / 'false') ![a-zA-Z0-9_$] > / CharLit / StringLit / NumLit
 # JLS 3.10.6: the escape set is closed — b, s, t, n, f, r, ", ', backslash, an octal
