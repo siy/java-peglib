@@ -68,6 +68,14 @@ public class JavaCoverageProbe {
         cases.put("record-pattern-nested", "class A { void m(Object o) { if (o instanceof P(Q(var x), var y)) { } } }");
         cases.put("guarded-pattern", "class A { void m(Object o) { switch (o) { case String s when s.isEmpty() -> { } default -> { } } } }");
 
+        // Gaps found by the OpenJDK langtools corpus (2026-08-06). Each of these parsed
+        // incorrectly before that run; they are gated here so the corpus does not have to be
+        // re-fetched to catch a regression.
+        cases.put("qualified-super", "class A { class B { void m() { A.super.hashCode(); } } }");
+        cases.put("array-init-lone-comma", "class A { int[] i = {,}; int[] j = new int[] {,}; }");
+        cases.put("annotated-wildcard", "class A { java.util.List<@Ann ?> l; }");
+        cases.put("annotated-wildcard-bound", "class A { java.util.List<@Ann ? extends Number> l; }");
+
         // Literals / lexical
         cases.put("text-block", "class A { String s = \"\"\"\n  hi\n  \"\"\"; }");
         cases.put("underscore-literals", "class A { long x = 1_000_000L; int y = 0b1010_1010; }");
