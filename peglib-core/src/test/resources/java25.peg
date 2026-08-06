@@ -192,7 +192,7 @@ ArrayType <- Annotation* (PrimType / RefType)
 # Lookahead BEFORE consuming '[' prevents java-peglib bug where failed iterations leave partial matches
 DimExprs <- (Annotation* &('[' !']') '[' Expr ']')+
 TypeArgs <- '<' '>' / '<' TypeArg (',' TypeArg)* '>'
-TypeArg <- Type / '?' (Annotation* ('extends' / 'super') Type)?
+TypeArg <- Type / Annotation* '?' (Annotation* ('extends' / 'super') Type)?
 
 # Use lookahead BEFORE consuming '.' to avoid capturing it when followed by keyword (e.g., 'String.class')
 QualifiedName <- Identifier (&('.' Identifier) '.' Identifier)*
