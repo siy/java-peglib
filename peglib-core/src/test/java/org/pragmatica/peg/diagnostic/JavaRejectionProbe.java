@@ -58,10 +58,13 @@ public class JavaRejectionProbe {
         cases.put("var-as-param-type", "class A { void m(var x) { } }");
         cases.put("var-as-return-type", "class A { var m() { return null; } }");
 
-        // --- JLS 9.1.4: an interface body is not a class body ---
-        cases.put("interface-field-no-initializer", "interface I { int X; }");
-        cases.put("interface-instance-initializer", "interface I { { } }");
-        cases.put("interface-static-initializer", "interface I { static { } }");
+        // NOTE: interface fields without an initializer, and interface/record initializer
+        // blocks, are over-accepted today. Both need a per-container body rule, which is
+        // blocked on an engine bug — see tools/langtools-corpus/README.md.
+
+        // NOTE: record instance fields / instance initializers are NOT gated here. They are
+        // over-accepted today and cannot be fixed in the grammar alone — see the record-body
+        // entry in tools/langtools-corpus/README.md.
 
         return cases;
     }
@@ -96,14 +99,22 @@ public class JavaRejectionProbe {
         cases.put("yield-as-identifier", "class A { int yield = 1; int m() { return yield; } }");
         cases.put("yield-in-switch", "class A { int m(int x) { return switch (x) { case 1 -> { yield 2; } default -> 0; }; } }");
 
-        // Interfaces keep everything they are actually allowed: initialized fields (including
-        // multi-declarator), all four method shapes, nested types, type params and extends.
-        // A class body is unaffected by the interface split and keeps its initializer blocks.
+        // Interface and record shapes pinned so a future per-container body rule cannot
+        // quietly break them.
         cases.put("interface-initialized-field", "interface I { int X = 1; }");
         cases.put("interface-multi-field", "interface I { int A = 1, B = 2; }");
         cases.put("interface-method-shapes", "interface I { void m(); default void d() { } static void s() { } private void p() { } }");
         cases.put("interface-generic-extends-nested", "interface I<T> extends java.util.List<T> { class Nested { } }");
         cases.put("class-keeps-initializers", "class A { int x; { } static { } A() { } }");
+
+        // Records and JEP 512 compact source files, pinned so a future attempt at the
+        // record-body restriction cannot quietly break them.
+        cases.put("record-static-field", "record R(int x) { static final int Y = 1; }");
+        cases.put("record-compact-and-method", "record R(int x) { R { } int m() { return x; } }");
+        cases.put("record-canonical-ctor", "record R(int x) { R(int x, int y) { this(x); } }");
+        cases.put("nested-record-static-field", "class A { record N(int x) { static int Y = 1; } }");
+        cases.put("compact-source-file", "void main() { }");
+        cases.put("record-as-identifier", "class A { int record; void record() { } }");
 
         return cases;
     }

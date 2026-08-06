@@ -33,7 +33,7 @@ ProvidesDirective <- 'provides' ^ QualifiedName 'with' QualifiedName (',' Qualif
 TypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
 TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
 ClassDecl <- ClassKW ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
-InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? InterfaceBody
+InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
 AnnotationDecl <- '@' InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? AnnotationBody
 # Type declaration keywords with word boundary (prevents 'class' matching prefix of 'className')
 ClassKW <- < 'class' ![a-zA-Z0-9_$] >
@@ -55,15 +55,6 @@ TypeParams <- '<' TypeParam (',' TypeParam)* '>'
 TypeParam <- Annotation* Identifier ('extends' Type ('&' Type)*)?
 
 ClassBody <- '{' ClassMember* '}'
-# An interface body is NOT a class body (JLS 9.1.4). A field is implicitly
-# 'public static final', so an initializer is REQUIRED — 'int X;' is illegal in an
-# interface though legal in a class. Interfaces also admit no initializer blocks
-# (instance or static) and no constructors, so neither InitializerBlock nor
-# ConstructorDecl appears here.
-InterfaceBody <- '{' InterfaceMember* '}'
-InterfaceMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* (TypeKind / MethodDecl / InterfaceFieldDecl) / ';'
-InterfaceFieldDecl <- Type InterfaceVarDecl (',' InterfaceVarDecl)* ';'
-InterfaceVarDecl <- Identifier Dims? '=' VarInit
 ClassMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* Member / InitializerBlock / ';'
 Member <- ConstructorDecl / TypeKind / MethodDecl / FieldDecl
 InitializerBlock <- 'static'? Block

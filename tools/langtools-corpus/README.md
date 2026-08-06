@@ -118,6 +118,43 @@ one pathological negative test and buys correct parsing of every switch guard en
 identifier (`case Integer i when i == j ->`), which previously produced 35 diagnostics on a
 four-line file. Corpus-neutral, unambiguously correct.
 
+## Blocked on an engine bug: per-container class bodies
+
+Interface and record bodies are over-accepted — `interface I { int X; }` (a field with no
+initializer), `interface I { { } }`, `record R(int x) { int y; }` (instance field) and
+`record R(int x) { { } }` all parse today and should not. Together that is ~8 corpus files and
+the largest remaining false-accept cluster. **Both attempts were made, measured as clean wins
+(+2 and +4, zero false-reject collateral), and then reverted. Do not simply retry them.**
+
+Two distinct obstacles, in order:
+
+1. **The JEP 512 fallback silently absorbs a malformed record.** When `RecordDecl` fails,
+   `OrdinaryUnit`'s `TopLevelMember` alternative re-parses `record R(int x) { int y; }` as a
+   *method named `R` returning type `record`*, consuming the whole declaration and reporting zero
+   diagnostics with a wrong-shaped CST. Verified by deleting `TopLevelMember`, after which the
+   same input correctly reports 10 diagnostics. A `!RecordKW` guard on `TopLevelMember` and
+   `Member` fixes the masking (and is JLS-correct: `record` is a restricted identifier that can
+   never be a type name). This masking is general — any failure inside a top-level type
+   declaration can be swallowed this way, which is a CST-shape hazard beyond records.
+
+2. **The blocker: a failed alternative leaves partial CST content.** With either the interface
+   split or the record guard in place, `FormatterCorpusGateTest` fails on
+   `MultilineArguments.java` and `MultilineParameters.java` with a DUPLICATED token —
+   `expected='public' actual='publicpublic'`, 674 → 683 non-trivia tokens. Adding an alternative
+   that fails after consuming modifiers leaves those modifiers in the CST, and the next
+   alternative appends them again. Spelling the guard without a group node changes nothing, so
+   it is not a grouping artifact. The same footgun is already noted inline at `DimExprs`
+   ("lookahead BEFORE consuming '[' prevents java-peglib bug where failed iterations leave
+   partial matches"), where it was worked around rather than fixed.
+
+So this is an **engine prerequisite, not a grammar task**: fix truncation-on-alternative-failure
+in `CstArrayBuilder`/`ParserGenerator` first, then both body rules land together for ~+6.
+
+Note what caught it: the grammar change passed all 333 `peglib-core` tests. Only the full
+reactor build fails, because the round-trip guarantee it breaks lives in `peglib-formatter`.
+**Run `mvn install`, not `mvn -pl peglib-core test`, before committing a structural grammar
+change.**
+
 ## Triage tips — earned, do not skip
 
 - **`trailing input not consumed` reports where the parser STOPPED**, which for a whole-file
