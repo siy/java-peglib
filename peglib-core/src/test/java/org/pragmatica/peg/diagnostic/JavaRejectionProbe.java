@@ -64,6 +64,12 @@ public class JavaRejectionProbe {
         cases.put("interface-static-initializer", "interface I { static { } }");
         cases.put("interface-constructor", "interface I { I(Object... args) { } }");
 
+        // JLS 7.3: a stray ';' after the imports is itself a TypeDeclaration, so a later
+        // import is illegal. This used to pass because the recovery loop silently re-parsed
+        // the remainder as a SECOND compilation unit.
+        cases.put("import-after-extraneous-semicolon", "import java.util.Map;;\nimport java.util.Set;\nclass Foo { }\n");
+        cases.put("two-concatenated-units", "class A { }\nimport java.util.Map;\nclass B { }\n");
+
         // --- JLS 8.10.4: a record's state is exactly its components ---
         cases.put("record-instance-field", "record R(int x) { int y; }");
         cases.put("record-instance-initializer", "record R(int x) { { } }");
@@ -122,6 +128,10 @@ public class JavaRejectionProbe {
         cases.put("record-canonical-ctor", "record R(int x) { R(int x, int y) { this(x); } }");
         cases.put("nested-record-static-field", "class A { record N(int x) { static int Y = 1; } }");
         cases.put("compact-source-file", "void main() { }");
+        cases.put("imports-before-module", "import a.Ann;\n@Ann\nmodule mod { requires b; }\n");
+        cases.put("plain-module", "module mod { }");
+        cases.put("open-module-exports", "open module mod { exports a to b; }");
+        cases.put("trailing-semicolon-after-class", "class Foo { };");
         cases.put("record-as-identifier", "class A { int record; void record() { } }");
 
         return cases;

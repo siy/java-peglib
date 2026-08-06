@@ -7,7 +7,11 @@
 # Used after discriminating keywords to improve error messages and performance.
 
 # === Compilation Units (JLS 7.3-7.8) ===
-CompilationUnit <- ModuleDecl / OrdinaryUnit
+# JLS 7.3: a ModularCompilationUnit is '{ImportDeclaration} ModuleDeclaration' — imports
+# may precede 'module', as in 'import a.Ann; @Ann module m { }'. This gap was masked
+# until the recovery loop stopped silently re-parsing the remainder as a second unit.
+CompilationUnit <- ModularUnit / OrdinaryUnit
+ModularUnit <- ImportDecl* ModuleDecl
 # JEP 512 (Compact Source Files and Instance Main Methods) — final in Java 25.
 # A compact source file has top-level methods/fields with no enclosing class; the
 # compiler wraps them in an implicitly declared class.
