@@ -1,6 +1,6 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-06 — 0.7.0 shipped; 0.7.1 cycle open on `release-0.7.1`
+**Last updated:** 2026-08-06 — 0.7.0 shipped; 0.7.1 open, validated against OpenJDK langtools
 
 ---
 
@@ -60,6 +60,51 @@ carries no changes of its own yet.
      so the early-access label is stale and will eventually break. Unrelated to any release.
    - ~657 JBCT warnings remain by design; see the warning policy in CLAUDE.md before touching
      any of them.
+
+### OpenJDK langtools corpus (2026-08-06)
+
+Ran the grammar over OpenJDK's own javac test suite — a far harder corpus than anything
+hand-written here, since it exercises the language exhaustively including deliberately
+pathological constructs.
+
+**Reproduce:**
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/openjdk/jdk.git /tmp/jdk
+cd /tmp/jdk && git sparse-checkout set test/langtools/tools/javac    # 5,667 files, 36 MB
+```
+Split positive from negative first, or the number is meaningless: a file is a NEGATIVE test if
+it contains `@compile/fail`, has a sibling `.out` golden file, or contains a `compiler.err.`
+marker. That gives **3,555 positive / 2,112 negative**. Only the positive set should parse clean.
+Drive it with a ~50-line harness that calls `PegParser.fromGrammar(...).parse(src)` per file and
+counts non-empty `diagnostics()`; the whole positive set runs in ~1.2 s.
+
+**Result: 96.8% -> 97.8% clean (3,477 / 3,555), zero crashes.** Four real gaps found and fixed
+this session: qualified `super` (`A.super.m()`), array initializer `{,}`, type annotations
+before a wildcard (`List<@Ann ?>`), and — from the earlier adversarial probe — receiver
+parameters.
+
+**78 files still fail. Two known causes, both worth doing:**
+
+1. **32 files: "empty input".** A compilation unit consisting only of comments (a license
+   header and nothing else) is legal Java, and an empty file is too. This is an **engine** bug,
+   not a grammar one: the generated `parseWithRecovery` in `ParserGenerator` (search for
+   `"empty input"`) unconditionally emits a diagnostic when the token stream is empty or
+   all-trivia, without asking whether the start rule can match empty. Java's `CompilationUnit`
+   can. Fix by attempting the start rule once on empty input and only emitting the diagnostic if
+   it fails, or by computing start-rule nullability at codegen (`Analyzer` already has
+   `computeNullableFixedPoint`). Careful: the current unconditional break is probably there to
+   prevent an infinite loop on a nullable start rule, so keep the `firstAttempt` guard.
+   Fixing this alone takes the corpus to ~98.7%.
+
+2. **~5 files: Unicode escapes.** Java translates `\uXXXX` in a pre-lex pass, so `\u0061bc` is
+   the identifier `abc` and `\u000a` is a real line terminator. This needs a preprocessing
+   stage ahead of the lexer, not a grammar change. Genuinely architectural; decide whether it is
+   worth supporting at all for a lint/format tool.
+
+The remaining ~41 are untriaged and cluster in `patterns`, `generics`, and
+`annotations/typeAnnotations/newlocations`. Bisect them the usual way rather than theorising —
+note that "trailing input not consumed" reports where the parser STOPPED, which is typically the
+start of the type declaration, not the offending construct.
 
 ### Things worth not re-learning
 

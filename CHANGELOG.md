@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+Validated the Java grammar against OpenJDK's own javac test suite (3,555 positive langtools
+tests). Clean-parse rate 96.8% -> 97.8%, zero crashes. Gaps found and fixed:
+
+- **Qualified `super`** — `A.super.m()`. `PostOp` handled `.this` but not `.super`.
+- **Array initializer `{,}`** — JLS permits an empty initializer list followed by a trailing
+  comma.
+- **Type annotations before a wildcard** — `List<@Ann ?>`. `TypeArg` allowed annotations after
+  `?` but not before it.
+
 ### Changed
 
 ### Added
