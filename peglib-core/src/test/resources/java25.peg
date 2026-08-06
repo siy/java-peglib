@@ -36,20 +36,20 @@ ProvidesDirective <- 'provides' ^ QualifiedName 'with' QualifiedName (',' Qualif
 
 TypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
 TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
-ClassDecl <- ClassKW ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
-InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? InterfaceBody
-AnnotationDecl <- '@' InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? AnnotationBody
+ClassDecl <- ClassKW ^ !RestrictedTypeName Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
+InterfaceDecl <- InterfaceKW ^ !RestrictedTypeName Identifier TypeParams? ('extends' TypeList)? PermitsClause? InterfaceBody
+AnnotationDecl <- '@' InterfaceKW ^ !RestrictedTypeName Identifier TypeParams? ('extends' TypeList)? AnnotationBody
 # Type declaration keywords with word boundary (prevents 'class' matching prefix of 'className')
 ClassKW <- < 'class' ![a-zA-Z0-9_$] >
 InterfaceKW <- < 'interface' ![a-zA-Z0-9_$] >
 AnnotationBody <- '{' AnnotationMember* '}'
 AnnotationMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* (AnnotationElemDecl / FieldDecl / TypeKind) / ';'
 AnnotationElemDecl <- TypeParams? Type Identifier '(' Params? ')' Dims? Throws? ('default' AnnotationElem)? (Block / ';')
-EnumDecl <- EnumKW ^ Identifier ImplementsClause? EnumBody
+EnumDecl <- EnumKW ^ !RestrictedTypeName Identifier ImplementsClause? EnumBody
 # Lookahead ensures this is a record declaration (record Name(...)) not:
 # - method call: record(...)
 # - field/variable of type 'record': record field;
-RecordDecl <- RecordKW &(Identifier TypeParams? '(') Identifier ^ TypeParams? '(' RecordComponents? ')' ImplementsClause? RecordBody
+RecordDecl <- RecordKW &(Identifier TypeParams? '(') !RestrictedTypeName Identifier ^ TypeParams? '(' RecordComponents? ')' ImplementsClause? RecordBody
 EnumKW <- < 'enum' ![a-zA-Z0-9_$] >
 RecordKW <- < 'record' ![a-zA-Z0-9_$] >
 ImplementsClause <- 'implements' ^ TypeList
@@ -120,7 +120,7 @@ Block <- '{' BlockStmt* '}'
 BlockStmt <- LocalVar / LocalTypeDecl / Stmt
 LocalTypeDecl <- Annotation* (!SealedMod Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
 SealedMod <- < ('sealed' / 'non-sealed') ![a-zA-Z0-9_$] >
-LocalVar <- Annotation* Modifier* LocalVarType LocalVarDecls ';'
+LocalVar <- Annotation* Modifier* (< 'var' ![a-zA-Z0-9_$] > LocalVarDecl / Type LocalVarDecls) ';'
 LocalVarType <- < 'var' ![a-zA-Z0-9_$] > / Type
 # Statement keywords use helper rules to combine keyword + word boundary as single token
 # This prevents the parser from skipping whitespace before the boundary check
@@ -166,7 +166,7 @@ FinallyKW <- < 'finally' ![a-zA-Z0-9_$] >
 WhenKW <- < 'when' ![a-zA-Z0-9_$] >
 ForCtrl <- ForInit? ';' Expr? ';' ExprList? / Annotation* Modifier* LocalVarType (Identifier / '_') ':' Expr
 ForInit <- LocalVarNoSemi / ExprList
-LocalVarNoSemi <- Annotation* Modifier* LocalVarType LocalVarDecls
+LocalVarNoSemi <- Annotation* Modifier* (< 'var' ![a-zA-Z0-9_$] > LocalVarDecl / Type LocalVarDecls)
 ResourceSpec <- '(' Resource (';' Resource)* ';'? ')'
 Resource <- Annotation* Modifier* LocalVarType (Identifier / '_') '=' Expr / QualifiedName
 Catch <- CatchKW ^ '(' Modifier* Type ('|' Type)* (Identifier / '_') ')' Block

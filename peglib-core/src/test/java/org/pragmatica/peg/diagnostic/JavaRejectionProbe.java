@@ -57,6 +57,10 @@ public class JavaRejectionProbe {
         cases.put("var-as-field-type", "class A { var v; }");
         cases.put("var-as-param-type", "class A { void m(var x) { } }");
         cases.put("var-as-return-type", "class A { var m() { return null; } }");
+        cases.put("var-as-class-name", "class var { }");
+        cases.put("var-as-interface-name", "interface var { }");
+        cases.put("yield-as-class-name", "class yield { }");
+        cases.put("var-multiple-declarators", "class A { void m() { var x = 1, y = 2; } }");
 
         // --- JLS 9.1.4: an interface body is not a class body ---
         cases.put("interface-field-no-initializer", "interface I { int X; }");
@@ -133,6 +137,9 @@ public class JavaRejectionProbe {
         cases.put("var-as-identifier", "class A { int var = 3; void m() { var = 4; } }");
         cases.put("var-local-inference", "class A { void m() { var x = 3; } }");
         cases.put("var-in-for-each", "class A { void m(int[] a) { for (var x : a) { } } }");
+        cases.put("var-single-declarator", "class A { void m() { var x = 1; } }");
+        cases.put("multi-declarators-typed", "class A { void m() { int x = 1, y = 2; } }");
+        cases.put("for-init-var-and-typed", "class A { void m() { for (var i = 0; i < 3; i++) { } for (int i = 0, j = 1; i < 3; i++) { } } }");
         cases.put("yield-as-identifier", "class A { int yield = 1; int m() { return yield; } }");
         cases.put("yield-in-switch", "class A { int m(int x) { return switch (x) { case 1 -> { yield 2; } default -> 0; }; } }");
 

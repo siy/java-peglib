@@ -66,11 +66,11 @@ As of 2026-08-06 on `release-0.7.1`:
 
 ```
 AGREE_CLEAN           5402
-AGREE_REJECT           170
+AGREE_REJECT           174
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            37
+FALSE_ACCEPT            33
 FALSE_REJECT            33
-agreement: 98.76% (5545/5642 scored, 24 excluded)
+agreement: 98.83% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
