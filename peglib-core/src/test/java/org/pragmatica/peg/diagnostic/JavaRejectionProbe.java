@@ -1,0 +1,124 @@
+package org.pragmatica.peg.diagnostic;
+
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.pragmatica.peg.PegParser;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+
+/**
+ * The mirror of {@link JavaCoverageProbe}: constructs that must be REJECTED.
+ *
+ * <p>A coverage probe alone cannot detect an over-permissive grammar — a grammar that accepted
+ * every byte sequence would pass it perfectly. These cases were found by differencing the
+ * grammar against javac's own parse phase over the OpenJDK langtools corpus
+ * ({@code tools/langtools-corpus/}), where each showed up as a FALSE ACCEPT: javac reports a
+ * syntax error, we did not.
+ *
+ * <p>Every case is paired with a legal near-miss in {@link #legalNearMisses()}. That pairing is
+ * the point: the cheap way to make a rejection case pass is to over-tighten the rule until it
+ * also rejects valid code, and the near-miss is what catches that. {@code 1_} must fail while
+ * {@code 1__0L} must still parse.
+ *
+ * <p>Scope note: this probe deliberately does NOT encode javac checks that are not context-free
+ * — numeric range ({@code compiler.err.int.number.too.large}), duplicate modifiers, or filename
+ * agreement. Those live in javac's parser for convenience, not because they are grammar. See
+ * {@code tools/langtools-corpus/README.md} for the enumerated waiver list.
+ */
+public class JavaRejectionProbe {
+
+    private static LinkedHashMap<String, String> mustReject() {
+        var cases = new LinkedHashMap<String, String>();
+
+        // --- JLS 3.10.1: underscores may appear only BETWEEN digits ---
+        cases.put("trailing-underscore", "class A { long x = 1_; }");
+        cases.put("underscore-before-dot", "class A { double d = 1_.5; }");
+        cases.put("underscore-after-dot", "class A { double d = 1._5; }");
+        cases.put("hex-leading-underscore", "class A { int x = 0x_1; }");
+        cases.put("underscore-before-suffix", "class A { long x = 1_L; }");
+        cases.put("binary-trailing-underscore", "class A { int x = 0b1_; }");
+
+        // --- JLS 3.10.6: the escape set is closed ---
+        cases.put("bad-escape-e", "class A { String s = \"\\e\"; }");
+        cases.put("bad-escape-q", "class A { char c = '\\q'; }");
+
+        // --- JLS 3.10.4: a char literal holds exactly one element ---
+        cases.put("empty-char-lit", "class A { char c = ''; }");
+
+        // --- JLS 8.4.1: varargs and C-style array brackets cannot be combined ---
+        cases.put("varargs-and-old-array", "class A { void m(int... x[]) { } }");
+        cases.put("varargs-and-old-array-ref", "class A { void m(String... s[]) { } }");
+
+        return cases;
+    }
+
+    /**
+     * Legal constructs that sit one character away from a rejection case. Each guards against
+     * the corresponding rule being tightened past the point of correctness.
+     */
+    private static LinkedHashMap<String, String> legalNearMisses() {
+        var cases = new LinkedHashMap<String, String>();
+
+        cases.put("runs-of-underscores", "class A { long x = 1__0L; }");
+        cases.put("underscores-all-parts", "class A { double d = 1_0.5_0e1_0; }");
+        cases.put("binary-and-hex-underscores", "class A { int y = 0b1010_1010; int z = 0xDEAD_BEEF; }");
+        cases.put("hex-float", "class A { double d = 0x1.8p3; float f = 0x1p-2f; }");
+        cases.put("trailing-dot-double", "class A { double d = 1.; double e = .5; }");
+        cases.put("octal-and-space-escape", "class A { String s = \"\\0\\377\\s\"; }");
+        cases.put("unicode-escape", "class A { String s = \"\\u0041\"; }");
+        cases.put("quote-escapes", "class A { char c = '\\''; char d = '\\\\'; String s = \"\\\"\"; }");
+        cases.put("text-block", "class A { String s = \"\"\"\n  hi\n  \"\"\"; }");
+        cases.put("varargs-alone", "class A { void m(int... x) { } }");
+        cases.put("array-param-alone", "class A { void m(int x[], String s[][]) { } }");
+        cases.put("varargs-generic", "class A { void m(java.util.List<String>... x) { } }");
+        cases.put("receiver-param", "class A { void m(A this, int x[]) { } }");
+
+        return cases;
+    }
+
+    @Test
+    public void rejectsWhatJavacRejects() throws Exception {
+        var grammar = Files.readString(Path.of("src/test/resources/java25.peg"));
+        var parser = PegParser.fromGrammar(grammar).unwrap();
+
+        System.out.println("=== java rejection probe ===");
+        var wronglyAccepted = 0;
+
+        for (var e : mustReject().entrySet()) {
+            var r = parser.parse(e.getValue());
+
+            if (r.diagnostics().isEmpty()) {
+                wronglyAccepted++ ;
+                System.out.printf("  ACCEPTED (should reject) %-28s %s%n", e.getKey(), e.getValue());
+            }
+        }
+
+        var wronglyRejected = 0;
+
+        for (var e : legalNearMisses().entrySet()) {
+            var r = parser.parse(e.getValue());
+
+            if (!r.diagnostics().isEmpty()) {
+                wronglyRejected++ ;
+                System.out.printf("  REJECTED (should accept) %-28s %s%n",
+                                  e.getKey(), r.diagnostics().get(0).message());
+            }
+        }
+
+        System.out.println("=== " + wronglyAccepted + " over-permissive, "
+                           + wronglyRejected + " over-tightened ===");
+
+        assertThat(wronglyAccepted)
+        .as("javac's parser rejects these; a grammar that accepts them is over-permissive")
+        .isZero();
+
+        assertThat(wronglyRejected)
+        .as("these are legal Java sitting one character from a rejection case — rejecting them "
+            + "means a rule was tightened past correctness")
+        .isZero();
+    }
+}

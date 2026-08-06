@@ -14,10 +14,13 @@ import java.util.LinkedHashMap;
  * unlikely to contain. Deliberately picks awkward-but-legal forms rather than
  * idiomatic ones — the point is to find gaps, not to confirm the happy path.
  *
- * <p>Asserts zero gaps: these 40 constructs all parse today, so any future grammar change
+ * <p>Asserts zero gaps: every construct listed here parses today, so any future grammar change
  * that breaks one fails here rather than being discovered in the field. Add a case when a
  * gap is found; do not delete one to make the suite pass. Run:
  * {@code mvn -pl peglib-core test -Dtest=JavaCoverageProbe -Djbct.skip=true}
+ *
+ * <p>This probe covers only what must be ACCEPTED. For constructs that must be REJECTED, see
+ * {@code JavaRejectionProbe} — a grammar that accepts everything would pass this file trivially.
  */
 public class JavaCoverageProbe {
 
@@ -75,6 +78,34 @@ public class JavaCoverageProbe {
         cases.put("array-init-lone-comma", "class A { int[] i = {,}; int[] j = new int[] {,}; }");
         cases.put("annotated-wildcard", "class A { java.util.List<@Ann ?> l; }");
         cases.put("annotated-wildcard-bound", "class A { java.util.List<@Ann ? extends Number> l; }");
+
+        // A compilation unit may be legally empty, and a file holding only a license header is
+        // just as legal — CompilationUnit is nullable. The engine used to reject both: the
+        // generated parseWithRecovery emitted "empty input" whenever the token stream was empty
+        // or all-trivia, without ever attempting the start rule. 71 langtools files hit this.
+        cases.put("empty-compilation-unit", "");
+        cases.put("comment-only-block", "/*\n * Copyright header, no code.\n */\n");
+        cases.put("comment-only-line", "// just a line comment\n");
+        cases.put("comment-only-mixed", "/* block */\n// line\n/// doc line\n");
+
+        // Gaps found by differencing against javac's own parse phase over the OpenJDK
+        // langtools corpus (2026-08-06). See tools/langtools-corpus/README.md.
+        cases.put("stray-semicolon-toplevel", "class Foo { };");
+        cases.put("stray-semicolon-between", "class A { } ; ; class B { }");
+        cases.put("annotation-decl-typeparams", "@interface A<T> { }");
+        cases.put("annotation-decl-extends", "@interface A extends B { }");
+        cases.put("annotation-elem-params-throws", "@interface A { int x(int y) throws Exception; }");
+        cases.put("annotation-elem-default-lone-comma", "@interface A { int[] v() default {,}; }");
+        cases.put("enum-lone-comma", "enum E { , }");
+        cases.put("enum-empty", "enum E { }");
+        cases.put("explicit-ctor-typeargs-super", "class A extends B { A() { <Object>super(); } }");
+        cases.put("explicit-ctor-typeargs-this", "class A { A() { <Object>this(1); } A(int x) { } }");
+        cases.put("annotated-varargs", "class A { void f(int @Ann ... x) { } }");
+        cases.put("for-each-final-annotated", "class A { void m(int[] arr) { for (final @Ann int a : arr) { } } }");
+        cases.put("pattern-final-binding", "class A { void m(Object o) { switch (o) { case Foo(final int x) -> { } default -> { } } } }");
+        cases.put("case-null-with-item", "class A { void m(String s) { switch (s) { case null, \"a\": break; default: break; } } }");
+        cases.put("annotation-before-typeparams", "class A { public @Ann <T> void m() { } }");
+        cases.put("qualified-receiver-param", "class Outer { class Inner { Inner(Outer Outer.this) { } } }");
 
         // Literals / lexical
         cases.put("text-block", "class A { String s = \"\"\"\n  hi\n  \"\"\"; }");
