@@ -654,13 +654,29 @@ public final class ParserGenerator {
             sb.append("            // whether anything remains to parse.\n");
             sb.append("            while (pos < tokens.count() && tokens.isTrivia(pos)) pos++;\n");
             sb.append("            if (pos >= tokens.count()) {\n");
-            sb.append("                if (firstAttempt && diagnostics.size() < maxDiagnostics) {\n");
-            sb.append("                    // Empty / all-trivia input — record a diagnostic so callers\n");
-            sb.append("                    // know the parse couldn't even attempt the start rule.\n");
-            sb.append("                    int off = tokens.count() == 0 ? 0 : tokens.startAt(0);\n");
-            sb.append("                    diagnostics.add(Diagnostic.error(off, 1,\n");
-            sb.append("                        \"empty input\", \"start of " + escapeJavaString(startName)
+            sb.append("                // Empty or all-trivia input. That is only an error if the start\n");
+            sb.append("                // rule cannot match empty — a nullable start rule legitimately\n");
+            sb.append("                // succeeds here (Java's CompilationUnit does: a file holding\n");
+            sb.append("                // nothing but a license header is a valid compilation unit).\n");
+            sb.append("                // So attempt it once and report only on a genuine failure.\n");
+            sb.append("                //\n");
+            sb.append("                // The break below stays UNCONDITIONAL: we are at end-of-input, so\n");
+            sb.append("                // a nullable start rule that consumes nothing must not be retried.\n");
+            sb.append("                if (firstAttempt) {\n");
+            sb.append("                    int beforeNodesEmpty = cst.currentNodeCount();\n");
+            sb.append("                    errorPos = -1;\n");
+            sb.append("                    expected = null;\n");
+            sb.append("                    found = -1;\n");
+            sb.append("                    lastFailedRuleKind = -1;\n");
+            sb.append("                    if (!parse").append(startName).append("(root)) {\n");
+            sb.append("                        cst.truncate(beforeNodesEmpty);\n");
+            sb.append("                        if (diagnostics.size() < maxDiagnostics) {\n");
+            sb.append("                            int off = tokens.count() == 0 ? 0 : tokens.startAt(0);\n");
+            sb.append("                            diagnostics.add(Diagnostic.error(off, 1,\n");
+            sb.append("                                \"empty input\", \"start of " + escapeJavaString(startName)
                      + "\", \"<end-of-input>\"));\n");
+            sb.append("                        }\n");
+            sb.append("                    }\n");
             sb.append("                }\n");
             sb.append("                break;\n");
             sb.append("            }\n");
