@@ -70,7 +70,7 @@ CompactConstructor <- Annotation* Modifier* Identifier Block
 FieldDecl <- Type VarDecls ';'
 VarDecls <- VarDecl (',' VarDecl)*
 VarDecl <- Identifier Dims? ('=' VarInit)?
-VarInit <- '{' (VarInit (',' VarInit)* ','?)? '}' / Expr
+VarInit <- '{' (VarInit (',' VarInit)*)? ','? '}' / Expr
 MethodDecl <- TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? (Block / ';')
 Params <- Param (',' Param)*
 # A receiver parameter (JLS 8.4.1) names 'this' instead of a variable; it exists so
@@ -170,7 +170,7 @@ Additive <- Multiplicative ((!'+=' '+' / !'-=' !'->' '-') Multiplicative)*
 Multiplicative <- Unary ((!'*=' '*' / !'/=' '/' / !'%=' '%') Unary)*
 Unary <- ('++' / '--' / '+' / '-' / '!' / '~') Unary / '(' Type ('&' Type)* ')' Unary / Postfix
 Postfix <- Primary PostOp*
-PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
+PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'class' / '.' 'this' / '.' < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
 Primary <- Literal / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / Lambda / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- Type ('.' < 'class' > / '::' TypeArgs? (< 'new' > / Identifier))
 Lambda <- LambdaParams '->' (Expr / Block)
