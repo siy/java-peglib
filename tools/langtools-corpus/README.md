@@ -65,12 +65,12 @@ count, CST node count, and whether `reconstruct()` round-trips byte-identically.
 As of 2026-08-06 on `release-0.7.1`:
 
 ```
-AGREE_CLEAN           5405
-AGREE_REJECT           164
+AGREE_CLEAN           5402
+AGREE_REJECT           170
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            43
-FALSE_REJECT            30
-agreement: 98.67% (5545/5642 scored, 24 excluded)
+FALSE_ACCEPT            37
+FALSE_REJECT            33
+agreement: 98.76% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -99,12 +99,13 @@ from a sibling repetition), `invalid.meth.decl.ret.type.req` (constructor-vs-met
 comparing an identifier to the enclosing class *name*, not a shape), and multi-surrogate char
 literals (needs Java's phase-1 `\uXXXX` translation).
 
-**javac's parser is inconsistent here (learned the hard way).** JLS 15.10.1 forbids array
-creation with a parameterized element type, but javac's *parser* only rejects some forms and
-defers the rest to Attr. A JLS-correct rule scored +6/−3 — a wash — while adding three grammar
-rules and making the formatter refuse input javac's parser accepts. Backed out. Note that
-`new Class<?>[0]` is **legal**: an unbounded wildcard is reifiable. A rule banning all type
-arguments there breaks 12 real files.
+**javac's parser is inconsistent on array creation.** JLS 15.10.1 forbids a parameterized
+element type, but javac's *parser* rejects only the diamond and explicit-type-argument forms and
+defers `new ArrayList<T>[…]` to Attr. The JLS-correct rule is in place and costs exactly three
+permanent disagreements — `GenericArrayCreation.java`, `BarNeg1.java`, `BarNeg2.java` — against
+six correct rejections. Two traps: `new Class<?>[0]` is **legal** (an unbounded wildcard is
+reifiable), and a rule banning all type arguments there breaks 12 real files; and this only
+became worth landing once other fixes were in, so measure the combination, not the rule alone.
 
 The same asymmetry costs 2 files on the restricted-type-name rule (JLS 3.9): we reject `var` in
 type-use position, which is JLS-correct, but javac's parser accepts `var<String> m()` and

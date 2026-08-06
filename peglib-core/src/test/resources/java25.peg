@@ -20,7 +20,7 @@ ModularUnit <- ImportDecl* ModuleDecl
 # 'Annotation* Modifier*' prefix, so reversing them would let TopLevelMember
 # win on ordinary files and change their CST shape — which the corpus gates and
 # the CST-shape assertion would both flag.
-OrdinaryUnit <- PackageDecl? ImportDecl* (TypeDecl / TopLevelMember / ';')*
+OrdinaryUnit <- PackageDecl ImportDecl* (TypeDecl / ';')* / ImportDecl* (TypeDecl / TopLevelMember / ';')*
 TopLevelMember <- Annotation* Modifier* !RecordKW (MethodDecl / FieldDecl)
 PackageDecl <- Annotation* 'package' ^ QualifiedName ';'
 ImportDecl  <- 'import' ^ ('module' QualifiedName ';' / 'static'? QualifiedName ('.' '*')? ';')
@@ -118,7 +118,8 @@ ConstructorDecl <- Annotation* TypeParams? Identifier '(' ^ Params? ')' Throws? 
 # === Blocks and Statements (JLS 14) ===
 Block <- '{' BlockStmt* '}'
 BlockStmt <- LocalVar / LocalTypeDecl / Stmt
-LocalTypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
+LocalTypeDecl <- Annotation* (!SealedMod Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
+SealedMod <- < ('sealed' / 'non-sealed') ![a-zA-Z0-9_$] >
 LocalVar <- Annotation* Modifier* LocalVarType LocalVarDecls ';'
 LocalVarType <- < 'var' ![a-zA-Z0-9_$] > / Type
 # Statement keywords use helper rules to combine keyword + word boundary as single token
@@ -215,7 +216,7 @@ Postfix <- Primary PostOp*
 # 'TypeName {[]} . class' (JLS 15.8.2), handled by TypeExpr. Leaving it here let
 # 'this.class' and '@Ann String.class' through.
 PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'this' / '.' < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
-Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > TypeArgs? ArrayType (DimExprs Dims? / Dims VarInit / '(' Args? ')' ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / '(' Expr ')' / TypeExpr / QualifiedName
+Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > (RawArrayElemType (DimExprs Dims? / Dims VarInit) / TypeArgs? ArrayType ('(' Args? ')') ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- UnannType '.' < 'class' > / Type '::' TypeArgs? (< 'new' > / Identifier)
 UnannType <- (PrimType / RefType) Dims?
 Lambda <- LambdaParams '->' (Expr / Block)
@@ -248,6 +249,11 @@ RestrictedTypeName <- < ('var' / 'yield') ![a-zA-Z0-9_$] >
 Dims <- (Annotation* '[' ']')+
 # ArrayType is Type without trailing Dims - used for array creation expressions
 ArrayType <- Annotation* (PrimType / RefType)
+# JLS 15.10.1 — see above: only bare '<?>' wildcards are reifiable, so '<? extends N>'
+# and '<>' are excluded here while 'new Class<?>[0]' keeps working.
+RawArrayElemType <- Annotation* (PrimType / RawTypeName (&('.' ('@' / Identifier)) '.' RawTypeName)*)
+RawTypeName <- Annotation* !RestrictedTypeName Identifier WildcardOnlyTypeArgs?
+WildcardOnlyTypeArgs <- '<' Annotation* '?' (',' Annotation* '?')* '>'
 # DimExprs are dimension expressions with sizes - e.g., [10], [rows][cols]
 # Lookahead BEFORE consuming '[' prevents java-peglib bug where failed iterations leave partial matches
 DimExprs <- (Annotation* &('[' !']') '[' Expr ']')+

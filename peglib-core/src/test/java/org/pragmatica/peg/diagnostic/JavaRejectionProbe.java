@@ -80,6 +80,14 @@ public class JavaRejectionProbe {
         // --- JLS 15.8.2: a class literal is 'TypeName {[]} . class', not a postfix operator ---
         cases.put("this-dot-class", "class A { Object o = this.class; }");
 
+        // --- JLS 15.10.1: an array's element type must be reifiable ---
+        cases.put("array-with-type-arguments", "class A { Object o = new java.util.List<String>[10]; }");
+        cases.put("array-with-diamond", "class A { Object o = new java.util.List<>[10]; }");
+
+        // --- JLS 14.3 / JEP 512 ---
+        cases.put("sealed-local-class", "class A { void m() { sealed class L { } } }");
+        cases.put("compact-source-with-package", "package p;\nvoid main() { }\n");
+
         // JLS 7.3: a stray ';' after the imports is itself a TypeDeclaration, so a later
         // import is illegal. This used to pass because the recovery loop silently re-parsed
         // the remainder as a SECOND compilation unit.
@@ -182,6 +190,13 @@ public class JavaRejectionProbe {
         cases.put("qualified-this", "class A { class B { Object o = A.this; } }");
         cases.put("method-ref-still-works", "class A { Object o = String::valueOf; }");
         cases.put("annotated-local-var", "class A { void m() { @Ann var v = \"\"; } }");
+
+        // An unbounded wildcard IS reifiable, so this stays legal — the trap that broke
+        // 12 files on the first attempt at the array rule.
+        cases.put("array-of-wildcard", "class A { Object o = new Class<?>[0]; Object p = new Class<?>[]{ }; }");
+        cases.put("array-creation-shapes", "class A { Object o = new int[3][4]; Object p = new String[]{\"a\"}; }");
+        cases.put("local-class-plain", "class A { void m() { class L { } } }");
+        cases.put("package-with-class", "package p;\nclass A { }\n");
         cases.put("record-as-identifier", "class A { int record; void record() { } }");
 
         return cases;
