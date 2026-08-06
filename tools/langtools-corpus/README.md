@@ -128,5 +128,11 @@ four-line file. Corpus-neutral, unambiguously correct.
   text-block opening-delimiter check broke **226 files** — every text block in the corpus.
 - **A lexer rule may not reference another rule.** Factoring a repeated character run into its
   own rule gets rejected at `fromGrammar` with `SkippedRuleReferenced`; spell it inline.
+- **A lexer rule that is too permissive can desync the whole file.** `NumLit`'s leading-dot
+  alternative was `< '.' [0-9_]+ ... >`; since `_` is in `[0-9_]`, `t._field` lexed `._` as one
+  2-char token, which beat the 1-char `.` on maximal munch. One bad token turned into
+  "trailing input not consumed" for the entire file. When a whole-file failure makes no sense,
+  suspect the token stream before the parser rules — the diagnostic's `found=` field names the
+  offending token text.
 - **Measure after every single change.** Two changes landed together cost a bisection round;
   the run is 6 seconds, so there is no reason to batch.

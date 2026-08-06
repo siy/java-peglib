@@ -122,6 +122,16 @@ public class JavaCoverageProbe {
         cases.put("constructor-annotation", "class Outer { class Inner { public @Ann Inner() { } } }");
         cases.put("annotation-bare-multi-value", "@Target(ElementType.METHOD, ElementType.TYPE) @interface A { }");
 
+        // An identifier beginning with '_' immediately after '.' used to lose a maximal-munch
+        // race: NumLit's leading-dot alternative was < '.' [0-9_]+ ... >, and because '_' is in
+        // [0-9_] it matched '._' as a single 2-char token, beating the 1-char '.' and desyncing
+        // the token stream for the rest of the file. Requiring a real digit after the dot fixed
+        // it. These look like lexer trivia but each one cascaded into a whole-file failure.
+        cases.put("underscore-member-after-dot", "class A { int _field; void m(A t) { t._field = 3; } }");
+        cases.put("underscore-package-segment", "package primitive._class;\nclass C { }\n");
+        cases.put("underscore-digit-member", "class A { void _1() { } void m(A t) { t._1(); } }");
+        cases.put("underscore-prefixed-names", "class A { int _x = 1; int __y = 2; int _9 = 3; }");
+
         // Literals / lexical
         cases.put("text-block", "class A { String s = \"\"\"\n  hi\n  \"\"\"; }");
         cases.put("underscore-literals", "class A { long x = 1_000_000L; int y = 0b1010_1010; }");
