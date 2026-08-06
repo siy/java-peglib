@@ -58,6 +58,11 @@ public class JavaRejectionProbe {
         cases.put("var-as-param-type", "class A { void m(var x) { } }");
         cases.put("var-as-return-type", "class A { var m() { return null; } }");
 
+        // --- JLS 9.1.4: an interface body is not a class body ---
+        cases.put("interface-field-no-initializer", "interface I { int X; }");
+        cases.put("interface-instance-initializer", "interface I { { } }");
+        cases.put("interface-static-initializer", "interface I { static { } }");
+
         return cases;
     }
 
@@ -90,6 +95,15 @@ public class JavaRejectionProbe {
         cases.put("var-in-for-each", "class A { void m(int[] a) { for (var x : a) { } } }");
         cases.put("yield-as-identifier", "class A { int yield = 1; int m() { return yield; } }");
         cases.put("yield-in-switch", "class A { int m(int x) { return switch (x) { case 1 -> { yield 2; } default -> 0; }; } }");
+
+        // Interfaces keep everything they are actually allowed: initialized fields (including
+        // multi-declarator), all four method shapes, nested types, type params and extends.
+        // A class body is unaffected by the interface split and keeps its initializer blocks.
+        cases.put("interface-initialized-field", "interface I { int X = 1; }");
+        cases.put("interface-multi-field", "interface I { int A = 1, B = 2; }");
+        cases.put("interface-method-shapes", "interface I { void m(); default void d() { } static void s() { } private void p() { } }");
+        cases.put("interface-generic-extends-nested", "interface I<T> extends java.util.List<T> { class Nested { } }");
+        cases.put("class-keeps-initializers", "class A { int x; { } static { } A() { } }");
 
         return cases;
     }
