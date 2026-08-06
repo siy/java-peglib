@@ -191,7 +191,13 @@ Type <- Annotation* (PrimType / RefType) Dims?
 PrimType <- < ('boolean' / 'byte' / 'short' / 'int' / 'long' / 'float' / 'double' / 'char' / 'void') ![a-zA-Z0-9_$] >
 # Use lookahead BEFORE consuming '.' to avoid capturing it when followed by keyword (e.g., 'HashMap.class')
 RefType <- AnnotatedTypeName (&('.' ('@' / Identifier)) '.' AnnotatedTypeName)*
-AnnotatedTypeName <- Annotation* Identifier TypeArgs?
+# JLS 3.9: 'var' and 'yield' are RESTRICTED type names — legal as ordinary identifiers
+# ('int var = 3;', 'obj.yield()') but never as the name of a type in type-use position.
+# Identifier deliberately excludes only HARD keywords, so without this guard a
+# contextual keyword slips through as a type name. LocalVarType keeps its own explicit
+# 'var' alternative, so local type inference is unaffected.
+AnnotatedTypeName <- Annotation* !RestrictedTypeName Identifier TypeArgs?
+RestrictedTypeName <- < ('var' / 'yield') ![a-zA-Z0-9_$] >
 Dims <- (Annotation* '[' ']')+
 # ArrayType is Type without trailing Dims - used for array creation expressions
 ArrayType <- Annotation* (PrimType / RefType)

@@ -65,12 +65,12 @@ count, CST node count, and whether `reconstruct()` round-trips byte-identically.
 As of 2026-08-06 on `release-0.7.1`:
 
 ```
-AGREE_CLEAN           5399
-AGREE_REJECT           136
+AGREE_CLEAN           5397
+AGREE_REJECT           141
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            71
-FALSE_REJECT            36
-agreement: 98.10% (5535/5642 scored, 24 excluded)
+FALSE_ACCEPT            66
+FALSE_REJECT            38
+agreement: 98.16% (5538/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -105,6 +105,11 @@ defers the rest to Attr. A JLS-correct rule scored +6/−3 — a wash — while 
 rules and making the formatter refuse input javac's parser accepts. Backed out. Note that
 `new Class<?>[0]` is **legal**: an unbounded wildcard is reifiable. A rule banning all type
 arguments there breaks 12 real files.
+
+The same asymmetry costs 2 files on the restricted-type-name rule (JLS 3.9): we reject `var` in
+type-use position, which is JLS-correct, but javac's parser accepts `var<String> m()` and
+`case Foo(var(var x, var y))` and defers to Attr. Net +3, so the rule stays and those 2 are
+expected disagreements.
 
 ## Triage tips — earned, do not skip
 

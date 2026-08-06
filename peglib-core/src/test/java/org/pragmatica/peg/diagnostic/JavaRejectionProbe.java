@@ -53,6 +53,11 @@ public class JavaRejectionProbe {
         cases.put("varargs-and-old-array", "class A { void m(int... x[]) { } }");
         cases.put("varargs-and-old-array-ref", "class A { void m(String... s[]) { } }");
 
+        // --- JLS 3.9: 'var' and 'yield' are restricted TYPE names ---
+        cases.put("var-as-field-type", "class A { var v; }");
+        cases.put("var-as-param-type", "class A { void m(var x) { } }");
+        cases.put("var-as-return-type", "class A { var m() { return null; } }");
+
         return cases;
     }
 
@@ -76,6 +81,15 @@ public class JavaRejectionProbe {
         cases.put("array-param-alone", "class A { void m(int x[], String s[][]) { } }");
         cases.put("varargs-generic", "class A { void m(java.util.List<String>... x) { } }");
         cases.put("receiver-param", "class A { void m(A this, int x[]) { } }");
+
+        // 'var' and 'yield' stay perfectly legal as ordinary identifiers — they are the two
+        // most common contextual keywords in real code, so the restriction above must not
+        // leak out of type-use position.
+        cases.put("var-as-identifier", "class A { int var = 3; void m() { var = 4; } }");
+        cases.put("var-local-inference", "class A { void m() { var x = 3; } }");
+        cases.put("var-in-for-each", "class A { void m(int[] a) { for (var x : a) { } } }");
+        cases.put("yield-as-identifier", "class A { int yield = 1; int m() { return yield; } }");
+        cases.put("yield-in-switch", "class A { int m(int x) { return switch (x) { case 1 -> { yield 2; } default -> 0; }; } }");
 
         return cases;
     }
