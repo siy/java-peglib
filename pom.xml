@@ -208,7 +208,13 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.6.0</version>
+                        <!-- 0.11.0: 0.6.0 cannot deserialize Central's current publish response.
+                             During the 0.7.0 release the bundle uploaded and auto-published
+                             correctly, then the plugin threw
+                             UnrecognizedPropertyException: Unrecognized field "warnings"
+                             while polling for confirmation, reporting BUILD FAILURE for a
+                             release that had in fact succeeded. -->
+                        <version>0.11.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>

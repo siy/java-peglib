@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.0] - 2026-08-05
 
+Published to Maven Central, deployment `d19659b0-cd3b-4748-b0a8-87fdc5f9a79b`, 6 artifacts
+(down from 7 — `peglib-incremental` is gone). Upload took 6:52. Note the deploy reported
+`BUILD FAILURE` despite succeeding: `central-publishing-maven-plugin` 0.6.0 cannot parse
+Central's current publish response (`Unrecognized field "warnings"`) and crashed while polling
+for confirmation, after the bundle had already uploaded and auto-published. Bumped to 0.11.0
+afterwards.
+
 ### Removed
 
 **BREAKING — the entire 0.5.x legacy parser path is gone.** 146 files, ~38,900 lines
