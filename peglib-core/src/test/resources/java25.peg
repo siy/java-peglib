@@ -94,6 +94,8 @@ CompactConstructor <- Annotation* Modifier* Identifier Block
 FieldDecl <- Type VarDecls ';'
 VarDecls <- VarDecl (',' VarDecl)*
 VarDecl <- Identifier Dims? ('=' VarInit)?
+LocalVarDecls <- LocalVarDecl (',' LocalVarDecl)*
+LocalVarDecl <- (Identifier / '_') Dims? ('=' VarInit)?
 VarInit <- '{' (VarInit (',' VarInit)*)? ','? '}' / Expr
 MethodDecl <- Annotation* TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? (Block / ';')
 Params <- Param (',' Param)*
@@ -117,7 +119,7 @@ ConstructorDecl <- Annotation* TypeParams? Identifier '(' ^ Params? ')' Throws? 
 Block <- '{' BlockStmt* '}'
 BlockStmt <- LocalVar / LocalTypeDecl / Stmt
 LocalTypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
-LocalVar <- Annotation* Modifier* LocalVarType VarDecls ';'
+LocalVar <- Annotation* Modifier* LocalVarType LocalVarDecls ';'
 LocalVarType <- < 'var' ![a-zA-Z0-9_$] > / Type
 # Statement keywords use helper rules to combine keyword + word boundary as single token
 # This prevents the parser from skipping whitespace before the boundary check
@@ -129,7 +131,9 @@ Stmt <- Block
      / WhileKW ^ '(' Expr ')' Stmt
      / ForKW ^ '(' ForCtrl ')' Stmt
      / DoKW ^ Stmt 'while' '(' Expr ')' ';'
-     / TryKW ^ ResourceSpec? Block Catch* Finally?
+     # JLS 14.20: a try needs resources, or a catch, or a finally — 'try { }' alone is not
+     # a statement.
+     / TryKW ^ (ResourceSpec Block Catch* Finally? / Block (Catch+ Finally? / Finally))
      / SwitchKW ^ '(' Expr ')' SwitchBlock
      / ReturnKW Expr? ';'
      / ThrowKW Expr ';'
@@ -159,12 +163,12 @@ YieldKW <- < 'yield' ![a-zA-Z0-9_$] >
 CatchKW <- < 'catch' ![a-zA-Z0-9_$] >
 FinallyKW <- < 'finally' ![a-zA-Z0-9_$] >
 WhenKW <- < 'when' ![a-zA-Z0-9_$] >
-ForCtrl <- ForInit? ';' Expr? ';' ExprList? / Annotation* Modifier* LocalVarType Identifier ':' Expr
+ForCtrl <- ForInit? ';' Expr? ';' ExprList? / Annotation* Modifier* LocalVarType (Identifier / '_') ':' Expr
 ForInit <- LocalVarNoSemi / ExprList
-LocalVarNoSemi <- Annotation* Modifier* LocalVarType VarDecls
+LocalVarNoSemi <- Annotation* Modifier* LocalVarType LocalVarDecls
 ResourceSpec <- '(' Resource (';' Resource)* ';'? ')'
-Resource <- Annotation* Modifier* LocalVarType Identifier '=' Expr / QualifiedName
-Catch <- CatchKW ^ '(' Modifier* Type ('|' Type)* Identifier ')' Block
+Resource <- Annotation* Modifier* LocalVarType (Identifier / '_') '=' Expr / QualifiedName
+Catch <- CatchKW ^ '(' Modifier* Type ('|' Type)* (Identifier / '_') ')' Block
 Finally <- FinallyKW ^ Block
 SwitchBlock <- '{' SwitchRule* '}'
 SwitchRule <- SwitchLabel '->' (Expr ';' / Block / ThrowKW Expr ';') / SwitchLabel ':' BlockStmt*
@@ -172,7 +176,9 @@ SwitchRule <- SwitchLabel '->' (Expr ';' / Block / ThrowKW Expr ';') / SwitchLab
 SwitchLabel <- 'case' ^ ('null' ',' 'default' / CaseItem (',' CaseItem)* Guard?) / 'default'
 CaseItem <- Pattern / QualifiedName &('->' / ',' / ':' / 'when') / Expr
 Pattern <- RecordPattern / TypePattern
-TypePattern <- &(Annotation* Modifier* LocalVarType Identifier) Annotation* Modifier* LocalVarType Identifier / '_'
+# A pattern binding may be named '_' (JEP 456), both bare ('case _') and typed
+# ('case String _ when ...'). The typed form is what the bare-'_' alternative misses.
+TypePattern <- &(Annotation* Modifier* LocalVarType (Identifier / '_')) Annotation* Modifier* LocalVarType (Identifier / '_') / '_'
 RecordPattern <- RefType '(' PatternList? ')'
 PatternList <- Pattern (',' Pattern)*
 # A guard is a boolean expression, never a lambda (JLS 14.11.1). Going through Expr would
@@ -285,7 +291,7 @@ NumLit <- < '0' [xX] [0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])? ('.' ([0-9a-fA-F] 
         / < '.' [0-9] ([0-9_]* [0-9])? ([eE] [+\-]? [0-9] ([0-9_]* [0-9])?)? [fFdD]? >
 
 # Hard keywords only - contextual keywords (var, yield, record, sealed, non-sealed, permits, when, module) are handled by their specific rules
-Keyword <- ('abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'double' / 'do' / 'else' / 'enum' / 'extends' / 'false' / 'finally' / 'final' / 'float' / 'for' / 'goto' / 'implements' / 'import' / 'instanceof' / 'interface' / 'int' / 'if' / 'long' / 'native' / 'new' / 'null' / 'package' / 'private' / 'protected' / 'public' / 'return' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throws' / 'throw' / 'transient' / 'true' / 'try' / 'void' / 'volatile' / 'while') ![a-zA-Z0-9_$]
+Keyword <- ('_' / 'abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' / 'catch' / 'char' / 'class' / 'const' / 'continue' / 'default' / 'double' / 'do' / 'else' / 'enum' / 'extends' / 'false' / 'finally' / 'final' / 'float' / 'for' / 'goto' / 'implements' / 'import' / 'instanceof' / 'interface' / 'int' / 'if' / 'long' / 'native' / 'new' / 'null' / 'package' / 'private' / 'protected' / 'public' / 'return' / 'short' / 'static' / 'strictfp' / 'super' / 'switch' / 'synchronized' / 'this' / 'throws' / 'throw' / 'transient' / 'true' / 'try' / 'void' / 'volatile' / 'while') ![a-zA-Z0-9_$]
 
 # 0.6.2 — the unsplit folded form is supported again: DfaBuilder.absorbWhitespace
 # absorbs each Choice alternative at its own trivia kind (WHITESPACE / LINE_COMMENT

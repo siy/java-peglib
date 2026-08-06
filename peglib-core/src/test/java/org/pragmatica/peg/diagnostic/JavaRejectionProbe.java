@@ -64,6 +64,14 @@ public class JavaRejectionProbe {
         cases.put("interface-static-initializer", "interface I { static { } }");
         cases.put("interface-constructor", "interface I { I(Object... args) { } }");
 
+        // --- JLS 14.20: a try needs resources, or a catch, or a finally ---
+        cases.put("try-alone", "class A { void m() { try { } } }");
+
+        // --- JEP 456: bare '_' is a variable name only, never a member or type name ---
+        cases.put("underscore-as-field", "class A { int _; }");
+        cases.put("underscore-as-method", "class A { void _() { } }");
+        cases.put("underscore-as-param", "class A { void m(int _) { } }");
+
         // JLS 7.3: a stray ';' after the imports is itself a TypeDeclaration, so a later
         // import is illegal. This used to pass because the recovery loop silently re-parsed
         // the remainder as a SECOND compilation unit.
@@ -132,6 +140,22 @@ public class JavaRejectionProbe {
         cases.put("plain-module", "module mod { }");
         cases.put("open-module-exports", "open module mod { exports a to b; }");
         cases.put("trailing-semicolon-after-class", "class Foo { };");
+
+        // try in each of its legal shapes.
+        cases.put("try-finally", "class A { void m() { try { } finally { } } }");
+        cases.put("try-catch", "class A { void m() { try { } catch (Exception e) { } } }");
+        cases.put("try-resources", "class A { void m() throws Exception { try (var r = open()) { } } AutoCloseable open() { return null; } }");
+
+        // '_' in every position JEP 456 actually allows. The typed pattern binding
+        // ('case String _') is the one the bare-'_' alternative misses.
+        cases.put("underscore-local", "class A { void m() { var _ = 1; } }");
+        cases.put("underscore-for-each", "class A { void m(int[] a) { for (var _ : a) { } } }");
+        cases.put("underscore-catch-param", "class A { void m() { try { } catch (Exception _) { } } }");
+        cases.put("underscore-lambda-param", "class A { void m() { java.util.List.of(1).forEach(_ -> { }); } }");
+        cases.put("underscore-bare-pattern", "class A { void m(Object o) { switch (o) { case _ -> { } } } }");
+        cases.put("underscore-typed-pattern", "class A { void m(Object o) { switch (o) { case String _ when true -> { } default -> { } } } }");
+        cases.put("underscore-record-pattern", "class A { void m(Object o) { if (o instanceof P(String _, var y)) { } } }");
+        cases.put("underscore-prefixed-identifiers", "class A { int _x = 1; int __ = 2; int _9 = 3; }");
         cases.put("record-as-identifier", "class A { int record; void record() { } }");
 
         return cases;
