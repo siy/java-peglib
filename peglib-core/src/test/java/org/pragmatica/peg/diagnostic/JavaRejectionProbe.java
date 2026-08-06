@@ -58,9 +58,16 @@ public class JavaRejectionProbe {
         cases.put("var-as-param-type", "class A { void m(var x) { } }");
         cases.put("var-as-return-type", "class A { var m() { return null; } }");
 
-        // NOTE: interface fields without an initializer, and interface/record initializer
-        // blocks, are over-accepted today. Both need a per-container body rule, which is
-        // blocked on an engine bug — see tools/langtools-corpus/README.md.
+        // --- JLS 9.1.4: an interface body is not a class body ---
+        cases.put("interface-field-no-initializer", "interface I { int X; }");
+        cases.put("interface-instance-initializer", "interface I { { } }");
+        cases.put("interface-static-initializer", "interface I { static { } }");
+        cases.put("interface-constructor", "interface I { I(Object... args) { } }");
+
+        // --- JLS 8.10.4: a record's state is exactly its components ---
+        cases.put("record-instance-field", "record R(int x) { int y; }");
+        cases.put("record-instance-initializer", "record R(int x) { { } }");
+        cases.put("nested-record-instance-field", "class A { record N(int x) { int y; } }");
 
         // NOTE: record instance fields / instance initializers are NOT gated here. They are
         // over-accepted today and cannot be fixed in the grammar alone — see the record-body
@@ -99,8 +106,9 @@ public class JavaRejectionProbe {
         cases.put("yield-as-identifier", "class A { int yield = 1; int m() { return yield; } }");
         cases.put("yield-in-switch", "class A { int m(int x) { return switch (x) { case 1 -> { yield 2; } default -> 0; }; } }");
 
-        // Interface and record shapes pinned so a future per-container body rule cannot
-        // quietly break them.
+        // Interface and record shapes that must survive the per-container body rules. The
+        // JEP 512 compact source file matters most: the !RecordKW guard that stops a broken
+        // record being re-read as a method named R returning type 'record' must not disturb it.
         cases.put("interface-initialized-field", "interface I { int X = 1; }");
         cases.put("interface-multi-field", "interface I { int A = 1, B = 2; }");
         cases.put("interface-method-shapes", "interface I { void m(); default void d() { } static void s() { } private void p() { } }");

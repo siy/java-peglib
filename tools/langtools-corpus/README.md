@@ -66,11 +66,11 @@ As of 2026-08-06 on `release-0.7.1`:
 
 ```
 AGREE_CLEAN           5406
-AGREE_REJECT           139
+AGREE_REJECT           145
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            68
+FALSE_ACCEPT            62
 FALSE_REJECT            29
-agreement: 98.28% (5545/5642 scored, 24 excluded)
+agreement: 98.39% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -118,42 +118,51 @@ one pathological negative test and buys correct parsing of every switch guard en
 identifier (`case Integer i when i == j ->`), which previously produced 35 diagnostics on a
 four-line file. Corpus-neutral, unambiguously correct.
 
-## Blocked on an engine bug: per-container class bodies
+## Per-container class bodies — landed, and why it looked like an engine bug
 
-Interface and record bodies are over-accepted — `interface I { int X; }` (a field with no
-initializer), `interface I { { } }`, `record R(int x) { int y; }` (instance field) and
-`record R(int x) { { } }` all parse today and should not. Together that is ~8 corpus files and
-the largest remaining false-accept cluster. **Both attempts were made, measured as clean wins
-(+2 and +4, zero false-reject collateral), and then reverted. Do not simply retry them.**
+Interface and record bodies now have their own rules: an interface field requires an
+initializer and admits no initializer blocks or constructors (JLS 9.1.4); a record admits no
+instance fields and no instance initializer blocks (JLS 8.10.4).
 
-Two distinct obstacles, in order:
+Two things had to be understood first, and the second one cost a wrong diagnosis:
 
 1. **The JEP 512 fallback silently absorbs a malformed record.** When `RecordDecl` fails,
    `OrdinaryUnit`'s `TopLevelMember` alternative re-parses `record R(int x) { int y; }` as a
-   *method named `R` returning type `record`*, consuming the whole declaration and reporting zero
-   diagnostics with a wrong-shaped CST. Verified by deleting `TopLevelMember`, after which the
-   same input correctly reports 10 diagnostics. A `!RecordKW` guard on `TopLevelMember` and
-   `Member` fixes the masking (and is JLS-correct: `record` is a restricted identifier that can
-   never be a type name). This masking is general — any failure inside a top-level type
-   declaration can be swallowed this way, which is a CST-shape hazard beyond records.
+   *method named `R` returning type `record`*, consuming the whole declaration and reporting
+   zero diagnostics with a wrong-shaped CST. Verified by deleting `TopLevelMember`, after which
+   the same input correctly reports 10 diagnostics. The `!RecordKW` guard on `TopLevelMember`
+   and `Member` closes it, and is JLS-correct: `record` is a restricted identifier that can
+   never be a type name. **This masking is general** — any failure inside a top-level type
+   declaration can be swallowed this way. It is a live CST-shape hazard for other constructs.
 
-2. **The blocker: a failed alternative leaves partial CST content.** With either the interface
-   split or the record guard in place, `FormatterCorpusGateTest` fails on
-   `MultilineArguments.java` and `MultilineParameters.java` with a DUPLICATED token —
-   `expected='public' actual='publicpublic'`, 674 → 683 non-trivia tokens. Adding an alternative
-   that fails after consuming modifiers leaves those modifiers in the CST, and the next
-   alternative appends them again. Spelling the guard without a group node changes nothing, so
-   it is not a grouping artifact. The same footgun is already noted inline at `DimExprs`
-   ("lookahead BEFORE consuming '[' prevents java-peglib bug where failed iterations leave
-   partial matches"), where it was worked around rather than fixed.
+2. **`FormatterCorpusGateTest` failed with a DUPLICATED token** (`expected='public'
+   actual='publicpublic'`, 674 → 683 non-trivia tokens), which looks exactly like a
+   backtracking bug in `CstArrayBuilder.truncate`. It is not. Two corpus fixtures,
+   `MultilineArguments.java` and `MultilineParameters.java`, contained **invalid Java**:
 
-So this is an **engine prerequisite, not a grammar task**: fix truncation-on-alternative-failure
-in `CstArrayBuilder`/`ParserGenerator` first, then both body rules land together for ~+6.
+   ```java
+   interface ValidRequest { ValidRequest(Object... args) {} }   // constructor in an interface
+   ```
 
-Note what caught it: the grammar change passed all 333 `peglib-core` tests. Only the full
-reactor build fails, because the round-trip guarantee it breaks lives in `peglib-formatter`.
-**Run `mvn install`, not `mvn -pl peglib-core test`, before committing a structural grammar
-change.**
+   javac's own parser rejects that with `<identifier> expected`; peglib accepted it only
+   because interfaces shared `ClassBody`. The correct rule made those files fail to parse, and
+   the duplication was panic-mode RECOVERY re-covering the skipped range — a downstream symptom,
+   not the cause. Both fixtures instantiate the types with `new ValidRequest(...)`, so they were
+   always meant to be classes; changing `interface` to `class` fixes them and all 20 fixtures
+   now agree with javac-parse at 100%.
+
+   The lesson: a duplicated token in formatter output means **the parse failed**, not that
+   backtracking leaked. Check the diagnostic count before suspecting `truncate`.
+
+**The langtools differential did not catch this** — it stayed at 5406 AGREE_CLEAN throughout,
+because the broken files live in peglib's own formatter corpus, not in langtools. Run
+`mvn install`, not `mvn -pl peglib-core test`, before committing a structural grammar change,
+and consider running `OracleRunner` over `perf-corpus/format-examples` as well:
+
+```bash
+java -cp "$(cat /tmp/abscp.txt):/tmp/harness" OracleRunner <grammar> \
+    peglib-core/src/test/resources/perf-corpus/format-examples
+```
 
 ## Triage tips — earned, do not skip
 

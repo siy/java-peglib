@@ -17,7 +17,7 @@ CompilationUnit <- ModuleDecl / OrdinaryUnit
 # win on ordinary files and change their CST shape — which the corpus gates and
 # the CST-shape assertion would both flag.
 OrdinaryUnit <- PackageDecl? ImportDecl* (TypeDecl / TopLevelMember / ';')*
-TopLevelMember <- Annotation* Modifier* (MethodDecl / FieldDecl)
+TopLevelMember <- Annotation* Modifier* !RecordKW (MethodDecl / FieldDecl)
 PackageDecl <- Annotation* 'package' ^ QualifiedName ';'
 ImportDecl  <- 'import' ^ ('module' QualifiedName ';' / 'static'? QualifiedName ('.' '*')? ';')
 
@@ -33,7 +33,7 @@ ProvidesDirective <- 'provides' ^ QualifiedName 'with' QualifiedName (',' Qualif
 TypeDecl <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
 TypeKind <- ClassDecl / InterfaceDecl / EnumDecl / RecordDecl / AnnotationDecl
 ClassDecl <- ClassKW ^ Identifier TypeParams? ('extends' Type)? ImplementsClause? PermitsClause? ClassBody
-InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? ClassBody
+InterfaceDecl <- InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? PermitsClause? InterfaceBody
 AnnotationDecl <- '@' InterfaceKW ^ Identifier TypeParams? ('extends' TypeList)? AnnotationBody
 # Type declaration keywords with word boundary (prevents 'class' matching prefix of 'className')
 ClassKW <- < 'class' ![a-zA-Z0-9_$] >
@@ -55,8 +55,17 @@ TypeParams <- '<' TypeParam (',' TypeParam)* '>'
 TypeParam <- Annotation* Identifier ('extends' Type ('&' Type)*)?
 
 ClassBody <- '{' ClassMember* '}'
+# An interface body is NOT a class body (JLS 9.1.4). A field is implicitly
+# 'public static final', so an initializer is REQUIRED — 'int X;' is illegal in an
+# interface though legal in a class. Interfaces also admit no initializer blocks
+# (instance or static) and no constructors, so neither InitializerBlock nor
+# ConstructorDecl appears here.
+InterfaceBody <- '{' InterfaceMember* '}'
+InterfaceMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* (TypeKind / MethodDecl / InterfaceFieldDecl) / ';'
+InterfaceFieldDecl <- Type InterfaceVarDecl (',' InterfaceVarDecl)* ';'
+InterfaceVarDecl <- Identifier Dims? '=' VarInit
 ClassMember <- Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* Member / InitializerBlock / ';'
-Member <- ConstructorDecl / TypeKind / MethodDecl / FieldDecl
+Member <- ConstructorDecl / TypeKind / !RecordKW (MethodDecl / FieldDecl)
 InitializerBlock <- 'static'? Block
 EnumBody <- '{' EnumConsts? (';' ClassMember*)? '}'
 EnumConsts <- EnumConst (',' EnumConst)* ','? / ','
@@ -64,7 +73,18 @@ EnumConst <- Annotation* Identifier ('(' Args? ')')? ClassBody?
 RecordComponents <- RecordComp (',' RecordComp)*
 RecordComp <- Annotation* Type (Annotation* '...')? Identifier
 RecordBody <- '{' RecordMember* '}'
-RecordMember <- CompactConstructor / ClassMember
+# JLS 8.10.4: a record's state is exactly its components — no instance fields and no
+# instance initializer blocks. Static fields and static initializers are fine.
+# Requiring 'static' in the modifier list needs the !StaticKW guard because PEG
+# repetition is POSSESSIVE: a plain 'Modifier* StaticKW' can never match, since
+# Modifier* would consume the 'static' and never give it back.
+RecordMember <- CompactConstructor
+              / Annotation* (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* (ConstructorDecl / TypeKind / MethodDecl)
+              / Annotation* RecordStaticField
+              / StaticKW Block
+              / ';'
+RecordStaticField <- (!StaticKW Modifier)* StaticKW Modifier* Type VarDecls ';'
+StaticKW <- < 'static' ![a-zA-Z0-9_$] >
 CompactConstructor <- Annotation* Modifier* Identifier Block
 
 FieldDecl <- Type VarDecls ';'

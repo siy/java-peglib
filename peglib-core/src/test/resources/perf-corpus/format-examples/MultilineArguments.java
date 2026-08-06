@@ -102,7 +102,7 @@ public class MultilineArguments {
         Result<Profile> validate();
     }
 
-    interface ValidRequest {
+    class ValidRequest {
         ValidRequest(Object... args) {}
     }
 
