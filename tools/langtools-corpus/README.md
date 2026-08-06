@@ -66,11 +66,11 @@ As of 2026-08-06 on `release-0.7.1`:
 
 ```
 AGREE_CLEAN           5402
-AGREE_REJECT           174
+AGREE_REJECT           178
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            33
+FALSE_ACCEPT            29
 FALSE_REJECT            33
-agreement: 98.83% (5545/5642 scored, 24 excluded)
+agreement: 98.90% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -181,5 +181,11 @@ java -cp "$(cat /tmp/abscp.txt):/tmp/harness" OracleRunner <grammar> \
   "trailing input not consumed" for the entire file. When a whole-file failure makes no sense,
   suspect the token stream before the parser rules — the diagnostic's `found=` field names the
   offending token text.
+- **PEG repetition is POSSESSIVE, and it bites in non-obvious places.** `Modifier* StaticKW`
+  can never match. `Primary PostOp* CallOp` can never match. `PostOp`'s member access spells
+  its call as `('(' Args? ')')?`, so it swallows `.foo()` whole and nothing downstream can see
+  the call. The fixes are a `!Guard` prefix (`(!StaticKW Modifier)* StaticKW`), right-recursion
+  (`Chain <- Op Chain / Terminal`), or a variant rule that stops short. Expect to need one of
+  these whenever a rule must constrain what comes LAST.
 - **Measure after every single change.** Two changes landed together cost a bisection round;
   the run is 6 seconds, so there is no reason to batch.

@@ -144,7 +144,7 @@ Stmt <- Block
      / SynchronizedKW ^ '(' Expr ')' Block
      / YieldKW Expr ';'
      / Identifier ':' Stmt
-     / Expr ';'
+     / StmtExpr ';'
      / ';'
 
 # Helper rules: keyword with word boundary INSIDE token (prevents whitespace skip before boundary check)
@@ -231,6 +231,25 @@ TypedLambdaParam <- Annotation* Modifier* Type (Annotation* '...')? (Identifier 
 VarLambdaParams <- VarLambdaParam (',' VarLambdaParam)*
 VarLambdaParam <- Annotation* Modifier* < 'var' ![a-zA-Z0-9_$] > (Identifier / '_')
 InferredLambdaParams <- (Identifier / '_') (',' (Identifier / '_'))*
+# JLS 14.8: only an assignment, pre/post increment or decrement, method invocation or
+# class instance creation may stand as a statement. '(a);' and a bare 'yield;' are
+# expressions but not statements. 'ends in a call' cannot be written as
+# 'Primary PostOp* CallOp' because PEG repetition is POSSESSIVE — PostOp* would eat the
+# final call and never give it back — so the chain is spelled right-recursively.
+StmtExpr <- ('++' / '--') Unary
+          / Postfix (URShiftAssign / RShiftAssign / LShiftAssign / '=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Expr
+          / &(< 'new' ![a-zA-Z0-9_$] >) Postfix
+          / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')'
+          / Primary CallChain
+CallChain <- ChainOp CallChain / CallOp
+# Same as PostOp but WITHOUT the optional trailing call on member access. PostOp spells
+# that as "('(' Args? ')')?", and PEG '?' is possessive, so '.foo()' would be swallowed
+# whole and CallOp would never see the call — making 'this.foo();' unparseable as a
+# statement while 'a.foo();' worked only because QualifiedName greedily took 'a.foo'.
+ChainOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier / '.' 'this' / '.' < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '::' TypeArgs? (Identifier / 'new') / '(' Args? ')' / '++' / '--'
+# A qualified class instance creation ('a.new B()') is itself a complete statement
+# expression, so it terminates the chain as well as continuing it.
+CallOp <- '(' Args? ')' / '++' / '--' / '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody?
 Args <- Expr (',' Expr)*
 ExprList <- Expr (',' Expr)*
 

@@ -84,6 +84,13 @@ public class JavaRejectionProbe {
         // --- JLS 15.8.2: a class literal is 'TypeName {[]} . class', not a postfix operator ---
         cases.put("this-dot-class", "class A { Object o = this.class; }");
 
+        // --- JLS 14.8: not every expression is a statement ---
+        cases.put("parenthesised-not-stmt", "class A { void m(int a) { (a); } }");
+        cases.put("field-access-not-stmt", "class A { void m(A a) { a.b; } }");
+        cases.put("bare-yield-not-stmt", "class A { void m() { yield; } }");
+        cases.put("method-ref-not-stmt", "class A { void m() { A::new; } }");
+        cases.put("literal-not-stmt", "class A { void m() { 1; } }");
+
         // --- JLS 15.10.1: an array's element type must be reifiable ---
         cases.put("array-with-type-arguments", "class A { Object o = new java.util.List<String>[10]; }");
         cases.put("array-with-diamond", "class A { Object o = new java.util.List<>[10]; }");
@@ -204,6 +211,22 @@ public class JavaRejectionProbe {
         cases.put("array-creation-shapes", "class A { Object o = new int[3][4]; Object p = new String[]{\"a\"}; }");
         cases.put("local-class-plain", "class A { void m() { class L { } } }");
         cases.put("package-with-class", "package p;\nclass A { }\n");
+
+        // Every JLS 14.8 statement-expression shape. The chain is spelled right-recursively
+        // because PEG repetition is possessive, so these pin the shapes that broke while
+        // getting that right: 'this.foo()' (PostOp swallowed the call), a mid-chain call,
+        // qualified 'new', and an explicit constructor invocation with type arguments.
+        cases.put("stmt-invocations", "class A { void m() { foo(); this.foo(); a.b.c(); } void foo() { } }");
+        cases.put("stmt-chained-calls", "class A { void m() { m().n().o(); } A m() { return this; } }");
+        cases.put("stmt-mid-chain-call", "class A { void m() { java.util.List.of(1).forEach(x -> { }); } }");
+        cases.put("stmt-super-call", "class A { void m() { super.hashCode(); } }");
+        cases.put("stmt-generic-call", "class A { void m() { this.<String>foo(); Test.<X,Y>bar(); } <T> void foo() { } }");
+        cases.put("stmt-assignments", "class A { void m(int x, int[] r) { x = 1; x += 2; r[0] = 1; } }");
+        cases.put("stmt-inc-dec", "class A { void m(int i, int[] r) { i++; ++i; i--; --i; r[0]++; } }");
+        cases.put("stmt-instance-creation", "class A { void m() { new A(); new A().m(); } }");
+        cases.put("stmt-qualified-new", "class A { void m(A a) { a.new B(); new A().new B(); } class B { } }");
+        cases.put("stmt-explicit-ctor-invocation", "class A extends B { A() { <T,E>super(); } } class B { }");
+        cases.put("stmt-this-super-ctor", "class A { A() { this(1); } A(int x) { } }");
         cases.put("record-as-identifier", "class A { int record; void record() { } }");
 
         return cases;
