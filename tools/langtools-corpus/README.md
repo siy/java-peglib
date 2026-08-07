@@ -66,11 +66,11 @@ As of 2026-08-06 on `release-0.7.1`:
 
 ```
 AGREE_CLEAN           5422
-AGREE_REJECT           179
+AGREE_REJECT           183
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            28
+FALSE_ACCEPT            24
 FALSE_REJECT            13
-agreement: 99.27% (5545/5642 scored, 24 excluded)
+agreement: 99.34% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -204,6 +204,38 @@ which use supplementary characters that are NOT valid identifier characters
 is broken for real codebases, whereas one that accepts an emoji as an identifier merely fails
 to reject code that does not compile anyway. Corpus parity is a proxy for correctness, not the
 goal — do not "fix" this by reverting to ASCII-only identifiers.
+
+## The remaining 37 disagreements, and why
+
+Reviewed file by file. Roughly half are permanent by design; the rest are individually
+expensive. **99.34% is close to the practical ceiling; ~19 of the 37 will never close.**
+
+**Permanently waived — not context-free (8 false accepts).** Numeric magnitude
+(`int i = 12345678901234567890`, `1e9999`, `1e-9999`), duplicate modifiers
+(`private private`), filename vs class name, and `m() { }` (needs comparing the method name to
+the enclosing class name). All require semantic state a grammar does not have.
+
+**Permanently waived — deliberate trades (11).** Four `SupplementaryJavaID` files are the cost
+of non-ASCII identifier support (see above). Seven false rejects are cases where peglib is
+JLS-correct and javac's parser defers to Attr: `new ArrayList<T>[]`, `BarNeg1/2`,
+lambda-as-operand, `var<String>`, `var` in a deconstruction pattern, and `package` in a modular
+unit. Matching javac on these would make the grammar LESS correct.
+
+**Blocked on one engine change (4).** A bad text-block open delimiter, a bad escape inside a
+text block, and two files whose text blocks contain an escaped triple quote. All need
+`compileDelimitedBlock` to accept a richer pattern than the fixed delimited-block shape — see
+the trap note below.
+
+**javac corner cases, low value (2).** `UncommonParamNames` declares parameters whose names
+contain NUL and BEL characters, written as Unicode escapes. That is legal because
+`Character.isIdentifierIgnorable` covers control characters. `UnicodeBackslash` is similar.
+
+**Individually tractable, one file each (~12).** `yield(1, 2)` disambiguation (needs to know
+whether it is inside a switch expression), qualified `new` with a qualified type name, a bare
+qualified `super` with no trailing member, type arguments on a select, `int i = 08` (octal digit
+— fiddly numeric surgery with real risk to float literals), `permits` without `sealed`, and
+annotations in record patterns (attempted once and reverted: it also rejected a legal annotated
+local declaration). Two untriaged: `TextBlockLang`, `BadTypeReference`.
 
 ## Triage tips — earned, do not skip
 
