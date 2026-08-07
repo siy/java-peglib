@@ -23,7 +23,9 @@ ModularUnit <- ImportDecl* ModuleDecl
 OrdinaryUnit <- PackageDecl ImportDecl* (TypeDecl / ';')* / ImportDecl* (TypeDecl / TopLevelMember / ';')*
 TopLevelMember <- Annotation* Modifier* !RecordKW (MethodDecl / FieldDecl)
 PackageDecl <- Annotation* 'package' ^ QualifiedName ';'
-ImportDecl  <- 'import' ^ ('module' QualifiedName ';' / 'static'? QualifiedName ('.' '*')? ';')
+ImportDecl  <- 'import' ^ ('module' QualifiedName ';' / 'static'? QualifiedName '.' '*' ';' / 'static'? QualifiedImportName ';')
+# At least one dot: importing from the unnamed package is not expressible.
+QualifiedImportName <- Identifier (&('.' Identifier) '.' Identifier)+
 
 # === Module Declarations (JLS 7.7) ===
 ModuleDecl <- Annotation* 'open'? 'module' ^ QualifiedName '{' ModuleDirective* '}'
@@ -95,10 +97,13 @@ FieldDecl <- Type VarDecls ';'
 VarDecls <- VarDecl (',' VarDecl)*
 VarDecl <- Identifier Dims? ('=' VarInit)?
 LocalVarDecls <- LocalVarDecl (',' LocalVarDecl)*
-LocalVarDecl <- (Identifier / '_') Dims? ('=' VarInit)?
+LocalVarDecl <- Identifier Dims? ('=' VarInit)? / '_' ('=' VarInit)?
 VarInit <- '{' (VarInit (',' VarInit)*)? ','? '}' / Expr
 MethodDecl <- Annotation* TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? ('default' AnnotationElem)? (Block / ';')
-Params <- Param (',' Param)*
+# JLS 8.4.1: only the LAST parameter may be variable-arity, so every parameter before the
+# final one is matched by a rule that has no '...' alternative.
+Params <- (NonVarargsParam ',')* Param
+NonVarargsParam <- Annotation* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type Identifier Dims?
 # A receiver parameter (JLS 8.4.1) names 'this' instead of a variable; it exists so
 # 'this' can carry type annotations. Ordered first: for an ordinary parameter the
 # Type matches and the 'this' check fails, so it backtracks to the normal form.
@@ -185,7 +190,7 @@ Finally <- FinallyKW ^ Block
 SwitchBlock <- '{' SwitchRule* '}'
 SwitchRule <- SwitchLabel '->' (Expr ';' / Block / ThrowKW Expr ';') / SwitchLabel ':' BlockStmt*
 # === Switch Labels and Patterns (JLS 14.11, 14.30) ===
-SwitchLabel <- 'case' ^ ('null' ',' 'default' / CaseItem (',' CaseItem)* Guard?) / 'default'
+SwitchLabel <- 'case' ^ ('null' ',' 'default' / Pattern (',' Pattern)* Guard / CaseItem (',' CaseItem)*) / 'default'
 CaseItem <- Pattern / QualifiedName &('->' / ',' / ':' / 'when') / Expr
 Pattern <- RecordPattern / TypePattern
 # A pattern binding may be named '_' (JEP 456), both bare ('case _') and typed
@@ -229,7 +234,7 @@ Postfix <- Primary PostOp*
 PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' Annotation* TypeArgs? Identifier ('(' Args? ')')? / '.' 'this' / '.' TypeArgs? < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
 Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > (RawArrayElemType (DimExprs Dims? / Dims VarInit) / TypeArgs? ArrayType ('(' Args? ')') ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- UnannType '.' < 'class' > / Type '::' TypeArgs? (< 'new' > / Identifier)
-UnannType <- (PrimType / RefType) Dims?
+UnannType <- (VoidType / PrimType / RefType) Dims?
 Lambda <- LambdaParams '->' (Expr / Block)
 # JLS 15.27.1: a lambda's parameter list must be uniform — all explicitly typed, all
 # 'var', or all inferred. Mixing them ('(var x, y) -> {}') is illegal, which a
@@ -265,8 +270,9 @@ Args <- Expr (',' Expr)*
 ExprList <- Expr (',' Expr)*
 
 # === Types with Type-Use Annotations (JSR 308 / JLS 4.11) ===
-Type <- Annotation* (PrimType / RefType) Dims?
-PrimType <- < ('boolean' / 'byte' / 'short' / 'int' / 'long' / 'float' / 'double' / 'char' / 'void') ![a-zA-Z0-9_$] >
+Type <- Annotation* (VoidType / (PrimType / RefType) Dims?)
+PrimType <- < ('boolean' / 'byte' / 'short' / 'int' / 'long' / 'float' / 'double' / 'char') ![a-zA-Z0-9_$] >
+VoidType <- < 'void' ![a-zA-Z0-9_$] >
 # Use lookahead BEFORE consuming '.' to avoid capturing it when followed by keyword (e.g., 'HashMap.class')
 RefType <- AnnotatedTypeName (&('.' ('@' / Identifier)) '.' AnnotatedTypeName)*
 # JLS 3.9: 'var' and 'yield' are RESTRICTED type names — legal as ordinary identifiers

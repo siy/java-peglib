@@ -70,6 +70,13 @@ public class JavaRejectionProbe {
 
         // --- JLS 14.20: a try needs resources, or a catch, or a finally ---
         cases.put("try-alone", "class A { void m() { try { } } }");
+
+        // --- JLS 8.4.1 / 14.11.1 / 7.5 / 4.3 ---
+        cases.put("varargs-not-last", "class A { void m(String... a, String b) { } }");
+        cases.put("underscore-with-brackets", "class A { void m() { int[] _[] = null; } }");
+        cases.put("guard-on-constant-label", "class A { void m(Object o, boolean b) { switch (o) { case 0 when b -> { } default -> { } } } }");
+        cases.put("unqualified-import", "import Dummy;");
+        cases.put("void-array-type", "class A { void[] a = null; }");
         cases.put("twr-bare-creation-resource", "class A implements AutoCloseable { public void close() { } void m() { try (new A()) { } } }");
 
         // --- JEP 456: bare '_' is a variable name only, never a member or type name ---
@@ -229,6 +236,10 @@ public class JavaRejectionProbe {
         cases.put("stmt-explicit-ctor-invocation", "class A extends B { A() { <T,E>super(); } } class B { }");
         cases.put("stmt-this-super-ctor", "class A { A() { this(1); } A(int x) { } }");
         cases.put("record-as-identifier", "class A { int record; void record() { } }");
+        cases.put("varargs-last-is-fine", "class A { void m(String a, String... b) { } }");
+        cases.put("guard-on-pattern-label", "class A { void m(Object o) { switch (o) { case Integer i when i > 0 -> { } default -> { } } } }");
+        cases.put("import-shapes", "import a.Dummy;\nimport a.*;\nimport static a.B.c;\nclass A { }\n");
+        cases.put("void-return-and-class-literal", "class A { void m() { } Object o = void.class; }");
 
         return cases;
     }
