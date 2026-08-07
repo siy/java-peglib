@@ -6,6 +6,7 @@ import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.cst.ParseResult;
 import org.pragmatica.peg.generator.LexerCompiler.CompiledLexer;
 import org.pragmatica.peg.generator.ParserCompiler.CompiledParser;
+import org.pragmatica.peg.lexer.UnicodeEscapes;
 import org.pragmatica.peg.token.TokenArray;
 
 
@@ -34,9 +35,28 @@ public final class Parser {
      * over it, returning the resulting {@link ParseResult}.
      */
     public ParseResult parse(String input) {
-        TokenArray tokens = lexer.lex(input);
+        return parser.parse(lexTranslated(input));
+    }
 
-        return parser.parse(tokens);
+    /**
+     * Lex {@code input}, applying Java's Unicode-escape pre-pass (JLS 3.3) when the source
+     * contains one.
+     *
+     * <p>{@code \\uXXXX} is substituted before lexing, not by the lexer, so {@code \\u0069f}
+     * really is the keyword {@code if} and {@code \\u000a} really does terminate a {@code //}
+     * comment. No grammar can express that. The token spans are then pushed back onto the
+     * ORIGINAL text so {@code reconstruct()} still returns exactly what the user wrote — the
+     * formatter's byte-identical round-trip depends on it.
+     *
+     * <p>Sources without an escape (almost all of them) pay one substring scan and are lexed
+     * unchanged; see {@link UnicodeEscapes#translate}.
+     */
+    private TokenArray lexTranslated(String input) {
+        return UnicodeEscapes.translate(input)
+                             .map(t -> lexer.lex(t.text())
+                                            .remapOffsets(input,
+                                                          t.offsetMap()))
+                             .or(() -> lexer.lex(input));
     }
 
     /**
@@ -50,9 +70,7 @@ public final class Parser {
      * </ul>
      */
     public ParseResult parse(String input, int maxDiagnostics) {
-        TokenArray tokens = lexer.lex(input);
-
-        return parser.parse(tokens, maxDiagnostics);
+        return parser.parse(lexTranslated(input), maxDiagnostics);
     }
 
     /** The compiled lexer; exposed for callers that want raw token access (incremental engine). */

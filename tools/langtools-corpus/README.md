@@ -65,12 +65,12 @@ count, CST node count, and whether `reconstruct()` round-trips byte-identically.
 As of 2026-08-06 on `release-0.7.1`:
 
 ```
-AGREE_CLEAN           5402
+AGREE_CLEAN           5420
 AGREE_REJECT           178
 EXCLUDED_ORACLE_OLD     24
 FALSE_ACCEPT            29
-FALSE_REJECT            33
-agreement: 98.90% (5545/5642 scored, 24 excluded)
+FALSE_REJECT            15
+agreement: 99.22% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -93,6 +93,17 @@ they should become `AGREE_CLEAN` on their own.
 a literal's *magnitude* is not a property of its shape. Duplicate modifiers (`repeated.modifier`)
 — a no-duplicates-in-list constraint is combinatorial in PEG. Filename agreement
 (`bad.file.name`) — unrelated to the token stream.
+
+**Unicode escapes are implemented** (JLS 3.3), not waived. `\uXXXX` is substituted before
+lexing by `UnicodeEscapes.translate`, so `\u0069f` really is the keyword `if` and `\u000a`
+really does end a `//` comment. Token spans are then pushed back onto the ORIGINAL text via
+`TokenArray.remapOffsets`, so `reconstruct()` still returns exactly what the user wrote — the
+formatter's byte-identical round-trip depends on that and is asserted in
+`UnicodeEscapeTranslationTest`. Sources without an escape pay one substring scan and are lexed
+unchanged. Two rules that are easy to get wrong: a backslash starts an escape only when
+preceded by an EVEN number of backslashes (`\\u0041` is not an `A`), and any number of `u`s
+may follow. Note the pre-pass lives in the `Parser` facade, so a generated parser driven
+directly from its own `GLexer` does not get it.
 
 **Borderline, disproportionate cost (waived).** `invalid.permits.clause` (needs `sealed` threaded
 from a sibling repetition), `invalid.meth.decl.ret.type.req` (constructor-vs-method needs
