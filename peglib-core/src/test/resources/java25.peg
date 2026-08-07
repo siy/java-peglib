@@ -103,7 +103,7 @@ MethodDecl <- Annotation* TypeParams? Type Identifier '(' ^ Params? ')' Dims? Th
 # JLS 8.4.1: only the LAST parameter may be variable-arity, so every parameter before the
 # final one is matched by a rule that has no '...' alternative.
 Params <- (NonVarargsParam ',')* Param
-NonVarargsParam <- Annotation* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type Identifier Dims?
+NonVarargsParam <- ReceiverParam / Annotation* Modifier* Type Identifier Dims?
 # A receiver parameter (JLS 8.4.1) names 'this' instead of a variable; it exists so
 # 'this' can carry type annotations. Ordered first: for an ordinary parameter the
 # Type matches and the 'this' check fails, so it backtracks to the normal form.
@@ -116,7 +116,11 @@ NonVarargsParam <- Annotation* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$]
 # The ordinary form spells '...' and C-style Dims as ALTERNATIVES, not an optional
 # pair: JLS 8.4.1 forbids combining them, so 'int... x[]' is illegal. The '...' may
 # itself carry type annotations ('int @Ann ... x').
-Param <- Annotation* Modifier* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type (Annotation* '...' Identifier / Identifier Dims?)
+# Factored out so Param and NonVarargsParam share it. The inline token-boundary form carries
+# a character class, which makes its enclosing rule MIXED; duplicating it would make a
+# second rule MIXED for no reason (RuleClassifierTest bounds how many may exist).
+ReceiverParam <- Annotation* Modifier* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] >
+Param <- ReceiverParam / Annotation* Modifier* Type (Annotation* '...' Identifier / Identifier Dims?)
 Throws <- 'throws' ^ TypeList
 ConstructorDecl <- Annotation* TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 

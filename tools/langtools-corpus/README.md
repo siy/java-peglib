@@ -66,11 +66,11 @@ As of 2026-08-06 on `release-0.7.1`:
 
 ```
 AGREE_CLEAN           5422
-AGREE_REJECT           174
+AGREE_REJECT           179
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            33
+FALSE_ACCEPT            28
 FALSE_REJECT            13
-agreement: 99.18% (5545/5642 scored, 24 excluded)
+agreement: 99.27% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -227,5 +227,10 @@ goal — do not "fix" this by reverting to ASCII-only identifiers.
   the call. The fixes are a `!Guard` prefix (`(!StaticKW Modifier)* StaticKW`), right-recursion
   (`Chain <- Op Chain / Terminal`), or a variant rule that stops short. Expect to need one of
   these whenever a rule must constrain what comes LAST.
+- **`RuleClassifierTest` bounds how many MIXED rules the grammar may have.** A rule that
+  references other rules AND contains a character class is MIXED; an inline token-boundary form
+  like `< 'this' ![a-zA-Z0-9_$] >` is enough to trigger it. Duplicating such a form into a second
+  rule pushes the count up and fails that test. Factor the shared form into its own rule instead
+  of raising the bound — that is what `ReceiverParam` exists for.
 - **Measure after every single change.** Two changes landed together cost a bisection round;
   the run is 6 seconds, so there is no reason to batch.
