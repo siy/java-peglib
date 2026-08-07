@@ -111,7 +111,7 @@ Params <- Param (',' Param)*
 # The ordinary form spells '...' and C-style Dims as ALTERNATIVES, not an optional
 # pair: JLS 8.4.1 forbids combining them, so 'int... x[]' is illegal. The '...' may
 # itself carry type annotations ('int @Ann ... x').
-Param <- Annotation* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type (Annotation* '...' Identifier / Identifier Dims?)
+Param <- Annotation* Modifier* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] > / Annotation* Modifier* Type (Annotation* '...' Identifier / Identifier Dims?)
 Throws <- 'throws' ^ TypeList
 ConstructorDecl <- Annotation* TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 
@@ -263,7 +263,7 @@ RefType <- AnnotatedTypeName (&('.' ('@' / Identifier)) '.' AnnotatedTypeName)*
 # Identifier deliberately excludes only HARD keywords, so without this guard a
 # contextual keyword slips through as a type name. LocalVarType keeps its own explicit
 # 'var' alternative, so local type inference is unaffected.
-AnnotatedTypeName <- Annotation* !RestrictedTypeName Identifier TypeArgs?
+AnnotatedTypeName <- Annotation* !(RestrictedTypeName !'.') Identifier TypeArgs?
 RestrictedTypeName <- < ('var' / 'yield') ![a-zA-Z0-9_$] >
 Dims <- (Annotation* '[' ']')+
 # ArrayType is Type without trailing Dims - used for array creation expressions
@@ -302,7 +302,8 @@ Modifier <- < ('public' / 'protected' / 'private' / 'static' / 'final' / 'abstra
 #      across any intervening modifiers ('sealed abstract value class X').
 ValueKW <- < 'value' ![a-zA-Z0-9_$] >
 Annotation <- '@' !'interface' QualifiedName ('(' AnnotationValue? ')')?
-AnnotationValue <- Identifier '=' AnnotationElem (',' Identifier '=' AnnotationElem)* / AnnotationElem (',' AnnotationElem)*
+AnnotationValue <- AnnotationArg (',' AnnotationArg)*
+AnnotationArg <- Identifier '=' AnnotationElem / AnnotationElem
 # A lambda may appear as an annotation value: '@Anno(value = x -> x)'. javac's parser
 # accepts it and rejects it in Attr. Lambda used to be reachable here via Primary.
 AnnotationElem <- Annotation / '{' (AnnotationElem (',' AnnotationElem)*)? ','? '}' / Lambda / Ternary

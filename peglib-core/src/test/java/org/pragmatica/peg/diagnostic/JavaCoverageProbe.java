@@ -111,6 +111,9 @@ public class JavaCoverageProbe {
         cases.put("generic-constructor", "class T<X> { <A> T() { } }");
         cases.put("interface-method-default-value", "interface I { String value() default \"\"; }");
         cases.put("annotated-qualified-selector", "class A { void m(String... args) { java.util.@A Arrays.stream(args); } }");
+        cases.put("final-receiver-parameter", "class A { void m() { class I { I(final A A.this) { } } } }");
+        cases.put("var-as-package-segment", "class A { void m() { pkg.nested.var.A a = null; } }");
+        cases.put("annotation-mixed-args", "@Anno(name == \"fred\", address = \"there\") class A { }");
 
         // A switch guard ending in a bare IDENTIFIER used to be swallowed as a lambda: with
         // Lambda reachable from Primary, 'when i == j ->' parsed 'j -> {...}' and ate the
