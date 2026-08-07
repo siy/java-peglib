@@ -117,6 +117,12 @@ public class JavaCoverageProbe {
         cases.put("twr-parenthesised-resource", "class A implements AutoCloseable { public void close() { } void m(A v) { try ((v)) { } } }");
         cases.put("twr-field-chain-resource", "class A implements AutoCloseable { public void close() { } void m(A v) { try (v.f.g) { } } }");
 
+        // JLS 3.8: an identifier is any run of Character.isJavaIdentifierPart, not just ASCII.
+        // Non-English identifiers are ordinary Java and must parse.
+        cases.put("non-ascii-identifier", "class A { int caf\u00e9 = 1; }");
+        cases.put("non-ascii-identifier-start", "class A { int \u00e9x = 1; int normal = 2; }");
+        cases.put("non-ascii-in-string-and-comment", "class A { String s = \"caf\u00e9\"; /* \u00e9 */ }");
+
         // A switch guard ending in a bare IDENTIFIER used to be swallowed as a lambda: with
         // Lambda reachable from Primary, 'when i == j ->' parsed 'j -> {...}' and ate the
         // switch rule's own arrow. Guards ending in a literal ('> 2') masked this for a long

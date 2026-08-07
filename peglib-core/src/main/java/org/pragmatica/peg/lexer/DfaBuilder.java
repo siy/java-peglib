@@ -1796,8 +1796,8 @@ public final class DfaBuilder {
             int afterFirst;
 
             if (c1 == '\\' && i + 1 < n) {
-                firstChar = decodeEscape(pattern.charAt(i + 1));
-                afterFirst = i + 2;
+                firstChar = decodeEscapeValueAt(pattern, i);
+                afterFirst = escapeEndAt(pattern, i);
             } else {
                 firstChar = c1;
                 afterFirst = i + 1;
@@ -1810,8 +1810,8 @@ public final class DfaBuilder {
                 int advance;
 
                 if (endChar == '\\' && rangeEndStart + 1 < n) {
-                    endDecoded = decodeEscape(pattern.charAt(rangeEndStart + 1));
-                    advance = (rangeEndStart + 2) - i;
+                    endDecoded = decodeEscapeValueAt(pattern, rangeEndStart);
+                    advance = escapeEndAt(pattern, rangeEndStart) - i;
                 } else {
                     endDecoded = endChar;
                     advance = (rangeEndStart + 1) - i;
@@ -1835,6 +1835,74 @@ public final class DfaBuilder {
         }
 
         return mask;
+    }
+
+    /**
+     * Decode the escape sequence starting at {@code i} (which must index a backslash),
+     * returning the character value it denotes.
+     *
+     * <p>{@link GrammarLexer} deliberately preserves the FULL escape text inside a character
+     * class ({@code \\x20}, {@code \\u00e9}) so it can be decoded here. Reading only the single
+     * character after the backslash silently mis-parsed those: {@code [\\x20]} became the three
+     * members {@code 'x'}, {@code '2'}, {@code '0'}, and in a range the leftover digits formed a
+     * bogus second range. {@code [\\x61-\\x7a]} appeared to work purely by accident — the stray
+     * {@code '-'} produced the range {@code '-'..'x'}, which happens to cover the lowercase
+     * letters it was meant to match. Negated classes had no such luck and matched nothing.
+     */
+    private static int decodeEscapeValueAt(String pattern, int i) {
+        var n = pattern.length();
+        var esc = pattern.charAt(i + 1);
+
+        if (esc == 'x' && i + 4 <= n) {
+            var value = parseHex(pattern, i + 2, 2);
+
+            if (value >= 0) {
+                return value;
+            }
+        }
+
+        if (esc == 'u' && i + 6 <= n) {
+            var value = parseHex(pattern, i + 2, 4);
+
+            if (value >= 0) {
+                return value;
+            }
+        }
+
+        return decodeEscape(esc);
+    }
+
+    /** Index just past the escape sequence starting at {@code i}; mirrors {@link #decodeEscapeValueAt}. */
+    private static int escapeEndAt(String pattern, int i) {
+        var n = pattern.length();
+        var esc = pattern.charAt(i + 1);
+
+        if (esc == 'x' && i + 4 <= n && parseHex(pattern, i + 2, 2) >= 0) {
+            return i + 4;
+        }
+
+        if (esc == 'u' && i + 6 <= n && parseHex(pattern, i + 2, 4) >= 0) {
+            return i + 6;
+        }
+
+        return i + 2;
+    }
+
+    /** Value of {@code digits} hex characters at {@code from}, or -1 if any is not hex. */
+    private static int parseHex(String pattern, int from, int digits) {
+        var value = 0;
+
+        for (var k = from; k < from + digits; k++) {
+            var d = Character.digit(pattern.charAt(k), 16);
+
+            if (d < 0) {
+                return -1;
+            }
+
+            value = value * 16 + d;
+        }
+
+        return value;
     }
 
     private static int decodeEscape(char esc) {

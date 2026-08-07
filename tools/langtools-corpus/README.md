@@ -65,12 +65,12 @@ count, CST node count, and whether `reconstruct()` round-trips byte-identically.
 As of 2026-08-06 on `release-0.7.1`:
 
 ```
-AGREE_CLEAN           5420
-AGREE_REJECT           178
+AGREE_CLEAN           5422
+AGREE_REJECT           174
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            29
-FALSE_REJECT            15
-agreement: 99.22% (5545/5642 scored, 24 excluded)
+FALSE_ACCEPT            33
+FALSE_REJECT            13
+agreement: 99.18% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
@@ -176,36 +176,34 @@ java -cp "$(cat /tmp/abscp.txt):/tmp/harness" OracleRunner <grammar> \
     peglib-core/src/test/resources/perf-corpus/format-examples
 ```
 
-## Top remaining gap: non-ASCII identifiers
+## Non-ASCII identifiers — landed, deliberately at a small corpus cost
 
-`Identifier` is `[a-zA-Z_$] [a-zA-Z0-9_$]*` — ASCII only. Java allows any character for which
-`Character.isJavaIdentifierStart/Part` holds, so **`int café = 1;` does not parse today.** That
-is a real-world gap, not merely a corpus one: it affects any codebase using non-English
-identifiers. It accounts for the last 3 Unicode corpus failures (`SupplementaryJavaID1`,
-`SupplementaryJavaID6`, `UncommonParamNames`), which use supplementary-plane identifiers.
+`int café = 1;` now parses. This required fixing a real engine bug first.
 
-**The obvious grammar-only fix does NOT work — it was tried and measured.** `DfaBuilder` gives
-each state one non-ASCII transition slot, emitted for `.` and for negated character classes, so
-the natural move is to respell the identifier sets as negations of the ASCII characters an
-identifier may not contain:
+**The engine bug.** `GrammarLexer` preserves the full escape text inside a character class
+(`\x20`, `é`) so `DfaBuilder` can decode it, but `parseCharClassPattern` read only the
+single character after the backslash. `[\x20]` became the three members `'x'`, `'2'`, `'0'`.
+The failure was disguised: `[\x61-\x7a]` appeared to work because the leftover `'-'` formed the
+bogus range `'-'..'x'`, which happens to cover the lowercase letters it was meant to match.
+Negated classes had no such luck and matched nothing at all — which is why the first attempt at
+this fix broke even `class A { int x = 1; }`. Fixed by `decodeEscapeValueAt` / `escapeEndAt`;
+pinned by `CharClassHexEscapeTest`, which asserts the positive and negated forms agree with
+their literal equivalents. **On its own the fix is corpus-neutral** — the Java grammar used no
+hex escapes until now.
 
-```peg
-Identifier <- !Keyword < [^\x00-\x23\x25-\x40\x5B-\x5E\x60\x7B-\x7F] [^\x00-\x23\x25-\x2F\x3A-\x40\x5B-\x5E\x60\x7B-\x7F]* >
-```
+**The identifier change.** The DFA alphabet is 0..255 plus one non-ASCII slot per state, emitted
+for `.` and for NEGATED classes (widening the alphabet to full Unicode is explicitly out of
+bounds). So the identifier sets are spelled as negations of the ASCII characters an identifier
+may not contain, which picks up every non-ASCII codepoint for free.
 
-(The grammar lexer does support `\xNN` and `\uNNNN` escapes, so this parses.) But it breaks
-identifier lexing **wholesale** — even `class A { int x = 1; }` fails, with the parser reporting
-`found 'class'`, meaning the token is produced with the wrong kind. The likely culprit is the
-interaction with `!Keyword` skip-prefix handling in `RuleClassifier`/`DfaBuilder`
-(`KeywordSkipInfo` compiles the rule body alone and resolves keywords post-hoc by matched
-text), or maximal-munch arbitration against the other lexer rules once the identifier DFA
-accepts nearly every byte. **Not diagnosed further — do not simply retry the snippet above.**
-
-So this is lexer/DFA work, not a grammar edit. Start by dumping the token stream for
-`class A { int x = 1; }` under the modified grammar and finding which rule wins and what kind
-the `class` token gets. Note also that any negated-class approach is inherently broader than
-`Character.isJavaIdentifierPart` — it admits non-ASCII symbols javac rejects — because Unicode
-categories cannot be expressed in a 256-way DFA.
+**This is a deliberate trade, scored −2 on the corpus.** It fixes `SupplementaryJavaID1`,
+`SupplementaryJavaID6` and `UncommonParamNames`, and it over-accepts `SupplementaryJavaID2`–`5`,
+which use supplementary characters that are NOT valid identifier characters
+(`compiler.err.illegal.char`). Distinguishing those needs Unicode character categories, which a
+256-way DFA cannot express. The trade was taken because a formatter that cannot parse `café`
+is broken for real codebases, whereas one that accepts an emoji as an identifier merely fails
+to reject code that does not compile anyway. Corpus parity is a proxy for correctness, not the
+goal — do not "fix" this by reverting to ASCII-only identifiers.
 
 ## Triage tips — earned, do not skip
 
