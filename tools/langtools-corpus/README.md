@@ -184,16 +184,28 @@ is a real-world gap, not merely a corpus one: it affects any codebase using non-
 identifiers. It accounts for the last 3 Unicode corpus failures (`SupplementaryJavaID1`,
 `SupplementaryJavaID6`, `UncommonParamNames`), which use supplementary-plane identifiers.
 
-The fix is a lexer-level change, not a grammar tweak. `DfaBuilder` gives each state a single
-non-ASCII transition slot (see CLAUDE.md — do NOT try to widen the alphabet to full Unicode),
-and that slot is currently emitted only for `.` and for NEGATED character classes. So the
-likely shape is to express the identifier character sets as negated classes — "anything that is
-not ASCII control, space, punctuation (and, for the first character, not a digit)" — which picks
-up the non-ASCII edge for free. Confirm first that the grammar's character-class syntax supports
-the escapes needed to write those ranges; that was not verified.
+**The obvious grammar-only fix does NOT work — it was tried and measured.** `DfaBuilder` gives
+each state one non-ASCII transition slot, emitted for `.` and for negated character classes, so
+the natural move is to respell the identifier sets as negations of the ASCII characters an
+identifier may not contain:
 
-Not attempted, so no measurement exists. Expect roughly +3 on the corpus and a much larger
-effect on real input.
+```peg
+Identifier <- !Keyword < [^\x00-\x23\x25-\x40\x5B-\x5E\x60\x7B-\x7F] [^\x00-\x23\x25-\x2F\x3A-\x40\x5B-\x5E\x60\x7B-\x7F]* >
+```
+
+(The grammar lexer does support `\xNN` and `\uNNNN` escapes, so this parses.) But it breaks
+identifier lexing **wholesale** — even `class A { int x = 1; }` fails, with the parser reporting
+`found 'class'`, meaning the token is produced with the wrong kind. The likely culprit is the
+interaction with `!Keyword` skip-prefix handling in `RuleClassifier`/`DfaBuilder`
+(`KeywordSkipInfo` compiles the rule body alone and resolves keywords post-hoc by matched
+text), or maximal-munch arbitration against the other lexer rules once the identifier DFA
+accepts nearly every byte. **Not diagnosed further — do not simply retry the snippet above.**
+
+So this is lexer/DFA work, not a grammar edit. Start by dumping the token stream for
+`class A { int x = 1; }` under the modified grammar and finding which rule wins and what kind
+the `class` token gets. Note also that any negated-class approach is inherently broader than
+`Character.isJavaIdentifierPart` — it admits non-ASCII symbols javac rejects — because Unicode
+categories cannot be expressed in a 256-way DFA.
 
 ## Triage tips — earned, do not skip
 
