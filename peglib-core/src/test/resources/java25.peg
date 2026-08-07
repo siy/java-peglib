@@ -168,7 +168,18 @@ ForCtrl <- ForInit? ';' Expr? ';' ExprList? / Annotation* Modifier* LocalVarType
 ForInit <- LocalVarNoSemi / ExprList
 LocalVarNoSemi <- Annotation* Modifier* (< 'var' ![a-zA-Z0-9_$] > LocalVarDecl / Type LocalVarDecls)
 ResourceSpec <- '(' Resource (';' Resource)* ';'? ')'
-Resource <- Annotation* Modifier* LocalVarType (Identifier / '_') '=' Expr / QualifiedName
+# JLS 14.20.3: a resource is a declaration or a VARIABLE ACCESS. javac accepts a
+# parenthesised or computed receiver ('try ((v))', 'try (new X(){}.f.g)', 'try ((c?a:b).f)')
+# but rejects a bare creation ('try (new X())') with 'try.with.resources.expr.needs.var'.
+# So the expression form must END in a field access — spelled right-recursively because PEG
+# repetition is possessive. The declaration form is tried first, so 'try (var x = e)' is
+# unaffected, and a plain name is its own alternative.
+Resource <- Annotation* Modifier* LocalVarType (Identifier / '_') '=' Expr
+          / Primary ResourceChain
+          / QualifiedName
+          / '(' Expr ')'
+ResourceChain <- ChainOp ResourceChain / FieldOp
+FieldOp <- '.' Annotation* TypeArgs? Identifier
 Catch <- CatchKW ^ '(' Modifier* Type ('|' Type)* (Identifier / '_') ')' Block
 Finally <- FinallyKW ^ Block
 SwitchBlock <- '{' SwitchRule* '}'

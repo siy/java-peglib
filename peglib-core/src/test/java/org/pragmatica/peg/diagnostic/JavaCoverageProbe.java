@@ -114,6 +114,8 @@ public class JavaCoverageProbe {
         cases.put("final-receiver-parameter", "class A { void m() { class I { I(final A A.this) { } } } }");
         cases.put("var-as-package-segment", "class A { void m() { pkg.nested.var.A a = null; } }");
         cases.put("annotation-mixed-args", "@Anno(name == \"fred\", address = \"there\") class A { }");
+        cases.put("twr-parenthesised-resource", "class A implements AutoCloseable { public void close() { } void m(A v) { try ((v)) { } } }");
+        cases.put("twr-field-chain-resource", "class A implements AutoCloseable { public void close() { } void m(A v) { try (v.f.g) { } } }");
 
         // A switch guard ending in a bare IDENTIFIER used to be swallowed as a lambda: with
         // Lambda reachable from Primary, 'when i == j ->' parsed 'j -> {...}' and ate the

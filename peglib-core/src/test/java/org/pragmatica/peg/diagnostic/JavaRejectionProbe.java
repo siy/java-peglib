@@ -70,6 +70,7 @@ public class JavaRejectionProbe {
 
         // --- JLS 14.20: a try needs resources, or a catch, or a finally ---
         cases.put("try-alone", "class A { void m() { try { } } }");
+        cases.put("twr-bare-creation-resource", "class A implements AutoCloseable { public void close() { } void m() { try (new A()) { } } }");
 
         // --- JEP 456: bare '_' is a variable name only, never a member or type name ---
         cases.put("underscore-as-field", "class A { int _; }");
