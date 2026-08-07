@@ -106,6 +106,9 @@ public class JavaCoverageProbe {
         cases.put("case-null-with-item", "class A { void m(String s) { switch (s) { case null, \"a\": break; default: break; } } }");
         cases.put("annotation-before-typeparams", "class A { public @Ann <T> void m() { } }");
         cases.put("qualified-receiver-param", "class Outer { class Inner { Inner(Outer Outer.this) { } } }");
+        cases.put("qualified-super-ctor-typeargs", "class T<X> { class V<Z> { <C> V(T<X> t) { t.<Object>super(\"\"); } } }");
+        cases.put("qualified-super-ctor-plain", "class T<X> { class V<Z> { V(T<X> t) { t.super(\"\"); } } }");
+        cases.put("generic-constructor", "class T<X> { <A> T() { } }");
 
         // A switch guard ending in a bare IDENTIFIER used to be swallowed as a lambda: with
         // Lambda reachable from Primary, 'when i == j ->' parsed 'j -> {...}' and ate the
