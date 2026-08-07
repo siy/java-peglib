@@ -97,7 +97,7 @@ VarDecl <- Identifier Dims? ('=' VarInit)?
 LocalVarDecls <- LocalVarDecl (',' LocalVarDecl)*
 LocalVarDecl <- (Identifier / '_') Dims? ('=' VarInit)?
 VarInit <- '{' (VarInit (',' VarInit)*)? ','? '}' / Expr
-MethodDecl <- Annotation* TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? (Block / ';')
+MethodDecl <- Annotation* TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? ('default' AnnotationElem)? (Block / ';')
 Params <- Param (',' Param)*
 # A receiver parameter (JLS 8.4.1) names 'this' instead of a variable; it exists so
 # 'this' can carry type annotations. Ordered first: for an ordinary parameter the
@@ -215,7 +215,7 @@ Postfix <- Primary PostOp*
 # '.class' is NOT a postfix operator on an arbitrary expression: a class literal is
 # 'TypeName {[]} . class' (JLS 15.8.2), handled by TypeExpr. Leaving it here let
 # 'this.class' and '@Ann String.class' through.
-PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier ('(' Args? ')')? / '.' 'this' / '.' TypeArgs? < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
+PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' Annotation* TypeArgs? Identifier ('(' Args? ')')? / '.' 'this' / '.' TypeArgs? < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
 Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > (RawArrayElemType (DimExprs Dims? / Dims VarInit) / TypeArgs? ArrayType ('(' Args? ')') ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- UnannType '.' < 'class' > / Type '::' TypeArgs? (< 'new' > / Identifier)
 UnannType <- (PrimType / RefType) Dims?
@@ -246,7 +246,7 @@ CallChain <- ChainOp CallChain / CallOp
 # that as "('(' Args? ')')?", and PEG '?' is possessive, so '.foo()' would be swallowed
 # whole and CallOp would never see the call — making 'this.foo();' unparseable as a
 # statement while 'a.foo();' worked only because QualifiedName greedily took 'a.foo'.
-ChainOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' TypeArgs? Identifier / '.' 'this' / '.' TypeArgs? < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '::' TypeArgs? (Identifier / 'new') / '(' Args? ')' / '++' / '--'
+ChainOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' Annotation* TypeArgs? Identifier / '.' 'this' / '.' TypeArgs? < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '::' TypeArgs? (Identifier / 'new') / '(' Args? ')' / '++' / '--'
 # A qualified class instance creation ('a.new B()') is itself a complete statement
 # expression, so it terminates the chain as well as continuing it.
 CallOp <- '(' Args? ')' / '++' / '--' / '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody?
