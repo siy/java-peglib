@@ -176,6 +176,25 @@ java -cp "$(cat /tmp/abscp.txt):/tmp/harness" OracleRunner <grammar> \
     peglib-core/src/test/resources/perf-corpus/format-examples
 ```
 
+## Top remaining gap: non-ASCII identifiers
+
+`Identifier` is `[a-zA-Z_$] [a-zA-Z0-9_$]*` — ASCII only. Java allows any character for which
+`Character.isJavaIdentifierStart/Part` holds, so **`int café = 1;` does not parse today.** That
+is a real-world gap, not merely a corpus one: it affects any codebase using non-English
+identifiers. It accounts for the last 3 Unicode corpus failures (`SupplementaryJavaID1`,
+`SupplementaryJavaID6`, `UncommonParamNames`), which use supplementary-plane identifiers.
+
+The fix is a lexer-level change, not a grammar tweak. `DfaBuilder` gives each state a single
+non-ASCII transition slot (see CLAUDE.md — do NOT try to widen the alphabet to full Unicode),
+and that slot is currently emitted only for `.` and for NEGATED character classes. So the
+likely shape is to express the identifier character sets as negated classes — "anything that is
+not ASCII control, space, punctuation (and, for the first character, not a digit)" — which picks
+up the non-ASCII edge for free. Confirm first that the grammar's character-class syntax supports
+the escapes needed to write those ranges; that was not verified.
+
+Not attempted, so no measurement exists. Expect roughly +3 on the corpus and a much larger
+effect on real input.
+
 ## Triage tips — earned, do not skip
 
 - **`trailing input not consumed` reports where the parser STOPPED**, which for a whole-file
