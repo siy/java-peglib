@@ -77,6 +77,12 @@ public class JavaRejectionProbe {
         cases.put("guard-on-constant-label", "class A { void m(Object o, boolean b) { switch (o) { case 0 when b -> { } default -> { } } } }");
         cases.put("unqualified-import", "import Dummy;");
         cases.put("void-array-type", "class A { void[] a = null; }");
+
+        // --- JLS 14.3 / 8.4.1 / 14.30.1 / 15.8.2 ---
+        cases.put("static-local-class", "class A { void m() { static class Y { } } }");
+        cases.put("receiver-param-not-first", "class A { void m(int any, A A.this) { } }");
+        cases.put("instanceof-var-pattern", "class A { void m(Object o) { if (o instanceof var v) { } } }");
+        cases.put("annotated-class-literal", "class A { Object o = @A Object.class; }");
         cases.put("twr-bare-creation-resource", "class A implements AutoCloseable { public void close() { } void m() { try (new A()) { } } }");
 
         // --- JEP 456: bare '_' is a variable name only, never a member or type name ---
@@ -240,6 +246,12 @@ public class JavaRejectionProbe {
         cases.put("guard-on-pattern-label", "class A { void m(Object o) { switch (o) { case Integer i when i > 0 -> { } default -> { } } } }");
         cases.put("import-shapes", "import a.Dummy;\nimport a.*;\nimport static a.B.c;\nclass A { }\n");
         cases.put("void-return-and-class-literal", "class A { void m() { } Object o = void.class; }");
+        cases.put("plain-local-class", "class A { void m() { class Y { } } }");
+        cases.put("static-member-class", "class A { static class Y { } }");
+        cases.put("receiver-param-first", "class A { void m(A this, int x) { } }");
+        // A record COMPONENT pattern may still use 'var' even though a top-level one may not.
+        cases.put("record-component-var-pattern", "class A { void m(Object o) { if (o instanceof P(Q(var x), var y)) { } } }");
+        cases.put("class-literal-shapes", "class A { Object o = Object.class; Object p = java.util.Map.class; Object q = String[].class; }");
 
         return cases;
     }

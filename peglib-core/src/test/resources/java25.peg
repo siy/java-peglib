@@ -102,8 +102,9 @@ VarInit <- '{' (VarInit (',' VarInit)*)? ','? '}' / Expr
 MethodDecl <- Annotation* TypeParams? Type Identifier '(' ^ Params? ')' Dims? Throws? ('default' AnnotationElem)? (Block / ';')
 # JLS 8.4.1: only the LAST parameter may be variable-arity, so every parameter before the
 # final one is matched by a rule that has no '...' alternative.
-Params <- (NonVarargsParam ',')* Param
-NonVarargsParam <- ReceiverParam / Annotation* Modifier* Type Identifier Dims?
+Params <- ReceiverParam (',' OrdinaryParams)? / OrdinaryParams
+OrdinaryParams <- (PlainParam ',')* LastParam
+PlainParam <- Annotation* Modifier* Type Identifier Dims?
 # A receiver parameter (JLS 8.4.1) names 'this' instead of a variable; it exists so
 # 'this' can carry type annotations. Ordered first: for an ordinary parameter the
 # Type matches and the 'this' check fails, so it backtracks to the normal form.
@@ -120,15 +121,16 @@ NonVarargsParam <- ReceiverParam / Annotation* Modifier* Type Identifier Dims?
 # a character class, which makes its enclosing rule MIXED; duplicating it would make a
 # second rule MIXED for no reason (RuleClassifierTest bounds how many may exist).
 ReceiverParam <- Annotation* Modifier* Type (QualifiedName '.')? < 'this' ![a-zA-Z0-9_$] >
-Param <- ReceiverParam / Annotation* Modifier* Type (Annotation* '...' Identifier / Identifier Dims?)
+LastParam <- Annotation* Modifier* Type (Annotation* '...' Identifier / Identifier Dims?)
 Throws <- 'throws' ^ TypeList
 ConstructorDecl <- Annotation* TypeParams? Identifier '(' ^ Params? ')' Throws? Block
 
 # === Blocks and Statements (JLS 14) ===
 Block <- '{' BlockStmt* '}'
 BlockStmt <- LocalVar / LocalTypeDecl / Stmt
-LocalTypeDecl <- Annotation* (!SealedMod Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
-SealedMod <- < ('sealed' / 'non-sealed') ![a-zA-Z0-9_$] >
+LocalTypeDecl <- Annotation* (!IllegalLocalClassMod Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))* TypeKind
+# JLS 14.3: a local class takes none of these — it is neither a member nor a top-level type.
+IllegalLocalClassMod <- < ('sealed' / 'non-sealed' / 'static') ![a-zA-Z0-9_$] >
 LocalVar <- Annotation* Modifier* (< 'var' ![a-zA-Z0-9_$] > LocalVarDecl / Type LocalVarDecls) ';'
 LocalVarType <- < 'var' ![a-zA-Z0-9_$] > / Type
 # Statement keywords use helper rules to combine keyword + word boundary as single token
@@ -196,12 +198,14 @@ SwitchRule <- SwitchLabel '->' (Expr ';' / Block / ThrowKW Expr ';') / SwitchLab
 # === Switch Labels and Patterns (JLS 14.11, 14.30) ===
 SwitchLabel <- 'case' ^ ('null' ',' 'default' / Pattern (',' Pattern)* Guard / CaseItem (',' CaseItem)*) / 'default'
 CaseItem <- Pattern / QualifiedName &('->' / ',' / ':' / 'when') / Expr
-Pattern <- RecordPattern / TypePattern
+Pattern <- RecordPattern / TopTypePattern
 # A pattern binding may be named '_' (JEP 456), both bare ('case _') and typed
 # ('case String _ when ...'). The typed form is what the bare-'_' alternative misses.
+TopTypePattern <- &(Annotation* Modifier* Type (Identifier / '_')) Annotation* Modifier* Type (Identifier / '_') / '_'
 TypePattern <- &(Annotation* Modifier* LocalVarType (Identifier / '_')) Annotation* Modifier* LocalVarType (Identifier / '_') / '_'
 RecordPattern <- RefType '(' PatternList? ')'
-PatternList <- Pattern (',' Pattern)*
+PatternList <- ComponentPattern (',' ComponentPattern)*
+ComponentPattern <- RecordPattern / TypePattern
 # A guard is a boolean expression, never a lambda (JLS 14.11.1). Going through Expr would
 # try the Lambda alternative first and swallow the switch rule's arrow on a bare-identifier
 # guard: 'case Integer i when b -> {}' parsed 'b -> {}' as the guard. Assignment is Expr
@@ -238,7 +242,9 @@ Postfix <- Primary PostOp*
 PostOp <- '.' 'new' TypeArgs? ArrayType ('(' Args? ')') ClassBody? / '.' Annotation* TypeArgs? Identifier ('(' Args? ')')? / '.' 'this' / '.' TypeArgs? < 'super' ![a-zA-Z0-9_$] > / '[' Expr ']' / '(' Args? ')' / '++' / '--' / '::' TypeArgs? (Identifier / 'new')
 Primary <- Literal / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')' / < 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] > / < 'new' ![a-zA-Z0-9_$] > (RawArrayElemType (DimExprs Dims? / Dims VarInit) / TypeArgs? ArrayType ('(' Args? ')') ClassBody?) / SwitchKW '(' Expr ')' SwitchBlock / '(' Expr ')' / TypeExpr / QualifiedName
 TypeExpr <- UnannType '.' < 'class' > / Type '::' TypeArgs? (< 'new' > / Identifier)
-UnannType <- (VoidType / PrimType / RefType) Dims?
+UnannType <- (VoidType / PrimType / PlainRefType) Dims?
+PlainRefType <- PlainTypeName (&('.' Identifier) '.' PlainTypeName)*
+PlainTypeName <- !RestrictedTypeName Identifier
 Lambda <- LambdaParams '->' (Expr / Block)
 # JLS 15.27.1: a lambda's parameter list must be uniform — all explicitly typed, all
 # 'var', or all inferred. Mixing them ('(var x, y) -> {}') is illegal, which a
