@@ -266,7 +266,7 @@ StmtExpr <- ('++' / '--') Unary
           / Postfix (URShiftAssign / RShiftAssign / LShiftAssign / '=' / '+=' / '-=' / '*=' / '/=' / '%=' / '&=' / '|=' / '^=') Expr
           / &(< 'new' ![a-zA-Z0-9_$] >) Postfix
           / TypeArgs (< 'this' ![a-zA-Z0-9_$] > / < 'super' ![a-zA-Z0-9_$] >) '(' Args? ')'
-          / Primary CallChain
+          / !YieldKW Primary CallChain
 CallChain <- ChainOp CallChain / CallOp
 # Same as PostOp but WITHOUT the optional trailing call on member access. PostOp spells
 # that as "('(' Args? ')')?", and PEG '?' is possessive, so '.foo()' would be swallowed

@@ -79,6 +79,9 @@ public class JavaRejectionProbe {
         cases.put("void-array-type", "class A { void[] a = null; }");
 
         // --- JLS 14.3 / 8.4.1 / 14.30.1 / 15.8.2 ---
+        // A statement starting with the identifier 'yield' is always a yield statement, so
+        // this is a yield of '(1, 2)' — not a call to a method named yield.
+        cases.put("bare-yield-invocation", "class A { void m() { yield(1, 2); } }");
         cases.put("static-local-class", "class A { void m() { static class Y { } } }");
         cases.put("receiver-param-not-first", "class A { void m(int any, A A.this) { } }");
         cases.put("instanceof-var-pattern", "class A { void m(Object o) { if (o instanceof var v) { } } }");
@@ -246,6 +249,9 @@ public class JavaRejectionProbe {
         cases.put("guard-on-pattern-label", "class A { void m(Object o) { switch (o) { case Integer i when i > 0 -> { } default -> { } } } }");
         cases.put("import-shapes", "import a.Dummy;\nimport a.*;\nimport static a.B.c;\nclass A { }\n");
         cases.put("void-return-and-class-literal", "class A { void m() { } Object o = void.class; }");
+        cases.put("yield-with-receiver", "class A { void yield(int a) { } void m() { this.yield(1); } }");
+        cases.put("yield-statement-in-switch", "class A { int m(int x) { return switch (x) { case 1 -> { yield 2; } default -> 0; }; } }");
+        cases.put("yield-as-plain-identifier", "class A { int yield = 1; int m() { return yield; } }");
         cases.put("plain-local-class", "class A { void m() { class Y { } } }");
         cases.put("static-member-class", "class A { static class Y { } }");
         cases.put("receiver-param-first", "class A { void m(A this, int x) { } }");

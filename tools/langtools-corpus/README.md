@@ -65,12 +65,12 @@ count, CST node count, and whether `reconstruct()` round-trips byte-identically.
 As of 2026-08-06 on `release-0.7.1`:
 
 ```
-AGREE_CLEAN           5422
-AGREE_REJECT           183
+AGREE_CLEAN           5425
+AGREE_REJECT           186
 EXCLUDED_ORACLE_OLD     24
-FALSE_ACCEPT            24
-FALSE_REJECT            13
-agreement: 99.34% (5545/5642 scored, 24 excluded)
+FALSE_ACCEPT            21
+FALSE_REJECT            10
+agreement: 99.45% (5545/5642 scored, 24 excluded)
 ```
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
