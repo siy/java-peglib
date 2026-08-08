@@ -36,8 +36,11 @@ considered and rejected for exactly this reason.
   `TokenDump` and this README, all written here.
 - **The probe cases.** `JavaCoverageProbe` and `JavaRejectionProbe` hold ~236 snippets derived
   while triaging corpus failures. They are independently authored minimal reproducers, not
-  extracts: a spot check of distinctive cases found **zero verbatim matches** anywhere in the
-  corpus. They are typically under 80 characters and state JLS *syntax rules* — there is
+  extracts: every substantive case (240 of them, excluding trivia like the empty compilation
+  unit) was checked as a literal substring against all 5,667 corpus files, and **none appears
+  verbatim**. One originally did — `package p;` followed by an empty class, which is generic
+  boilerplate rather than anything protectable — and it was reworded anyway so the check comes
+  back clean. Re-run that check if you add cases in bulk. They are typically under 80 characters and state JLS *syntax rules* — there is
   essentially one way to write "a varargs parameter that is not last" — so there is no
   protectable expression being taken. Keep it that way: when adding a case, write the minimal
   snippet yourself rather than pasting a corpus file.

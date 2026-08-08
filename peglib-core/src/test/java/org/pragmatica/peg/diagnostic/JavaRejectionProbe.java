@@ -227,7 +227,7 @@ public class JavaRejectionProbe {
         cases.put("array-of-wildcard", "class A { Object o = new Class<?>[0]; Object p = new Class<?>[]{ }; }");
         cases.put("array-creation-shapes", "class A { Object o = new int[3][4]; Object p = new String[]{\"a\"}; }");
         cases.put("local-class-plain", "class A { void m() { class L { } } }");
-        cases.put("package-with-class", "package p;\nclass A { }\n");
+        cases.put("package-with-class", "package acme.tools;\nclass Widget { }\n");
 
         // Every JLS 14.8 statement-expression shape. The chain is spelled right-recursively
         // because PEG repetition is possessive, so these pin the shapes that broke while
