@@ -10,6 +10,45 @@ It is **not** wired into the build: it needs a 36 MB external checkout and a JDK
 (post-Java-25 syntax); every fix found here should land as a case in one of them so this corpus
 does not have to be re-fetched to catch a regression.
 
+## Licensing — do not vendor the corpus
+
+**The corpus is GPLv2; peglib is MIT. Never commit corpus files into this repo.**
+
+Measured over the 5,667 files in `test/langtools/tools/javac`:
+
+| header | count |
+|---|---|
+| GNU GPL v2 | 4,261 (only 38 of which carry the Classpath Exception) |
+| `/nodynamiccopyright/` (jtreg marker, no header) | 1,392 |
+| neither | 14 |
+
+GPLv2 without the Classpath Exception is strong copyleft. MIT code may be incorporated into a
+GPL work, but not the reverse: distributing these files as part of an MIT-licensed artifact
+would encumber the whole distribution. That is why the in-build gates are hand-written probes
+and this check fetches the corpus at run time instead of vendoring a subset — the option was
+considered and rejected for exactly this reason.
+
+**What is safe, and why:**
+
+- **Running the differential.** The user clones the corpus themselves; the harness reads those
+  files and reports counts. Copyright restricts copying and distribution, not reading or
+  analysis. This repo distributes none of it — only `OracleRunner`, `Snip`, `CstCheck`,
+  `TokenDump` and this README, all written here.
+- **The probe cases.** `JavaCoverageProbe` and `JavaRejectionProbe` hold ~236 snippets derived
+  while triaging corpus failures. They are independently authored minimal reproducers, not
+  extracts: a spot check of distinctive cases found **zero verbatim matches** anywhere in the
+  corpus. They are typically under 80 characters and state JLS *syntax rules* — there is
+  essentially one way to write "a varargs parameter that is not last" — so there is no
+  protectable expression being taken. Keep it that way: when adding a case, write the minimal
+  snippet yourself rather than pasting a corpus file.
+
+**Do not** rely on the `/nodynamiccopyright/` marker as a licence grant. It exists so a header
+does not shift line numbers in expected-output comparisons; it signals that OpenJDK does not
+assert a header on those files, which is not the same as permission to redistribute.
+
+This is engineering practice, not legal advice. The "no GPL files in an MIT repo" part is
+unambiguous; anything subtler warrants counsel.
+
 ## Why javac is the oracle
 
 `JavacTask.parse()` runs the scanner and parser and nothing else — no enter, no attribute, no
