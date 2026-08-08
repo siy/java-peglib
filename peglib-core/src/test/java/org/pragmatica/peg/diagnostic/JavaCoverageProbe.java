@@ -119,6 +119,10 @@ public class JavaCoverageProbe {
 
         // JLS 3.8: an identifier is any run of Character.isJavaIdentifierPart, not just ASCII.
         // Non-English identifiers are ordinary Java and must parse.
+        // A text block may contain an ESCAPED triple quote without closing. Block comments
+        // must not gain the same behaviour: a backslash before */ does not escape it.
+        cases.put("text-block-escaped-quotes", "class A { String s = \"\"\"\n  a \\\"\"\"  b\n  \"\"\"; }");
+        cases.put("block-comment-backslash-still-ends", "class A { void m() { /* a \\*/ int x = 1; } }");
         cases.put("non-ascii-identifier", "class A { int caf\u00e9 = 1; }");
         cases.put("non-ascii-identifier-start", "class A { int \u00e9x = 1; int normal = 2; }");
         cases.put("non-ascii-in-string-and-comment", "class A { String s = \"caf\u00e9\"; /* \u00e9 */ }");

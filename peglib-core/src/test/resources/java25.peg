@@ -352,7 +352,11 @@ Literal <- < ('null' / 'true' / 'false') ![a-zA-Z0-9_$] > / CharLit / StringLit 
 # A char literal holds EXACTLY one element: '' is empty, and a raw newline may not appear
 # inside either a char or a (non-text-block) string literal.
 CharLit <- < '\'' ([^'\\\n\r] / '\\' ([btnfrs"'\\] / [0-3] [0-7] [0-7] / [0-7] [0-7]? / 'u'+ [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])) '\'' >
-StringLit <- < '"""' (!'"""' .)* '"""' >
+# The text-block body opts into backslash-escape awareness (see DfaBuilder
+# compileDelimitedBlock): a backslash consumes the next character whole, so an escaped
+# triple quote does not close the block. Block comments deliberately do NOT use this
+# shape — a backslash before */ does not escape it.
+StringLit <- < '"""' ('\\' . / !'"""' .)* '"""' >
            / < '"' ([^"\\\n\r] / '\\' ([btnfrs"'\\] / [0-3] [0-7] [0-7] / [0-7] [0-7]? / 'u'+ [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]))* '"' >
 # JLS 3.10.1: an underscore may appear only BETWEEN digits — never leading, never
 # trailing, never adjacent to '.', 'x', 'b', or a type suffix. Each digit run is
