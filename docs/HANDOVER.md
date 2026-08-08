@@ -100,6 +100,75 @@ GA); `JsonEncoder` could move onto `JsonMapper.writeAsString`.
 
 ---
 
+## Performance regression — measured, profiled, NOT resolved
+
+**0.7.1 parses ~33% slower than 0.7.0.** Same machine, same JMH settings, 2 forks x 10
+iterations, error bars +-2-3% and non-overlapping:
+
+| fixture | 0.7.0 (main) | 0.7.1 (branch) | delta |
+|---|---|---|---|
+| reference (1.9k LOC) | 2.770 +- 0.078 ms | 3.822 +- 0.115 ms | +38% |
+| selfhost (40k LOC) | 68.683 +- 1.656 ms | 91.459 +- 1.874 ms | +33% |
+
+Reproduce (bench jar resolves fixtures relative to CWD, so run from `peglib-core/`):
+
+```bash
+mvn -pl peglib-core -am -Pbench -DskipTests package
+cd peglib-core && java -jar target/benchmarks.jar Java25LargeFixturesBenchmark -wi 5 -i 10 -f 2
+```
+
+For a baseline, `git clone . /tmp/peglib-main -b main` and build the same jar there. Do not
+compare against the 0.6.2-era figures (2.68 / 71.9 ms) — different machine state, and a
+single-run delta on this box is not trustworthy below ~15%.
+
+### The cause, from the profiler (not from theory)
+
+`async-profiler`, cpu event, selfhost fixture:
+
+- **41.7%** of samples pass through `parseStmtExpr`
+- top self-time frames: `CstArrayBuilder.truncate` **10.1%**, `CstArrayBuilder.beginNode`
+  **9.9%**, `GParser_1.fail` **8.3%** — the signature of backtracking: build CST nodes, fail,
+  throw them away, parse again
+
+The cost is the JLS 14.8 statement-expression restriction added in this release. `Stmt` used to
+be `Expr ';'`; it is now `StmtExpr ';'`, whose assignment alternative parses a whole `Postfix`
+before discovering there is no assignment operator, backtracks, and then the invocation
+alternative parses that same `Postfix` again. Expression statements dominate real Java, so this
+roughly doubles the work on the most common statement form.
+
+### What was tried
+
+Reordering `StmtExpr` to put the invocation form first, with a trailing `&';'` guard.
+The guard is **required for correctness**: without it the invocation form matches a PREFIX of an
+assignment, so `foo().bar = 1;` matches `foo()` and stops. Measured:
+
+| variant | reference | selfhost | agreement |
+|---|---|---|---|
+| assignment-first (shipped) | 3.822 ms | 91.459 ms | 99.45% |
+| invocation-first + `&';'` | 3.345 ms | 82.098 ms | **99.42%** |
+
+It recovers only ~40% of the regression AND costs two files of agreement, so it was **not**
+kept. The grammar in the repo is the correct 99.45% version.
+
+### Where to take it next
+
+The profile points at backtracking cost inside `CstArrayBuilder`, not at any single grammar
+rule, so the promising directions are engine-side rather than more reordering:
+
+1. Make a failed alternative cheaper. `beginNode` + `truncate` together are 20% of samples;
+   an alternative that fails should ideally not have built nodes at all. Deferring node creation
+   until an alternative commits would attack the dominant cost directly.
+2. Memoise `Postfix` at a position. Classic packrat, deliberately dropped in 0.6.0 as
+   unnecessary under the tokens-first design — this is the first evidence that a narrowly
+   targeted cache might pay for itself. Measure before believing it.
+3. Decide whether JLS 14.8 enforcement is worth 33%. Reverting `StmtExpr` to plain `Expr`
+   restores the speed and loses ~6 files of agreement, re-admitting `(a);` and `a.b;` as
+   statements. That is a product call, not a technical one.
+
+**Do not ship 0.7.1 without an explicit decision here.**
+
+---
+
 ## Session 9 — 0.7.0 (2026-08-01 → 08-05) — SHIPPED
 
 ### State at a glance
