@@ -7,20 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.1] - unreleased
 
-### Fixed
+Validated the Java grammar against **javac's own parse phase** over OpenJDK's langtools test
+suite (5,666 files). `JavacTask.parse()` runs the scanner and parser and nothing else, so its
+errors are exactly the syntax errors — which makes it ground truth for the only question a
+parser can be held to, in both directions.
 
-Validated the Java grammar against OpenJDK's own javac test suite (3,555 positive langtools
-tests). Clean-parse rate 96.8% -> 97.8%, zero crashes. Gaps found and fixed:
+Agreement went from **95.55% to 99.45%**: files we wrongly rejected fell 155 -> 10, and files we
+wrongly accepted fell 73 -> 21. Tooling and the full disposition of every remaining disagreement
+are in `tools/langtools-corpus/`.
 
-- **Qualified `super`** — `A.super.m()`. `PostOp` handled `.this` but not `.super`.
-- **Array initializer `{,}`** — JLS permits an empty initializer list followed by a trailing
-  comma.
-- **Type annotations before a wildcard** — `List<@Ann ?>`. `TypeArg` allowed annotations after
-  `?` but not before it.
+> The previously reported "97.8% over 3,555 positive tests" was measured with a heuristic that
+> split the corpus by grepping for `@compile/fail` markers. That scored roughly 77 genuine
+> grammar gaps as expected failures, so it could never have found more than half of them. The
+> heuristic has been removed.
+
+### Fixed — engine
+
+- **Empty and comment-only compilation units are accepted.** The generated `parseWithRecovery`
+  emitted `"empty input"` whenever the token stream was empty or all-trivia, without asking
+  whether the start rule can match empty. Java's `CompilationUnit` can, and a file holding only
+  a licence header is legal. Non-nullable start rules still report the diagnostic.
+- **Trailing input after a partial parse is reported.** A successful start-rule call that left
+  tokens behind caused the recovery loop to silently parse the remainder as a *second*
+  document, so a file could be accepted as N concatenated compilation units. In
+  `import a.B;; import c.D;` the stray `;` is a type declaration, making the following import
+  illegal — and both halves parsed cleanly on their own.
+- **Hex and Unicode escapes inside character classes are decoded.** `[\x20]` was read as the
+  three members `'x'`, `'2'`, `'0'`. The bug was disguised: `[\x61-\x7a]` appeared to work
+  because the leftover `'-'` formed the range `'-'..'x'`, which happens to cover the lowercase
+  letters it was meant to match. Negated classes matched nothing at all.
+
+### Added
+
+- **Unicode escape translation (JLS 3.3).** A backslash-u escape is now substituted before
+  lexing rather than by the lexer, so an escape denoting `i` followed by a literal `f`
+  really is the keyword `if`, and an escape denoting a line terminator really does end a
+  `//` comment. Token spans are remapped onto the original text, so `reconstruct()` still
+  returns exactly what was written — the formatter's byte-identical round-trip depends on
+  that and is asserted. Sources containing no escape pay a single substring scan. Two rules
+  that are easy to get wrong: a backslash starts an escape only when preceded by an EVEN
+  number of backslashes, and any number of `u`s may follow.
+- **Non-ASCII identifiers.** `int café = 1;` parses. Java allows any
+  `Character.isJavaIdentifierPart`, and the grammar was ASCII-only. Deliberately broader than
+  javac by four corpus files: distinguishing valid from invalid non-ASCII identifier characters
+  needs Unicode categories, which the DFA's single non-ASCII transition slot cannot express.
+- **Opt-in escape-aware delimited blocks.** A body written `('\' . / !CLOSE .)*` gives the
+  backslash-escape rule, so a text block may contain an escaped triple quote without closing.
+  Block comments deliberately do not use that shape — `/* ... \*/` does end a comment.
+
+### Fixed — Java 25 grammar
+
+Constructs that failed to parse and now succeed: qualified `super` with explicit type arguments
+(`t.<T>super()`), `@interface` bodies with type parameters, `extends`, and method-shaped members,
+stray `;` between declarations, `enum E { , }`, `@interface A { int[] v() default {,}; }`,
+explicit constructor invocations with type arguments (`<T>super()`), annotated varargs
+(`int @Ann ... x`), modifiers on a for-each variable and on pattern bindings, `case null` beside
+other labels, annotations between modifiers and type parameters, qualified receiver parameters
+(`Inner(Outer Outer.this)`), method `default` values, annotated qualified selectors
+(`java.util.@A Arrays.stream(...)`), receiver-parameter modifiers, `var` as a package segment,
+mixed annotation arguments, expression resources in try-with-resources, imports before a module
+declaration, and record components declared varargs.
+
+Constructs that were wrongly accepted and are now rejected: underscores adjacent to a `.`, a
+suffix or a radix prefix in numeric literals; escapes outside the JLS set; empty and multi-element
+char literals; varargs combined with C-style brackets, or not last; `var`/`yield` as type names,
+as type-declaration names, or with multiple declarators; expressions that are not statements
+(JLS 14.8); non-uniform lambda parameter lists; `try` without catch, finally or resources; bare
+`_` as a member or type name, or with brackets; interface fields without an initializer and
+interface/record initializer blocks; class literals as a postfix operator or with annotations;
+non-reifiable array element types; sealed and static local classes; a package declaration in a
+compact source file; unqualified imports; `void` array types; guards on constant labels;
+`instanceof var`; and a bare `yield(...)` invocation.
 
 ### Changed
 
-### Added
+- **The `*Probe` gates now run in the build.** Surefire matched only `**/*Test.java` and
+  `**/*Example.java`, so `JavaCoverageProbe` and `ModernJavaSyntaxProbe` were compiled but never
+  executed — a grammar regression would have reached the field with a green build.
+- **`JavaRejectionProbe` added**, the mirror gate for constructs that must be *rejected*. Each
+  case is paired with a legal near-miss, because the cheap way to pass a rejection test is to
+  over-tighten until valid code breaks too: `1_` must fail while `1__0L` must still parse.
+- New engine tests: `NullableStartRuleEmptyInputTest`, `UnicodeEscapeTranslationTest`,
+  `CharClassHexEscapeTest`. Suite: **528 -> 551 tests**, 0 failures.
+- Two formatter corpus fixtures contained invalid Java — a constructor inside an `interface`,
+  which javac's own parser rejects. They are now classes, matching how the fixtures instantiate
+  them.
+- `IdentifierFallbackTest` asserted that a bare `yield()` call parses. javac rejects it
+  ("to invoke a method called yield, qualify the yield with a receiver"); the case now uses
+  `this.yield()`.
 
 ## [0.7.0] - 2026-08-05
 
