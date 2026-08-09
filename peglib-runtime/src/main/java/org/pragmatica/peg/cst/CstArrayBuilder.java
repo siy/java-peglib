@@ -10,9 +10,12 @@ import org.pragmatica.peg.token.TokenArray;
  * {@link #build(int)} produces the array; subsequent calls fail fast.
  *
  * <p>Storage uses a single packed {@code int[]} of {@value CstArray#NODE_STRIDE}
- * ints per node, grown by doubling. Sibling chains are tracked as the builder runs by
- * maintaining a stack of "previous sibling per parent": when the next child of the same
- * parent is appended, the previous sibling's {@code nextSibling} slot is patched.
+ * ints per node, grown by doubling. Sibling chains are linked on SUCCESS, not on
+ * allocation: {@link #beginNode} only reserves and initialises the slot, and
+ * {@link #endNode} links the node into its parent's child chain. A node abandoned
+ * by backtracking — truncated before being ended — was therefore never linked and
+ * needs no link repair, which is what keeps {@link #truncate(int)} cheap on the
+ * dominant begin-fail-truncate path.
  *
  * <p>This builder is an internal hot-path helper invoked from generated parser code and
  * a small number of trusted Java callers (CST splice, recovery emit). Defensive
@@ -47,14 +50,14 @@ public final class CstArrayBuilder {
     private int lastChildCount;
 
     /**
-     * Parallel array sized to {@code nodes / NODE_STRIDE}. {@code lastChildBefore[i]}
-     * stores the value of {@code lastChild[parentOf(i)]} BEFORE node {@code i} was
-     * appended (i.e., the would-be previous sibling, or {@link CstArray#NO_NODE} if
-     * {@code i} is its parent's first child or has no parent). Used as an undo log
-     * by {@link #truncate(int)} so rollback cost is O(dropped) rather than
-     * O(surviving).
+     * Link journal: one {@code (child, previousLastChild)} pair per {@link #endNode}
+     * that linked a node into its parent, in link order, packed two ints per entry.
+     * {@link #truncate(int)} pops the suffix whose child index falls in the dropped
+     * range and undoes exactly those links. Nodes that failed before reaching
+     * {@code endNode} were never linked, have no entry, and cost nothing to drop.
      */
-    private int[] lastChildBefore;
+    private int[] linkLog;
+    private int linkLogCount;
     private boolean built;
 
     public CstArrayBuilder(String input, TokenArray tokens, String[] ruleTable) {
@@ -74,17 +77,20 @@ public final class CstArrayBuilder {
         // on distinct parent indices touched per backtrack window.
         this.lastChild = new int[Math.max(64, cap / 4)];
         this.lastChildCount = 0;
-        this.lastChildBefore = new int[cap];
+        this.linkLog = new int[Math.max(128, cap)];
+        this.linkLogCount = 0;
         this.built = false;
     }
 
     /**
-     * Allocate a new node, link it under {@code parent} (or as root if {@code parent == -1}),
-     * and return its index. The new node becomes the open child of {@code parent}: subsequent
-     * {@code beginNode} calls with this node's index as {@code parent} will create children of
-     * it. The new node has {@code lastToken} pre-set to {@code firstToken} so that if no
-     * {@link #endNode} is called the span is at least non-negative; {@link #endNode} sets the
-     * final value.
+     * Allocate a new node and return its index. The node records {@code parent}
+     * (or {@code -1} for a root) but is NOT yet linked into the parent's child chain —
+     * linking happens in {@link #endNode}. Until then the node is invisible to
+     * child/sibling traversal; every node that survives to {@link #build(int)} must be
+     * ended exactly once, on its success path. Children may attach to a still-open
+     * parent: {@code beginNode} calls with this node's index as {@code parent} work
+     * immediately. {@code lastToken} is pre-set to {@code firstToken} so the span is
+     * at least non-negative; {@link #endNode} sets the final value.
      */
     public int beginNode(int kind, int firstToken, int parent) {
         var newIdx = nodeCount;
@@ -100,31 +106,28 @@ public final class CstArrayBuilder {
         nodes[base + 5] = CstArray.NO_NODE;
         nodes[base + 6] = 0;
         nodes[base + 7] = 0;
-        // Record the would-be previous sibling BEFORE linkAsChildOf overwrites
-        // lastChild[parent]. truncate() consults this slot during rollback to
-        // restore lastChild[parent] in O(dropped) time.
-        if (parent != CstArray.NO_NODE && parent < lastChildCount) {
-            lastChildBefore[newIdx] = lastChild[parent];
-        } else {
-            lastChildBefore[newIdx] = CstArray.NO_NODE;
-        }
-
         nodeCount++;
-        if (parent != CstArray.NO_NODE) {
-            linkAsChildOf(parent, newIdx);
-        }
 
         return newIdx;
     }
 
     /**
-     * Set the {@code lastToken} of an existing node. Does not "pop" any builder state — the
-     * {@code lastChild} stack is keyed by parent index, so children can still be appended in
-     * a depth-first manner without an explicit stack discipline.
+     * Set the {@code lastToken} of {@code nodeIdx} and link it into its parent's child
+     * chain, journalling the parent's previous last-child so {@link #truncate(int)} can
+     * undo the link if a later failure drops this node. Must be called exactly once per
+     * node, on its success path only: siblings succeed in source order, so linking at
+     * end time preserves child order. Calling it twice would double-link the node.
      */
     @SuppressWarnings("JBCT-RET-01")
     public void endNode(int nodeIdx, int lastToken) {
-        nodes[nodeIdx * CstArray.NODE_STRIDE + 3] = lastToken;
+        var base = nodeIdx * CstArray.NODE_STRIDE;
+
+        nodes[base + 3] = lastToken;
+        var parent = nodes[base];
+
+        if (parent != CstArray.NO_NODE) {
+            linkAsChildOf(parent, nodeIdx);
+        }
     }
 
     @SuppressWarnings("JBCT-RET-01")
@@ -142,56 +145,47 @@ public final class CstArrayBuilder {
      * parser: a call site saves {@link #currentNodeCount()} before attempting an
      * alternative and calls this method to roll back partial progress on failure.
      *
-     * <p>Uses a parallel undo log {@link #lastChildBefore} populated by
-     * {@link #beginNode}. For each dropped index {@code i} we restore
-     * {@code lastChild[parentOf(i)]} to {@code lastChildBefore[i]} and clear the
-     * sibling/firstChild link that pointed to {@code i}. Cost is O(dropped),
-     * independent of the size of the surviving prefix — which dominates time when
-     * the parser performs many shallow rollbacks deep into the input.
+     * <p>Only nodes that reached {@link #endNode} were ever linked, and their journal
+     * entries form a contiguous suffix of {@link #linkLog}: between a savepoint and its
+     * truncate, every {@code endNode} call is for a node allocated after the savepoint,
+     * because ending an older node would require returning out of the rule invocation
+     * that holds the savepoint. So rollback pops that suffix — cost is
+     * O(linked-and-dropped), and the common begin-fail-truncate churn (no completed
+     * children) reduces to resetting {@code nodeCount}.
      */
     @SuppressWarnings("JBCT-RET-01")
     public void truncate(int newCount) {
         if (newCount == nodeCount) {
             return;
         }
-        // Walk the dropped range backward, undoing the link that beginNode
-        // recorded for each node. Two writes per dropped node:
-        //   1. Restore lastChild[parent] to the pre-link value.
-        //   2. Clear the slot that pointed to this node (parent's firstChild
-        //      when prev == NO_NODE, otherwise prev's nextSibling).
-        // Multi-sibling drops resolve correctly: processing reverse order
-        // means the LAST iteration for any parent restores the value that
-        // was current before the FIRST (lowest-index) of that parent's
-        // dropped children was added.
-        for (var i = nodeCount - 1; i >= newCount; i--) {
-            var base = i * CstArray.NODE_STRIDE;
-            var parent = nodes[base];
 
-            if (parent == CstArray.NO_NODE) {
-                continue;
+        while (linkLogCount > 0 && linkLog[(linkLogCount - 1) * 2]>= newCount) {
+            linkLogCount--;
+            var child = linkLog[linkLogCount * 2];
+            var parent = nodes[child * CstArray.NODE_STRIDE];
+            // A dropped parent's chain slots are themselves in the dropped range
+            // (children always have higher indices than their parent), so only
+            // links into surviving parents need repair. Reverse pop order means
+            // the last pop for any surviving parent restores the value current
+            // before its first dropped child linked.
+            if (parent < newCount) {
+                var prev = linkLog[linkLogCount * 2 + 1];
+
+                if (prev == CstArray.NO_NODE) {
+                    nodes[parent * CstArray.NODE_STRIDE + 4] = CstArray.NO_NODE;
+                } else {
+                    nodes[prev * CstArray.NODE_STRIDE + 5] = CstArray.NO_NODE;
+                }
+
+                lastChild[parent] = prev;
             }
-
-            var prev = lastChildBefore[i];
-
-            if (prev == CstArray.NO_NODE) {
-                nodes[parent * CstArray.NODE_STRIDE + 4] = CstArray.NO_NODE;
-            } else {
-                nodes[prev * CstArray.NODE_STRIDE + 5] = CstArray.NO_NODE;
-            }
-            // Note: parent may itself be in the dropped range (>= newCount).
-            // The write into lastChild[parent] is safe because beginNode
-            // ensured lastChild has capacity through any parent it ever saw,
-            // and writing to a soon-discarded slot is harmless.
-            lastChild[parent] = prev;
         }
 
         nodeCount = newCount;
-        // Clip lastChildCount so that future linkAsChildOf calls with a parent
-        // index in [newCount, oldLastChildCount) take the init path and reset
-        // the slot to NO_NODE. The back-walk above wrote restored values into
-        // lastChild for parents that were themselves dropped; those writes are
-        // stale relative to any node that may be re-allocated at the same
-        // index, and clipping forces correct re-initialisation.
+        // Clip lastChildCount so that a future linkAsChildOf call with a parent
+        // index in [newCount, oldLastChildCount) takes the init path and resets
+        // the slot to NO_NODE: those slots may hold values for dropped nodes
+        // re-allocated at the same index.
         if (lastChildCount > newCount) {
             lastChildCount = newCount;
         }
@@ -204,7 +198,7 @@ public final class CstArrayBuilder {
         built = true;
         nodes = null;
         lastChild = null;
-        lastChildBefore = null;
+        linkLog = null;
 
         return new CstArray(input, tokens, trimmed, nodeCount, ruleTableCopy, rootIndex);
     }
@@ -232,6 +226,10 @@ public final class CstArrayBuilder {
         }
 
         lastChild[parent] = child;
+        ensureLinkLogCapacity(linkLogCount + 1);
+        linkLog[linkLogCount * 2] = child;
+        linkLog[linkLogCount * 2 + 1] = prev;
+        linkLogCount++;
     }
 
     private void ensureNodeCapacity(int requiredNodes) {
@@ -251,11 +249,6 @@ public final class CstArrayBuilder {
         }
 
         nodes = Arrays.copyOf(nodes, newCap);
-        var nodeCap = newCap / CstArray.NODE_STRIDE;
-
-        if (lastChildBefore.length < nodeCap) {
-            lastChildBefore = Arrays.copyOf(lastChildBefore, nodeCap);
-        }
     }
 
     private void ensureLastChildCapacity(int required) {
@@ -273,5 +266,24 @@ public final class CstArrayBuilder {
         }
 
         lastChild = Arrays.copyOf(lastChild, newCap);
+    }
+
+    private void ensureLinkLogCapacity(int requiredEntries) {
+        var requiredInts = requiredEntries * 2;
+
+        if (requiredInts <= linkLog.length) {
+            return;
+        }
+
+        var newCap = linkLog.length;
+
+        while (newCap < requiredInts) {
+            newCap = newCap << 1;
+            if (newCap < 0) {
+                newCap = Integer.MAX_VALUE - 8;
+            }
+        }
+
+        linkLog = Arrays.copyOf(linkLog, newCap);
     }
 }
