@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.grammar.Expression;
@@ -897,6 +898,70 @@ public final class ParserGenerator {
             return Result.success(new GeneratedParser(packageName, className, sb.toString()));
         }
 
+        /**
+         * Token kinds that MUST appear first for {@code expr} to match, or {@link Option#none()}
+         * when that cannot be determined conservatively.
+         *
+         * <p>Used to emit a first-token guard ahead of {@code beginNode}. Profiling the selfhost
+         * fixture put 37.6% of samples inside {@code CstArrayBuilder}, and the single largest
+         * contributor was {@code parseAnnotation}: {@code Annotation*} appears in Type, Param,
+         * ClassMember, Dims, TypeArg and the pattern rules, so on the overwhelmingly common
+         * no-annotation case every one of those sites allocated a CST node, tried {@code '@'},
+         * failed, and truncated.
+         *
+         * <p>Deliberately conservative — anything not provably literal-rooted returns none and
+         * simply gets no guard. In particular a {@link Expression.Reference} always bails: a
+         * referenced rule may carry an identifier fallback for contextual keywords, and
+         * narrowing its first set here would reject valid input.
+         */
+        private Option<java.util.Set<Integer>> mandatoryFirstKinds(Expression expr) {
+            return switch (expr) {
+                case Expression.Literal lit -> {
+                    var kind = kinds.inlineLiteralToKind().get(lit.text() + (lit.caseInsensitive()
+                                                                             ? "/i"
+                                                                             : "/cs"));
+
+                    yield kind == null
+                          ? Option.none()
+                          : Option.some(java.util.Set.of(kind));
+                }
+                case Expression.Group g -> mandatoryFirstKinds(g.expression());
+                case Expression.TokenBoundary t -> mandatoryFirstKinds(t.expression());
+                case Expression.Ignore i -> mandatoryFirstKinds(i.expression());
+                case Expression.OneOrMore o -> mandatoryFirstKinds(o.expression());
+                case Expression.Sequence seq -> {
+                    // Skip leading zero-width elements; the first CONSUMING element decides.
+                    for (var element : seq.elements()) {
+                        if (element instanceof Expression.Not || element instanceof Expression.And || element instanceof Expression.Cut) {
+                            continue;
+                        }
+
+                        yield mandatoryFirstKinds(element);
+                    }
+
+                    yield Option.none();
+                }
+                case Expression.Choice choice -> {
+                    var union = new java.util.LinkedHashSet<Integer>();
+
+                    for (var alt : choice.alternatives()) {
+                        var altKinds = mandatoryFirstKinds(alt).or((java.util.Set<Integer>) null);
+
+                        if (altKinds == null) {
+                            yield Option.none();
+                        }
+
+                        union.addAll(altKinds);
+                    }
+
+                    yield union.isEmpty()
+                          ? Option.none()
+                          : Option.some(union);
+                }
+                default -> Option.none();
+            };
+        }
+
         private Result<String> renderRuleBody(Rule rule) {
             var sb = new StringBuilder(512);
             // Phase 0.6.0-perf — rule methods return boolean. The CST node is
@@ -908,6 +973,33 @@ public final class ParserGenerator {
             // also seeds pos that way). The first-token of the new node is the current
             // pos. If the rule body matches zero tokens, lastToken stays = firstToken
             // (degenerate), which the builder accepts.
+            var ruleKindForGuard = classification.kinds().getOrDefault(rule.name(), RuleKind.PARSER);
+            // First-token guard, emitted BEFORE beginNode so a rule that cannot possibly match
+            // costs a single peek() instead of a node allocation plus a truncate. Restricted to
+            // PARSER rules: a MIXED rule may match at char level, where peek() is not decisive.
+            if (ruleKindForGuard == RuleKind.PARSER) {
+                mandatoryFirstKinds(rule.expression()).onPresent(firstKinds -> {
+                    var guard = new StringBuilder();
+
+                    for (var kind : firstKinds) {
+                        usedTokenKinds.add(kind);
+                        guard.append(guard.isEmpty()
+                                     ? ""
+                                     : " && ")
+                             .append("peek() != KIND_")
+                             .append(sanitize(kinds.kindNameTable() [kind]));
+                    }
+
+                    sb.append("        if (")
+                      .append(guard)
+                      .append(") { fail(\"")
+                      .append(escapeJavaString(rule.name()))
+                      .append("\", RULE_")
+                      .append(rule.name())
+                      .append("_KIND); return false; }\n");
+                });
+            }
+
             sb.append("        int firstTok = pos;\n");
             sb.append("        int savedPos = pos;\n");
             sb.append("        int savedNodes = cst.currentNodeCount();\n");

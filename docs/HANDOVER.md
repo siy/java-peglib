@@ -100,15 +100,17 @@ GA); `JsonEncoder` could move onto `JsonMapper.writeAsString`.
 
 ---
 
-## Performance regression — measured, profiled, NOT resolved
+## Performance regression — partially recovered, NOT closed
 
-**0.7.1 parses ~33% slower than 0.7.0.** Same machine, same JMH settings, 2 forks x 10
-iterations, error bars +-2-3% and non-overlapping:
+**0.7.1 parses ~20% slower than 0.7.0** after mitigation (was ~33%). Same machine, 2 forks x 10
+iterations, error bars +-2-3%:
 
-| fixture | 0.7.0 (main) | 0.7.1 (branch) | delta |
+| variant | reference (1.9k LOC) | selfhost (40k LOC) | agreement |
 |---|---|---|---|
-| reference (1.9k LOC) | 2.770 +- 0.078 ms | 3.822 +- 0.115 ms | +38% |
-| selfhost (40k LOC) | 68.683 +- 1.656 ms | 91.459 +- 1.874 ms | +33% |
+| 0.7.0 (main) | 2.770 +- 0.078 ms | 68.683 +- 1.656 ms | — |
+| 0.7.1 before mitigation | 3.822 +- 0.115 ms | 91.459 +- 1.874 ms | 99.45% |
+| **0.7.1 shipped** | **3.614 ms** | **82.380 +- 1.995 ms** | **99.45%** |
+| *(rejected) grammar reorder* | 3.345 ms | 82.098 ms | 99.42% |
 
 Reproduce (bench jar resolves fixtures relative to CWD, so run from `peglib-core/`):
 
@@ -117,55 +119,56 @@ mvn -pl peglib-core -am -Pbench -DskipTests package
 cd peglib-core && java -jar target/benchmarks.jar Java25LargeFixturesBenchmark -wi 5 -i 10 -f 2
 ```
 
-For a baseline, `git clone . /tmp/peglib-main -b main` and build the same jar there. Do not
-compare against the 0.6.2-era figures (2.68 / 71.9 ms) — different machine state, and a
-single-run delta on this box is not trustworthy below ~15%.
+Baseline: `git clone . /tmp/peglib-main -b main` and build the same jar there. Do NOT compare
+against the 0.6.2-era figures (2.68 / 71.9 ms) — different machine state. A single-run delta on
+this box is untrustworthy below ~15%; the first attempt at this measurement had +-65% error on
+the baseline and was unusable.
 
-### The cause, from the profiler (not from theory)
+### Cause, from the profiler (not from theory)
 
-`async-profiler`, cpu event, selfhost fixture:
+`async-profiler`, cpu event, selfhost:
 
-- **41.7%** of samples pass through `parseStmtExpr`
-- top self-time frames: `CstArrayBuilder.truncate` **10.1%**, `CstArrayBuilder.beginNode`
-  **9.9%**, `GParser_1.fail` **8.3%** — the signature of backtracking: build CST nodes, fail,
-  throw them away, parse again
+- **37.6%** of all samples are inside `CstArrayBuilder`
+- self time: `truncate` 10.1%, `beginNode` 9.9%, `fail` 8.3%, `linkAsChildOf` 4.7%
+- attributing node-building to the calling rule: **`parseAnnotation` 15.9%**, `parseTypeArgs`
+  6.6%, `parseAnnotatedTypeName` 6.6%
 
-The cost is the JLS 14.8 statement-expression restriction added in this release. `Stmt` used to
-be `Expr ';'`; it is now `StmtExpr ';'`, whose assignment alternative parses a whole `Postfix`
-before discovering there is no assignment operator, backtracks, and then the invocation
-alternative parses that same `Postfix` again. Expression statements dominate real Java, so this
-roughly doubles the work on the most common statement form.
+The surprise was that the top contributor is NOT the JLS 14.8 statement-expression rule added in
+this release. It is `Annotation*`, which appears in Type, Param, ClassMember, Dims, TypeArg and
+the pattern rules: on the overwhelmingly common no-annotation case each site allocated a CST
+node, tried `'@'`, failed, and truncated.
 
-### What was tried
+### What shipped: a first-token guard
 
-Reordering `StmtExpr` to put the invocation form first, with a trailing `&';'` guard.
-The guard is **required for correctness**: without it the invocation form matches a PREFIX of an
-assignment, so `foo().bar = 1;` matches `foo()` and stops. Measured:
+`ParserGenerator.mandatoryFirstKinds` computes, conservatively, the token kinds that must start a
+rule. When they are known, a `peek()` guard is emitted BEFORE `beginNode`, so a rule that cannot
+match costs one comparison instead of a node allocation plus a truncate.
 
-| variant | reference | selfhost | agreement |
-|---|---|---|---|
-| assignment-first (shipped) | 3.822 ms | 91.459 ms | 99.45% |
-| invocation-first + `&';'` | 3.345 ms | 82.098 ms | **99.42%** |
+Deliberately conservative — anything not provably literal-rooted gets no guard, and a
+`Reference` always bails because a referenced rule may carry an identifier fallback for
+contextual keywords, and narrowing its first set would reject valid input. Restricted to PARSER
+rules; a MIXED rule can match at char level where `peek()` is not decisive.
 
-It recovers only ~40% of the regression AND costs two files of agreement, so it was **not**
-kept. The grammar in the repo is the correct 99.45% version.
+Result: **selfhost 91.459 -> 82.380 ms (-9.9%), agreement unchanged at 99.45%.** It matches the
+speedup of the rejected grammar reorder (82.098 ms) while costing nothing in correctness, which
+is why the reorder was dropped in its favour.
 
-### Where to take it next
+### Still open — roughly 20%
 
-The profile points at backtracking cost inside `CstArrayBuilder`, not at any single grammar
-rule, so the promising directions are engine-side rather than more reordering:
+1. **Extend the guard through references.** It currently fires only for literal-rooted rules.
+   A proper FIRST-set fixpoint over references would cover far more, but must preserve the
+   identifier-fallback behaviour for contextual keywords — get that wrong and valid code is
+   rejected.
+2. **Defer node creation entirely.** `beginNode` + `truncate` are still ~20% of samples. A rule
+   that fails should ideally never have built a node. This is the big one and it is an engine
+   redesign, not a tweak: children need a parent index while parsing.
+3. **Memoise `Postfix` at a position.** Packrat was dropped in 0.6.0 as unnecessary under the
+   tokens-first design; the statement-expression rule is the first evidence a narrowly targeted
+   cache might pay. Measure before believing it.
 
-1. Make a failed alternative cheaper. `beginNode` + `truncate` together are 20% of samples;
-   an alternative that fails should ideally not have built nodes at all. Deferring node creation
-   until an alternative commits would attack the dominant cost directly.
-2. Memoise `Postfix` at a position. Classic packrat, deliberately dropped in 0.6.0 as
-   unnecessary under the tokens-first design — this is the first evidence that a narrowly
-   targeted cache might pay for itself. Measure before believing it.
-3. Decide whether JLS 14.8 enforcement is worth 33%. Reverting `StmtExpr` to plain `Expr`
-   restores the speed and loses ~6 files of agreement, re-admitting `(a);` and `a.b;` as
-   statements. That is a product call, not a technical one.
-
-**Do not ship 0.7.1 without an explicit decision here.**
+The remaining gap is the price of the JLS 14.8 statement-expression restriction. Reverting it
+would restore the speed and give back ~6 files of agreement — a product call, recorded here so
+it is made deliberately rather than by default.
 
 ---
 
