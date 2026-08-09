@@ -1,102 +1,108 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-06 — 0.7.0 shipped; 0.7.1 open, validated against OpenJDK langtools
+**Last updated:** 2026-08-09 — 0.7.1 at 99.45% agreement with javac; blocked on a performance decision
 
 ---
 
-## Session 10 — 0.7.1 (2026-08-06) — IN PROGRESS, nothing shipped
+## Session 10 — 0.7.1 (2026-08-06 → 08-09) — NOT SHIPPED, one decision blocking
 
 ### State at a glance
 
 | | |
 |---|---|
-| **Branch** | `release-0.7.1`, branched from `main` at `139b7ca`. Pushed. **No PR yet.** |
-| **Version** | 0.7.1 in all 6 poms; CHANGELOG `[0.7.1] - unreleased` |
+| **Branch** | `release-0.7.1`, 43 commits ahead of `main` at `139b7ca`. **No PR yet.** |
+| **Version** | 0.7.1 in all 6 poms; CHANGELOG `[0.7.1] - unreleased`, rewritten and current |
 | **Build** | `mvn install` (lint + format-check on) — BUILD SUCCESS |
-| **Tests** | 528 across 5 modules, 0 failures, 0 skips |
-| **Probes** | `ModernJavaSyntaxProbe` 19/19, `JavaCoverageProbe` 44/44 — both asserting |
-| **langtools** | 3,477 / 3,555 clean (97.8%) |
+| **Tests** | **551** across 5 modules, 0 failures, 0 skips (was 528) |
+| **Probes** | `JavaCoverageProbe` 93/93, `JavaRejectionProbe` 0 over-permissive / 0 over-tightened, `ModernJavaSyntaxProbe` 19/19 — **all three now actually execute** |
+| **langtools** | **99.45%** agreement with javac's parse phase (5,611 / 5,642 scored, 24 excluded) |
+| **Performance** | **~20% slower than 0.7.0.** See the section below — this is the blocker |
 | **Working tree** | clean |
 
-### What landed so far
+### The one thing blocking a release
 
-Four grammar gaps found by the OpenJDK langtools corpus and fixed: qualified `super`
-(`A.super.m()`), array initializer `{,}`, type annotations before a wildcard
-(`List<@Ann ?>`), and receiver parameters (`void m(A this)`). All four are gated in
-`JavaCoverageProbe`, so the external corpus does not need re-fetching to catch a regression.
+0.7.1 parses ~20% slower than 0.7.0 (was ~33% before mitigation). The regression is the price of
+the JLS 14.8 statement-expression restriction. Full measurements, the profile, what was tried,
+what was reverted and why are in **Performance regression** below. It needs a decision, not more
+investigation:
 
-### OpenJDK langtools corpus (2026-08-06)
+1. **Ship at −20%.** Correctness improved substantially; throughput did not.
+2. **Revert `StmtExpr` to plain `Expr`.** Restores speed, gives back ~6 files of agreement, and
+   re-admits `(a);` and `a.b;` as statements. A product call.
+3. **Implement link-on-success first** (design written up below). Plausibly halves the gap.
 
-Ran the grammar over OpenJDK's own javac test suite — a far harder corpus than anything
-hand-written here, since it exercises the language exhaustively including deliberately
-pathological constructs.
+Do not ship without choosing one.
 
-**Reproduce:**
-```bash
-git clone --depth 1 --filter=blob:none --sparse https://github.com/openjdk/jdk.git /tmp/jdk
-cd /tmp/jdk && git sparse-checkout set test/langtools/tools/javac    # 5,667 files, 36 MB
-```
-Split positive from negative first, or the number is meaningless: a file is a NEGATIVE test if
-it contains `@compile/fail`, has a sibling `.out` golden file, or contains a `compiler.err.`
-marker. That gives **3,555 positive / 2,112 negative**. Only the positive set should parse clean.
-Drive it with a ~50-line harness that calls `PegParser.fromGrammar(...).parse(src)` per file and
-counts non-empty `diagnostics()`; the whole positive set runs in ~1.2 s.
+### What landed
 
-**Result: 96.8% -> 97.8% clean (3,477 / 3,555), zero crashes.** Four real gaps found and fixed
-this session: qualified `super` (`A.super.m()`), array initializer `{,}`, type annotations
-before a wildcard (`List<@Ann ?>`), and — from the earlier adversarial probe — receiver
-parameters.
+**Methodology — the number you inherited was wrong.** The corpus is now differenced against
+**javac's own parse phase** (`JavacTask.parse()`), in both directions, over all 5,666 files. The
+previous "97.8% over 3,555 positive tests" used a heuristic that split the corpus by grepping for
+`@compile/fail` markers; that scored roughly 77 genuine grammar gaps as expected failures, so it
+could not have found more than half of them. True baseline was 95.55%. The heuristic
+(`classify.py`) is deleted. Tooling and the full disposition of every remaining disagreement live
+in `tools/langtools-corpus/`.
 
-**78 files still fail. Two known causes, both worth doing:**
+| | baseline | now |
+|---|---|---|
+| we wrongly reject | 155 | **10** |
+| we wrongly accept | 73 | **21** |
+| agreement | 95.55% | **99.45%** |
 
-1. **32 files: "empty input".** A compilation unit consisting only of comments (a license
-   header and nothing else) is legal Java, and an empty file is too. This is an **engine** bug,
-   not a grammar one: the generated `parseWithRecovery` in `ParserGenerator` (search for
-   `"empty input"`) unconditionally emits a diagnostic when the token stream is empty or
-   all-trivia, without asking whether the start rule can match empty. Java's `CompilationUnit`
-   can. Fix by attempting the start rule once on empty input and only emitting the diagnostic if
-   it fails, or by computing start-rule nullability at codegen (`Analyzer` already has
-   `computeNullableFixedPoint`). Careful: the current unconditional break is probably there to
-   prevent an infinite loop on a nullable start rule, so keep the `firstAttempt` guard.
-   Fixing this alone takes the corpus to ~98.7%.
+**Engine fixes** (not just grammar): nullable start rules accept empty and comment-only
+compilation units; trailing input after a partial parse is reported instead of silently
+re-parsed as a second document; Unicode escape translation (JLS 3.3) with token spans remapped
+onto the original text so round-trip survives; hex escapes decoded inside character classes;
+opt-in escape-aware delimited blocks; and a first-token guard that skips node allocation for
+rules that cannot match.
 
-2. **~5 files: Unicode escapes.** Java translates `\uXXXX` in a pre-lex pass, so `\u0061bc` is
-   the identifier `abc` and `\u000a` is a real line terminator. This needs a preprocessing
-   stage ahead of the lexer, not a grammar change. Genuinely architectural; decide whether it is
-   worth supporting at all for a lint/format tool.
+**Grammar**: ~40 acceptance fixes and ~25 over-permissiveness fixes. Enumerated in the CHANGELOG.
 
-The remaining ~41 are untriaged and cluster in `patterns`, `generics`, and
-`annotations/typeAnnotations/newlocations`. Bisect them the usual way rather than theorising —
-note that "trailing input not consumed" reports where the parser STOPPED, which is typically the
-start of the type declaration, not the offending construct.
+**Gates that were not running.** Surefire matched only `**/*Test.java` and `**/*Example.java`, so
+`JavaCoverageProbe` and `ModernJavaSyntaxProbe` were compiled but **never executed** — a grammar
+regression would have reached the field with a green build. Fixed. `JavaRejectionProbe` is new:
+the mirror gate for what must be REJECTED, every case paired with a legal near-miss, because the
+cheap way to pass a rejection test is to over-tighten until valid code breaks too.
 
-### Next: close the remaining langtools gap
+**Also**: CI unpinned from the stale `25-ea` to `25` GA; two formatter fixtures that contained
+invalid Java (a constructor inside an `interface`) corrected; `IdentifierFallbackTest` corrected
+after checking javac — it asserted that a bare `yield()` call parses, which javac rejects.
 
-Tooling is committed at **`tools/langtools-corpus/`** — `README.md` (full run recipe),
-`classify.py` (positive/negative split, reproduces 3,555 / 2,112), and `LangtoolsRunner.java`
-(the harness). Nothing needs rebuilding; follow the README.
+### Where to pick up, in order
 
-Work in this order:
+1. **Decide the performance question above.** Everything else is downstream of it.
+2. **If continuing on speed**: implement link-on-success (design and verification checklist in
+   the performance section). Do NOT retry the `truncate` link-skip — it was measured and does
+   not pay; the reason is recorded.
+3. **Remaining corpus gap**: 31 disagreements, of which **19 are permanent by design** (not
+   context-free, deliberate trades, or cases where peglib is JLS-correct and javac defers to
+   Attr). Each is dispositioned in `tools/langtools-corpus/README.md`. Practical ceiling is
+   ~99.66%; the last stretch chases javac's corners, not correctness.
+4. **Then ship**: PR against `main`, merge, tag `v0.7.1`, deploy. `docs/RELEASE.md` /
+   prior session notes cover the Maven Central mechanics.
 
-1. **The 32 "empty input" files — biggest single win, takes the corpus to ~98.7%.**
-   An all-comments file (license header, no code) and an empty file are both legal Java.
-   This is an **engine** bug, not a grammar gap. In `ParserGenerator`, search for
-   `"empty input"`: the generated `parseWithRecovery` emits that diagnostic whenever the token
-   stream is empty or all-trivia, without asking whether the start rule can match empty —
-   Java's `CompilationUnit` can. Either attempt the start rule once on empty input and emit the
-   diagnostic only if it fails, or compute start-rule nullability at codegen (`Analyzer` already
-   has `computeNullableFixedPoint`). **Keep the `firstAttempt` guard**: the unconditional break
-   is most likely there to stop a nullable start rule looping forever.
+### Things worth not re-learning
 
-2. **~41 untriaged failures**, clustering in `patterns`, `generics`, and
-   `annotations/typeAnnotations/newlocations`. Bisect to minimal snippets; add each to
-   `JavaCoverageProbe` as it is fixed.
-
-3. **~5 Unicode-escape files** — architectural. Java translates backslash-u escapes in a
-   pre-lex pass. Decide whether a lint/format tool should support that at all before building it.
-
-Also open, unrelated to the corpus: CI pins `java-version: '25-ea'` (stale since Java 25 went
-GA); `JsonEncoder` could move onto `JsonMapper.writeAsString`.
+- **Licensing: never vendor the corpus.** It is GPLv2 (only 38 of 4,261 headers carry the
+  Classpath Exception); peglib is MIT. Fetching at run time and reading is fine; committing
+  files is not. All 240 substantive probe snippets were checked as literal substrings against
+  all 5,667 corpus files — none matches verbatim, and it should stay that way. Details in
+  `tools/langtools-corpus/README.md`.
+- **`mvn install`, not `mvn -pl peglib-core test`, before committing a structural grammar
+  change.** A change can pass all 347 core tests and still break the formatter round-trip,
+  which lives in another module. That happened once this session.
+- **PEG repetition is possessive, and it bites in non-obvious places.** `Modifier* StaticKW`
+  can never match. `Primary PostOp* CallOp` can never match. `PostOp` spells its call as an
+  optional group, so it swallows a trailing call whole. The fixes are a `!Guard` prefix,
+  right-recursion (`Chain <- Op Chain / Terminal`), or a variant rule that stops short.
+- **Alternative order in a PEG is semantic, not just cost.** Reordering `StmtExpr` for speed
+  silently broke `foo().bar = 1;`, because the invocation form matched the *prefix* `foo()`.
+  Any reorder needs a corpus re-run, not just a test run.
+- **Profile before optimising — three times this session the profiler contradicted a confident
+  hypothesis.** The top node-builder was `parseAnnotation`, not the statement rule everyone
+  (including me) suspected.
+- **A duplicated token in formatter output means the PARSE failed**, not that backtracking
+  leaked. Check the diagnostic count before suspecting `CstArrayBuilder.truncate`.
 
 ---
 

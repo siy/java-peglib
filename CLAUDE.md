@@ -278,10 +278,15 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**528 tests across 5 modules**, 0 failures, 0 skips. The count dropped from 1445 in 0.6.3 because
+**551 tests across 5 modules**, 0 failures, 0 skips. The count dropped from 1445 in 0.6.3 because
 the 0.5.x interpreter and its parity suites were deleted, not because coverage was lost.
 
 Notable test classes for verification gates:
+- `JavaCoverageProbe` / `JavaRejectionProbe` / `ModernJavaSyntaxProbe` — the accept/reject
+  gates for the Java grammar. **`peglib-core/pom.xml` must keep `**/*Probe.java` in the
+  surefire `<includes>`**: before 0.7.1 surefire matched only `*Test.java`, so these were
+  compiled and never executed, and a grammar regression would have shipped green
+
 - `Java25CorpusGateTest` — 20 format-examples fixtures lex round-trip
 - `Java25ParserGateTest` — same fixtures parse round-trip, **plus CST-shape sanity**
   (`nodeCount >= LOC/3`), which is the gate that catches an empty-CompilationUnit collapse
