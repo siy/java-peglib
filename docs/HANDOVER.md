@@ -1,6 +1,6 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-09 — 0.7.1 at 99.45% agreement with javac; blocked on a performance decision
+**Last updated:** 2026-08-09 — 0.7.1 at 99.45% agreement with javac; regression cut to ~10%, ship decision open
 
 ---
 
@@ -16,20 +16,23 @@
 | **Tests** | **551** across 5 modules, 0 failures, 0 skips (was 528) |
 | **Probes** | `JavaCoverageProbe` 93/93, `JavaRejectionProbe` 0 over-permissive / 0 over-tightened, `ModernJavaSyntaxProbe` 19/19 — **all three now actually execute** |
 | **langtools** | **99.45%** agreement with javac's parse phase (5,611 / 5,642 scored, 24 excluded) |
-| **Performance** | **~20% slower than 0.7.0.** See the section below — this is the blocker |
+| **Performance** | **~9.6% slower than 0.7.0** after link-on-success landed 2026-08-09 (was ~20%). See below — ship decision still open |
 | **Working tree** | clean |
 
 ### The one thing blocking a release
 
-0.7.1 parses ~20% slower than 0.7.0 (was ~33% before mitigation). The regression is the price of
-the JLS 14.8 statement-expression restriction. Full measurements, the profile, what was tried,
-what was reverted and why are in **Performance regression** below. It needs a decision, not more
+0.7.1 parses ~9.6% slower than 0.7.0 (was ~33% before the first-token guard, ~20% before
+link-on-success — both now landed). What remains is the price of the JLS 14.8
+statement-expression restriction: the profile puts the cost in parse work (`parsePostfix` in
+46% of samples), not node churn — the builder levers are spent. It needs a decision, not more
 investigation:
 
-1. **Ship at −20%.** Correctness improved substantially; throughput did not.
+1. **Ship at −9.6%.** Correctness improved substantially; throughput regression now modest.
 2. **Revert `StmtExpr` to plain `Expr`.** Restores speed, gives back ~6 files of agreement, and
    re-admits `(a);` and `a.b;` as statements. A product call.
-3. **Implement link-on-success first** (design written up below). Plausibly halves the gap.
+3. **Memoise `Postfix` at a position first.** The only remaining lever that attacks the double
+   parse. Unmeasured; packrat was dropped in 0.6.0, so this would be a single-rule cache, not
+   a revival. Measure before believing it.
 
 Do not ship without choosing one.
 
@@ -53,8 +56,9 @@ in `tools/langtools-corpus/`.
 compilation units; trailing input after a partial parse is reported instead of silently
 re-parsed as a second document; Unicode escape translation (JLS 3.3) with token spans remapped
 onto the original text so round-trip survives; hex escapes decoded inside character classes;
-opt-in escape-aware delimited blocks; and a first-token guard that skips node allocation for
-rules that cannot match.
+opt-in escape-aware delimited blocks; a first-token guard that skips node allocation for
+rules that cannot match; and link-on-success CST building (2026-08-09) that makes
+backtracking rollback O(completed-and-dropped) instead of O(dropped).
 
 **Grammar**: ~40 acceptance fixes and ~25 over-permissiveness fixes. Enumerated in the CHANGELOG.
 
@@ -71,9 +75,9 @@ after checking javac — it asserted that a bare `yield()` call parses, which ja
 ### Where to pick up, in order
 
 1. **Decide the performance question above.** Everything else is downstream of it.
-2. **If continuing on speed**: implement link-on-success (design and verification checklist in
-   the performance section). Do NOT retry the `truncate` link-skip — it was measured and does
-   not pay; the reason is recorded.
+2. **If continuing on speed**: memoise `Postfix` at a position (see the performance section).
+   Link-on-success is DONE (2026-08-09). Do NOT retry the `truncate` link-skip — it was
+   measured and does not pay; the reason is recorded.
 3. **Remaining corpus gap**: 31 disagreements, of which **19 are permanent by design** (not
    context-free, deliberate trades, or cases where peglib is JLS-correct and javac defers to
    Attr). Each is dispositioned in `tools/langtools-corpus/README.md`. Practical ceiling is
@@ -108,15 +112,19 @@ after checking javac — it asserted that a bare `yield()` call parses, which ja
 
 ## Performance regression — partially recovered, NOT closed
 
-**0.7.1 parses ~20% slower than 0.7.0** after mitigation (was ~33%). Same machine, 2 forks x 10
-iterations, error bars +-2-3%:
+**0.7.1 parses ~9.6% slower than 0.7.0** after two mitigations (was ~33%). Same-day A/B of
+2026-08-09, 2 forks x 10 iterations. Cross-day numbers on this box are NOT comparable — the
+day's first baseline attempt measured 75.188 +- 20.668 ms and was discarded; a clean re-run
+minutes later gave 66.634 +- 0.328:
 
 | variant | reference (1.9k LOC) | selfhost (40k LOC) | agreement |
 |---|---|---|---|
-| 0.7.0 (main) | 2.770 +- 0.078 ms | 68.683 +- 1.656 ms | — |
-| 0.7.1 before mitigation | 3.822 +- 0.115 ms | 91.459 +- 1.874 ms | 99.45% |
-| **0.7.1 shipped** | **3.614 ms** | **82.380 +- 1.995 ms** | **99.45%** |
-| *(rejected) grammar reorder* | 3.345 ms | 82.098 ms | 99.42% |
+| 0.7.0 (main) | 2.672 +- 0.018 ms | 66.634 +- 0.328 ms | — |
+| 0.7.1 guard only (f717163) | 3.312 +- 0.015 ms | 79.969 +- 0.387 ms (+20.0%) | 99.45% |
+| **0.7.1 + link-on-success** | **3.157 +- 0.024 ms** | **73.040 +- 0.193 ms (+9.6%)** | **99.45%** |
+
+Previous-session figures (different machine state — do not mix into this table): 0.7.0 68.683,
+0.7.1 before any mitigation 91.459, guard-only 82.380, rejected grammar reorder 82.098.
 
 Reproduce (bench jar resolves fixtures relative to CWD, so run from `peglib-core/`):
 
@@ -159,9 +167,10 @@ Result: **selfhost 91.459 -> 82.380 ms (-9.9%), agreement unchanged at 99.45%.**
 speedup of the rejected grammar reorder (82.098 ms) while costing nothing in correctness, which
 is why the reorder was dropped in its favour.
 
-### Node-churn work: one win, one measured failure, and the design that follows
+### Node-churn work: two wins, one measured failure
 
 **Landed (kept): first-token guard.** selfhost 91.459 -> 82.380 ms, agreement unchanged.
+**Landed (kept): link-on-success** — the section below.
 
 **Tried and reverted: skipping link-repair in `truncate` for dropped parents.** When an
 alternative fails it drops a whole subtree, so nearly every dropped node's parent is dropped
@@ -176,30 +185,44 @@ link repair. The loop still reads `nodes[i * NODE_STRIDE]` for every dropped nod
 parent, so the memory traffic is identical; the skip only avoided two writes into cache lines
 that were already hot. **Do not retry this.**
 
-### The design that actually follows: link on success, not on begin
+### Landed: link on success, not on begin (2026-08-09)
 
-`beginNode` currently does two things — reserve the slot AND link the node into its parent. The
-linking is why `truncate` must walk at all: a failed node was already linked, so the link has to
-be undone.
+`beginNode` used to do two things — reserve the slot AND link the node into its parent. The
+linking was why `truncate` had to walk the dropped range undoing links. `linkAsChildOf` now
+runs from `endNode`: a node that fails before ending was never linked and needs no repair.
 
-If `linkAsChildOf` moved from `beginNode` to `endNode`, a node that fails would never have been
-linked, and there would be nothing to undo:
+- `truncate` for the dominant begin-fail-truncate churn (no completed children) reduces to a
+  counter reset — its 10.1% self time fell to 4.5%
+- the `lastChildBefore` undo log is deleted; `beginNode` self time fell 9.9% -> 3.6%
 
-- `truncate` becomes `nodeCount = newCount` — **O(1) instead of O(dropped)**, removing its 10.1%
-- the `lastChildBefore` undo log becomes unnecessary and can be deleted
-- combined with deferring the payload write to `endNode`, a failed rule costs a counter bump
+One refinement over the design as originally written: "nothing to undo" was not quite true.
+A child that COMPLETES inside a later-failing choice alternative is linked into a SURVIVING
+parent, and that link still must be undone. `CstArrayBuilder` keeps a compact link journal —
+one (child, previousLastChild) pair per endNode — and `truncate` pops the suffix whose child
+index falls in the dropped range. The suffix-pop is sound because savepoints are strictly
+nested in the generated code: every endNode between a savepoint and its truncate belongs to a
+node allocated after the savepoint (ending an older node would require returning out of the
+rule invocation holding the savepoint). Cost is O(completed-and-dropped).
 
-Order is preserved because children still succeed in source order, so `lastChild[parent]` sees
-them in the same sequence. The things to verify carefully: `endNode` is reached on every success
-path in the generated parser; `parseWithRecovery`'s synthetic root and the `emitRecoveryError` /
-`emitForcedAdvanceError` paths, which attach Error nodes directly; and `IncrementalParser`'s
-`spliceSubtree`, which assumes the existing link layout.
+The contract change to keep in mind: **a node is invisible until endNode links it, and every
+surviving node must be ended exactly once, on its success path.** Ending twice would
+double-link. The generated parser, `parseWithRecovery`'s synthetic root, both recovery-error
+emitters, and `CstArray.spliceSubtree` all already followed this discipline; they were each
+verified, not assumed.
 
-This is a `peglib-runtime` hot-path change and correctness-critical — `CstArrayBuilder` carries a
-class-level suppression precisely because it is per-node, per-parse. Gate it on the formatter
-round-trip (`FormatterCorpusGateTest`) and the CST-shape assertion in `Java25ParserGateTest`, not
-just on diagnostics: the corpus differential compares diagnostics only and would not notice a
-mangled tree.
+Verified as this section demanded: full `mvn install` — 551 tests, 0 failures — including the
+`FormatterCorpusGateTest` round-trip and the `Java25ParserGateTest` CST-shape assertion;
+`SpliceSubtreeTest` / `FindCheckpointAncestorTest` cover the incremental splice layout. No
+grammar or parse-logic change, so agreement is untouched. Result: selfhost 79.969 -> 73.040 ms
+(-8.7%), reference 3.312 -> 3.157 ms (-4.7%), both with non-overlapping CIs.
+
+Post-change profile (550 samples, directional): top self-time frames are `GParser.fail`
+(11.6%) and `GLexer.lex`; `linkAsChildOf` ~3.8% (same work as before, moved to end-time).
+`parsePostfix` appears in 46% of samples, `parseStmtExpr` in 42% — the remaining gap is the
+JLS 14.8 double-Postfix parse, exactly as predicted below. Deferring `beginNode`'s payload
+writes (the "counter bump" half of the original design) was deliberately NOT done: its ceiling
+is beginNode's remaining ~3.6%, and it would widen the endNode signature and reorder setFlag
+in the splice path — API churn the remaining win does not justify.
 
 ### The other half of the gap is not allocation
 
@@ -208,18 +231,19 @@ parsing work — token comparisons, rule dispatch, recursion — and no CST-buil
 second traversal. Only memoising `Postfix` at a position, or relaxing the JLS 14.8 restriction,
 addresses it.
 
-### Still open — roughly 20%
+### Still open — roughly 10%
 
-1. **Extend the guard through references.** It currently fires only for literal-rooted rules.
+1. **Memoise `Postfix` at a position.** Now the dominant lever: `parsePostfix` shows in 46% of
+   profile samples via the JLS 14.8 double parse. Packrat was dropped in 0.6.0 as unnecessary
+   under the tokens-first design; this would be a single-rule cache, not a revival. Measure
+   before believing it.
+2. **Extend the guard through references.** It currently fires only for literal-rooted rules.
    A proper FIRST-set fixpoint over references would cover far more, but must preserve the
    identifier-fallback behaviour for contextual keywords — get that wrong and valid code is
    rejected.
-2. **Defer node creation entirely.** `beginNode` + `truncate` are still ~20% of samples. A rule
-   that fails should ideally never have built a node. This is the big one and it is an engine
-   redesign, not a tweak: children need a parent index while parsing.
-3. **Memoise `Postfix` at a position.** Packrat was dropped in 0.6.0 as unnecessary under the
-   tokens-first design; the statement-expression rule is the first evidence a narrowly targeted
-   cache might pay. Measure before believing it.
+3. **Defer `beginNode`'s payload writes to `endNode`.** Mostly superseded by link-on-success:
+   beginNode self time is down to ~3.6%, and the change would widen the endNode signature and
+   reorder setFlag in the splice path. Recorded so it is skipped deliberately, not forgotten.
 
 The remaining gap is the price of the JLS 14.8 statement-expression restriction. Reverting it
 would restore the speed and give back ~6 files of agreement — a product call, recorded here so

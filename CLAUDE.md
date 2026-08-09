@@ -59,7 +59,7 @@ peglib-runtime/src/main/java/org/pragmatica/peg/
 │   └── LexFn.java                   functional lexer adapter
 ├── cst/
 │   ├── CstArray.java                flat int[]; findCheckpointAncestor; spliceSubtree
-│   ├── CstArrayBuilder.java         truncate uses lastChildBefore undo log (O(dropped) bounded scan)
+│   ├── CstArrayBuilder.java         links on endNode (success), not beginNode; truncate pops a link journal
 │   ├── CstNode.java                 sealed Branch/Leaf/Error views
 │   └── ParseResult.java
 └── diagnostic/

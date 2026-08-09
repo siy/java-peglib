@@ -79,6 +79,26 @@ non-reifiable array element types; sealed and static local classes; a package de
 compact source file; unqualified imports; `void` array types; guards on constant labels;
 `instanceof var`; and a bare `yield(...)` invocation.
 
+### Performance
+
+The JLS 14.8 statement-expression restriction makes `StmtExpr` parse `Postfix` twice on
+assignments, which initially cost ~33% of parse throughput versus 0.7.0. Two engine changes
+claw most of it back; what remains is the price of the correctness fix:
+
+- **First-token guard.** For rules whose first token set is provably literal-rooted, the
+  generated parser peeks before allocating a CST node, so a rule that cannot match costs one
+  comparison instead of a node allocation plus a rollback. Conservative by design: any rule
+  reachable through a reference keeps no guard, preserving identifier-fallback for contextual
+  keywords.
+- **Link-on-success CST building.** `CstArrayBuilder` links a node into its parent's sibling
+  chain when the node *ends*, not when it *begins*. A node dropped by backtracking was never
+  linked, so `truncate` no longer walks the dropped range undoing links — it pops a compact
+  link journal covering only completed-then-dropped nodes, and the dominant
+  begin-fail-truncate churn reduces to a counter reset.
+
+Same-day A/B (JMH, 2 forks x 10 iterations, selfhost 40k-LOC fixture): 0.7.0 = 66.6 ms,
+0.7.1 = 73.0 ms — a ~10% regression, down from ~33% before these changes.
+
 ### Changed
 
 - **The `*Probe` gates now run in the build.** Surefire matched only `**/*Test.java` and
