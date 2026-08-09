@@ -286,14 +286,12 @@ Notable test classes for verification gates:
   gates for the Java grammar. **`peglib-core/pom.xml` must keep `**/*Probe.java` in the
   surefire `<includes>`**: before 0.7.1 surefire matched only `*Test.java`, so these were
   compiled and never executed, and a grammar regression would have shipped green
-
 - `Java25CorpusGateTest` — 20 format-examples fixtures lex round-trip
 - `Java25ParserGateTest` — same fixtures parse round-trip, **plus CST-shape sanity**
   (`nodeCount >= LOC/3`), which is the gate that catches an empty-CompilationUnit collapse
   that byte-equal reconstruction alone would pass
 - `FactoryClassGeneratorDiagTest` — real-world 1900-LOC parse (0 diagnostics)
-- `ModernJavaSyntaxProbe` — prints which post-Java-25 forms the grammar accepts (value classes,
-  primitive patterns, known gaps). Not a gate; a measurement to start from
+- `Java25BisectTest` — minimal-snippet bisection helper for grammar triage
 - `IncrementalEditBenchmark` — edit latency p50/p99 in `src/jmh/`
 - `Java25LargeFixturesBenchmark` — warm parse on reference + selfhost fixtures
 - `JavacParseOnlyBenchmark` — vs javac via `JavacTask.parse()`
