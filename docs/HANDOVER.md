@@ -153,6 +153,55 @@ Result: **selfhost 91.459 -> 82.380 ms (-9.9%), agreement unchanged at 99.45%.**
 speedup of the rejected grammar reorder (82.098 ms) while costing nothing in correctness, which
 is why the reorder was dropped in its favour.
 
+### Node-churn work: one win, one measured failure, and the design that follows
+
+**Landed (kept): first-token guard.** selfhost 91.459 -> 82.380 ms, agreement unchanged.
+
+**Tried and reverted: skipping link-repair in `truncate` for dropped parents.** When an
+alternative fails it drops a whole subtree, so nearly every dropped node's parent is dropped
+too and the link-undo is provably pointless. Adding `if (parent >= newCount) continue;` is
+correct and looks free.
+
+It measured as **no improvement** — selfhost 82.380 +- 1.995 -> 84.644 +- 1.703, nominally
+worse, ranges overlapping. Reverted.
+
+The reason matters more than the result: `truncate`'s cost is the **backward walk**, not the
+link repair. The loop still reads `nodes[i * NODE_STRIDE]` for every dropped node to find its
+parent, so the memory traffic is identical; the skip only avoided two writes into cache lines
+that were already hot. **Do not retry this.**
+
+### The design that actually follows: link on success, not on begin
+
+`beginNode` currently does two things — reserve the slot AND link the node into its parent. The
+linking is why `truncate` must walk at all: a failed node was already linked, so the link has to
+be undone.
+
+If `linkAsChildOf` moved from `beginNode` to `endNode`, a node that fails would never have been
+linked, and there would be nothing to undo:
+
+- `truncate` becomes `nodeCount = newCount` — **O(1) instead of O(dropped)**, removing its 10.1%
+- the `lastChildBefore` undo log becomes unnecessary and can be deleted
+- combined with deferring the payload write to `endNode`, a failed rule costs a counter bump
+
+Order is preserved because children still succeed in source order, so `lastChild[parent]` sees
+them in the same sequence. The things to verify carefully: `endNode` is reached on every success
+path in the generated parser; `parseWithRecovery`'s synthetic root and the `emitRecoveryError` /
+`emitForcedAdvanceError` paths, which attach Error nodes directly; and `IncrementalParser`'s
+`spliceSubtree`, which assumes the existing link layout.
+
+This is a `peglib-runtime` hot-path change and correctness-critical — `CstArrayBuilder` carries a
+class-level suppression precisely because it is per-node, per-parse. Gate it on the formatter
+round-trip (`FormatterCorpusGateTest`) and the CST-shape assertion in `Java25ParserGateTest`, not
+just on diagnostics: the corpus differential compares diagnostics only and would not notice a
+mangled tree.
+
+### The other half of the gap is not allocation
+
+Even with node churn at zero, `StmtExpr` still parses `Postfix` twice on assignments. That is
+parsing work — token comparisons, rule dispatch, recursion — and no CST-builder change removes a
+second traversal. Only memoising `Postfix` at a position, or relaxing the JLS 14.8 restriction,
+addresses it.
+
 ### Still open — roughly 20%
 
 1. **Extend the guard through references.** It currently fires only for literal-rooted rules.
