@@ -2,9 +2,13 @@
 
 ## Project Status
 
-**0.6.3 is the latest shipped release** (Maven Central, 2026-06-07). Work in progress on
-`release-0.7.0`, which is **breaking**: the 0.5.x interpreter path and the `peglib-incremental`
-artifact are removed, and `org.pragmatica.peg.v6.*` has collapsed into `org.pragmatica.peg.*`.
+**0.7.1 is the latest shipped release** (Maven Central, 2026-08-14). It validates the Java
+grammar against javac's own parse phase (99.45% agreement over OpenJDK's langtools suite), adds
+the `%memo` directive, and holds parse throughput within ~1% of 0.7.0.
+
+0.7.0 (2026-08-05) was the **breaking** one: the 0.5.x interpreter path and the
+`peglib-incremental` artifact were removed, and `org.pragmatica.peg.v6.*` collapsed into
+`org.pragmatica.peg.*`.
 
 See `docs/HANDOVER.md` for current state and next steps, `docs/ARCHITECTURE-0.6.0.md` for design.
 

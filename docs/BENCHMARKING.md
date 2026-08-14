@@ -3,7 +3,7 @@
 Peglib ships with a JMH harness under `src/jmh/java/` that measures
 parse throughput and average time on a 1,900-LOC real-world Java 25
 fixture. The harness is the source of the numbers in
-[`PERF-FLAGS.md`](PERF-FLAGS.md) and [`CHANGELOG.md`](../CHANGELOG.md).
+[`archive/PERF-FLAGS.md`](archive/PERF-FLAGS.md) and [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Prerequisites
 
@@ -179,7 +179,9 @@ raw files serve as machine-readable backup.
 
 ## Related
 
-- [`PERF-FLAGS.md`](PERF-FLAGS.md) — what each `ParserConfig` flag does
+- [`archive/PERF-FLAGS.md`](archive/PERF-FLAGS.md) — what each `ParserConfig` flag did.
+  **Archived and historical**: `ParserConfig` was deleted in 0.6.0, where the grammar itself
+  became the configuration.
 - [`archive/PERF-REWORK-SPEC.md`](archive/PERF-REWORK-SPEC.md) — design rationale and
   phase-by-phase specification (archived; superseded by [`incremental/THROUGHPUT-ENGINE-TIER1.md`](incremental/THROUGHPUT-ENGINE-TIER1.md))
 - [`CHANGELOG.md`](../CHANGELOG.md) — per-release measured numbers
