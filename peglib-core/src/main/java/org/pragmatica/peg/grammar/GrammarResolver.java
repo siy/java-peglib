@@ -183,12 +183,15 @@ public final class GrammarResolver {
         // composition preserves them so an incremental engine wrapping the
         // composed grammar sees every boundary declared anywhere upstream.
         var composedCheckpoints = new LinkedHashSet<String>(root.checkpointRules());
+        // 0.7.1 — same union for %memo declarations.
+        var composedMemo = new LinkedHashSet<String>(root.memoRules());
 
         for (var imp : root.imports()) {
             var cached = loadedGrammars.get(imp.grammarName());
 
             if (cached != null) {
                 composedCheckpoints.addAll(cached.checkpointRules());
+                composedMemo.addAll(cached.memoRules());
             }
         }
 
@@ -199,7 +202,8 @@ public final class GrammarResolver {
                                root.suggestRules(),
                                List.of(),
                                root.recoverSets(),
-                               Set.copyOf(composedCheckpoints));
+                               Set.copyOf(composedCheckpoints),
+                               Set.copyOf(composedMemo));
     }
 
     private Result<Grammar> loadGrammarOrFail(String grammarName, SourceLocation errorLocation, List<String> chain) {
