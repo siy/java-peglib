@@ -82,8 +82,8 @@ compact source file; unqualified imports; `void` array types; guards on constant
 ### Performance
 
 The JLS 14.8 statement-expression restriction makes `StmtExpr` parse `Postfix` twice on
-assignments, which initially cost ~33% of parse throughput versus 0.7.0. Two engine changes
-claw most of it back; what remains is the price of the correctness fix:
+assignments, which initially cost ~33% of parse throughput versus 0.7.0. Three engine changes
+claw nearly all of it back:
 
 - **First-token guard.** For rules whose first token set is provably literal-rooted, the
   generated parser peeks before allocating a CST node, so a rule that cannot match costs one
@@ -95,9 +95,21 @@ claw most of it back; what remains is the price of the correctness fix:
   linked, so `truncate` no longer walks the dropped range undoing links — it pops a compact
   link journal covering only completed-then-dropped nodes, and the dominant
   begin-fail-truncate churn reduces to a counter reset.
+- **`%memo RuleName` — targeted position memo.** A grammar-level directive marking a rule whose
+  successful parse is salvaged when backtracking drops it, then replayed if the same rule is
+  re-parsed at the same token position. It exists because the JLS 14.8 re-parse goes through
+  *different* rules (`Postfix` vs `Primary CallChain`), so the shareable unit is the argument
+  list both paths parse at the same position — hence `%memo Args`, not `%memo Postfix`. This is a
+  single-slot cache, not a revival of packrat, which 0.6.0 dropped. Replay is observationally
+  identical to re-parsing: it is disabled wholesale for grammars using named captures, since
+  replay would skip capture registration.
 
-Same-day A/B (JMH, 2 forks x 10 iterations, selfhost 40k-LOC fixture): 0.7.0 = 66.6 ms,
-0.7.1 = 73.0 ms — a ~10% regression, down from ~33% before these changes.
+Same-day A/B (JMH, 2 forks x 10 iterations, selfhost 40k-LOC fixture, interleaved variants on an
+otherwise idle machine): 0.7.0 = 66.5 ms, 0.7.1 without the memo = 72.8 ms (+9.5%), 0.7.1 with
+`%memo Args` = 67.3 ms (**+1.2%**). The memo was verified to be semantics-preserving by parsing
+43,433 LOC of real Java through the grammar with and against the directive and comparing
+diagnostics, `reconstruct()`, node count and the full preorder CST signature — identical on every
+file.
 
 ### Changed
 
@@ -108,7 +120,8 @@ Same-day A/B (JMH, 2 forks x 10 iterations, selfhost 40k-LOC fixture): 0.7.0 = 6
   case is paired with a legal near-miss, because the cheap way to pass a rejection test is to
   over-tighten until valid code breaks too: `1_` must fail while `1__0L` must still parse.
 - New engine tests: `NullableStartRuleEmptyInputTest`, `UnicodeEscapeTranslationTest`,
-  `CharClassHexEscapeTest`. Suite: **528 -> 551 tests**, 0 failures.
+  `CharClassHexEscapeTest`, and for the memo: `CstArrayBuilderMemoTest`, `MemoDirectiveTest`,
+  `MemoReplayParserTest`. Suite: **528 -> 568 tests**, 0 failures.
 - Two formatter corpus fixtures contained invalid Java — a constructor inside an `interface`,
   which javac's own parser rejects. They are now classes, matching how the fixtures instantiate
   them.

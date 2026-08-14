@@ -123,6 +123,7 @@ e{n,m}      # Bounded repetition
 %whitespace <- [ \t\r\n]*
 %recover <CharSet> Rule       # per-rule sync set (implemented per-rule since 0.6.1)
 %checkpoint Rule              # incremental-reparse boundary
+%memo Rule                    # position memo for a rule re-parsed by overlapping alternatives (0.7.1)
 ```
 
 **Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`).
