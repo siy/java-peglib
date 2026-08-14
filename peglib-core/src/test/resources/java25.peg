@@ -388,3 +388,12 @@ Keyword <- ('_' / 'abstract' / 'assert' / 'boolean' / 'break' / 'byte' / 'case' 
 %checkpoint Stmt
 %checkpoint MethodDecl
 %checkpoint TypeDecl
+
+# 0.7.1 — position memo for the JLS 14.8 StmtExpr double parse. A call statement
+# is parsed once as 'Postfix (assign-op) Expr' and, when the assign-op fails,
+# re-parsed as 'Primary CallChain'. Those are different rules, so the shareable
+# unit is the argument list both paths parse at the same token position. The
+# generated parser salvages the Args subtree when backtracking drops it and
+# replays it in the second parse. Semantics-preserving; measured -8% warm parse
+# on the 40k-LOC selfhost fixture.
+%memo Args
