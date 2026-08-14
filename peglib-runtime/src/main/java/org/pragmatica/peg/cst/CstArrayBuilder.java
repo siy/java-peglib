@@ -57,7 +57,27 @@ public final class CstArrayBuilder {
      * {@code endNode} were never linked, have no entry, and cost nothing to drop.
      */
     private int[] linkLog;
+
     private int linkLogCount;
+
+    /**
+     * Single-slot success memo for one generator-designated rule (targeted packrat).
+     * {@link #memoArm} records the rule kind, token span and node range of the rule's
+     * last successful parse. If backtracking later drops that range, {@link #truncate}
+     * salvages the node records into {@code memoBuf}; {@link #memoTryReplay} then lets
+     * a re-parse of the same rule at the same token position splice the salvaged
+     * subtree back in instead of re-parsing it. Valid only for context-free rules —
+     * the generator must not arm rules whose subtree registers named captures, since
+     * replay would skip the registration.
+     */
+    private int memoRuleKind = -1;
+    private int memoTokenStart = -1;
+    private int memoTokenEnd = -1;
+    private int memoNodeStart = -1;
+    private int memoCount = 0;
+    private boolean memoLive = false;
+    private boolean memoSalvaged = false;
+    private int[] memoBuf;
     private boolean built;
 
     public CstArrayBuilder(String input, TokenArray tokens, String[] ruleTable) {
@@ -158,6 +178,24 @@ public final class CstArrayBuilder {
         if (newCount == nodeCount) {
             return;
         }
+        // Salvage the armed memo subtree before it is dropped. Partial overlap is
+        // impossible — savepoints cannot land inside a completed subtree — but the
+        // defensive else-branch invalidates rather than salvages if it ever occurred.
+        if (memoLive) {
+            if (newCount <= memoNodeStart) {
+                var ints = memoCount * CstArray.NODE_STRIDE;
+
+                if (memoBuf == null || memoBuf.length < ints) {
+                    memoBuf = new int[Math.max(ints, 256)];
+                }
+
+                System.arraycopy(nodes, memoNodeStart * CstArray.NODE_STRIDE, memoBuf, 0, ints);
+                memoLive = false;
+                memoSalvaged = true;
+            } else if (newCount < memoNodeStart + memoCount) {
+                memoLive = false;
+            }
+        }
 
         while (linkLogCount > 0 && linkLog[(linkLogCount - 1) * 2]>= newCount) {
             linkLogCount--;
@@ -199,8 +237,73 @@ public final class CstArrayBuilder {
         nodes = null;
         lastChild = null;
         linkLog = null;
+        memoBuf = null;
 
         return new CstArray(input, tokens, trimmed, nodeCount, ruleTableCopy, rootIndex);
+    }
+
+    /**
+     * Record the just-completed subtree of a memoised rule: token span
+     * {@code [tokenStart, tokenEnd)} (parser positions at entry and success), node range
+     * {@code [nodeStart, nodeCount)}. Called by generated code on the rule's success
+     * path, after {@link #endNode}. Single slot — the latest arm wins, which for nested
+     * occurrences of the same rule means the outermost (it completes last).
+     */
+    @SuppressWarnings("JBCT-RET-01")
+    public void memoArm(int ruleKind, int tokenStart, int tokenEnd, int nodeStart) {
+        memoRuleKind = ruleKind;
+        memoTokenStart = tokenStart;
+        memoTokenEnd = tokenEnd;
+        memoNodeStart = nodeStart;
+        memoCount = nodeCount - nodeStart;
+        memoLive = true;
+        memoSalvaged = false;
+    }
+
+    /**
+     * Replay the salvaged memo subtree if it matches {@code ruleKind} at {@code tokenPos}:
+     * append a copy at the end of the node array, rebase intra-subtree links (severing
+     * any pointer that escapes the subtree — the root's old parent and sibling), and
+     * link the new root under {@code newParent} through the normal journalled path so a
+     * later {@link #truncate} can drop the replayed copy like any other node. Returns
+     * the token position after the subtree, or {@code -1} on miss. The buffer survives
+     * replay, so a third parse at the same position replays again.
+     */
+    public int memoTryReplay(int ruleKind, int tokenPos, int newParent) {
+        if (!memoSalvaged || memoRuleKind != ruleKind || memoTokenStart != tokenPos) {
+            return -1;
+        }
+
+        var newBase = nodeCount;
+
+        ensureNodeCapacity(newBase + memoCount);
+        System.arraycopy(memoBuf, 0, nodes, newBase * CstArray.NODE_STRIDE, memoCount * CstArray.NODE_STRIDE);
+        var delta = newBase - memoNodeStart;
+        var srcEnd = memoNodeStart + memoCount;
+
+        for (var i = 0; i < memoCount; i++) {
+            var base = (newBase + i) * CstArray.NODE_STRIDE;
+            var parent = nodes[base];
+
+            nodes[base] = parent >= memoNodeStart && parent < srcEnd
+                          ? parent + delta
+                          : newParent;
+            var firstChild = nodes[base + 4];
+
+            nodes[base + 4] = firstChild >= memoNodeStart && firstChild < srcEnd
+                              ? firstChild + delta
+                              : CstArray.NO_NODE;
+            var nextSibling = nodes[base + 5];
+
+            nodes[base + 5] = nextSibling >= memoNodeStart && nextSibling < srcEnd
+                              ? nextSibling + delta
+                              : CstArray.NO_NODE;
+        }
+
+        nodeCount = newBase + memoCount;
+        linkAsChildOf(newParent, newBase);
+
+        return memoTokenEnd;
     }
 
     public boolean isBuilt() {
