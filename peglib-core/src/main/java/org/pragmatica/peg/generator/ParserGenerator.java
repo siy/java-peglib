@@ -203,9 +203,25 @@ public final class ParserGenerator {
         // skip-prefix rule name (e.g. "Identifier"); value is the sorted
         // int[] of acceptable kinds (idKind + all fallback kinds).
         private final Map<String, int[]> idFallbackArrays;
+
         // 0.6.2 — DFA-builder skipped-rule reasons (rule name → reason). Used to
         // reject references to a skipped LEXER rule with a dead token kind.
         private final Map<String, String> skippedReasons;
+
+        /**
+         * 0.7.1 — rules the grammar declares via {@code %memo RuleName}: their successful
+         * parse is memoised at a token position via {@code CstArrayBuilder.memoArm} /
+         * {@code memoTryReplay}, so grammar shapes that re-parse the same substructure
+         * through different enclosing rules replay the subtree instead of re-parsing it.
+         * The motivating case is Java's JLS 14.8 statement-expression restriction: the
+         * re-parse goes through different rules ({@code Postfix} vs
+         * {@code Primary CallChain}), so the shareable unit is the argument list both
+         * parse at the same position — {@code %memo Args} — not Postfix itself. Forced
+         * empty when the grammar uses named captures anywhere: replay skips capture
+         * registration, so memoising a capture-bearing grammar would silently change
+         * back-reference behaviour.
+         */
+        private final Set<String> memoRules;
 
         Renderer(Grammar grammar,
                  RuleClassifier.Classification classification,
@@ -228,6 +244,41 @@ public final class ParserGenerator {
             this.usedTokenKinds = new LinkedHashSet<>();
             this.aliasArrays = new LinkedHashSet<>();
             this.idFallbackArrays = new LinkedHashMap<>();
+            this.memoRules = computeMemoRules(grammar);
+        }
+
+        private static Set<String> computeMemoRules(Grammar grammar) {
+            if (grammar.memoRules().isEmpty()) {
+                return Set.of();
+            }
+
+            for (var rule : grammar.rules()) {
+                if (containsCapture(rule.expression())) {
+                    return Set.of();
+                }
+            }
+
+            return Set.copyOf(grammar.memoRules());
+        }
+
+        private static boolean containsCapture(Expression expr) {
+            return switch (expr) {
+                case Expression.Capture __ -> true;
+                case Expression.CaptureScope __ -> true;
+                case Expression.BackReference __ -> true;
+                case Expression.Sequence seq -> seq.elements().stream().anyMatch(Renderer::containsCapture);
+                case Expression.Choice ch -> ch.alternatives().stream().anyMatch(Renderer::containsCapture);
+                case Expression.ZeroOrMore e -> containsCapture(e.expression());
+                case Expression.OneOrMore e -> containsCapture(e.expression());
+                case Expression.Optional e -> containsCapture(e.expression());
+                case Expression.Repetition e -> containsCapture(e.expression());
+                case Expression.And e -> containsCapture(e.expression());
+                case Expression.Not e -> containsCapture(e.expression());
+                case Expression.TokenBoundary e -> containsCapture(e.expression());
+                case Expression.Ignore e -> containsCapture(e.expression());
+                case Expression.Group e -> containsCapture(e.expression());
+                default -> false;
+            };
         }
 
         Result<GeneratedParser> render() {
@@ -1000,6 +1051,17 @@ public final class ParserGenerator {
                 });
             }
 
+            var memoised = memoRules.contains(rule.name()) && ruleKindForGuard == RuleKind.PARSER;
+            // Memo replay — if this rule already succeeded at this exact token position
+            // and its subtree was salvaged by a backtrack, splice the copy in and skip
+            // the re-parse. See CstArrayBuilder.memoTryReplay for the mechanism.
+            if (memoised) {
+                sb.append("        int memoEnd = cst.memoTryReplay(RULE_")
+                  .append(rule.name())
+                  .append("_KIND, pos, parent);\n");
+                sb.append("        if (memoEnd >= 0) { pos = memoEnd; return true; }\n");
+            }
+
             sb.append("        int firstTok = pos;\n");
             sb.append("        int savedPos = pos;\n");
             sb.append("        int savedNodes = cst.currentNodeCount();\n");
@@ -1018,6 +1080,12 @@ public final class ParserGenerator {
             sb.append("        if (lastTok >= tokens.count()) lastTok = tokens.count() - 1;\n");
             sb.append("        if (lastTok < firstTok) lastTok = firstTok;\n");
             sb.append("        cst.endNode(self, lastTok);\n");
+            if (memoised) {
+                sb.append("        cst.memoArm(RULE_")
+                  .append(rule.name())
+                  .append("_KIND, savedPos, pos, savedNodes);\n");
+            }
+
             sb.append("        return true;\n");
             sb.append("    }\n");
 
