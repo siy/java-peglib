@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.pragmatica-lite</groupId>
         <artifactId>peglib-parent</artifactId>
-        <version>0.7.0</version>
+        <version>0.7.1</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -57,6 +57,14 @@
                     <includes>
                         <include>**/*Test.java</include>
                         <include>**/*Example.java</include>
+                        <!--
+                          The *Probe classes are assertion-bearing gates, not scratch tools:
+                          JavaCoverageProbe pins what must parse, JavaRejectionProbe pins what
+                          must be rejected, ModernJavaSyntaxProbe pins post-Java-25 syntax.
+                          Without this include they compile but never run, so a grammar
+                          regression reaches the field with a green build.
+                        -->
+                        <include>**/*Probe.java</include>
                     </includes>
                 </configuration>
             </plugin>

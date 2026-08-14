@@ -90,6 +90,47 @@ public final class TokenArray {
         return table;
     }
 
+    /**
+     * Re-express this token array against a different source string, translating every token
+     * span through {@code offsetMap}.
+     *
+     * <p>Used for Java's Unicode-escape pre-pass (JLS 3.3): the lexer runs over text in which
+     * {@code \\uXXXX} has already been replaced by the character it denotes, so
+     * {@code \\u0069f} lexes as the keyword {@code if}. The resulting spans point into that
+     * translated text, which would make {@link org.pragmatica.peg.cst.CstArray#reconstruct()}
+     * emit translated source and break the formatter's byte-identical round-trip. Remapping
+     * restores spans over the ORIGINAL text, so the escape sequence survives verbatim while
+     * the parser still sees the character it denotes.
+     *
+     * <p>{@code offsetMap} has one entry per translated character plus a terminating entry, so
+     * an end offset immediately after the last character maps correctly.
+     *
+     * @param originalInput the untranslated source
+     * @param offsetMap     translated index to original index; length at least
+     *                      {@code translatedLength + 1}
+     */
+    public TokenArray remapOffsets(String originalInput, int[] offsetMap) {
+        var newStarts = new int[count];
+        var newEnds = new int[count];
+
+        for (var i = 0; i < count; i++) {
+            newStarts[i] = mapOffset(offsetMap, starts[i]);
+            newEnds[i] = mapOffset(offsetMap, ends[i]);
+        }
+
+        return new TokenArray(originalInput, newStarts, newEnds, kinds, count, kindNameTable);
+    }
+
+    private static int mapOffset(int[] offsetMap, int offset) {
+        if (offset < 0) {
+            return 0;
+        }
+
+        return offset < offsetMap.length
+               ? offsetMap[offset]
+               : offsetMap[offsetMap.length - 1];
+    }
+
     public int count() {
         return count;
     }

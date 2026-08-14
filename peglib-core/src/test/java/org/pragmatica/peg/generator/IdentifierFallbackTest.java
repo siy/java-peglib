@@ -93,7 +93,12 @@ class IdentifierFallbackTest {
             "public class Foo { void m() { with(); } }",
             "public class Foo { void m() { to(); } }",
             "public class Foo { void m() { record(); } }",
-            "public class Foo { void m() { yield(); } }",
+            // 'yield' is the ONE contextual keyword that does not get a bare-call fallback.
+            // javac: "invalid use of a restricted identifier 'yield' — to invoke a method
+            // called yield, qualify the yield with a receiver or type name". A statement
+            // beginning with 'yield' is always a yield statement (JLS 14.21), so the call
+            // form must carry a receiver. Verified against javac before changing this case.
+            "public class Foo { void yield() { } void m() { this.yield(); } }",
             "public class Foo { void m() { sealed(); } }",
             "public class Foo { void m() { permits(); } }",
             "public class Foo { void m() { when(); } }",

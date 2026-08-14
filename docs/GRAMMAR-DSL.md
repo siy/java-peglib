@@ -16,6 +16,7 @@ repeated here.
    - [`%tag "name"`](#tag)
 3. [Grammar-level directives](#grammar-level-directives)
    - [`%suggest RuleName`](#suggest)
+   - [`%memo RuleName`](#memo)
    - [`%import Grammar.Rule`](#import)
 4. [Directive interaction matrix](#directive-interaction-matrix)
 5. [Analyzer](#analyzer)
@@ -252,6 +253,50 @@ recomputation).
 If no `%suggest` directive is declared, no suggestion logic runs and
 error-path cost is unchanged.
 
+### `%memo`
+
+`%memo RuleName` *(0.7.1)*
+
+Marks a rule whose successful parse should be cached at a token position.
+When backtracking drops the rule's subtree, the builder salvages it; if the
+same rule is then re-parsed at the *same token position*, the salvaged
+subtree is spliced back in instead of being parsed again.
+
+```peg
+%memo Args
+Args <- Item (',' Item)*
+```
+
+This is a **single-slot cache, not packrat** — 0.6.0 dropped packrat as
+unnecessary under the tokens-first design, and this does not revive it. Only
+the most recently completed occurrence is retained.
+
+**When it helps.** Only when the same input is parsed twice at the same
+position through *different* enclosing rules, so ordinary choice ordering
+cannot avoid the repeat. The motivating case is Java's JLS 14.8
+statement-expression restriction: a statement is first tried as
+`Postfix (assign-op) Expr` and, when the assignment operator fails, re-parsed
+as `Primary CallChain`. Those are different rules, so the shareable unit is
+the argument list both paths parse at the same position — hence `%memo Args`
+rather than `%memo Postfix`. On the 40k-LOC selfhost fixture this is worth
+about 7% of warm parse time.
+
+If a rule is simply reached twice by a Choice trying successive
+alternatives, fix the grammar instead — reordering or factoring the common
+prefix costs nothing at runtime.
+
+**Semantics.** Replay is observationally identical to re-parsing: the CST,
+the diagnostics and `reconstruct()` are unchanged. It is purely an
+optimisation, and correspondingly it is *silently disabled* in two cases:
+
+- the grammar uses named captures anywhere (replay would skip capture
+  registration, changing back-reference behaviour);
+- the named rule is classified LEXER or MIXED rather than PARSER.
+
+Unknown rule names are accepted without error, matching `%checkpoint`. All
+three silent cases are reported by the analyzer — see
+`grammar.memo-unknown-rule` and `grammar.memo-non-parser-rule` below.
+
 ## Directive interaction matrix
 
 | Directive | Scope | Sets tag | Affects parse outcome | Affects hot path |
@@ -260,10 +305,14 @@ error-path cost is unchanged.
 | `%recover` | rule | `error.unclosed` (unless `%tag` overrides) | yes — changes where recovery resumes | only on failure path |
 | `%tag` | rule | explicit value | no | no |
 | `%suggest` | grammar | (adds note to diagnostics) | no | failure-only Levenshtein scan |
+| `%memo` | grammar | no | no — output is identical either way | yes — success path, by design |
 
-None of the four affects the success path. All four are opt-in: a grammar
-that uses none of them produces output byte-identical to pre-0.2.4
-parsers, per the `Phase1ParityTest` / `CorpusParityTest` suites.
+`%expected`, `%recover`, `%tag` and `%suggest` do not affect the success
+path. `%memo` is the exception and the only one: it exists precisely to
+change success-path cost, but it does not change success-path *output*.
+All five are opt-in: a grammar that uses none of them produces output
+byte-identical to pre-0.2.4 parsers, per the `Phase1ParityTest` /
+`CorpusParityTest` suites.
 
 ## Analyzer
 
@@ -282,6 +331,8 @@ Each finding has a stable tag for tooling integration. The full catalog:
 | `grammar.duplicate-literal` | ERROR | Literal repeated verbatim within the same `Choice` |
 | `grammar.whitespace-cycle` | ERROR | `%whitespace` expression transitively references itself |
 | `grammar.has-backreference` | INFO | Rule uses `$name` back-reference — forward-compat note: incremental parsing (since 0.3.2) falls back to full reparse on such rules |
+| `grammar.memo-unknown-rule` | WARNING | `%memo` names a rule the grammar does not define — the directive is ignored |
+| `grammar.memo-non-parser-rule` | WARNING | `%memo` targets a LEXER or MIXED rule; only PARSER rules are memoised — the directive is ignored |
 
 The ambiguous-choice check is conservative: it flags only choices where
 *every* alternative has a fixed literal prefix. Rule-reference-prefixed or
@@ -576,9 +627,9 @@ tooling integrations.
 
 - [Error Recovery](ERROR_RECOVERY.md) — recovery strategies, diagnostic
   formatting, `ParseResultWithDiagnostics` API
-- [Trivia Attribution](TRIVIA-ATTRIBUTION.md) — how whitespace/comments
-  are attached to CST nodes
-- [Partial Parse](PARTIAL-PARSE.md) — the 0.3.0 `parseRuleAt` API for
-  cursor-anchored partial parsing and incremental reparse
+- [Trivia Attribution](archive/TRIVIA-ATTRIBUTION.md) — how whitespace/comments
+  are attached to CST nodes (archived)
+- [Partial Parse](archive/PARTIAL-PARSE.md) — the 0.3.0 `parseRuleAt` API for
+  cursor-anchored partial parsing and incremental reparse (archived)
 - [`CHANGELOG.md`](../CHANGELOG.md) — per-release history of grammar-DSL
   additions

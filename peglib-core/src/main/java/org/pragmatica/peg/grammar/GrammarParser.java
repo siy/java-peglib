@@ -49,6 +49,7 @@ public final class GrammarParser {
         var imports = new ArrayList<Import>();
         var recoverSets = new LinkedHashMap<String, Set<Character>>();
         var checkpointRules = new LinkedHashSet<String>();
+        var memoRules = new LinkedHashSet<String>();
         Option<String> startRule = Option.none();
         Option<Expression> whitespace = Option.none();
         Option<Expression> word = Option.none();
@@ -125,6 +126,22 @@ public final class GrammarParser {
                     checkpointRules.add(result.unwrap());
                     continue;
                 }
+                // 0.7.1 — Grammar-level %memo RuleName designates a rule whose
+                // successful parse the generated parser memoises at a token
+                // position (targeted packrat). Same shape as %checkpoint: no
+                // rule-level form, argument is a rule name.
+                if ("memo".equals(directive.name()) && pos + 1 < tokens.size() && tokens.get(pos + 1) instanceof GrammarToken.Identifier) {
+                    advance();
+                    var result = parseMemoDirective();
+
+                    if (result instanceof Result.Failure<?> f) {
+                        return f.cause()
+                                .result();
+                    }
+
+                    memoRules.add(result.unwrap());
+                    continue;
+                }
 
                 advance();
                 var result = parseDirective(directive);
@@ -162,6 +179,7 @@ public final class GrammarParser {
         var copiedImports = List.copyOf(imports);
         var copiedRecover = Map.copyOf(recoverSets);
         var copiedCheckpoint = Set.copyOf(checkpointRules);
+        var copiedMemo = Set.copyOf(memoRules);
         // 0.4.0 — when a grammar declares no imports, validate eagerly via the
         // parse-don't-validate factory. With imports, the root grammar may
         // legitimately reference rule names that only appear after %import
@@ -177,7 +195,8 @@ public final class GrammarParser {
                                    copiedSuggest,
                                    copiedImports,
                                    copiedRecover,
-                                   copiedCheckpoint);
+                                   copiedCheckpoint,
+                                   copiedMemo);
         }
 
         return Result.success(new Grammar(rules,
@@ -187,7 +206,8 @@ public final class GrammarParser {
                                           copiedSuggest,
                                           copiedImports,
                                           copiedRecover,
-                                          copiedCheckpoint));
+                                          copiedCheckpoint,
+                                          copiedMemo));
     }
 
     /** Result tuple for a parsed {@code %recover &lt;CharClass&gt; RuleName} directive. */
@@ -230,6 +250,26 @@ public final class GrammarParser {
             return new ParseError.UnexpectedInput(peek().span().start(),
                                                   tokenDescription(peek()),
                                                   "rule name for '%checkpoint'").result();
+        }
+
+        advance();
+
+        return Result.success(ruleId.name());
+    }
+
+    /**
+     * Parse the body of a top-level {@code %memo RuleName} directive. The
+     * {@code %memo} keyword has already been consumed. Unknown rule names are
+     * accepted — the generator silently ignores them, matching the relaxed
+     * handling of {@code %checkpoint}.
+     *
+     * @since 0.7.1
+     */
+    private Result<String> parseMemoDirective() {
+        if (! (peek() instanceof GrammarToken.Identifier ruleId)) {
+            return new ParseError.UnexpectedInput(peek().span().start(),
+                                                  tokenDescription(peek()),
+                                                  "rule name for '%memo'").result();
         }
 
         advance();

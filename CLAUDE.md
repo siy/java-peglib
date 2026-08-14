@@ -2,9 +2,13 @@
 
 ## Project Status
 
-**0.6.3 is the latest shipped release** (Maven Central, 2026-06-07). Work in progress on
-`release-0.7.0`, which is **breaking**: the 0.5.x interpreter path and the `peglib-incremental`
-artifact are removed, and `org.pragmatica.peg.v6.*` has collapsed into `org.pragmatica.peg.*`.
+**0.7.1 is the latest shipped release** (Maven Central, 2026-08-14). It validates the Java
+grammar against javac's own parse phase (99.45% agreement over OpenJDK's langtools suite), adds
+the `%memo` directive, and holds parse throughput within ~1% of 0.7.0.
+
+0.7.0 (2026-08-05) was the **breaking** one: the 0.5.x interpreter path and the
+`peglib-incremental` artifact were removed, and `org.pragmatica.peg.v6.*` collapsed into
+`org.pragmatica.peg.*`.
 
 See `docs/HANDOVER.md` for current state and next steps, `docs/ARCHITECTURE-0.6.0.md` for design.
 
@@ -59,7 +63,7 @@ peglib-runtime/src/main/java/org/pragmatica/peg/
 │   └── LexFn.java                   functional lexer adapter
 ├── cst/
 │   ├── CstArray.java                flat int[]; findCheckpointAncestor; spliceSubtree
-│   ├── CstArrayBuilder.java         truncate uses lastChildBefore undo log (O(dropped) bounded scan)
+│   ├── CstArrayBuilder.java         links on endNode (success), not beginNode; truncate pops a link journal
 │   ├── CstNode.java                 sealed Branch/Leaf/Error views
 │   └── ParseResult.java
 └── diagnostic/
@@ -123,6 +127,7 @@ e{n,m}      # Bounded repetition
 %whitespace <- [ \t\r\n]*
 %recover <CharSet> Rule       # per-rule sync set (implemented per-rule since 0.6.1)
 %checkpoint Rule              # incremental-reparse boundary
+%memo Rule                    # position memo for a rule re-parsed by overlapping alternatives (0.7.1)
 ```
 
 **Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`).
@@ -278,17 +283,22 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**528 tests across 5 modules**, 0 failures, 0 skips. The count dropped from 1445 in 0.6.3 because
+**576 tests across 5 modules**, 0 failures, 0 skips. The count dropped from 1445 in 0.6.3 because
 the 0.5.x interpreter and its parity suites were deleted, not because coverage was lost.
 
 Notable test classes for verification gates:
+- `JavaCoverageProbe` / `JavaRejectionProbe` / `ModernJavaSyntaxProbe` — the accept/reject
+  gates for the Java grammar. **`peglib-core/pom.xml` must keep `**/*Probe.java` in the
+  surefire `<includes>`**: before 0.7.1 surefire matched only `*Test.java`, so these were
+  compiled and never executed, and a grammar regression would have shipped green
 - `Java25CorpusGateTest` — 20 format-examples fixtures lex round-trip
 - `Java25ParserGateTest` — same fixtures parse round-trip, **plus CST-shape sanity**
   (`nodeCount >= LOC/3`), which is the gate that catches an empty-CompilationUnit collapse
   that byte-equal reconstruction alone would pass
 - `FactoryClassGeneratorDiagTest` — real-world 1900-LOC parse (0 diagnostics)
-- `ModernJavaSyntaxProbe` — prints which post-Java-25 forms the grammar accepts (value classes,
-  primitive patterns, known gaps). Not a gate; a measurement to start from
+- `Java25BisectTest` — minimal-snippet bisection helper for grammar triage
+- `MemoInteractionTest` — `%memo` against per-rule `%recover` and incremental reparse; all three
+  memo suites are mutation-checked, so breaking the replay position guard turns them red
 - `IncrementalEditBenchmark` — edit latency p50/p99 in `src/jmh/`
 - `Java25LargeFixturesBenchmark` — warm parse on reference + selfhost fixtures
 - `JavacParseOnlyBenchmark` — vs javac via `JavacTask.parse()`

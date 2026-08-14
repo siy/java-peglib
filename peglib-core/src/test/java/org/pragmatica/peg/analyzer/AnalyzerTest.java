@@ -208,6 +208,70 @@ class AnalyzerTest {
         }
     }
 
+    /**
+     * 0.7.1 — both {@code %memo} failure modes are accepted by the front-end and
+     * dropped at codegen, so the only symptom without a finding is that the
+     * expected speedup silently fails to appear.
+     */
+    @Nested
+    class MemoDirectives {
+        @Test
+        void flagsMemoOnUndefinedRule() {
+            var grammar = """
+                    Start <- Call+
+                    Call <- Ident '(' Ident? ')'
+                    Ident <- [a-z]+
+                    %memo NoSuchRule
+                    """;
+            var report = analyze(grammar);
+            assertThat(report.findings()).anyMatch(f ->
+            "grammar.memo-unknown-rule".equals(f.tag())
+            && "NoSuchRule".equals(f.ruleName())
+            && f.severity() == Finding.Severity.WARNING);
+        }
+
+        @Test
+        void flagsMemoOnLexerRule() {
+            // Ident references only character classes, so RuleClassifier types it
+            // LEXER and the generator never memoises it.
+            var grammar = """
+                    Start <- Call+
+                    Call <- Ident '(' Ident? ')'
+                    Ident <- [a-z]+
+                    %memo Ident
+                    """;
+            var report = analyze(grammar);
+            assertThat(report.findings()).anyMatch(f ->
+            "grammar.memo-non-parser-rule".equals(f.tag())
+            && "Ident".equals(f.ruleName())
+            && f.severity() == Finding.Severity.WARNING);
+        }
+
+        @Test
+        void doesNotFlagMemoOnParserRule() {
+            var grammar = """
+                    Start <- Call+
+                    Call <- Ident '(' Args? ')'
+                    Args <- Ident (',' Ident)*
+                    Ident <- [a-z]+
+                    %memo Args
+                    """;
+            var report = analyze(grammar);
+            assertThat(report.findings()).noneMatch(f ->
+            f.tag().startsWith("grammar.memo-"));
+        }
+
+        @Test
+        void doesNotFlagGrammarWithoutMemo() {
+            var grammar = """
+                    Start <- 'x'
+                    """;
+            var report = analyze(grammar);
+            assertThat(report.findings()).noneMatch(f ->
+            f.tag().startsWith("grammar.memo-"));
+        }
+    }
+
     @Nested
     class ReportFormatting {
         @Test

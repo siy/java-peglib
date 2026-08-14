@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import org.pragmatica.lang.Cause;
+import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.grammar.Expression;
@@ -202,9 +203,25 @@ public final class ParserGenerator {
         // skip-prefix rule name (e.g. "Identifier"); value is the sorted
         // int[] of acceptable kinds (idKind + all fallback kinds).
         private final Map<String, int[]> idFallbackArrays;
+
         // 0.6.2 — DFA-builder skipped-rule reasons (rule name → reason). Used to
         // reject references to a skipped LEXER rule with a dead token kind.
         private final Map<String, String> skippedReasons;
+
+        /**
+         * 0.7.1 — rules the grammar declares via {@code %memo RuleName}: their successful
+         * parse is memoised at a token position via {@code CstArrayBuilder.memoArm} /
+         * {@code memoTryReplay}, so grammar shapes that re-parse the same substructure
+         * through different enclosing rules replay the subtree instead of re-parsing it.
+         * The motivating case is Java's JLS 14.8 statement-expression restriction: the
+         * re-parse goes through different rules ({@code Postfix} vs
+         * {@code Primary CallChain}), so the shareable unit is the argument list both
+         * parse at the same position — {@code %memo Args} — not Postfix itself. Forced
+         * empty when the grammar uses named captures anywhere: replay skips capture
+         * registration, so memoising a capture-bearing grammar would silently change
+         * back-reference behaviour.
+         */
+        private final Set<String> memoRules;
 
         Renderer(Grammar grammar,
                  RuleClassifier.Classification classification,
@@ -227,6 +244,41 @@ public final class ParserGenerator {
             this.usedTokenKinds = new LinkedHashSet<>();
             this.aliasArrays = new LinkedHashSet<>();
             this.idFallbackArrays = new LinkedHashMap<>();
+            this.memoRules = computeMemoRules(grammar);
+        }
+
+        private static Set<String> computeMemoRules(Grammar grammar) {
+            if (grammar.memoRules().isEmpty()) {
+                return Set.of();
+            }
+
+            for (var rule : grammar.rules()) {
+                if (containsCapture(rule.expression())) {
+                    return Set.of();
+                }
+            }
+
+            return Set.copyOf(grammar.memoRules());
+        }
+
+        private static boolean containsCapture(Expression expr) {
+            return switch (expr) {
+                case Expression.Capture __ -> true;
+                case Expression.CaptureScope __ -> true;
+                case Expression.BackReference __ -> true;
+                case Expression.Sequence seq -> seq.elements().stream().anyMatch(Renderer::containsCapture);
+                case Expression.Choice ch -> ch.alternatives().stream().anyMatch(Renderer::containsCapture);
+                case Expression.ZeroOrMore e -> containsCapture(e.expression());
+                case Expression.OneOrMore e -> containsCapture(e.expression());
+                case Expression.Optional e -> containsCapture(e.expression());
+                case Expression.Repetition e -> containsCapture(e.expression());
+                case Expression.And e -> containsCapture(e.expression());
+                case Expression.Not e -> containsCapture(e.expression());
+                case Expression.TokenBoundary e -> containsCapture(e.expression());
+                case Expression.Ignore e -> containsCapture(e.expression());
+                case Expression.Group e -> containsCapture(e.expression());
+                default -> false;
+            };
         }
 
         Result<GeneratedParser> render() {
@@ -654,13 +706,29 @@ public final class ParserGenerator {
             sb.append("            // whether anything remains to parse.\n");
             sb.append("            while (pos < tokens.count() && tokens.isTrivia(pos)) pos++;\n");
             sb.append("            if (pos >= tokens.count()) {\n");
-            sb.append("                if (firstAttempt && diagnostics.size() < maxDiagnostics) {\n");
-            sb.append("                    // Empty / all-trivia input — record a diagnostic so callers\n");
-            sb.append("                    // know the parse couldn't even attempt the start rule.\n");
-            sb.append("                    int off = tokens.count() == 0 ? 0 : tokens.startAt(0);\n");
-            sb.append("                    diagnostics.add(Diagnostic.error(off, 1,\n");
-            sb.append("                        \"empty input\", \"start of " + escapeJavaString(startName)
+            sb.append("                // Empty or all-trivia input. That is only an error if the start\n");
+            sb.append("                // rule cannot match empty — a nullable start rule legitimately\n");
+            sb.append("                // succeeds here (Java's CompilationUnit does: a file holding\n");
+            sb.append("                // nothing but a license header is a valid compilation unit).\n");
+            sb.append("                // So attempt it once and report only on a genuine failure.\n");
+            sb.append("                //\n");
+            sb.append("                // The break below stays UNCONDITIONAL: we are at end-of-input, so\n");
+            sb.append("                // a nullable start rule that consumes nothing must not be retried.\n");
+            sb.append("                if (firstAttempt) {\n");
+            sb.append("                    int beforeNodesEmpty = cst.currentNodeCount();\n");
+            sb.append("                    errorPos = -1;\n");
+            sb.append("                    expected = null;\n");
+            sb.append("                    found = -1;\n");
+            sb.append("                    lastFailedRuleKind = -1;\n");
+            sb.append("                    if (!parse").append(startName).append("(root)) {\n");
+            sb.append("                        cst.truncate(beforeNodesEmpty);\n");
+            sb.append("                        if (diagnostics.size() < maxDiagnostics) {\n");
+            sb.append("                            int off = tokens.count() == 0 ? 0 : tokens.startAt(0);\n");
+            sb.append("                            diagnostics.add(Diagnostic.error(off, 1,\n");
+            sb.append("                                \"empty input\", \"start of " + escapeJavaString(startName)
                      + "\", \"<end-of-input>\"));\n");
+            sb.append("                        }\n");
+            sb.append("                    }\n");
             sb.append("                }\n");
             sb.append("                break;\n");
             sb.append("            }\n");
@@ -683,6 +751,29 @@ public final class ParserGenerator {
             sb.append("                // progress by skipping one token under an Error node, else we\n");
             sb.append("                // loop forever on the same position.\n");
             sb.append("                emitForcedAdvanceError(root, beforePos);\n");
+            sb.append("            } else {\n");
+            sb.append("                // The start rule succeeded but did not consume the whole stream.\n");
+            sb.append("                // Looping would silently re-parse the remainder as a SECOND\n");
+            sb.append("                // start-rule application, accepting a file that is really two\n");
+            sb.append("                // concatenated documents. For Java that hides real errors: in\n");
+            sb.append("                // 'import a.B;; import c.D;' the stray ';' is a type declaration\n");
+            sb.append("                // (JLS 7.3), so the following import is illegal — yet both halves\n");
+            sb.append("                // parse as valid compilation units on their own.\n");
+            sb.append("                //\n");
+            sb.append("                // Record the trailing-input diagnostic here, then keep looping so\n");
+            sb.append("                // the remainder still lands in the CST: callers that reconstruct\n");
+            sb.append("                // source from the tree depend on full coverage.\n");
+            sb.append("                int trailTok = pos;\n");
+            sb.append("                while (trailTok < tokens.count() && tokens.isTrivia(trailTok)) trailTok++;\n");
+            sb.append("                if (trailTok < tokens.count() && diagnostics.size() < maxDiagnostics) {\n");
+            sb.append("                    int tStart = tokens.startAt(trailTok);\n");
+            sb.append("                    int tEnd = tokens.endAt(trailTok);\n");
+            sb.append("                    int tLen = tEnd - tStart;\n");
+            sb.append("                    if (tLen < 1) tLen = 1;\n");
+            sb.append("                    diagnostics.add(Diagnostic.error(tStart, tLen,\n");
+            sb.append("                        \"trailing input not consumed\", \"end of input\",\n");
+            sb.append("                        tokens.input().substring(tStart, tEnd)));\n");
+            sb.append("                }\n");
             sb.append("            }\n");
             sb.append("            if (!parsedOk && pos == beforePos) {\n");
             sb.append("                // Recovery couldn't move past the failing token (no sync, no EOF\n");
@@ -858,6 +949,70 @@ public final class ParserGenerator {
             return Result.success(new GeneratedParser(packageName, className, sb.toString()));
         }
 
+        /**
+         * Token kinds that MUST appear first for {@code expr} to match, or {@link Option#none()}
+         * when that cannot be determined conservatively.
+         *
+         * <p>Used to emit a first-token guard ahead of {@code beginNode}. Profiling the selfhost
+         * fixture put 37.6% of samples inside {@code CstArrayBuilder}, and the single largest
+         * contributor was {@code parseAnnotation}: {@code Annotation*} appears in Type, Param,
+         * ClassMember, Dims, TypeArg and the pattern rules, so on the overwhelmingly common
+         * no-annotation case every one of those sites allocated a CST node, tried {@code '@'},
+         * failed, and truncated.
+         *
+         * <p>Deliberately conservative — anything not provably literal-rooted returns none and
+         * simply gets no guard. In particular a {@link Expression.Reference} always bails: a
+         * referenced rule may carry an identifier fallback for contextual keywords, and
+         * narrowing its first set here would reject valid input.
+         */
+        private Option<java.util.Set<Integer>> mandatoryFirstKinds(Expression expr) {
+            return switch (expr) {
+                case Expression.Literal lit -> {
+                    var kind = kinds.inlineLiteralToKind().get(lit.text() + (lit.caseInsensitive()
+                                                                             ? "/i"
+                                                                             : "/cs"));
+
+                    yield kind == null
+                          ? Option.none()
+                          : Option.some(java.util.Set.of(kind));
+                }
+                case Expression.Group g -> mandatoryFirstKinds(g.expression());
+                case Expression.TokenBoundary t -> mandatoryFirstKinds(t.expression());
+                case Expression.Ignore i -> mandatoryFirstKinds(i.expression());
+                case Expression.OneOrMore o -> mandatoryFirstKinds(o.expression());
+                case Expression.Sequence seq -> {
+                    // Skip leading zero-width elements; the first CONSUMING element decides.
+                    for (var element : seq.elements()) {
+                        if (element instanceof Expression.Not || element instanceof Expression.And || element instanceof Expression.Cut) {
+                            continue;
+                        }
+
+                        yield mandatoryFirstKinds(element);
+                    }
+
+                    yield Option.none();
+                }
+                case Expression.Choice choice -> {
+                    var union = new java.util.LinkedHashSet<Integer>();
+
+                    for (var alt : choice.alternatives()) {
+                        var altKinds = mandatoryFirstKinds(alt).or((java.util.Set<Integer>) null);
+
+                        if (altKinds == null) {
+                            yield Option.none();
+                        }
+
+                        union.addAll(altKinds);
+                    }
+
+                    yield union.isEmpty()
+                          ? Option.none()
+                          : Option.some(union);
+                }
+                default -> Option.none();
+            };
+        }
+
         private Result<String> renderRuleBody(Rule rule) {
             var sb = new StringBuilder(512);
             // Phase 0.6.0-perf — rule methods return boolean. The CST node is
@@ -869,6 +1024,44 @@ public final class ParserGenerator {
             // also seeds pos that way). The first-token of the new node is the current
             // pos. If the rule body matches zero tokens, lastToken stays = firstToken
             // (degenerate), which the builder accepts.
+            var ruleKindForGuard = classification.kinds().getOrDefault(rule.name(), RuleKind.PARSER);
+            // First-token guard, emitted BEFORE beginNode so a rule that cannot possibly match
+            // costs a single peek() instead of a node allocation plus a truncate. Restricted to
+            // PARSER rules: a MIXED rule may match at char level, where peek() is not decisive.
+            if (ruleKindForGuard == RuleKind.PARSER) {
+                mandatoryFirstKinds(rule.expression()).onPresent(firstKinds -> {
+                    var guard = new StringBuilder();
+
+                    for (var kind : firstKinds) {
+                        usedTokenKinds.add(kind);
+                        guard.append(guard.isEmpty()
+                                     ? ""
+                                     : " && ")
+                             .append("peek() != KIND_")
+                             .append(sanitize(kinds.kindNameTable() [kind]));
+                    }
+
+                    sb.append("        if (")
+                      .append(guard)
+                      .append(") { fail(\"")
+                      .append(escapeJavaString(rule.name()))
+                      .append("\", RULE_")
+                      .append(rule.name())
+                      .append("_KIND); return false; }\n");
+                });
+            }
+
+            var memoised = memoRules.contains(rule.name()) && ruleKindForGuard == RuleKind.PARSER;
+            // Memo replay — if this rule already succeeded at this exact token position
+            // and its subtree was salvaged by a backtrack, splice the copy in and skip
+            // the re-parse. See CstArrayBuilder.memoTryReplay for the mechanism.
+            if (memoised) {
+                sb.append("        int memoEnd = cst.memoTryReplay(RULE_")
+                  .append(rule.name())
+                  .append("_KIND, pos, parent);\n");
+                sb.append("        if (memoEnd >= 0) { pos = memoEnd; return true; }\n");
+            }
+
             sb.append("        int firstTok = pos;\n");
             sb.append("        int savedPos = pos;\n");
             sb.append("        int savedNodes = cst.currentNodeCount();\n");
@@ -887,6 +1080,12 @@ public final class ParserGenerator {
             sb.append("        if (lastTok >= tokens.count()) lastTok = tokens.count() - 1;\n");
             sb.append("        if (lastTok < firstTok) lastTok = firstTok;\n");
             sb.append("        cst.endNode(self, lastTok);\n");
+            if (memoised) {
+                sb.append("        cst.memoArm(RULE_")
+                  .append(rule.name())
+                  .append("_KIND, savedPos, pos, savedNodes);\n");
+            }
+
             sb.append("        return true;\n");
             sb.append("    }\n");
 

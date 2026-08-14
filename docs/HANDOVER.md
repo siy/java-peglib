@@ -1,6 +1,191 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-05 — 0.7.0 SHIPPED to Maven Central
+**Last updated:** 2026-08-14 — 0.7.1 at 99.45% agreement, regression closed to ~1.2%, ready to ship
+
+---
+
+## Session 11 — 0.7.1 (2026-08-13 → 08-14) — READY TO SHIP
+
+### State at a glance
+
+| | |
+|---|---|
+| **Branch** | `release-0.7.1`, 54 commits ahead of `main` at `139b7ca`. **No PR yet.** |
+| **Version** | 0.7.1 in all 6 poms; CHANGELOG `[0.7.1] - unreleased`, current |
+| **Build** | `mvn install` (lint + format-check on) — BUILD SUCCESS |
+| **Tests** | **576** across 5 modules, 0 failures, 0 skips |
+| **Probes** | `JavaCoverageProbe` 93/93, `JavaRejectionProbe` 0/0, `ModernJavaSyntaxProbe` 19/19 |
+| **langtools** | **99.45%** (5,614/5,645 scored, 24 excluded) — **re-measured 2026-08-14**, not inherited |
+| **Performance** | **+1.2% vs 0.7.0** on selfhost (was +9.6%) after `%memo Args` |
+| **Working tree** | clean |
+
+### The blocking decision from session 10 is resolved
+
+Session 10 ended on a three-way choice: ship at −9.6%, revert `StmtExpr`, or memoise. **Option 3
+was built and it pays.** `%memo` is a grammar-level directive marking a rule whose successful
+parse is salvaged when backtracking drops it and replayed if the same rule is re-parsed at the
+same token position. Applied as `%memo Args` — *not* `Postfix`, because the JLS 14.8 re-parse
+goes through different rules (`Postfix` vs `Primary CallChain`), so the shareable unit is the
+argument list both paths parse at the same position.
+
+Same-day interleaved A/B (JMH, 2 forks x 10 iterations, otherwise-idle machine):
+
+| variant | reference (1.9k LOC) | selfhost (40k LOC) | vs 0.7.0 |
+|---|---|---|---|
+| 0.7.0 (`139b7ca`) | 2.617 ± 0.044 ms | 66.498 ± 0.661 ms | — |
+| 0.7.1 no memo (`e48c48b`) | 3.195 ± 0.038 ms | 72.830 ± 1.666 ms | +9.5% |
+| **0.7.1 + `%memo Args`** | **2.821 ± 0.014 ms** | **67.307 ± 0.448 ms** | **+1.2%** |
+
+A second round agreed (+9.5% / +3.2%; the memo figure there carried ±3.9 under a load spike, so
++1.2% is the better estimate and +3.2% the pessimistic bound).
+
+### Evidence the memo is semantics-preserving
+
+Replay is an optimisation, so anything observable is a bug. Checked at three levels:
+
+- **43,433 LOC of real Java** (selfhost + FactoryClassGenerator + 21 perf-corpus files) parsed
+  through java25.peg with and without the directive: identical diagnostics, `reconstruct()`,
+  node count and full preorder CST signature on every file.
+- **Error paths**, which the clean-file check could not reach: 10 inputs malformed *inside* an
+  argument list, 16–28 diagnostics each — identical count, identical diagnostic text, identical
+  CST. This mattered because a salvaged subtree can contain an `Error` node while replay does
+  not re-record diagnostics.
+- **Interactions**: `MemoInteractionTest` covers `%memo` alongside a per-rule `%recover` sync set
+  and across incremental reparses. Both were previously arguments rather than tests.
+
+All three memo suites were mutation-checked — breaking the replay's position guard turns them
+red, so they are not passing vacuously.
+
+### Where to pick up, in order
+
+1. **Ship.** PR against `main`, merge, tag `v0.7.1`, deploy. That is the whole remaining list.
+2. Optional, deliberately deferred (see "Still open" below) — none of it blocks the release.
+
+### Things worth not re-learning
+
+- **The corpus check is cheap: ~6 s** once fetched, and the fetch is a 36 MB sparse clone. There
+  is no reason to ship an inherited agreement number. Instructions in
+  `tools/langtools-corpus/README.md`. **Never vendor the corpus** — it is GPLv2, peglib is MIT.
+- **Do not clone repos into a benchmarked machine's temp dir mid-measurement.** Doing exactly
+  that triggered Spotlight (`mds` at 44% CPU, load 13) and produced a run with ±43% error bars
+  that flatly contradicted a clean run twenty minutes earlier. Check `ps`/`uptime` before
+  trusting a surprising delta.
+- **JMH benchmark selection is a regex and the shell here is zsh.** `ARGS="Bench -wi 5"` then
+  `java -jar b.jar $ARGS` passes ONE argument, because zsh does not word-split unquoted
+  expansions. It fails as "No matching benchmarks", exits in under a second, and looks like a
+  benchmark that ran.
+- **`mvn install`, not `mvn -pl peglib-core test`, before committing.** Also: `jbct:format`
+  before committing new main-source code — format-check gates the build and will fail the
+  reactor after all tests pass, which reads confusingly.
+- **PEG repetition is possessive**, and alternative order is semantic, not just cost.
+  Reordering `StmtExpr` for speed silently broke `foo().bar = 1;`. Any reorder needs a corpus
+  re-run, not just a test run.
+- **Profile before optimising.** Repeatedly this release the profiler contradicted a confident
+  hypothesis — the top node-builder was `parseAnnotation`, not the statement rule everyone
+  suspected.
+
+---
+
+## Performance — closed for 0.7.1
+
+Three mitigations landed, in this order: **first-token guard** (−9.9%), **link-on-success CST
+building** (−8.7%), **`%memo Args`** (−7.4%). Net: +33% regression reduced to +1.2%.
+
+### Still open — deliberately not done
+
+Recorded so they are skipped on purpose rather than forgotten. At +1.2% the remaining upside is
+small and each carries real risk:
+
+1. **Extend the first-token guard through references.** It currently fires only for
+   literal-rooted rules. A FIRST-set fixpoint over references would cover far more but must
+   preserve identifier-fallback for contextual keywords — get it wrong and valid code is
+   rejected.
+2. **More `%memo` sites.** `Args` was chosen from a profile. A fresh post-memo profile would say
+   whether anything else repeats; nothing suggests it does.
+3. **Defer `beginNode`'s payload writes to `endNode`.** Mostly superseded by link-on-success
+   (beginNode self time is ~3.6%); would widen the endNode signature and reorder setFlag in the
+   splice path.
+
+**Do NOT retry the `truncate` link-skip.** It was measured (82.380 → 84.644 ms, nominally worse)
+and reverted. `truncate`'s cost is the backward walk, not the link repair: the loop still reads
+`nodes[i * NODE_STRIDE]` for every dropped node, so memory traffic is identical.
+
+### Reproducing the A/B
+
+The bench jar resolves fixtures relative to CWD, so run from `peglib-core/`. Build a baseline by
+cloning rather than stashing — a stash across a parallel agent dispatch has lost work here before:
+
+```bash
+mvn -pl peglib-core -am -Pbench -DskipTests package
+git clone . /tmp/peglib-base -b main    # or any baseline ref
+cd peglib-core && java -jar target/benchmarks.jar Java25LargeFixturesBenchmark -wi 5 -i 10 -f 2
+```
+
+Interleave variants (A,B,A,B) rather than running each to completion — machine drift over a
+10-minute window is larger than the effect being measured.
+
+### Remaining corpus gap
+
+31 disagreements: 10 wrongly rejected (all "trailing input not consumed"), 21 wrongly accepted.
+**19 are permanent by design** — not context-free, deliberate trades, or cases where peglib is
+JLS-correct and javac defers to Attr. Each is dispositioned in `tools/langtools-corpus/README.md`.
+Practical ceiling is ~99.66%; the last stretch chases javac's corners, not correctness.
+
+---
+
+## Session 10 — 0.7.1 (2026-08-06 → 08-09) — superseded by session 11
+
+Kept for the reasoning behind the guard and link-on-success, both of which still ship.
+
+### What landed
+
+**Methodology — the number you inherited was wrong.** The corpus is now differenced against
+**javac's own parse phase** (`JavacTask.parse()`), in both directions, over all 5,666 files. The
+previous "97.8% over 3,555 positive tests" used a heuristic that split the corpus by grepping for
+`@compile/fail` markers; that scored roughly 77 genuine grammar gaps as expected failures, so it
+could not have found more than half of them. True baseline was 95.55%. The heuristic
+(`classify.py`) is deleted. Tooling and the full disposition of every remaining disagreement live
+in `tools/langtools-corpus/`.
+
+| | baseline | now |
+|---|---|---|
+| we wrongly reject | 155 | **10** |
+| we wrongly accept | 73 | **21** |
+| agreement | 95.55% | **99.45%** |
+
+**Engine fixes** (not just grammar): nullable start rules accept empty and comment-only
+compilation units; trailing input after a partial parse is reported instead of silently
+re-parsed as a second document; Unicode escape translation (JLS 3.3) with token spans remapped
+onto the original text so round-trip survives; hex escapes decoded inside character classes;
+opt-in escape-aware delimited blocks; a first-token guard that skips node allocation for
+rules that cannot match; and link-on-success CST building (2026-08-09) that makes
+backtracking rollback O(completed-and-dropped) instead of O(dropped).
+
+**Grammar**: ~40 acceptance fixes and ~25 over-permissiveness fixes. Enumerated in the CHANGELOG.
+
+**Gates that were not running.** Surefire matched only `**/*Test.java` and `**/*Example.java`, so
+`JavaCoverageProbe` and `ModernJavaSyntaxProbe` were compiled but **never executed** — a grammar
+regression would have reached the field with a green build. Fixed. `JavaRejectionProbe` is new:
+the mirror gate for what must be REJECTED, every case paired with a legal near-miss, because the
+cheap way to pass a rejection test is to over-tighten until valid code breaks too.
+
+**Also**: CI unpinned from the stale `25-ea` to `25` GA; two formatter fixtures that contained
+invalid Java (a constructor inside an `interface`) corrected; `IdentifierFallbackTest` corrected
+after checking javac — it asserted that a bare `yield()` call parses, which javac rejects.
+
+### Licensing, and other things worth not re-learning
+
+- **Licensing: never vendor the corpus.** It is GPLv2 (only 38 of 4,261 headers carry the
+  Classpath Exception); peglib is MIT. Fetching at run time and reading is fine; committing
+  files is not. All 240 substantive probe snippets were checked as literal substrings against
+  all 5,667 corpus files — none matches verbatim, and it should stay that way. Details in
+  `tools/langtools-corpus/README.md`.
+- **A duplicated token in formatter output means the PARSE failed**, not that backtracking
+  leaked. Check the diagnostic count before suspecting `CstArrayBuilder.truncate`.
+- **The link-on-success contract:** a node is invisible until `endNode` links it, and every
+  surviving node must be ended exactly once, on its success path. Ending twice double-links.
+  The generated parser, `parseWithRecovery`'s synthetic root, both recovery-error emitters and
+  `CstArray.spliceSubtree` were each verified against this, not assumed.
 
 ---
 
@@ -46,17 +231,20 @@
 
 ### Where to pick up — ordered
 
-1. **Merge `fix/central-publishing-plugin`.** `central-publishing-maven-plugin` was bumped
-   0.6.0 -> 0.11.0 after the release. 0.6.0 cannot deserialize Central's current publish
-   response and dies with `Unrecognized field "warnings"` while polling — it reported
-   `BUILD FAILURE` for a release that had already uploaded and auto-published. Anyone reading
-   only the exit code would have concluded 0.7.0 failed to ship. **Verify a publish by querying
-   repo1 for concrete artifact files, not by trusting the plugin or a directory listing** —
-   directory listings 404 on repo1 even for published artifacts.
+0.7.0 is shipped and its follow-up (PR #39, publishing-plugin bump) is merged. `release-0.7.1`
+is branched from `main` at `139b7ca` with versions bumped and an empty CHANGELOG section; it
+carries no changes of its own yet.
 
-2. **`JsonEncoder` could follow `JsonDecoder`** onto `JsonMapper.writeAsString`. Deliberately
-   deferred: it has zero lint errors and its output shape is what `playground.js` renders, so
-   swapping it risks the SPA wire format for no lint benefit.
+1. **Nothing is outstanding for 0.7.0.** The grammar has no known gaps — `ModernJavaSyntaxProbe`
+   19/19 and `JavaCoverageProbe` 40/40, both asserting.
+
+2. **Candidates for 0.7.1**, none urgent:
+   - `JsonEncoder` could follow `JsonDecoder` onto `JsonMapper.writeAsString`. Deferred because
+     its output shape is what `playground.js` renders and it has zero lint errors.
+   - CI pins `java-version: '25-ea'`. It still resolves, but Java 25 went GA in September 2025,
+     so the early-access label is stale and will eventually break. Unrelated to any release.
+   - ~657 JBCT warnings remain by design; see the warning policy in CLAUDE.md before touching
+     any of them.
 
 ### Things worth not re-learning
 

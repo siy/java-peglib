@@ -34,6 +34,15 @@ import org.pragmatica.peg.source.SourceLocation;
  * accepted without validation (silently ignored by the engine) — matches the
  * relaxed-directive principle used for {@code %recover}.
  *
+ * <p>{@code memoRules} (0.7.1) is the set of rule names declared at grammar level
+ * via {@code %memo RuleName}. These designate rules whose successful parse the
+ * generated parser memoises at a token position, so grammar shapes that re-parse
+ * the same substructure through different enclosing rules (Java's JLS 14.8
+ * statement-expression restriction) replay the subtree instead of re-parsing it.
+ * Purely an optimisation — replay is semantics-preserving, and the generator
+ * ignores the directive entirely for grammars using named captures. Unknown rule
+ * names are accepted without validation, matching {@code checkpointRules}.
+ *
  * <h2>Construction (parse-don't-validate)</h2>
  *
  * <p>Use {@link #grammar(List, Option, Option, Option, List, List)} to build a
@@ -58,17 +67,19 @@ public record Grammar(List<Rule> rules,
                       List<String> suggestRules,
                       List<Import> imports,
                       Map<String, Set<Character>> recoverSets,
-                      Set<String> checkpointRules) {
+                      Set<String> checkpointRules,
+                      Set<String> memoRules) {
     /**
      * Canonical compact constructor. Applies a defensive copy to
-     * {@code checkpointRules} so the record's exposed set is immutable
-     * regardless of how callers construct the instance. Matches the style
-     * used for {@code recoverSets}.
+     * {@code checkpointRules} and {@code memoRules} so the record's exposed
+     * sets are immutable regardless of how callers construct the instance.
+     * Matches the style used for {@code recoverSets}.
      *
      * @since 0.6.1
      */
     public Grammar {
         checkpointRules = Set.copyOf(checkpointRules);
+        memoRules = Set.copyOf(memoRules);
     }
 
     /**
@@ -132,6 +143,27 @@ public record Grammar(List<Rule> rules,
                                           List<Import> imports,
                                           Map<String, Set<Character>> recoverSets,
                                           Set<String> checkpointRules) {
+        return grammar(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, checkpointRules, Set.of());
+    }
+
+    /**
+     * Full factory.
+     *
+     * <p>{@code memoRules} is NOT validated — unknown rule names are accepted
+     * and silently ignored by the generator, matching {@code checkpointRules}.
+     *
+     * @since 0.7.1 — accepts grammar-level {@code memoRules} populated from
+     * {@code %memo RuleName} directives.
+     */
+    public static Result<Grammar> grammar(List<Rule> rules,
+                                          Option<String> startRule,
+                                          Option<Expression> whitespace,
+                                          Option<Expression> word,
+                                          List<String> suggestRules,
+                                          List<Import> imports,
+                                          Map<String, Set<Character>> recoverSets,
+                                          Set<String> checkpointRules,
+                                          Set<String> memoRules) {
         return validate(new Grammar(rules,
                                     startRule,
                                     whitespace,
@@ -139,7 +171,8 @@ public record Grammar(List<Rule> rules,
                                     suggestRules,
                                     imports,
                                     recoverSets,
-                                    checkpointRules));
+                                    checkpointRules,
+                                    memoRules));
     }
 
     /**
@@ -186,7 +219,24 @@ public record Grammar(List<Rule> rules,
                    List<String> suggestRules,
                    List<Import> imports,
                    Map<String, Set<Character>> recoverSets) {
-        this(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, Set.of());
+        this(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, Set.of(), Set.of());
+    }
+
+    /**
+     * Backwards-compatible 8-arg canonical constructor. Defaults
+     * {@code memoRules} to the empty set.
+     *
+     * @since 0.7.1
+     */
+    public Grammar(List<Rule> rules,
+                   Option<String> startRule,
+                   Option<Expression> whitespace,
+                   Option<Expression> word,
+                   List<String> suggestRules,
+                   List<Import> imports,
+                   Map<String, Set<Character>> recoverSets,
+                   Set<String> checkpointRules) {
+        this(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, checkpointRules, Set.of());
     }
 
     /**

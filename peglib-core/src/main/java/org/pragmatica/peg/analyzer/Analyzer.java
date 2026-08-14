@@ -13,6 +13,8 @@ import org.pragmatica.lang.Option;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
+import org.pragmatica.peg.lexer.RuleClassifier;
+import org.pragmatica.peg.lexer.RuleKind;
 
 
 /**
@@ -38,6 +40,10 @@ import org.pragmatica.peg.grammar.Rule;
  *   <li>{@code grammar.has-backreference} — rules containing any
  *       {@link Expression.BackReference}. Forward-compatibility note for
  *       incremental parsing. Severity: INFO.</li>
+ *   <li>{@code grammar.memo-unknown-rule} — a {@code %memo} directive naming a
+ *       rule the grammar does not define. Severity: WARNING.</li>
+ *   <li>{@code grammar.memo-non-parser-rule} — a {@code %memo} directive on a
+ *       LEXER or MIXED rule. Only PARSER rules are memoised. Severity: WARNING.</li>
  * </ol>
  */
 public final class Analyzer {
@@ -63,6 +69,7 @@ public final class Analyzer {
         findings.addAll(checkDuplicateLiterals());
         findings.addAll(checkWhitespaceCycle());
         findings.addAll(checkBackReferences());
+        findings.addAll(checkMemoRules());
         // Stable sort: by rule name, then tag, then severity. Ensures deterministic output.
         findings.sort(Comparator.<Finding, String> comparing(Finding::ruleName)
                                 .thenComparing(Finding::tag)
@@ -549,5 +556,45 @@ public final class Analyzer {
             case Expression.Group grp -> containsBackReference(grp.expression());
             default -> false;
         };
+    }
+
+    // === Check 7: %memo directives that silently do nothing ===
+    //
+    // Both failure modes are accepted without complaint by the front-end (the
+    // relaxed-directive principle shared with %recover and %checkpoint) and then
+    // dropped at codegen, so without a finding the only symptom is that the
+    // expected speedup does not appear.
+    private List<Finding> checkMemoRules() {
+        if (grammar.memoRules().isEmpty()) {
+            return List.of();
+        }
+
+        var findings = new ArrayList<Finding>();
+        var ruleMap = grammar.ruleMap();
+        // A grammar that fails classification has bigger problems, and the other
+        // checks report them; skip the kind-dependent finding rather than guess.
+        var kinds = RuleClassifier.classify(grammar).map(RuleClassifier.Classification::kinds).or(Map::of);
+
+        for (var name : grammar.memoRules()) {
+            if (!ruleMap.containsKey(name)) {
+                findings.add(Finding.warning("grammar.memo-unknown-rule",
+                                             name,
+                                             "'%memo " + name
+                                            + "' names no rule in this grammar; the directive is ignored"));
+                continue;
+            }
+
+            var kind = kinds.get(name);
+
+            if (kind != null && kind != RuleKind.PARSER) {
+                findings.add(Finding.warning("grammar.memo-non-parser-rule",
+                                             name,
+                                             "'%memo " + name
+                                            + "' targets a " + kind
+                                            + " rule; only PARSER rules are memoised, so the directive is ignored"));
+            }
+        }
+
+        return findings;
     }
 }

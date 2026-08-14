@@ -1376,6 +1376,23 @@ public final class DfaBuilder {
         }
 
         var bodyInner = unwrapAcceptableWrappers(zom.expression());
+        // Opt-in escape awareness. A body written as "('\\' . / !CLOSE .)*" asks for the
+        // backslash-escape rule: a backslash consumes the following character whole, so an
+        // escaped delimiter does not terminate the block. Java text blocks need this
+        // ('\\\"\"\"' is an escaped quote, not a close), while block comments must NOT have it
+        // — /* ... \\*/ DOES end a comment. Keying it to the grammar shape keeps the two apart.
+        var escapeAware = false;
+
+        if (bodyInner instanceof Expression.Choice bodyChoice && bodyChoice.alternatives().size() == 2) {
+            var escAlt = unwrapAcceptableWrappers(bodyChoice.alternatives().get(0));
+
+            if (escAlt instanceof Expression.Sequence escSeq && escSeq.elements().size() == 2 && unwrapAcceptableWrappers(escSeq.elements()
+                                                                                                                                .get(0)) instanceof Expression.Literal escLit && "\\".equals(escLit.text()) && unwrapAcceptableWrappers(escSeq.elements()
+                                                                                                                                                                                                                                              .get(1)) instanceof Expression.Any) {
+                escapeAware = true;
+                bodyInner = unwrapAcceptableWrappers(bodyChoice.alternatives().get(1));
+            }
+        }
 
         if (! (bodyInner instanceof Expression.Sequence bodySeq) || bodySeq.elements().size() != 2) {
             return Option.none();
@@ -1409,7 +1426,7 @@ public final class DfaBuilder {
             return Option.none();
         }
 
-        return Option.some(buildDelimitedBlockFragment(nfa, openText, closeText));
+        return Option.some(buildDelimitedBlockFragment(nfa, openText, closeText, escapeAware));
     }
 
     /**
@@ -1427,7 +1444,10 @@ public final class DfaBuilder {
      * to the longest proper suffix of {@code delim[0..k] + b} that is also
      * a prefix of {@code delim} (computed via the standard prefix function).
      */
-    private static Fragment buildDelimitedBlockFragment(Nfa nfa, String openDelim, String closeDelim) {
+    private static Fragment buildDelimitedBlockFragment(Nfa nfa,
+                                                        String openDelim,
+                                                        String closeDelim,
+                                                        boolean escapeAware) {
         int n = closeDelim.length();
         // KMP-style failure function on the CLOSING delimiter — the body loop
         // only ever tracks how close we are to seeing the close.
@@ -1470,12 +1490,33 @@ public final class DfaBuilder {
         // For each body state k in 0..n-1, install transitions for every
         // ASCII byte b: advance to state[k+1] if b matches closeDelim[k],
         // otherwise collapse via the failure function.
+        // When escape-aware, a backslash routes to a dedicated skip state INSTEAD of taking the
+        // usual KMP transition. Adding both would leave the subset construction holding the
+        // KMP branch as well, so an escaped delimiter would still be able to close the block.
+        var skip = escapeAware
+                   ? nfa.newState()
+                   : -1;
+
         for (int k = 0; k < n; k++) {
             for (int b = 0; b < ALPHABET; b++) {
+                if (escapeAware && b == '\\') {
+                    nfa.addCharEdge(state[k], b, skip);
+                    continue;
+                }
+
                 int target = nextDelimitedState(closeDelim, fail, k, (char) b);
 
                 nfa.addCharEdge(state[k], b, state[target]);
             }
+        }
+
+        if (escapeAware) {
+            // The escaped character is consumed whole and the partial match restarts.
+            for (int b = 0; b < ALPHABET; b++) {
+                nfa.addCharEdge(skip, b, state[0]);
+            }
+
+            nfa.addNonAsciiEdge(skip, state[0]);
         }
         // 0.6.0 — non-ASCII characters never match any byte of the close
         // delimiter (the delimiter is ASCII text), so they always reset the
@@ -1796,8 +1837,8 @@ public final class DfaBuilder {
             int afterFirst;
 
             if (c1 == '\\' && i + 1 < n) {
-                firstChar = decodeEscape(pattern.charAt(i + 1));
-                afterFirst = i + 2;
+                firstChar = decodeEscapeValueAt(pattern, i);
+                afterFirst = escapeEndAt(pattern, i);
             } else {
                 firstChar = c1;
                 afterFirst = i + 1;
@@ -1810,8 +1851,8 @@ public final class DfaBuilder {
                 int advance;
 
                 if (endChar == '\\' && rangeEndStart + 1 < n) {
-                    endDecoded = decodeEscape(pattern.charAt(rangeEndStart + 1));
-                    advance = (rangeEndStart + 2) - i;
+                    endDecoded = decodeEscapeValueAt(pattern, rangeEndStart);
+                    advance = escapeEndAt(pattern, rangeEndStart) - i;
                 } else {
                     endDecoded = endChar;
                     advance = (rangeEndStart + 1) - i;
@@ -1835,6 +1876,74 @@ public final class DfaBuilder {
         }
 
         return mask;
+    }
+
+    /**
+     * Decode the escape sequence starting at {@code i} (which must index a backslash),
+     * returning the character value it denotes.
+     *
+     * <p>{@link GrammarLexer} deliberately preserves the FULL escape text inside a character
+     * class ({@code \\x20}, {@code \\u00e9}) so it can be decoded here. Reading only the single
+     * character after the backslash silently mis-parsed those: {@code [\\x20]} became the three
+     * members {@code 'x'}, {@code '2'}, {@code '0'}, and in a range the leftover digits formed a
+     * bogus second range. {@code [\\x61-\\x7a]} appeared to work purely by accident — the stray
+     * {@code '-'} produced the range {@code '-'..'x'}, which happens to cover the lowercase
+     * letters it was meant to match. Negated classes had no such luck and matched nothing.
+     */
+    private static int decodeEscapeValueAt(String pattern, int i) {
+        var n = pattern.length();
+        var esc = pattern.charAt(i + 1);
+
+        if (esc == 'x' && i + 4 <= n) {
+            var value = parseHex(pattern, i + 2, 2);
+
+            if (value >= 0) {
+                return value;
+            }
+        }
+
+        if (esc == 'u' && i + 6 <= n) {
+            var value = parseHex(pattern, i + 2, 4);
+
+            if (value >= 0) {
+                return value;
+            }
+        }
+
+        return decodeEscape(esc);
+    }
+
+    /** Index just past the escape sequence starting at {@code i}; mirrors {@link #decodeEscapeValueAt}. */
+    private static int escapeEndAt(String pattern, int i) {
+        var n = pattern.length();
+        var esc = pattern.charAt(i + 1);
+
+        if (esc == 'x' && i + 4 <= n && parseHex(pattern, i + 2, 2) >= 0) {
+            return i + 4;
+        }
+
+        if (esc == 'u' && i + 6 <= n && parseHex(pattern, i + 2, 4) >= 0) {
+            return i + 6;
+        }
+
+        return i + 2;
+    }
+
+    /** Value of {@code digits} hex characters at {@code from}, or -1 if any is not hex. */
+    private static int parseHex(String pattern, int from, int digits) {
+        var value = 0;
+
+        for (var k = from; k < from + digits; k++) {
+            var d = Character.digit(pattern.charAt(k), 16);
+
+            if (d < 0) {
+                return -1;
+            }
+
+            value = value * 16 + d;
+        }
+
+        return value;
     }
 
     private static int decodeEscape(char esc) {
