@@ -1,23 +1,31 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-14 — 0.7.1 at 99.45% agreement, regression closed to ~1.2%, ready to ship
+**Last updated:** 2026-08-14 — 0.7.1 SHIPPED to Maven Central
 
 ---
 
-## Session 11 — 0.7.1 (2026-08-13 → 08-14) — READY TO SHIP
+## Session 11 — 0.7.1 (2026-08-13 → 08-14) — SHIPPED
 
 ### State at a glance
 
 | | |
 |---|---|
-| **Branch** | `release-0.7.1`, 54 commits ahead of `main` at `139b7ca`. **No PR yet.** |
-| **Version** | 0.7.1 in all 6 poms; CHANGELOG `[0.7.1] - unreleased`, current |
+| **Ship state** | **SHIPPED.** PR #40 merged; tag `v0.7.1` at `98837e2`; live on Maven Central, all 6 artifacts with sources, javadoc and GPG signatures verified on repo1. |
+| **Version** | 0.7.1 in all 6 poms; CHANGELOG `[0.7.1] - 2026-08-14` |
 | **Build** | `mvn install` (lint + format-check on) — BUILD SUCCESS |
 | **Tests** | **576** across 5 modules, 0 failures, 0 skips |
 | **Probes** | `JavaCoverageProbe` 93/93, `JavaRejectionProbe` 0/0, `ModernJavaSyntaxProbe` 19/19 |
 | **langtools** | **99.45%** (5,614/5,645 scored, 24 excluded) — **re-measured 2026-08-14**, not inherited |
 | **Performance** | **+1.2% vs 0.7.0** on selfhost (was +9.6%) after `%memo Args` |
 | **Working tree** | clean |
+
+> Release mechanics, since no `RELEASE.md` exists and the old handover pointed at one that never
+> did: sources, javadoc and GPG signing all live in the **`release` profile**, and the publish is
+> **manual** — no CI job is tag-triggered. The command is `mvn -Prelease deploy`. The pom sets
+> `autoPublish=true` with `waitUntil=published`, so there is **no staging gate**: the deploy goes
+> straight to Central and artifacts there are immutable. A mistake ships 0.7.2, it does not roll
+> back. `central-publishing-maven-plugin` is pinned to 0.11.0 because 0.6.0 reported BUILD FAILURE
+> for the 0.7.0 release that had in fact succeeded.
 
 ### The blocking decision from session 10 is resolved
 
@@ -58,8 +66,19 @@ red, so they are not passing vacuously.
 
 ### Where to pick up, in order
 
-1. **Ship.** PR against `main`, merge, tag `v0.7.1`, deploy. That is the whole remaining list.
-2. Optional, deliberately deferred (see "Still open" below) — none of it blocks the release.
+0.7.1 is shipped; there is no outstanding release work. Whatever comes next starts from a clean
+`main` at `98837e2`.
+
+1. **Nothing is blocking.** The deferred perf items under "Still open" are the only known backlog,
+   and at +1.2% none of them is worth the risk on its own — revisit only if a future change
+   reopens the gap.
+2. **If the grammar changes materially, re-run the corpus check** before shipping. It is ~6 s once
+   fetched and there is no excuse for quoting an inherited agreement number
+   (`tools/langtools-corpus/README.md`).
+3. **Consider trimming `docs/`.** Four links pointed at files moved into `docs/archive/` and went
+   unnoticed across two releases; `PERF-FLAGS.md` still documents `ParserConfig`, deleted in 0.6.0.
+   They are repointed and labelled now, but the underlying rot is that archived design docs are
+   still referenced from live ones.
 
 ### Things worth not re-learning
 
