@@ -152,6 +152,7 @@ e{3}  e{2,}  e{2,5}          # bounded repetition
 %recover <CharSet> Rule      # per-rule synchronization set for error recovery
 %checkpoint Rule             # incremental-reparse boundary
 %suggest Rule "message"      # diagnostic hint for parse failures
+%memo Rule                   # cache a rule re-parsed at the same position (0.7.1)
 ```
 
 See [`docs/GRAMMAR-DSL.md`](docs/GRAMMAR-DSL.md) for the full reference.

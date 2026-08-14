@@ -1,40 +1,141 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-09 — 0.7.1 at 99.45% agreement with javac; regression cut to ~10%, ship decision open
+**Last updated:** 2026-08-14 — 0.7.1 at 99.45% agreement, regression closed to ~1.2%, ready to ship
 
 ---
 
-## Session 10 — 0.7.1 (2026-08-06 → 08-09) — NOT SHIPPED, one decision blocking
+## Session 11 — 0.7.1 (2026-08-13 → 08-14) — READY TO SHIP
 
 ### State at a glance
 
 | | |
 |---|---|
-| **Branch** | `release-0.7.1`, 43 commits ahead of `main` at `139b7ca`. **No PR yet.** |
-| **Version** | 0.7.1 in all 6 poms; CHANGELOG `[0.7.1] - unreleased`, rewritten and current |
+| **Branch** | `release-0.7.1`, 54 commits ahead of `main` at `139b7ca`. **No PR yet.** |
+| **Version** | 0.7.1 in all 6 poms; CHANGELOG `[0.7.1] - unreleased`, current |
 | **Build** | `mvn install` (lint + format-check on) — BUILD SUCCESS |
-| **Tests** | **551** across 5 modules, 0 failures, 0 skips (was 528) |
-| **Probes** | `JavaCoverageProbe` 93/93, `JavaRejectionProbe` 0 over-permissive / 0 over-tightened, `ModernJavaSyntaxProbe` 19/19 — **all three now actually execute** |
-| **langtools** | **99.45%** agreement with javac's parse phase (5,611 / 5,642 scored, 24 excluded) |
-| **Performance** | **~9.6% slower than 0.7.0** after link-on-success landed 2026-08-09 (was ~20%). See below — ship decision still open |
+| **Tests** | **576** across 5 modules, 0 failures, 0 skips |
+| **Probes** | `JavaCoverageProbe` 93/93, `JavaRejectionProbe` 0/0, `ModernJavaSyntaxProbe` 19/19 |
+| **langtools** | **99.45%** (5,614/5,645 scored, 24 excluded) — **re-measured 2026-08-14**, not inherited |
+| **Performance** | **+1.2% vs 0.7.0** on selfhost (was +9.6%) after `%memo Args` |
 | **Working tree** | clean |
 
-### The one thing blocking a release
+### The blocking decision from session 10 is resolved
 
-0.7.1 parses ~9.6% slower than 0.7.0 (was ~33% before the first-token guard, ~20% before
-link-on-success — both now landed). What remains is the price of the JLS 14.8
-statement-expression restriction: the profile puts the cost in parse work (`parsePostfix` in
-46% of samples), not node churn — the builder levers are spent. It needs a decision, not more
-investigation:
+Session 10 ended on a three-way choice: ship at −9.6%, revert `StmtExpr`, or memoise. **Option 3
+was built and it pays.** `%memo` is a grammar-level directive marking a rule whose successful
+parse is salvaged when backtracking drops it and replayed if the same rule is re-parsed at the
+same token position. Applied as `%memo Args` — *not* `Postfix`, because the JLS 14.8 re-parse
+goes through different rules (`Postfix` vs `Primary CallChain`), so the shareable unit is the
+argument list both paths parse at the same position.
 
-1. **Ship at −9.6%.** Correctness improved substantially; throughput regression now modest.
-2. **Revert `StmtExpr` to plain `Expr`.** Restores speed, gives back ~6 files of agreement, and
-   re-admits `(a);` and `a.b;` as statements. A product call.
-3. **Memoise `Postfix` at a position first.** The only remaining lever that attacks the double
-   parse. Unmeasured; packrat was dropped in 0.6.0, so this would be a single-rule cache, not
-   a revival. Measure before believing it.
+Same-day interleaved A/B (JMH, 2 forks x 10 iterations, otherwise-idle machine):
 
-Do not ship without choosing one.
+| variant | reference (1.9k LOC) | selfhost (40k LOC) | vs 0.7.0 |
+|---|---|---|---|
+| 0.7.0 (`139b7ca`) | 2.617 ± 0.044 ms | 66.498 ± 0.661 ms | — |
+| 0.7.1 no memo (`e48c48b`) | 3.195 ± 0.038 ms | 72.830 ± 1.666 ms | +9.5% |
+| **0.7.1 + `%memo Args`** | **2.821 ± 0.014 ms** | **67.307 ± 0.448 ms** | **+1.2%** |
+
+A second round agreed (+9.5% / +3.2%; the memo figure there carried ±3.9 under a load spike, so
++1.2% is the better estimate and +3.2% the pessimistic bound).
+
+### Evidence the memo is semantics-preserving
+
+Replay is an optimisation, so anything observable is a bug. Checked at three levels:
+
+- **43,433 LOC of real Java** (selfhost + FactoryClassGenerator + 21 perf-corpus files) parsed
+  through java25.peg with and without the directive: identical diagnostics, `reconstruct()`,
+  node count and full preorder CST signature on every file.
+- **Error paths**, which the clean-file check could not reach: 10 inputs malformed *inside* an
+  argument list, 16–28 diagnostics each — identical count, identical diagnostic text, identical
+  CST. This mattered because a salvaged subtree can contain an `Error` node while replay does
+  not re-record diagnostics.
+- **Interactions**: `MemoInteractionTest` covers `%memo` alongside a per-rule `%recover` sync set
+  and across incremental reparses. Both were previously arguments rather than tests.
+
+All three memo suites were mutation-checked — breaking the replay's position guard turns them
+red, so they are not passing vacuously.
+
+### Where to pick up, in order
+
+1. **Ship.** PR against `main`, merge, tag `v0.7.1`, deploy. That is the whole remaining list.
+2. Optional, deliberately deferred (see "Still open" below) — none of it blocks the release.
+
+### Things worth not re-learning
+
+- **The corpus check is cheap: ~6 s** once fetched, and the fetch is a 36 MB sparse clone. There
+  is no reason to ship an inherited agreement number. Instructions in
+  `tools/langtools-corpus/README.md`. **Never vendor the corpus** — it is GPLv2, peglib is MIT.
+- **Do not clone repos into a benchmarked machine's temp dir mid-measurement.** Doing exactly
+  that triggered Spotlight (`mds` at 44% CPU, load 13) and produced a run with ±43% error bars
+  that flatly contradicted a clean run twenty minutes earlier. Check `ps`/`uptime` before
+  trusting a surprising delta.
+- **JMH benchmark selection is a regex and the shell here is zsh.** `ARGS="Bench -wi 5"` then
+  `java -jar b.jar $ARGS` passes ONE argument, because zsh does not word-split unquoted
+  expansions. It fails as "No matching benchmarks", exits in under a second, and looks like a
+  benchmark that ran.
+- **`mvn install`, not `mvn -pl peglib-core test`, before committing.** Also: `jbct:format`
+  before committing new main-source code — format-check gates the build and will fail the
+  reactor after all tests pass, which reads confusingly.
+- **PEG repetition is possessive**, and alternative order is semantic, not just cost.
+  Reordering `StmtExpr` for speed silently broke `foo().bar = 1;`. Any reorder needs a corpus
+  re-run, not just a test run.
+- **Profile before optimising.** Repeatedly this release the profiler contradicted a confident
+  hypothesis — the top node-builder was `parseAnnotation`, not the statement rule everyone
+  suspected.
+
+---
+
+## Performance — closed for 0.7.1
+
+Three mitigations landed, in this order: **first-token guard** (−9.9%), **link-on-success CST
+building** (−8.7%), **`%memo Args`** (−7.4%). Net: +33% regression reduced to +1.2%.
+
+### Still open — deliberately not done
+
+Recorded so they are skipped on purpose rather than forgotten. At +1.2% the remaining upside is
+small and each carries real risk:
+
+1. **Extend the first-token guard through references.** It currently fires only for
+   literal-rooted rules. A FIRST-set fixpoint over references would cover far more but must
+   preserve identifier-fallback for contextual keywords — get it wrong and valid code is
+   rejected.
+2. **More `%memo` sites.** `Args` was chosen from a profile. A fresh post-memo profile would say
+   whether anything else repeats; nothing suggests it does.
+3. **Defer `beginNode`'s payload writes to `endNode`.** Mostly superseded by link-on-success
+   (beginNode self time is ~3.6%); would widen the endNode signature and reorder setFlag in the
+   splice path.
+
+**Do NOT retry the `truncate` link-skip.** It was measured (82.380 → 84.644 ms, nominally worse)
+and reverted. `truncate`'s cost is the backward walk, not the link repair: the loop still reads
+`nodes[i * NODE_STRIDE]` for every dropped node, so memory traffic is identical.
+
+### Reproducing the A/B
+
+The bench jar resolves fixtures relative to CWD, so run from `peglib-core/`. Build a baseline by
+cloning rather than stashing — a stash across a parallel agent dispatch has lost work here before:
+
+```bash
+mvn -pl peglib-core -am -Pbench -DskipTests package
+git clone . /tmp/peglib-base -b main    # or any baseline ref
+cd peglib-core && java -jar target/benchmarks.jar Java25LargeFixturesBenchmark -wi 5 -i 10 -f 2
+```
+
+Interleave variants (A,B,A,B) rather than running each to completion — machine drift over a
+10-minute window is larger than the effect being measured.
+
+### Remaining corpus gap
+
+31 disagreements: 10 wrongly rejected (all "trailing input not consumed"), 21 wrongly accepted.
+**19 are permanent by design** — not context-free, deliberate trades, or cases where peglib is
+JLS-correct and javac defers to Attr. Each is dispositioned in `tools/langtools-corpus/README.md`.
+Practical ceiling is ~99.66%; the last stretch chases javac's corners, not correctness.
+
+---
+
+## Session 10 — 0.7.1 (2026-08-06 → 08-09) — superseded by session 11
+
+Kept for the reasoning behind the guard and link-on-success, both of which still ship.
 
 ### What landed
 
@@ -72,182 +173,19 @@ cheap way to pass a rejection test is to over-tighten until valid code breaks to
 invalid Java (a constructor inside an `interface`) corrected; `IdentifierFallbackTest` corrected
 after checking javac — it asserted that a bare `yield()` call parses, which javac rejects.
 
-### Where to pick up, in order
-
-1. **Decide the performance question above.** Everything else is downstream of it.
-2. **If continuing on speed**: memoise `Postfix` at a position (see the performance section).
-   Link-on-success is DONE (2026-08-09). Do NOT retry the `truncate` link-skip — it was
-   measured and does not pay; the reason is recorded.
-3. **Remaining corpus gap**: 31 disagreements, of which **19 are permanent by design** (not
-   context-free, deliberate trades, or cases where peglib is JLS-correct and javac defers to
-   Attr). Each is dispositioned in `tools/langtools-corpus/README.md`. Practical ceiling is
-   ~99.66%; the last stretch chases javac's corners, not correctness.
-4. **Then ship**: PR against `main`, merge, tag `v0.7.1`, deploy. `docs/RELEASE.md` /
-   prior session notes cover the Maven Central mechanics.
-
-### Things worth not re-learning
+### Licensing, and other things worth not re-learning
 
 - **Licensing: never vendor the corpus.** It is GPLv2 (only 38 of 4,261 headers carry the
   Classpath Exception); peglib is MIT. Fetching at run time and reading is fine; committing
   files is not. All 240 substantive probe snippets were checked as literal substrings against
   all 5,667 corpus files — none matches verbatim, and it should stay that way. Details in
   `tools/langtools-corpus/README.md`.
-- **`mvn install`, not `mvn -pl peglib-core test`, before committing a structural grammar
-  change.** A change can pass all 347 core tests and still break the formatter round-trip,
-  which lives in another module. That happened once this session.
-- **PEG repetition is possessive, and it bites in non-obvious places.** `Modifier* StaticKW`
-  can never match. `Primary PostOp* CallOp` can never match. `PostOp` spells its call as an
-  optional group, so it swallows a trailing call whole. The fixes are a `!Guard` prefix,
-  right-recursion (`Chain <- Op Chain / Terminal`), or a variant rule that stops short.
-- **Alternative order in a PEG is semantic, not just cost.** Reordering `StmtExpr` for speed
-  silently broke `foo().bar = 1;`, because the invocation form matched the *prefix* `foo()`.
-  Any reorder needs a corpus re-run, not just a test run.
-- **Profile before optimising — three times this session the profiler contradicted a confident
-  hypothesis.** The top node-builder was `parseAnnotation`, not the statement rule everyone
-  (including me) suspected.
 - **A duplicated token in formatter output means the PARSE failed**, not that backtracking
   leaked. Check the diagnostic count before suspecting `CstArrayBuilder.truncate`.
-
----
-
-## Performance regression — partially recovered, NOT closed
-
-**0.7.1 parses ~9.6% slower than 0.7.0** after two mitigations (was ~33%). Same-day A/B of
-2026-08-09, 2 forks x 10 iterations. Cross-day numbers on this box are NOT comparable — the
-day's first baseline attempt measured 75.188 +- 20.668 ms and was discarded; a clean re-run
-minutes later gave 66.634 +- 0.328:
-
-| variant | reference (1.9k LOC) | selfhost (40k LOC) | agreement |
-|---|---|---|---|
-| 0.7.0 (main) | 2.672 +- 0.018 ms | 66.634 +- 0.328 ms | — |
-| 0.7.1 guard only (f717163) | 3.312 +- 0.015 ms | 79.969 +- 0.387 ms (+20.0%) | 99.45% |
-| **0.7.1 + link-on-success** | **3.157 +- 0.024 ms** | **73.040 +- 0.193 ms (+9.6%)** | **99.45%** |
-
-Previous-session figures (different machine state — do not mix into this table): 0.7.0 68.683,
-0.7.1 before any mitigation 91.459, guard-only 82.380, rejected grammar reorder 82.098.
-
-Reproduce (bench jar resolves fixtures relative to CWD, so run from `peglib-core/`):
-
-```bash
-mvn -pl peglib-core -am -Pbench -DskipTests package
-cd peglib-core && java -jar target/benchmarks.jar Java25LargeFixturesBenchmark -wi 5 -i 10 -f 2
-```
-
-Baseline: `git clone . /tmp/peglib-main -b main` and build the same jar there. Do NOT compare
-against the 0.6.2-era figures (2.68 / 71.9 ms) — different machine state. A single-run delta on
-this box is untrustworthy below ~15%; the first attempt at this measurement had +-65% error on
-the baseline and was unusable.
-
-### Cause, from the profiler (not from theory)
-
-`async-profiler`, cpu event, selfhost:
-
-- **37.6%** of all samples are inside `CstArrayBuilder`
-- self time: `truncate` 10.1%, `beginNode` 9.9%, `fail` 8.3%, `linkAsChildOf` 4.7%
-- attributing node-building to the calling rule: **`parseAnnotation` 15.9%**, `parseTypeArgs`
-  6.6%, `parseAnnotatedTypeName` 6.6%
-
-The surprise was that the top contributor is NOT the JLS 14.8 statement-expression rule added in
-this release. It is `Annotation*`, which appears in Type, Param, ClassMember, Dims, TypeArg and
-the pattern rules: on the overwhelmingly common no-annotation case each site allocated a CST
-node, tried `'@'`, failed, and truncated.
-
-### What shipped: a first-token guard
-
-`ParserGenerator.mandatoryFirstKinds` computes, conservatively, the token kinds that must start a
-rule. When they are known, a `peek()` guard is emitted BEFORE `beginNode`, so a rule that cannot
-match costs one comparison instead of a node allocation plus a truncate.
-
-Deliberately conservative — anything not provably literal-rooted gets no guard, and a
-`Reference` always bails because a referenced rule may carry an identifier fallback for
-contextual keywords, and narrowing its first set would reject valid input. Restricted to PARSER
-rules; a MIXED rule can match at char level where `peek()` is not decisive.
-
-Result: **selfhost 91.459 -> 82.380 ms (-9.9%), agreement unchanged at 99.45%.** It matches the
-speedup of the rejected grammar reorder (82.098 ms) while costing nothing in correctness, which
-is why the reorder was dropped in its favour.
-
-### Node-churn work: two wins, one measured failure
-
-**Landed (kept): first-token guard.** selfhost 91.459 -> 82.380 ms, agreement unchanged.
-**Landed (kept): link-on-success** — the section below.
-
-**Tried and reverted: skipping link-repair in `truncate` for dropped parents.** When an
-alternative fails it drops a whole subtree, so nearly every dropped node's parent is dropped
-too and the link-undo is provably pointless. Adding `if (parent >= newCount) continue;` is
-correct and looks free.
-
-It measured as **no improvement** — selfhost 82.380 +- 1.995 -> 84.644 +- 1.703, nominally
-worse, ranges overlapping. Reverted.
-
-The reason matters more than the result: `truncate`'s cost is the **backward walk**, not the
-link repair. The loop still reads `nodes[i * NODE_STRIDE]` for every dropped node to find its
-parent, so the memory traffic is identical; the skip only avoided two writes into cache lines
-that were already hot. **Do not retry this.**
-
-### Landed: link on success, not on begin (2026-08-09)
-
-`beginNode` used to do two things — reserve the slot AND link the node into its parent. The
-linking was why `truncate` had to walk the dropped range undoing links. `linkAsChildOf` now
-runs from `endNode`: a node that fails before ending was never linked and needs no repair.
-
-- `truncate` for the dominant begin-fail-truncate churn (no completed children) reduces to a
-  counter reset — its 10.1% self time fell to 4.5%
-- the `lastChildBefore` undo log is deleted; `beginNode` self time fell 9.9% -> 3.6%
-
-One refinement over the design as originally written: "nothing to undo" was not quite true.
-A child that COMPLETES inside a later-failing choice alternative is linked into a SURVIVING
-parent, and that link still must be undone. `CstArrayBuilder` keeps a compact link journal —
-one (child, previousLastChild) pair per endNode — and `truncate` pops the suffix whose child
-index falls in the dropped range. The suffix-pop is sound because savepoints are strictly
-nested in the generated code: every endNode between a savepoint and its truncate belongs to a
-node allocated after the savepoint (ending an older node would require returning out of the
-rule invocation holding the savepoint). Cost is O(completed-and-dropped).
-
-The contract change to keep in mind: **a node is invisible until endNode links it, and every
-surviving node must be ended exactly once, on its success path.** Ending twice would
-double-link. The generated parser, `parseWithRecovery`'s synthetic root, both recovery-error
-emitters, and `CstArray.spliceSubtree` all already followed this discipline; they were each
-verified, not assumed.
-
-Verified as this section demanded: full `mvn install` — 551 tests, 0 failures — including the
-`FormatterCorpusGateTest` round-trip and the `Java25ParserGateTest` CST-shape assertion;
-`SpliceSubtreeTest` / `FindCheckpointAncestorTest` cover the incremental splice layout. No
-grammar or parse-logic change, so agreement is untouched. Result: selfhost 79.969 -> 73.040 ms
-(-8.7%), reference 3.312 -> 3.157 ms (-4.7%), both with non-overlapping CIs.
-
-Post-change profile (550 samples, directional): top self-time frames are `GParser.fail`
-(11.6%) and `GLexer.lex`; `linkAsChildOf` ~3.8% (same work as before, moved to end-time).
-`parsePostfix` appears in 46% of samples, `parseStmtExpr` in 42% — the remaining gap is the
-JLS 14.8 double-Postfix parse, exactly as predicted below. Deferring `beginNode`'s payload
-writes (the "counter bump" half of the original design) was deliberately NOT done: its ceiling
-is beginNode's remaining ~3.6%, and it would widen the endNode signature and reorder setFlag
-in the splice path — API churn the remaining win does not justify.
-
-### The other half of the gap is not allocation
-
-Even with node churn at zero, `StmtExpr` still parses `Postfix` twice on assignments. That is
-parsing work — token comparisons, rule dispatch, recursion — and no CST-builder change removes a
-second traversal. Only memoising `Postfix` at a position, or relaxing the JLS 14.8 restriction,
-addresses it.
-
-### Still open — roughly 10%
-
-1. **Memoise `Postfix` at a position.** Now the dominant lever: `parsePostfix` shows in 46% of
-   profile samples via the JLS 14.8 double parse. Packrat was dropped in 0.6.0 as unnecessary
-   under the tokens-first design; this would be a single-rule cache, not a revival. Measure
-   before believing it.
-2. **Extend the guard through references.** It currently fires only for literal-rooted rules.
-   A proper FIRST-set fixpoint over references would cover far more, but must preserve the
-   identifier-fallback behaviour for contextual keywords — get that wrong and valid code is
-   rejected.
-3. **Defer `beginNode`'s payload writes to `endNode`.** Mostly superseded by link-on-success:
-   beginNode self time is down to ~3.6%, and the change would widen the endNode signature and
-   reorder setFlag in the splice path. Recorded so it is skipped deliberately, not forgotten.
-
-The remaining gap is the price of the JLS 14.8 statement-expression restriction. Reverting it
-would restore the speed and give back ~6 files of agreement — a product call, recorded here so
-it is made deliberately rather than by default.
+- **The link-on-success contract:** a node is invisible until `endNode` links it, and every
+  surviving node must be ended exactly once, on its success path. Ending twice double-links.
+  The generated parser, `parseWithRecovery`'s synthetic root, both recovery-error emitters and
+  `CstArray.spliceSubtree` were each verified against this, not assumed.
 
 ---
 

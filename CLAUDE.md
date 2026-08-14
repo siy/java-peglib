@@ -279,7 +279,7 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**551 tests across 5 modules**, 0 failures, 0 skips. The count dropped from 1445 in 0.6.3 because
+**576 tests across 5 modules**, 0 failures, 0 skips. The count dropped from 1445 in 0.6.3 because
 the 0.5.x interpreter and its parity suites were deleted, not because coverage was lost.
 
 Notable test classes for verification gates:
@@ -293,6 +293,8 @@ Notable test classes for verification gates:
   that byte-equal reconstruction alone would pass
 - `FactoryClassGeneratorDiagTest` — real-world 1900-LOC parse (0 diagnostics)
 - `Java25BisectTest` — minimal-snippet bisection helper for grammar triage
+- `MemoInteractionTest` — `%memo` against per-rule `%recover` and incremental reparse; all three
+  memo suites are mutation-checked, so breaking the replay position guard turns them red
 - `IncrementalEditBenchmark` — edit latency p50/p99 in `src/jmh/`
 - `Java25LargeFixturesBenchmark` — warm parse on reference + selfhost fixtures
 - `JavacParseOnlyBenchmark` — vs javac via `JavacTask.parse()`
