@@ -153,6 +153,7 @@ e{3}  e{2,}  e{2,5}          # bounded repetition
 %checkpoint Rule             # incremental-reparse boundary
 %suggest Rule "message"      # diagnostic hint for parse failures
 %memo Rule                   # cache a rule re-parsed at the same position (0.7.1)
+%import Grammar.Rule         # compose grammars; pass a GrammarSource (0.7.2)
 ```
 
 See [`docs/GRAMMAR-DSL.md`](docs/GRAMMAR-DSL.md) for the full reference.
@@ -300,6 +301,33 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
 
 Defaults emit `GLexer.java`, `GParser.java`, `GVisitor.java` under the configured
 package. Generated sources depend ONLY on `peglib-runtime` + `pragmatica-lite:core`.
+
+### Goals
+
+| Goal | Phase | Does |
+|---|---|---|
+| `generate` | `generate-sources` | Emits lexer, parser and visitor sources |
+| `lint` | `validate` | Runs the grammar analyzer; reports findings |
+| `check` | `verify` | Builds the parser and optionally parses a smoke input |
+
+### Parameters
+
+All are settable as properties (`-Dpeglib.<name>=…`).
+
+| Parameter | Goals | Default | Purpose |
+|---|---|---|---|
+| `grammarFile` | all | *(required)* | The `.peg` file |
+| `outputDirectory` | `generate` | *(required)* | Where sources are written |
+| `packageName` | `generate` | *(required)* | Package for the emitted classes |
+| `lexerClassName` | `generate` | `GLexer` | Emitted lexer name |
+| `parserClassName` | `generate` | `GParser` | Emitted parser name |
+| `visitorClassName` | `generate` | `GVisitor` | Emitted visitor name |
+| `importDirectory` | all | grammar file's own directory | Where `%import` looks for `<Name>.peg` |
+| `failOnWarning` | `lint`, `check` | `false` | Treat analyzer warnings as build failures |
+| `smokeInput` | `check` | *(none)* | Input parsed to prove the grammar works end to end |
+
+`%import` resolves against `importDirectory`, so a grammar importing `Shared.Rule`
+finds `Shared.peg` beside it with no configuration.
 
 ---
 

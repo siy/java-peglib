@@ -14,6 +14,7 @@ repeated here.
 3. [Grammar-level directives](#grammar-level-directives)
    - [`%suggest RuleName`](#suggest)
    - [`%memo RuleName`](#memo)
+   - [`%word` (inert)](#word--accepted-but-inert)
    - [`%import Grammar.Rule`](#grammar-composition)
 4. [Directive interaction matrix](#directive-interaction-matrix)
 5. [Analyzer](#analyzer)
@@ -267,6 +268,22 @@ Unknown rule names are accepted without error, matching `%checkpoint`. All
 three silent cases are reported by the analyzer — see
 `grammar.memo-unknown-rule` and `grammar.memo-non-parser-rule` below.
 
+### `%word` — accepted but inert
+
+`%word <- Expression`
+
+Parsed, stored on `Grammar`, and propagated through import composition — but **never
+consumed** by the lexer or the generator. In cpp-peglib `%word` supplies the
+word-boundary rule used when matching keywords; peglib does not implement that, and
+spells word boundaries inline instead:
+
+```peg
+RecordDecl <- 'record' ![a-zA-Z0-9_$] Identifier
+```
+
+Declaring `%word` changes nothing. The analyzer reports it as
+`grammar.inert-directive` so it fails loudly at lint time rather than silently.
+
 ## Directive interaction matrix
 
 | Directive | Scope | Honoured | Affects parse outcome | Affects hot path |
@@ -276,6 +293,7 @@ three silent cases are reported by the analyzer — see
 | `%tag` (rule trailer) | rule | **no — inert** | no | no |
 | `%recover [chars] Rule` | grammar | yes | yes — changes where recovery resumes | only on failure path |
 | `%whitespace` | grammar | yes | yes — defines trivia | lexer |
+| `%word` | grammar | **no — inert** | no | no |
 | `%suggest` | grammar | yes | no — adds a note to diagnostics | failure-only Levenshtein scan |
 | `%checkpoint` | grammar | yes | no | incremental reparse only |
 | `%memo` | grammar | yes | no — output is identical either way | yes — success path, by design |
@@ -303,6 +321,7 @@ Each finding has a stable tag for tooling integration. The full catalog:
 | `grammar.has-backreference` | INFO | Rule uses `$name` back-reference — forward-compat note: incremental parsing (since 0.3.2) falls back to full reparse on such rules |
 | `grammar.memo-unknown-rule` | WARNING | `%memo` names a rule the grammar does not define — the directive is ignored |
 | `grammar.memo-non-parser-rule` | WARNING | `%memo` targets a LEXER or MIXED rule; only PARSER rules are memoised — the directive is ignored |
+| `grammar.inert-directive` | WARNING | A directive the front-end accepts but the generator never reads (`%word`, rule-level `%expected` / `%recover` / `%tag`) — declaring it has no effect |
 
 The ambiguous-choice check is conservative: it flags only choices where
 *every* alternative has a fixed literal prefix. Rule-reference-prefixed or
@@ -408,47 +427,52 @@ Grammar import cycles (`A.peg → B.peg → A.peg`) are a hard error
 detected at resolve time. The error message shows the offending import
 chain.
 
-### Public API — resolver-level only
+### Public API
 
-**`%import` composition currently stops at the `Grammar` IR.** `GrammarResolver`
-resolves the transitive closure and returns a composed `Grammar`:
+Pass a `GrammarSource` alongside the grammar text. The transitive import closure is
+resolved before generation, so the composed grammar is what gets classified and
+compiled:
 
 ```java
-import org.pragmatica.peg.grammar.GrammarResolver;
+import org.pragmatica.peg.PegParser;
 import org.pragmatica.peg.grammar.GrammarSource;
 
 var source = GrammarSource.inMemory(Map.of(
-    "Java25", Files.readString(Path.of("grammars/Java25.peg"))
+    "Shared", Files.readString(Path.of("grammars/Shared.peg"))
 ));
-var composed = GrammarResolver.resolveText(rootGrammarText, source).unwrap();
+var parser = PegParser.fromGrammar(rootGrammarText, source).unwrap();
 ```
 
-There is **no public path from that composed `Grammar` to a `Parser`**.
-`PegParser.fromGrammar(String)` is the only entry point and it does not resolve
-imports, so a root grammar containing `%import` cannot currently be turned into
-a working parser through the public API. Composition is exercised at the
-resolver level only — see `GrammarCompositionTest`.
+*(Added in 0.7.2. Before that the directive parsed and `GrammarResolver` existed, but
+nothing connected them — `fromGrammar` went straight to classification and the grammar
+failed with a misleading "references undefined rule".)*
 
-Earlier revisions of this document described a three-argument
-`PegParser.fromGrammar(text, config, source)` overload. It does not exist; the
-`ParserConfig` half of that signature was deleted in 0.6.0.
+A grammar declaring no imports behaves identically under either overload. Calling the
+single-argument `fromGrammar` on a grammar that *does* declare imports fails with an
+actionable message naming the fix rather than reporting a phantom undefined rule.
+
+**Caching.** The parser cache is keyed by grammar text alone, which cannot distinguish
+the same root text resolved against two different sources. Results are therefore cached
+only when the root grammar declares no imports; a grammar with imports is recompiled on
+every call. That is a deliberate trade — a wrong cache hit would hand back a parser
+built from someone else's imports.
 
 Built-in `GrammarSource` strategies:
 
 - `GrammarSource.inMemory(Map<String,String>)` — name → text map (tests).
-- `GrammarSource.classpath(ClassLoader)` — reads `<name>.peg` from a
-  classloader resource root.
-- `GrammarSource.classpath()` — uses the current thread's context
-  classloader.
-- `GrammarSource.filesystem(Path)` — reads `<name>.peg` from a
-  configured directory.
-- `GrammarSource.chained(a, b, c)` — tries each source in order; first
-  hit wins.
-- `GrammarSource.empty()` — causes any `%import` to fail with a
-  "grammar not found" error.
+- `GrammarSource.classpath(ClassLoader)` — reads `<name>.peg` from a classloader
+  resource root.
+- `GrammarSource.classpath()` — uses the current thread's context classloader.
+- `GrammarSource.filesystem(Path)` — reads `<name>.peg` from a directory.
+- `GrammarSource.chained(a, b, c)` — tries each source in order; first hit wins.
+- `GrammarSource.empty()` — causes any `%import` to fail with "grammar not found".
 
-If your root grammar declares no `%import` directives, none of this applies —
-use `PegParser.fromGrammar(grammarText)` directly.
+### Through the maven plugin
+
+`generate`, `check` and `lint` all resolve imports from a filesystem source rooted at the
+grammar file's own directory, so `%import Shared.Rule` finds `Shared.peg` beside the root
+grammar with no configuration. Override with the `importDirectory` parameter
+(`peglib.importDirectory`).
 
 <a id="left-recursion"></a>
 ## Left recursion is rejected
