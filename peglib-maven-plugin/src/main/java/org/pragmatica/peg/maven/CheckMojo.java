@@ -67,6 +67,10 @@ public class CheckMojo extends AbstractMojo {
         var lint = new LintMojo();
 
         lint.setGrammarFile(grammarFile);
+        // Must be propagated: Plexus injects @Parameter fields only into container-managed
+        // instances, so this hand-built LintMojo would otherwise resolve %import against the
+        // grammar's own directory while step 2 below uses the configured one.
+        lint.setImportDirectory(importDirectory);
         lint.setFailOnWarning(failOnWarning);
         var outcome = lint.runAnalyzer();
 
@@ -98,20 +102,8 @@ public class CheckMojo extends AbstractMojo {
         return PegParser.fromGrammar(grammarText, importSource()).mapError(c -> Causes.cause("peglib:check failed — parser build failed: " + c.message()));
     }
 
-    /**
-     * Filesystem source rooted at {@code importDirectory}, or at the grammar file's own
-     * directory when that parameter is unset.
-     *
-     * @since 0.7.2
-     */
     private GrammarSource importSource() {
-        var dir = importDirectory != null
-                  ? importDirectory.toPath()
-                  : grammarFile.toPath().toAbsolutePath().getParent();
-
-        return dir == null
-               ? GrammarSource.empty()
-               : GrammarSource.filesystem(dir);
+        return ImportSources.forGrammar(grammarFile, importDirectory);
     }
 
     private Result<Unit> runSmoke(Parser parser) {
@@ -165,5 +157,11 @@ public class CheckMojo extends AbstractMojo {
     @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setSmokeInput(String smokeInput) {
         this.smokeInput = smokeInput;
+    }
+
+    /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setImportDirectory(File importDirectory) {
+        this.importDirectory = importDirectory;
     }
 }

@@ -160,18 +160,8 @@ public class GenerateMojo extends AbstractMojo {
                                                                                                                                                                 visitor))));
     }
 
-    /**
-     * Filesystem source rooted at {@code importDirectory}, or at the grammar file's own
-     * directory when that parameter is unset.
-     */
     private GrammarSource importSource() {
-        var dir = importDirectory != null
-                  ? importDirectory.toPath()
-                  : grammarFile.toPath().toAbsolutePath().getParent();
-
-        return dir == null
-               ? GrammarSource.empty()
-               : GrammarSource.filesystem(dir);
+        return ImportSources.forGrammar(grammarFile, importDirectory);
     }
 
     private static Result<String> readGrammar(Path path) {
@@ -214,7 +204,22 @@ public class GenerateMojo extends AbstractMojo {
                               .resolve(className + ".java");
     }
 
+    /**
+     * True when every target is newer than the root grammar.
+     *
+     * <p>Deliberately returns false for any grammar declaring {@code %import}: the check
+     * compares against the ROOT grammar's mtime only, so editing an imported grammar while
+     * leaving the root untouched would otherwise leave stale generated sources in place with
+     * no warning. Matching the trade already made in {@code PegParser}, which does not cache
+     * grammars with imports, correctness wins over skipping work.
+     *
+     * @since 0.7.2 — the import-aware bail-out
+     */
     private boolean allUpToDate(Path... targets) {
+        if (declaresImports()) {
+            return false;
+        }
+
         long grammarMtime = grammarFile.lastModified();
 
         for (var target : targets) {
@@ -226,6 +231,18 @@ public class GenerateMojo extends AbstractMojo {
         }
 
         return true;
+    }
+
+    /** Cheap textual pre-check; a full parse here would duplicate work done moments later. */
+    private boolean declaresImports() {
+        return readGrammar(grammarFile.toPath()).map(GenerateMojo::hasImportDirective)
+                          .or(Boolean.TRUE);
+    }
+
+    private static boolean hasImportDirective(String text) {
+        return text.lines()
+                   .anyMatch(line -> line.strip()
+                                         .startsWith("%import"));
     }
 
     /** For programmatic invocation from tests. */
@@ -262,5 +279,11 @@ public class GenerateMojo extends AbstractMojo {
     /** Package-name-aware Cause helper for tests. */
     sealed interface GenerateError extends Cause {
         record GrammarReadError(String message) implements GenerateError {}
+    }
+
+    /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setImportDirectory(File importDirectory) {
+        this.importDirectory = importDirectory;
     }
 }

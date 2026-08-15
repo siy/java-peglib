@@ -141,8 +141,140 @@ class MojoIntegrationTest {
         mojo.setParserClassName("MParser");
         mojo.setVisitorClassName("MVisitor");
 
+        // The message matters, not just the throw: before %import was wired, this same
+        // grammar failed at rule-reference validation with "references undefined rule",
+        // so asserting only the exception type passes whether or not the feature exists.
         assertThatThrownBy(mojo::execute).as("a missing imported grammar must fail the build")
-                                         .isInstanceOf(MojoFailureException.class);
+                                         .isInstanceOf(MojoFailureException.class)
+                                         .hasMessageContaining("Missing")
+                                         .hasMessageNotContaining("references undefined rule");
+    }
+
+    @Test
+    void lintMojo_resolvesImportsFromGrammarDirectory(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("Shared.peg"), "Number <- [0-9]+\n");
+        var grammarFile = tempDir.resolve("root.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "%import Shared.Number\nSum <- Shared_Number '+' Shared_Number\n");
+        var mojo = new LintMojo();
+        mojo.setGrammarFile(grammarFile);
+
+        mojo.execute();
+    }
+
+    @Test
+    void lintMojo_failsWhenImportedGrammarIsMissing(@TempDir Path tempDir) throws Exception {
+        var grammarFile = tempDir.resolve("root.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "%import Missing.Number\nSum <- Missing_Number '+' Missing_Number\n");
+        var mojo = new LintMojo();
+        mojo.setGrammarFile(grammarFile);
+
+        assertThatThrownBy(mojo::execute).isInstanceOf(MojoFailureException.class)
+                                         .hasMessageContaining("Missing");
+    }
+
+    @Test
+    void checkMojo_resolvesImportsFromGrammarDirectory(@TempDir Path tempDir) throws Exception {
+        Files.writeString(tempDir.resolve("Shared.peg"), "Number <- [0-9]+\n");
+        var grammarFile = tempDir.resolve("root.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "%import Shared.Number\nSum <- Shared_Number '+' Shared_Number\n");
+        var mojo = new CheckMojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setSmokeInput("1+2");
+
+        mojo.execute();
+    }
+
+    @Test
+    void checkMojo_honoursImportDirectoryInBothOfItsStages(@TempDir Path tempDir) throws Exception {
+        // Regression guard: CheckMojo runs an embedded LintMojo and then builds a parser.
+        // The embedded lint is hand-constructed, so Plexus never injects importDirectory into
+        // it — without explicit propagation the two stages resolve %import against different
+        // directories and the lint stage fails on a perfectly valid grammar.
+        var grammars = Files.createDirectory(tempDir.resolve("grammars"));
+        var sources = Files.createDirectory(tempDir.resolve("sources"));
+
+        Files.writeString(grammars.resolve("Shared.peg"), "Number <- [0-9]+\n");
+        var grammarFile = sources.resolve("root.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "%import Shared.Number\nSum <- Shared_Number '+' Shared_Number\n");
+        var mojo = new CheckMojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setImportDirectory(grammars.toFile());
+        mojo.setSmokeInput("1+2");
+
+        mojo.execute();
+    }
+
+    @Test
+    void generateMojo_honoursImportDirectoryOutsideTheGrammarDirectory(@TempDir Path tempDir) throws Exception {
+        var grammars = Files.createDirectory(tempDir.resolve("grammars"));
+        var sources = Files.createDirectory(tempDir.resolve("sources"));
+
+        Files.writeString(grammars.resolve("Shared.peg"), "Number <- [0-9]+\n");
+        var grammarFile = sources.resolve("root.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "%import Shared.Number\nSum <- Shared_Number '+' Shared_Number\n");
+        var outputDir = tempDir.resolve("generated")
+                               .toFile();
+        var mojo = new GenerateMojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setImportDirectory(grammars.toFile());
+        mojo.setOutputDirectory(outputDir);
+        mojo.setPackageName("demo.dir");
+        mojo.setLexerClassName("DLexer");
+        mojo.setParserClassName("DParser");
+        mojo.setVisitorClassName("DVisitor");
+        mojo.execute();
+
+        assertThat(Files.exists(outputDir.toPath()
+                                         .resolve("demo")
+                                         .resolve("dir")
+                                         .resolve("DParser.java"))).as("importDirectory override must be honoured")
+                                                                   .isTrue();
+    }
+
+    @Test
+    void generateMojo_regeneratesWhenAnImportedGrammarChanges(@TempDir Path tempDir) throws Exception {
+        // The up-to-date check compares targets against the ROOT grammar's mtime only, so a
+        // grammar with %import must not take the skip path — otherwise editing Shared.peg
+        // silently ships generated sources built from its previous content.
+        var shared = tempDir.resolve("Shared.peg");
+
+        Files.writeString(shared, "Number <- [0-9]+\n");
+        var grammarFile = tempDir.resolve("root.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "%import Shared.Number\nSum <- Shared_Number '+' Shared_Number\n");
+        var outputDir = tempDir.resolve("generated")
+                               .toFile();
+        var mojo = new GenerateMojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setOutputDirectory(outputDir);
+        mojo.setPackageName("demo.stale");
+        mojo.setLexerClassName("SLexer");
+        mojo.setParserClassName("SParser");
+        mojo.setVisitorClassName("SVisitor");
+        mojo.execute();
+
+        var lexer = outputDir.toPath()
+                             .resolve("demo")
+                             .resolve("stale")
+                             .resolve("SLexer.java");
+        var first = Files.readString(lexer);
+        // Change ONLY the imported grammar, leaving the root untouched.
+        Files.writeString(shared, "Number <- [0-9]+ 'u'?\n");
+        mojo.execute();
+
+        assertThat(Files.readString(lexer)).as("editing an imported grammar must not leave stale output")
+                                           .isNotEqualTo(first);
     }
 
     @Test

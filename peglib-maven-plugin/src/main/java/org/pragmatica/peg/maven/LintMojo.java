@@ -92,31 +92,29 @@ public class LintMojo extends AbstractMojo {
                           .map(Analyzer::analyze);
     }
 
-    private Result<Grammar> parseGrammar(String text) {
-        return GrammarParser.parse(text)
-                            .flatMap(root -> GrammarResolver.resolve(root,
-                                                                     importSource()))
-                            .mapError(c -> Causes.cause("Grammar parse failed: " + c.message()));
+    /** Resolution failures are labelled for their own stage — they are not parse errors. */
+    private Result<Grammar> resolveImports(Grammar root) {
+        return GrammarResolver.resolve(root, importSource()).mapError(c -> Causes.cause("Import resolution failed: " + c.message()));
     }
 
-    /**
-     * Filesystem source rooted at {@code importDirectory}, or at the grammar file's own
-     * directory when that parameter is unset.
-     *
-     * @since 0.7.2
-     */
-    private GrammarSource importSource() {
-        var dir = importDirectory != null
-                  ? importDirectory.toPath()
-                  : grammarFile.toPath().toAbsolutePath().getParent();
+    private Result<Grammar> parseGrammar(String text) {
+        return GrammarParser.parse(text)
+                            .mapError(c -> Causes.cause("Grammar parse failed: " + c.message()))
+                            .flatMap(this::resolveImports);
+    }
 
-        return dir == null
-               ? GrammarSource.empty()
-               : GrammarSource.filesystem(dir);
+    private GrammarSource importSource() {
+        return ImportSources.forGrammar(grammarFile, importDirectory);
     }
 
     private static Result<String> readGrammar(Path path) {
         return Result.lift(t -> Causes.cause("Failed to read grammar: " + path + " — " + t.getMessage()),
                            () -> Files.readString(path));
+    }
+
+    /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setImportDirectory(File importDirectory) {
+        this.importDirectory = importDirectory;
     }
 }
