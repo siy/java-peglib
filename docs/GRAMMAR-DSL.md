@@ -10,19 +10,17 @@ repeated here.
 ## Table of contents
 
 1. [Cut operator (`^` / `↑`)](#cut-operator)
-2. [Rule-level directives](#rule-level-directives)
-   - [`%expected "label"`](#expected)
-   - [`%recover '<terminator>'`](#recover)
-   - [`%tag "name"`](#tag)
+2. [Rule-level directives — accepted but inert](#rule-level-directives--accepted-but-inert)
 3. [Grammar-level directives](#grammar-level-directives)
    - [`%suggest RuleName`](#suggest)
    - [`%memo RuleName`](#memo)
-   - [`%import Grammar.Rule`](#import)
+   - [`%import Grammar.Rule`](#grammar-composition)
 4. [Directive interaction matrix](#directive-interaction-matrix)
 5. [Analyzer](#analyzer)
-6. [Programmatic action attachment (lambda actions)](#programmatic-action-attachment)
+6. [Actions were removed in 0.6.0](#actions-were-removed-in-060)
 7. [Grammar composition (`%import`)](#grammar-composition)
-8. [Direct left-recursion (0.2.9)](#left-recursion)
+8. [Left recursion is rejected](#left-recursion)
+9. [Related](#related)
 
 ## Cut operator
 
@@ -35,7 +33,7 @@ IfStmt <- 'if' ^ '(' Expr ')' Stmt
 Once the parser has matched `'if'` and crossed the `^`, it **commits** to
 the current choice alternative. If `'('` then fails, the failure does
 **not** trigger backtracking to sibling alternatives — it is raised as a
-`CutFailure`, which propagates up until caught by a rule boundary.
+*committed failure*, which propagates up until caught by a rule boundary.
 
 Cut enables two things:
 
@@ -55,19 +53,19 @@ A     <- 'a' (X / Y ^ Z)
 ```
 
 A cut inside the inner `(X / Y ^ Z)` commits that inner choice only. If
-the outer choice's `A` fails after the cut fires, the failure is still a
-`CutFailure` and propagates up — but the outer `Outer` was never
+the outer choice's `A` fails after the cut fires, the failure is still
+*committed* and propagates up — but the outer `Outer` was never
 committed, so the failure is caught at `Outer`'s boundary and the parser
 falls through to `B`. This matches cpp-peglib behaviour.
 
 Summary: cut commits the tightest enclosing grouping / choice it lives
-in. Rule boundaries catch `CutFailure` and convert it into that rule's
-regular failure.
+in. Rule boundaries catch a *committed failure* and convert it into that
+rule's regular failure.
 
 ### Cut inside repetitions
 
 A cut inside the body of `e*`, `e+`, or `e?` commits the current iteration.
-A `CutFailure` fired inside an iteration is **not** swallowed as "end of
+A *committed failure* fired inside an iteration is **not** swallowed as "end of
 repetition" — it propagates out of the repetition, exiting it with a
 failure instead of a successful partial match. (Early peglib versions
 treated the cut as end-of-repetition; that was a bug fixed in 0.1.5.)
@@ -81,28 +79,27 @@ Block <- '{' (Stmt ^ ';')* '}'
 - `{ foo; bar; }` — all `Stmt ^ ';'` iterations succeed; the repetition
   terminates when `Stmt` fails (no cut yet).
 - `{ foo; bar }` — the second iteration matches `bar` as `Stmt`, crosses
-  `^`, then `';'` fails. `CutFailure` propagates out of the `*`, the
+  `^`, then `';'` fails. The *committed failure* propagates out of the `*`, the
   repetition does **not** swallow it, and `Block` reports the error at
   the `}` position — not at `{`.
 
 Same applies to `OneOrMore` (`+`), `Optional` (`?`), and bounded
 `Repetition` (`e{n,m}`). `Choice` inside a repetition similarly passes
-`CutFailure` through.
+a *committed failure* through.
 
-### CutFailure vs regular Failure
+### How cut is implemented
 
-Internal to the parser:
+In the generated parser each `Choice` declares a `cutHit_<label>` boolean.
+Crossing a `^` inside an alternative sets it; when that alternative then fails,
+the flag suppresses the remaining alternatives and the whole `Choice` fails
+instead of backtracking.
 
-| Failure type | Caused by | Effect |
-|---|---|---|
-| `ParseResult.Failure` | An alternative didn't match | Backtracks to try next alternative |
-| `ParseResult.CutFailure` | A rule passed `^` then failed | Propagates through enclosing combinators; caught at rule boundary; converted to `Failure` for the containing rule |
-
-Error recovery (`RecoveryStrategy.ADVANCED`) tags recovery diagnostics
-triggered by a `CutFailure` with `error.unclosed` (vs `error.unexpected-input`
-for non-cut recovery), making it programmatically distinguishable whether
-a recovery point was hit after a committed rule or during ordinary
-backtracking.
+Earlier revisions of this document described sealed `ParseResult.Failure` /
+`ParseResult.CutFailure` types and a `RecoveryStrategy.ADVANCED` that tagged
+cut-triggered diagnostics. Those belong to the 0.5.x interpreter: `ParseResult`
+is now the plain record `(CstArray cst, List<Diagnostic> diagnostics)`, there is
+one always-on recovery mechanism, and diagnostics carry no tag. Cut's
+*observable* behaviour is unchanged — see `CutOperatorTest`.
 
 ### When to use cut
 
@@ -123,75 +120,48 @@ RecordDecl <- 'record' ![a-zA-Z0-9_$] ^ Identifier ...
 Without the `![a-zA-Z0-9_$]` guard, the grammar would commit to a record
 declaration when seeing `recordResult` as an identifier.
 
-## Rule-level directives
+## Rule-level directives — accepted but inert
 
-Three directives may appear on a rule's right-hand side, after the
-expression body and before any action / error-message trailer:
+Three directives may appear on a rule's right-hand side, after the expression
+body:
 
 ```peg
 RuleName <- Expression %expected "label" %recover "}" %tag "error.mine"
 ```
 
-All three are optional and order-independent among themselves. They are
-**additive**: any rule that doesn't use them produces output byte-identical
-to pre-0.2.4 parsers.
+**They parse, they are stored on `Rule`, and the generator never reads them.**
+`Rule` carries `expected()`, `recover()` and `tag()`; `ParserGenerator` does not
+reference any of the three. Writing them changes nothing about parsing,
+diagnostics, or recovery.
 
-### `%expected`
+They are documented here as *accepted syntax* so that a grammar carrying them
+still loads, and so nobody spends time wondering why they have no effect:
 
-`%expected "semantic label"`
+| directive | intended meaning | actual 0.7.x behaviour |
+|---|---|---|
+| `%expected "label"` | replace the enumerated first-token set in the failure message | inert — the default message is always used |
+| `%recover "}"` (rule trailer) | rule-scoped recovery terminator | inert — use the grammar-level form below |
+| `%tag "name"` | machine-readable diagnostic tag | inert — `Diagnostic` has no tag component |
 
-Replaces the engine's default "expected one of X, Y, Z, …" token join
-with a single semantic phrase when this rule fails.
+`Diagnostic` is `(severity, offset, length, message, expected, found)`. There is
+no `tag()` accessor, and the tags earlier revisions of this document described
+(`error.unclosed`, `error.expected`, `error.unexpected-input`) are not emitted
+anywhere in the engine.
 
-```peg
-Statement <- Expr ';' %expected "statement"
-```
+### Use the grammar-level `%recover` instead
 
-On failure, the diagnostic carries message `expected statement` and tag
-`error.expected`. Without `%expected`, the diagnostic would enumerate
-the raw first-token set of the rule's alternatives (often a long
-punctuation list).
-
-Useful on rules whose first-token set is large or uninformative (e.g. a
-top-level `Statement` or `Expression` rule).
-
-### `%recover`
-
-`%recover "<literal-terminator>"`
-
-Overrides the default ADVANCED recovery char-set (`,`, `;`, `}`, `)`,
-`]`, `\n`) with a single string literal scoped to this rule's body. On
-recovery, the parser scans forward to the first occurrence of the
-terminator, emits an `Error` node spanning the skipped text, and resumes
-after the terminator.
+Per-rule recovery *is* implemented, but through the grammar-level directive,
+which takes a character class and a rule name:
 
 ```peg
-Block <- '{' Stmt* '}' %recover "}"
-Stmt  <- [a-z]+ ';'
+%recover [;] Stmt
+%recover [}] Block
 ```
 
-For `{ foo; @@@; }`, the default recovery would stop at the first `;`
-inside the block (producing noise). With `%recover "}"`, recovery
-rewinds the enclosing block as one unit. Terminators can be multi-char
-(e.g. `%recover ">>"`).
-
-Diagnostics emitted by `%recover` carry tag `error.unclosed`.
-
-### `%tag`
-
-`%tag "tag.name"`
-
-Attaches a machine-readable tag to diagnostics produced by this rule's
-failures, overriding any built-in tag (`error.expected` /
-`error.unclosed` / `error.unexpected-input`).
-
-```peg
-JsonString <- '"' [^"]* '"' %tag "json.string"
-```
-
-Callers read it via `diagnostic.tag()` — useful for IDE categorization,
-quick-fix dispatch, and localization. Tags do not appear in the Rust-style
-formatted output; they are purely machine-readable.
+That form has been honoured per-rule since 0.6.1 — see
+`PerRuleRecoverDirectiveTest` for the dispatch contract and its limits, and
+[Error Recovery](ERROR_RECOVERY.md#choosing-recovery-points) for guidance on
+picking sync sets.
 
 ## Grammar-level directives
 
@@ -299,20 +269,20 @@ three silent cases are reported by the analyzer — see
 
 ## Directive interaction matrix
 
-| Directive | Scope | Sets tag | Affects parse outcome | Affects hot path |
+| Directive | Scope | Honoured | Affects parse outcome | Affects hot path |
 |---|---|---|---|---|
-| `%expected` | rule | `error.expected` (unless `%tag` overrides) | no — only diagnostic message | no |
-| `%recover` | rule | `error.unclosed` (unless `%tag` overrides) | yes — changes where recovery resumes | only on failure path |
-| `%tag` | rule | explicit value | no | no |
-| `%suggest` | grammar | (adds note to diagnostics) | no | failure-only Levenshtein scan |
-| `%memo` | grammar | no | no — output is identical either way | yes — success path, by design |
+| `%expected` (rule trailer) | rule | **no — inert** | no | no |
+| `%recover "lit"` (rule trailer) | rule | **no — inert** | no | no |
+| `%tag` (rule trailer) | rule | **no — inert** | no | no |
+| `%recover [chars] Rule` | grammar | yes | yes — changes where recovery resumes | only on failure path |
+| `%whitespace` | grammar | yes | yes — defines trivia | lexer |
+| `%suggest` | grammar | yes | no — adds a note to diagnostics | failure-only Levenshtein scan |
+| `%checkpoint` | grammar | yes | no | incremental reparse only |
+| `%memo` | grammar | yes | no — output is identical either way | yes — success path, by design |
 
-`%expected`, `%recover`, `%tag` and `%suggest` do not affect the success
-path. `%memo` is the exception and the only one: it exists precisely to
-change success-path cost, but it does not change success-path *output*.
-All five are opt-in: a grammar that uses none of them produces output
-byte-identical to pre-0.2.4 parsers, per the `Phase1ParityTest` /
-`CorpusParityTest` suites.
+Only `%memo` deliberately changes success-path *cost*, and it does not change
+success-path *output*. Everything else is either failure-path or structural. A
+grammar using none of them parses exactly as it would without directives.
 
 ## Analyzer
 
@@ -360,92 +330,17 @@ The CLI exits with status `0` when no errors, `1` when errors found,
 `2` on I/O or grammar-parse failure. Warnings/info alone do not fail
 the CLI — only `ERROR` findings do.
 
-## Programmatic action attachment
+## Actions were removed in 0.6.0
 
-*Since 0.2.6.*
+Earlier versions supported inline `{ ... }` action blocks in the grammar and
+programmatic lambda attachment via an `Actions` builder and `RuleId` marker
+types. **All of it is gone**, along with `Action`, `SemanticValues`,
+`ActionCompiler`, `Actions` and `RuleId`.
 
-Actions can be attached to rules **programmatically** — via Java lambdas
-keyed by a type-safe `RuleId` class — without modifying the grammar file.
-The existing inline `{ ... }` actions still work; the two mechanisms
-coexist.
-
-### API shape
-
-The library ships two small types under `org.pragmatica.peg.action`:
-
-- `RuleId` — a marker interface. A rule identifier is an implementing
-  record whose simple class name matches the rule name.
-- `Actions` — an immutable, composable map from `RuleId` classes to
-  `Function<SemanticValues, Object>` lambdas. Every mutation returns a
-  new instance; the original is untouched.
-
-```java
-import org.pragmatica.peg.action.Actions;
-import org.pragmatica.peg.action.RuleId;
-
-record Number() implements RuleId {}
-record Sum() implements RuleId {}
-
-var actions = Actions.empty()
-    .with(Number.class, sv -> sv.toInt())
-    .with(Sum.class,    sv -> (Integer) sv.get(0) + (Integer) sv.get(1));
-
-var grammar = """
-    Sum    <- Number '+' Number
-    Number <- < [0-9]+ >
-    %whitespace <- [ ]*
-    """;
-
-var parser = PegParser.fromGrammar(grammar, actions).unwrap();
-parser.parse("2 + 3").unwrap();   // → 5
-```
-
-`PegParser.fromGrammar(String, Actions)` and
-`PegParser.fromGrammar(String, ParserConfig, Actions)` thread the
-attachments through to the interpreter.
-
-### Lambda vs inline action precedence
-
-When a rule has **both** an inline action in the grammar and a lambda
-attached via `Actions`, the **lambda wins**. The inline action is still
-parsed — it just isn't executed for that rule. This lets callers override
-specific rules without rewriting the grammar.
-
-```java
-// Grammar says: return sv.toInt(); Lambda says: multiply by 10.
-var grammar = "Number <- < [0-9]+ > { return sv.toInt(); }";
-var actions = Actions.empty().with(Number.class, sv -> sv.toInt() * 10);
-PegParser.fromGrammar(grammar, actions).unwrap().parse("42");  // → 420
-```
-
-Rules without a lambda attachment fall back to their inline action (if
-any), or return the CST node as before.
-
-### Generated parsers
-
-The standalone parsers emitted by
-`PegParser.generateParser(...)` / `PegParser.generateCstParser(...)`
-expose a nested `sealed interface RuleId extends
-org.pragmatica.peg.action.RuleId` with one parameter-less record per
-grammar rule. AST-path parsers additionally expose a `withAction` fluent
-setter and a nested `SemanticValues` record, so the same lambda override
-mechanism works against a pre-compiled parser:
-
-```java
-// Using the generated parser as a plain class.
-var parser = new MyGeneratedParser()
-    .withAction(MyGeneratedParser.RuleId.Number.class, sv -> sv.toInt() * 10);
-parser.parse("42");
-```
-
-### Forward-compatibility with `parseRuleAt` (0.3.0)
-
-The `RuleId` shape is deliberately minimal — parameter-less marker
-records whose identity is the class itself — so that the upcoming
-`parseRuleAt(Class<? extends RuleId>, String input, int offset)` entry
-point can dispatch on the same types without a migration. Callers who
-adopt lambda actions on 0.2.6 will not need to rewrite `RuleId` usages
-when `parseRuleAt` lands.
+CST → domain transformation is now a separate concern. The generator emits a
+`GVisitor<T>` stub per grammar with one method per parser rule; subclass it and
+override selectively. See [`VISITOR-TUTORIAL.md`](VISITOR-TUTORIAL.md) and the
+migration guide's "Pattern: Action-based semantic transform".
 
 <a id="grammar-composition"></a>
 ## Grammar composition (`%import`)
@@ -513,36 +408,30 @@ Grammar import cycles (`A.peg → B.peg → A.peg`) are a hard error
 detected at resolve time. The error message shows the offending import
 chain.
 
-### RuleId emission
+### Public API — resolver-level only
 
-Imported rules participate in the composed grammar's `RuleId` sealed
-interface emission (see the lambda-actions section above):
-
-- Root rule `MyAnnotation` → `RuleId.MyAnnotation`
-- `%import Java25.Type` → `RuleId.Java25Type` (underscore-stripped
-  after sanitization)
-- `%import Java25.Expression as JavaExpr` → `RuleId.JavaExpr`
-
-The grammar-qualified prefix preserves source-grammar provenance for
-unaliased imports; `as` renames let callers pick an arbitrary local
-name.
-
-### Public API
-
-Parsers that declare `%import` directives must be built through the
-three-arg `PegParser.fromGrammar` overload that accepts a
-`GrammarSource`:
+**`%import` composition currently stops at the `Grammar` IR.** `GrammarResolver`
+resolves the transitive closure and returns a composed `Grammar`:
 
 ```java
-import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.grammar.GrammarResolver;
 import org.pragmatica.peg.grammar.GrammarSource;
-import org.pragmatica.peg.parser.ParserConfig;
 
-var source = GrammarSource.inMemory(java.util.Map.of(
-    "Java25", java.nio.file.Files.readString(java.nio.file.Path.of("grammars/Java25.peg"))
+var source = GrammarSource.inMemory(Map.of(
+    "Java25", Files.readString(Path.of("grammars/Java25.peg"))
 ));
-var parser = PegParser.fromGrammar(rootGrammarText, ParserConfig.DEFAULT, source).unwrap();
+var composed = GrammarResolver.resolveText(rootGrammarText, source).unwrap();
 ```
+
+There is **no public path from that composed `Grammar` to a `Parser`**.
+`PegParser.fromGrammar(String)` is the only entry point and it does not resolve
+imports, so a root grammar containing `%import` cannot currently be turned into
+a working parser through the public API. Composition is exercised at the
+resolver level only — see `GrammarCompositionTest`.
+
+Earlier revisions of this document described a three-argument
+`PegParser.fromGrammar(text, config, source)` overload. It does not exist; the
+`ParserConfig` half of that signature was deleted in 0.6.0.
 
 Built-in `GrammarSource` strategies:
 
@@ -555,78 +444,72 @@ Built-in `GrammarSource` strategies:
   configured directory.
 - `GrammarSource.chained(a, b, c)` — tries each source in order; first
   hit wins.
-- `GrammarSource.empty()` — the default; causes any `%import` to fail
-  with a "grammar not found" error.
+- `GrammarSource.empty()` — causes any `%import` to fail with a
+  "grammar not found" error.
 
-If your root grammar declares no `%import` directives, you can keep
-using the two-arg `fromGrammar` overload — no behaviour change.
+If your root grammar declares no `%import` directives, none of this applies —
+use `PegParser.fromGrammar(grammarText)` directly.
 
 <a id="left-recursion"></a>
-## Direct left-recursion (0.2.9)
+## Left recursion is rejected
 
-Peglib 0.2.9 supports **direct** left-recursion via Warth-style
-seed-and-grow parsing (Warth et al. 2008, *Packrat Parsers Can Support
-Left Recursion*). A rule is directly left-recursive when it references
-itself as the first element of one of its alternatives:
+**Both direct and indirect left recursion are rejected at
+`PegParser.fromGrammar`**, with a witness naming the offending rule chain.
 
 ```peg
-Expr <- Expr '+' Term / Term
+Expr <- Expr '+' Term / Term    # rejected
+```
+
+```
+Grammar contains a left-recursive rule:
+  - Rule 'Expr' is left-recursive: Expr → Expr. PEG cannot express left
+    recursion; rewrite as right-recursive, e.g. 'A <- B (op B)*' instead
+    of 'A <- A op B / B'.
+```
+
+Rewrite as a repetition and rebuild associativity in the visitor:
+
+```peg
+Expr <- Term ('+' Term)*
 Term <- [0-9]+
 ```
 
-This parses left-associatively: `1+2+3` is grouped as `(1+2)+3`.
+The CST is flat — `Term ('+' Term)*` — so a left-associative fold is a loop
+over `cst.children(...)` in your `GVisitor<T>`, which is cheaper than the
+parser-level machinery it replaces.
 
-### Algorithm summary
-
-At rule entry the packrat cache is seeded with `Failure`. The first
-recursive self-invocation sees this seed and fails, so parsing falls
-through to the non-recursive alternative (the base case). That result
-becomes the initial seed. The rule body is then re-parsed in a loop
-using the current seed; each iteration that consumes strictly more
-input replaces the seed. Growth stops when the seed stabilizes.
-
-### Scope and limitations
-
-- **Direct only.** Indirect left-recursion (`A → B → A`) is *not*
-  supported. `Grammar.validate()` rejects such grammars with a clear
-  error message:
-  `indirect left-recursion detected in rule chain A -> B -> A; not supported in 0.2.9`.
-- **Cut inside an LR rule freezes the current seed.** When a `^` cut
-  fires during a growth iteration, the seed is taken as final and no
-  further growth is attempted.
-- **`selectivePackrat` × LR.** A left-recursive rule cannot appear in
-  `ParserConfig.packratSkipRules()`. The Warth seed-and-grow loop
-  requires the packrat cache to persist seeds across iterations;
-  skipping the cache for an LR rule would break correctness. This is
-  enforced at engine/generator construction time with a configuration
-  error.
-- **Actions-on-LR.** In 0.2.9, rule actions on left-recursive rules are
-  not supported. Calling `parse()` on an LR grammar routes the LR rule
-  through the CST seed-and-grow path; inline and lambda actions on LR
-  rules will not receive aggregated semantic values from recursive
-  iterations. Use CST-level parsing (`parseCst` / `parseAst`) for LR
-  grammars.
+> **History.** 0.2.9 supported *direct* left recursion via Warth-style
+> seed-and-grow over the packrat cache. 0.6.0 dropped packrat along with the
+> interpreter, and seed-and-grow depended on it: the algorithm needs the cache
+> to persist seeds across growth iterations. Rather than reimplement it in the
+> generated recursive-descent parser, left recursion became a rejection with a
+> rewrite hint. `LeftRecursionDetector` produces the witness; see
+> `LeftRecursionTest` and `LeftRecursionDetectorTest`.
 
 ### Detection API
 
-`Grammar.leftRecursiveRules()` returns the set of directly
-left-recursive rule names:
+`LeftRecursionDetector.detect(grammar)` runs the check directly if you want the
+witness without going through `fromGrammar`:
 
 ```java
-var grammar = GrammarParser.parse(grammarText).unwrap();
-Set<String> lrRules = grammar.leftRecursiveRules();
-// -> {"Expr"} for the grammar above
+var result = LeftRecursionDetector.detect(grammar);
+
+result.onSuccess(detection -> {
+    if (detection.hasErrors()) {
+        detection.errors()
+                 .forEach(e -> System.err.println(e.message()));
+    }
+});
 ```
 
-Lower-level detection is also exposed via
-`LeftRecursionAnalysis.directLeftRecursiveRules(grammar)` and
-`LeftRecursionAnalysis.findIndirectCycle(grammar)` for analyzer /
-tooling integrations.
+`LeftRecursionError` carries the offending `ruleName()` and the
+`witnessCycle()` that reaches it, and `message()` renders the rewrite hint
+shown above.
 
 ## Related
 
-- [Error Recovery](ERROR_RECOVERY.md) — recovery strategies, diagnostic
-  formatting, `ParseResultWithDiagnostics` API
+- [Error Recovery](ERROR_RECOVERY.md) — the always-on panic-mode mechanism,
+  the `Diagnostic` record, and error nodes in the CST
 - [Trivia Attribution](archive/TRIVIA-ATTRIBUTION.md) — how whitespace/comments
   are attached to CST nodes (archived)
 - [Partial Parse](archive/PARTIAL-PARSE.md) — the 0.3.0 `parseRuleAt` API for
