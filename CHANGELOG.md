@@ -55,6 +55,32 @@ are in `tools/langtools-corpus/`.
   backslash-escape rule, so a text block may contain an escaped triple quote without closing.
   Block comments deliberately do not use that shape — `/* ... \*/` does end a comment.
 
+### Changed — CST shape for method/field chains
+
+**Chains in statement position now produce a different CST shape than chains in expression
+position.** This is a consequence of the JLS 14.8 statement-expression restriction and is
+deliberate, but it is a breaking change for any consumer that walks chains, so it is called out
+here rather than left to be discovered.
+
+| position | example | shape |
+|---|---|---|
+| expression | `return a.b().c();` | `Postfix` → `Primary`, `PostOp*` |
+| statement | `a.b().c();` | `StmtExpr` → `Primary`, right-recursive `CallChain` of `ChainOp` / `CallOp` |
+
+Before 0.7.1 both went through `Postfix` / `PostOp`, so `childrenByRule(postfix, POST_OP)`
+covered every chain. It now finds nothing in statement position, because there is no `Postfix`
+node there. Consumers need to handle both rule sets.
+
+The two shapes also group operators differently: `PostOp` keeps `.c()` as a **single** operator,
+while `ChainOp` splits it into `.c` followed by `(...)`. So `a.b().c()` has 2 links as an
+expression and 3 as a statement.
+
+Operator nodes are materialised consistently in both shapes, with or without arguments — walk by
+rule kind (`cst.kindAt(idx)`), not by `viewAt`. `CstArray.viewAt` returns `CstNode.Leaf` for any
+node with **no child nodes**, so an argument-less `PostOp [()]` views as a `Leaf` while
+`PostOp [(x)]` views as a `Branch`. That has been `viewAt`'s behaviour since well before 0.7.1
+and is not related to the link-on-success change.
+
 ### Fixed — Java 25 grammar
 
 Constructs that failed to parse and now succeed: qualified `super` with explicit type arguments
