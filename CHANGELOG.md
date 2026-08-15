@@ -31,6 +31,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Shared.peg` beside the root grammar with no configuration. Override with the new
   `importDirectory` parameter (`peglib.importDirectory`).
 
+- **Nested `%import`.** An imported grammar may itself declare `%import`; it is now fully
+  composed before the importer takes its closure. Previously a rule pulled from such a grammar
+  could reference a name only its own imports provided, and composition failed with an
+  "undefined rule" for a reference that was resolvable one level down. Cycles through nested
+  imports are rejected with a witness rather than recursing until the stack gives out.
+
+  *Known limitation:* prefixing is path-dependent, so a diamond (two paths reaching one grammar)
+  brings the shared rule in once per path — `Left_Leaf_Atom` and `Right_Leaf_Atom`. Composition
+  succeeds, but duplicated LEXER rules collide at tokenization. Pinned by test; converging both
+  paths on one name needs the resolver to track where a rule is defined rather than how it was
+  reached.
+
+- **Single-flight parser cache.** Concurrent misses on the same grammar now serialise on the
+  build. Previously each racing thread ran the full classify → DFA → compile pipeline
+  (~100-500 ms) and every result but one was discarded. A failed build leaves no cache entry, so
+  a later call retries rather than inheriting the failure.
+
 - **Analyzer check `grammar.inert-directive`.** Flags directives the front-end accepts and
   stores but the generator never reads: `%word`, and the rule-level `%expected` / `%recover` /
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —

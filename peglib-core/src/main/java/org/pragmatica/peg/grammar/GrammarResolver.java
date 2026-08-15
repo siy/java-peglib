@@ -41,7 +41,15 @@ import org.pragmatica.peg.source.SourceLocation;
  */
 public final class GrammarResolver {
     private final GrammarSource source;
+
     private final Map<String, Grammar> loadedGrammars = new HashMap<>();
+
+    /**
+     * Grammar names whose own imports are mid-resolution. Nested resolution recurses through
+     * {@link #loadGrammarOrFail}, so a cycle would otherwise recurse until the stack gives out
+     * — this catches it at the point of re-entry.
+     */
+    private final Set<String> resolving = new LinkedHashSet<>();
 
     private GrammarResolver(GrammarSource source) {
         this.source = source;
@@ -232,9 +240,48 @@ public final class GrammarResolver {
 
         var g = parsed.unwrap();
 
-        loadedGrammars.put(grammarName, g);
+        if (g.imports().isEmpty()) {
+            loadedGrammars.put(grammarName, g);
 
-        return Result.success(g);
+            return Result.success(g);
+        }
+
+        return resolveNested(grammarName, errorLocation, chain, g);
+    }
+
+    /**
+     * 0.7.2 — an imported grammar may itself declare {@code %import}. Compose it fully before
+     * the importer takes its closure, otherwise a rule pulled from it can reference a name that
+     * only its own imports provide, and composition ends with an "undefined rule" for a
+     * reference that was perfectly resolvable one level down.
+     *
+     * <p>The composed grammar is cached under its name, so a diamond (two importers reaching the
+     * same grammar) resolves it once.
+     */
+    private Result<Grammar> resolveNested(String grammarName,
+                                          SourceLocation errorLocation,
+                                          List<String> chain,
+                                          Grammar parsed) {
+        if (!resolving.add(grammarName)) {
+            return new ParseError.SemanticError(errorLocation,
+                                                "Cyclic grammar import detected: " + String.join(" -> ",
+                                                                                                 appendChain(chain,
+                                                                                                             grammarName))).result();
+        }
+
+        var composed = resolveRoot(parsed);
+
+        resolving.remove(grammarName);
+        if (composed instanceof Result.Failure<Grammar> f) {
+            return f.cause()
+                    .result();
+        }
+
+        var resolved = composed.unwrap();
+
+        loadedGrammars.put(grammarName, resolved);
+
+        return Result.success(resolved);
     }
 
     /**

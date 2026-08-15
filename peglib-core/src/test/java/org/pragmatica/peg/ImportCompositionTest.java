@@ -6,7 +6,9 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.pragmatica.peg.grammar.GrammarResolver;
 import org.pragmatica.peg.grammar.GrammarSource;
+import org.pragmatica.peg.grammar.Rule;
 
 /**
  * 0.7.2 — {@code %import} composition end to end: a root grammar declaring imports
@@ -165,6 +167,100 @@ class ImportCompositionTest {
                           .nodeCount());
         assertThat(viaSource.diagnostics())
         .isEmpty();
+    }
+
+    @Test
+    void nestedImport_resolvesThroughTwoLevels() {
+        // Root -> Mid -> Leaf. Mid's own rule references a name that only Mid's import
+        // provides, so this only works if Mid is composed before Root takes its closure.
+        var leaf = """
+            Thing <- [0-9]+
+            """;
+        var mid = """
+            %import Leaf.Thing
+            Something <- Leaf_Thing '+' Leaf_Thing
+            """;
+        var root = """
+            %import Mid.Something as Sum
+            Start <- Sum (',' Sum)*
+            %whitespace <- [ \t]*
+            """;
+        var source = GrammarSource.inMemory(Map.of("Leaf", leaf, "Mid", mid));
+        var result = PegParser.fromGrammar(root, source)
+                              .unwrap()
+                              .parse("1+2, 3+4");
+
+        assertThat(result.diagnostics())
+        .as("a rule reached through two levels of %%import must parse")
+        .isEmpty();
+        assertThat(result.cst()
+                         .reconstruct())
+        .isEqualTo("1+2, 3+4");
+    }
+
+    @Test
+    void nestedImport_diamondDuplicatesTheSharedLeaf() {
+        // KNOWN LIMITATION, pinned deliberately. Prefixing is path-dependent: a rule pulled
+        // through two different import paths arrives twice, as Left_Leaf_Atom and
+        // Right_Leaf_Atom. Composition succeeds, but two identical LEXER rules mean the first
+        // wins at tokenization and the second branch never matches.
+        //
+        // Fixing this needs the resolver to track where a rule was DEFINED rather than the path
+        // taken to reach it, so both paths converge on one name. That is a design change, not a
+        // patch — until then, avoid diamonds over lexer rules.
+        var leaf = """
+            Atom <- [0-9]+
+            """;
+        var left = """
+            %import Leaf.Atom
+            Left <- Leaf_Atom '<'
+            """;
+        var right = """
+            %import Leaf.Atom
+            Right <- Leaf_Atom '>'
+            """;
+        var root = """
+            %import Left.Left as L
+            %import Right.Right as R
+            Start <- (L / R)+
+            %whitespace <- [ \t]*
+            """;
+        var source = GrammarSource.inMemory(Map.of("Leaf", leaf, "Left", left, "Right", right));
+
+        assertThat(GrammarResolver.resolveText(root, source)
+                                  .unwrap()
+                                  .rules()
+                                  .stream()
+                                  .map(Rule::name))
+        .as("the shared leaf arrives once per import path")
+        .contains("Left_Leaf_Atom", "Right_Leaf_Atom");
+        // Composition itself still succeeds — the duplication is a parse-time consequence.
+        assertThat(PegParser.fromGrammar(root, source)
+                            .isSuccess())
+        .isTrue();
+    }
+
+    @Test
+    void nestedImport_cycleIsRejectedNotStackOverflow() {
+        var a = """
+            %import B.RuleB
+            RuleA <- 'a' B_RuleB
+            """;
+        var b = """
+            %import A.RuleA
+            RuleB <- 'b' A_RuleA
+            """;
+        var root = """
+            %import A.RuleA as Entry
+            Start <- Entry
+            """;
+        var result = PegParser.fromGrammar(root, GrammarSource.inMemory(Map.of("A", a, "B", b)));
+
+        assertThat(result.isSuccess())
+        .isFalse();
+        result.onFailure(cause -> assertThat(cause.message())
+                                  .as("a nested cycle must be reported, not blow the stack")
+                                  .contains("Cyclic"));
     }
 
     @Test
