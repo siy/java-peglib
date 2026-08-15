@@ -95,6 +95,57 @@ class MojoIntegrationTest {
     }
 
     @Test
+    void generateMojo_resolvesImportsFromGrammarDirectory(@TempDir Path tempDir) throws Exception {
+        // 0.7.2 — %import through the plugin. The imported grammar sits beside the root
+        // grammar and is found without configuring importDirectory. An unaliased
+        // "%import Shared.Number" binds the rule as Shared_Number.
+        Files.writeString(tempDir.resolve("Shared.peg"), "Number <- [0-9]+\n");
+        var grammarFile = tempDir.resolve("root.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "%import Shared.Number\nSum <- Shared_Number '+' Shared_Number\n");
+        var outputDir = tempDir.resolve("generated")
+                               .toFile();
+        var mojo = new GenerateMojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setOutputDirectory(outputDir);
+        mojo.setPackageName("demo.imp");
+        mojo.setLexerClassName("ImpLexer");
+        mojo.setParserClassName("ImpParser");
+        mojo.setVisitorClassName("ImpVisitor");
+        mojo.execute();
+
+        var pkgDir = outputDir.toPath()
+                              .resolve("demo")
+                              .resolve("imp");
+        assertThat(Files.exists(pkgDir.resolve("ImpParser.java"))).as("parser emitted from a grammar using %import")
+                                                                  .isTrue();
+        assertThat(Files.readString(pkgDir.resolve("ImpVisitor.java"))).as("the imported rule must reach the generated visitor")
+                                                                       .contains("visitSum");
+    }
+
+    @Test
+    void generateMojo_failsWhenImportedGrammarIsMissing(@TempDir Path tempDir) throws Exception {
+        // Guards the test above from passing vacuously: without Shared.peg beside it,
+        // the same grammar must fail rather than silently generate something.
+        var grammarFile = tempDir.resolve("root.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "%import Missing.Number\nSum <- Missing_Number '+' Missing_Number\n");
+        var mojo = new GenerateMojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setOutputDirectory(tempDir.resolve("generated")
+                                       .toFile());
+        mojo.setPackageName("demo.missing");
+        mojo.setLexerClassName("MLexer");
+        mojo.setParserClassName("MParser");
+        mojo.setVisitorClassName("MVisitor");
+
+        assertThatThrownBy(mojo::execute).as("a missing imported grammar must fail the build")
+                                         .isInstanceOf(MojoFailureException.class);
+    }
+
+    @Test
     void generateMojo_skipsWhenAllArtifactsUpToDate(@TempDir Path tempDir) throws Exception {
         var grammarFile = tempDir.resolve("gen.peg")
                                  .toFile();

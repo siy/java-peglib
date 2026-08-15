@@ -11,6 +11,8 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.grammar.GrammarResolver;
+import org.pragmatica.peg.grammar.GrammarSource;
 import org.pragmatica.peg.generator.LexerGenerator;
 import org.pragmatica.peg.generator.LexerGenerator.Generated;
 import org.pragmatica.peg.generator.ParserGenerator;
@@ -59,6 +61,16 @@ public class GenerateMojo extends AbstractMojo {
 
     @Parameter(property = "peglib.parserClassName", defaultValue = "GParser")
     private String parserClassName;
+
+    /**
+     * Directory searched for grammars named by {@code %import}. Defaults to the
+     * directory holding {@code grammarFile}, so a grammar importing {@code Shared.Rule}
+     * finds {@code Shared.peg} beside it. Ignored when the grammar declares no imports.
+     *
+     * @since 0.7.2
+     */
+    @Parameter(property = "peglib.importDirectory")
+    private File importDirectory;
 
     @Parameter(property = "peglib.visitorClassName", defaultValue = "GVisitor")
     private String visitorClassName;
@@ -117,10 +129,13 @@ public class GenerateMojo extends AbstractMojo {
      * sources. Each step is a Result so failures surface as a Cause.
      */
     private Result<GeneratedBundle> buildAll(String grammarText) {
-        return GrammarParser.parse(grammarText).flatMap(grammar -> RuleClassifier.classify(grammar).flatMap(classification -> DfaBuilder.build(grammar,
-                                                                                                                                               classification).flatMap(built -> generateBundle(grammar,
-                                                                                                                                                                                               classification,
-                                                                                                                                                                                               built))));
+        return GrammarParser.parse(grammarText)
+                            .flatMap(root -> GrammarResolver.resolve(root,
+                                                                     importSource()))
+                            .flatMap(grammar -> RuleClassifier.classify(grammar).flatMap(classification -> DfaBuilder.build(grammar,
+                                                                                                                            classification).flatMap(built -> generateBundle(grammar,
+                                                                                                                                                                            classification,
+                                                                                                                                                                            built))));
     }
 
     private Result<GeneratedBundle> generateBundle(Grammar grammar,
@@ -143,6 +158,20 @@ public class GenerateMojo extends AbstractMojo {
                                                                                                            visitorClassName).map(visitor -> new GeneratedBundle(lexer,
                                                                                                                                                                 parser,
                                                                                                                                                                 visitor))));
+    }
+
+    /**
+     * Filesystem source rooted at {@code importDirectory}, or at the grammar file's own
+     * directory when that parameter is unset.
+     */
+    private GrammarSource importSource() {
+        var dir = importDirectory != null
+                  ? importDirectory.toPath()
+                  : grammarFile.toPath().toAbsolutePath().getParent();
+
+        return dir == null
+               ? GrammarSource.empty()
+               : GrammarSource.filesystem(dir);
     }
 
     private static Result<String> readGrammar(Path path) {

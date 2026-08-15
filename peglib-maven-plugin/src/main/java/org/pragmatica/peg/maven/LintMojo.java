@@ -10,6 +10,8 @@ import org.pragmatica.peg.analyzer.Analyzer;
 import org.pragmatica.peg.analyzer.AnalyzerReport;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.grammar.GrammarResolver;
+import org.pragmatica.peg.grammar.GrammarSource;
 
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -28,6 +30,15 @@ import org.apache.maven.plugins.annotations.Parameter;
 public class LintMojo extends AbstractMojo {
     @Parameter(property = "peglib.grammarFile", required = true)
     private File grammarFile;
+
+    /**
+     * Directory searched for grammars named by {@code %import}. Defaults to the
+     * directory holding {@code grammarFile}.
+     *
+     * @since 0.7.2
+     */
+    @Parameter(property = "peglib.importDirectory")
+    private File importDirectory;
 
     @Parameter(property = "peglib.failOnWarning", defaultValue = "false")
     private boolean failOnWarning;
@@ -77,12 +88,31 @@ public class LintMojo extends AbstractMojo {
         // parse step (when there are no %imports) returns a validated Grammar
         // directly. Lint targets standalone grammar files, so we don't run the
         // resolver here.
-        return readGrammar(grammarFile.toPath()).flatMap(LintMojo::parseGrammar)
+        return readGrammar(grammarFile.toPath()).flatMap(this::parseGrammar)
                           .map(Analyzer::analyze);
     }
 
-    private static Result<Grammar> parseGrammar(String text) {
-        return GrammarParser.parse(text).mapError(c -> Causes.cause("Grammar parse failed: " + c.message()));
+    private Result<Grammar> parseGrammar(String text) {
+        return GrammarParser.parse(text)
+                            .flatMap(root -> GrammarResolver.resolve(root,
+                                                                     importSource()))
+                            .mapError(c -> Causes.cause("Grammar parse failed: " + c.message()));
+    }
+
+    /**
+     * Filesystem source rooted at {@code importDirectory}, or at the grammar file's own
+     * directory when that parameter is unset.
+     *
+     * @since 0.7.2
+     */
+    private GrammarSource importSource() {
+        var dir = importDirectory != null
+                  ? importDirectory.toPath()
+                  : grammarFile.toPath().toAbsolutePath().getParent();
+
+        return dir == null
+               ? GrammarSource.empty()
+               : GrammarSource.filesystem(dir);
     }
 
     private static Result<String> readGrammar(Path path) {
