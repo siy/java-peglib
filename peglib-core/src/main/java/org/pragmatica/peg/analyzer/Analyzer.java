@@ -44,6 +44,9 @@ import org.pragmatica.peg.lexer.RuleKind;
  *       rule the grammar does not define. Severity: WARNING.</li>
  *   <li>{@code grammar.memo-non-parser-rule} — a {@code %memo} directive on a
  *       LEXER or MIXED rule. Only PARSER rules are memoised. Severity: WARNING.</li>
+ *   <li>{@code grammar.inert-directive} — a directive the grammar front-end accepts
+ *       and stores but the generator never reads, so declaring it has no effect.
+ *       Severity: WARNING.</li>
  * </ol>
  */
 public final class Analyzer {
@@ -70,6 +73,7 @@ public final class Analyzer {
         findings.addAll(checkWhitespaceCycle());
         findings.addAll(checkBackReferences());
         findings.addAll(checkMemoRules());
+        findings.addAll(checkInertDirectives());
         // Stable sort: by rule name, then tag, then severity. Ensures deterministic output.
         findings.sort(Comparator.<Finding, String> comparing(Finding::ruleName)
                                 .thenComparing(Finding::tag)
@@ -556,6 +560,39 @@ public final class Analyzer {
             case Expression.Group grp -> containsBackReference(grp.expression());
             default -> false;
         };
+    }
+
+    // === Check 8: directives that are accepted and then ignored ===
+    //
+    // %word, and the rule-level %expected / %recover / %tag trailers, are parsed and
+    // stored on the IR but never read by ParserGenerator. Silence here means the only
+    // symptom is that the declared behaviour never materialises.
+    private List<Finding> checkInertDirectives() {
+        var findings = new ArrayList<Finding>();
+
+        grammar.word()
+               .onPresent(__ -> findings.add(Finding.warning("grammar.inert-directive",
+                                                             "",
+                                                             "'%word' is accepted but never consumed; peglib spells word boundaries "
+                                                            + "inline (e.g. \"'record' ![a-zA-Z0-9_$]\") instead")));
+        for (var rule : grammar.rules()) {
+            rule.expected().onPresent(__ -> findings.add(inertTrailer(rule.name(), "%expected")));
+            rule.recover().onPresent(__ -> findings.add(inertTrailer(rule.name(), "%recover")));
+            rule.tag().onPresent(__ -> findings.add(inertTrailer(rule.name(), "%tag")));
+        }
+
+        return findings;
+    }
+
+    private static Finding inertTrailer(String ruleName, String directive) {
+        return Finding.warning("grammar.inert-directive",
+                               ruleName,
+                               "rule-level '" + directive
+                              + "' on '" + ruleName
+                              + "' is accepted but never consumed by the generator" + ("%recover".equals(directive)
+                                                                                       ? "; use the grammar-level form '%recover [chars] " + ruleName
+                                                                                        + "'"
+                                                                                       : ""));
     }
 
     // === Check 7: %memo directives that silently do nothing ===

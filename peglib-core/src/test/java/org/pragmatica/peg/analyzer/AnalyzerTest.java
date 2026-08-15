@@ -213,6 +213,49 @@ class AnalyzerTest {
      * dropped at codegen, so the only symptom without a finding is that the
      * expected speedup silently fails to appear.
      */
+    /**
+     * 0.7.2 — directives the front-end accepts and the generator never reads. Silent
+     * acceptance means the only symptom is that the declared behaviour never appears.
+     */
+    @Nested
+    class InertDirectives {
+        @Test
+        void flagsWordDirective() {
+            var grammar = """
+                    %word <- [a-zA-Z0-9_]
+                    Start <- 'a'
+                    """;
+            var report = analyze(grammar);
+            assertThat(report.findings()).anyMatch(f ->
+            "grammar.inert-directive".equals(f.tag())
+            && f.message().contains("%word")
+            && f.severity() == Finding.Severity.WARNING);
+        }
+
+        @Test
+        void flagsRuleLevelTrailers() {
+            var grammar = """
+                    Start <- 'a' %expected "thing" %tag "my.tag"
+                    """;
+            var report = analyze(grammar);
+            assertThat(report.findings()).anyMatch(f ->
+            "grammar.inert-directive".equals(f.tag()) && f.message().contains("%expected"));
+            assertThat(report.findings()).anyMatch(f ->
+            "grammar.inert-directive".equals(f.tag()) && f.message().contains("%tag"));
+        }
+
+        @Test
+        void doesNotFlagGrammarWithoutInertDirectives() {
+            var grammar = """
+                    Start <- 'x'
+                    %whitespace <- [ ]*
+                    """;
+            var report = analyze(grammar);
+            assertThat(report.findings()).noneMatch(f ->
+            "grammar.inert-directive".equals(f.tag()));
+        }
+    }
+
     @Nested
     class MemoDirectives {
         @Test
