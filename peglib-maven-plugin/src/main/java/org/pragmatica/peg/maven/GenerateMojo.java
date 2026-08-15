@@ -138,26 +138,29 @@ public class GenerateMojo extends AbstractMojo {
                                                                                                                                                                             built))));
     }
 
+    /**
+     * The three generators are independent — none consumes another's output — so they run as a
+     * Fork-Join. Chaining them meant a lexer-generation failure hid simultaneous parser or
+     * visitor failures, which is the wrong trade in the goal a developer runs to find out why
+     * codegen broke. Generation is pure text assembly, so evaluating all three costs nothing
+     * material.
+     */
     private Result<GeneratedBundle> generateBundle(Grammar grammar,
                                                    RuleClassifier.Classification classification,
                                                    DfaBuilder.Built built) {
-        return LexerGenerator.generate(grammar,
-                                       classification,
-                                       built.dfa(),
-                                       built.kinds(),
-                                       packageName,
-                                       lexerClassName)
-                             .flatMap(lexer -> ParserGenerator.generate(grammar,
-                                                                        classification,
-                                                                        built.kinds(),
-                                                                        packageName,
-                                                                        parserClassName)
-                                                              .flatMap(parser -> VisitorGenerator.generate(grammar,
-                                                                                                           classification,
-                                                                                                           packageName,
-                                                                                                           visitorClassName).map(visitor -> new GeneratedBundle(lexer,
-                                                                                                                                                                parser,
-                                                                                                                                                                visitor))));
+        return Result.all(LexerGenerator.generate(grammar,
+                                                  classification,
+                                                  built.dfa(),
+                                                  built.kinds(),
+                                                  packageName,
+                                                  lexerClassName),
+                          ParserGenerator.generate(grammar,
+                                                   classification,
+                                                   built.kinds(),
+                                                   packageName,
+                                                   parserClassName),
+                          VisitorGenerator.generate(grammar, classification, packageName, visitorClassName))
+                     .map(GeneratedBundle::new);
     }
 
     private GrammarSource importSource() {
@@ -183,17 +186,18 @@ public class GenerateMojo extends AbstractMojo {
         return Files.writeString(targetFile, source);
     }
 
+    /** Three unrelated files; a failure on one should not hide the others. */
     private static Result<List<Path>> writeAll(GeneratedBundle bundle,
                                                Path lexerTarget,
                                                Path parserTarget,
                                                Path visitorTarget) {
-        return writeSource(lexerTarget,
-                           bundle.lexer().source()).flatMap(l -> writeSource(parserTarget,
-                                                                             bundle.parser().source()).flatMap(p -> writeSource(visitorTarget,
-                                                                                                                                bundle.visitor()
-                                                                                                                                      .source()).map(v -> List.of(l,
-                                                                                                                                                                  p,
-                                                                                                                                                                  v))));
+        return Result.all(writeSource(lexerTarget,
+                                      bundle.lexer().source()),
+                          writeSource(parserTarget,
+                                      bundle.parser().source()),
+                          writeSource(visitorTarget,
+                                      bundle.visitor().source()))
+                     .map(List::of);
     }
 
     private Path targetSourceFile(String className) {

@@ -36,6 +36,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
   the same footgun class as the `%memo` no-ops flagged in 0.7.1.
 
+### Fixed
+
+Found by the pre-release review round, all in 0.7.2's own new code unless noted:
+
+- **`peglib:check` ignored `importDirectory` in half of its work.** `CheckMojo` runs an embedded
+  `LintMojo` it constructs by hand, so Plexus never injects `@Parameter` fields into it. With a
+  configured `importDirectory`, the lint stage resolved `%import` against the grammar's own
+  directory while the parser-build stage used the configured one — the two halves of a single
+  `check` disagreed, failing valid grammars.
+- **`peglib:generate` could ship stale sources.** The up-to-date check compares generated files
+  against the *root* grammar's mtime, so editing an imported grammar without touching the root
+  left the previous output in place with no warning. Grammars declaring `%import` now always
+  regenerate.
+- **`peglib:lint` mislabelled import failures.** Resolution errors ("grammar not found", cyclic
+  import, name collision) were reported under a "Grammar parse failed:" prefix. Each stage now
+  labels its own failures.
+- **`Grammar` only defensively copied two of its six collections** despite javadoc claiming
+  otherwise. A `Grammar` lives inside a cached `Parser` shared across threads, so its
+  immutability cannot depend on every producer remembering to pre-copy. Pre-existing.
+- **The analyzer silently absorbed rule-classification failures**, letting `peglib:lint` report a
+  clean grammar that `check` and `generate` reject moments later. Now reported as
+  `grammar.classification-failed`. Pre-existing.
+- **`GrammarSource.filesystem` now verifies the resolved path stays inside its directory.** Not
+  exploitable via `%import` — grammar names are lexically restricted to identifiers — but the
+  guarantee lived in a different class than the one reading files, and this is public API.
+- Generator and file-writing steps in `peglib:generate` run as Fork-Join, so a failure in one no
+  longer hides simultaneous failures in the others.
+
 ### Documentation
 
 - The maven plugin's goals and parameters are documented in the README for the first time.
