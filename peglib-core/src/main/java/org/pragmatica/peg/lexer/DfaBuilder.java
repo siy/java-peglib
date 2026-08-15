@@ -806,9 +806,8 @@ public final class DfaBuilder {
         // Record the literal so the caller can append its NFA accept fragment to
         // the lexer (otherwise the kind exists in the table but no DFA path
         // produces tokens of that kind).
-        if (aliasLiteralsOut != null) {
-            aliasLiteralsOut.add(inlineLit);
-        }
+        // Required parameter — the single entry point always supplies a fresh list.
+        aliasLiteralsOut.add(inlineLit);
 
         return kind;
     }

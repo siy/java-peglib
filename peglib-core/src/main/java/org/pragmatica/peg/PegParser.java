@@ -1,7 +1,6 @@
 package org.pragmatica.peg;
 
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicLong;
@@ -9,7 +8,6 @@ import java.util.stream.Collectors;
 
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
-import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.peg.error.ParseError;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
@@ -54,7 +52,7 @@ public final class PegParser {
      * <p>A failed build removes its own entry, so a later call retries rather than inheriting a
      * permanent failure, while threads already waiting still receive that failure.
      */
-    private static final Map<String, CompletableFuture<Result<Parser>>> CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, Result<Parser>> CACHE = new ConcurrentHashMap<>();
     private static final AtomicLong GEN_COUNTER = new AtomicLong();
 
     private PegParser() {}
@@ -121,29 +119,21 @@ public final class PegParser {
     }
 
     /**
-     * Reserve the key, build once, publish. Losers of the race wait on the winner's future
-     * instead of repeating the work.
+     * Build once per key. {@code computeIfAbsent} runs the mapping function under the bin lock,
+     * so N threads racing on the same uncached grammar serialise on the BUILD rather than each
+     * running the full classify → DFA → compile pipeline (~100-500 ms) and discarding all but
+     * one result.
+     *
+     * <p>A failed build removes its own entry, so a later call retries instead of inheriting a
+     * permanent failure. Safe to block in the mapping function here because nothing in the build
+     * path touches {@code CACHE} — this is its only writer.
      */
     private static Result<Parser> singleFlight(String cacheKey, Supplier<Result<Parser>> builder) {
-        var reserved = new CompletableFuture<Result<Parser>>();
-        var existing = CACHE.putIfAbsent(cacheKey, reserved);
+        var result = CACHE.computeIfAbsent(cacheKey, __ -> builder.get());
 
-        if (existing != null) {
-            return join(existing);
-        }
+        result.onFailure(__ -> CACHE.remove(cacheKey, result));
 
-        var built = builder.get();
-
-        built.onFailure(__ -> CACHE.remove(cacheKey, reserved));
-        reserved.complete(built);
-
-        return built;
-    }
-
-    private static Result<Parser> join(CompletableFuture<Result<Parser>> future) {
-        return Result.<Result<Parser>> lift(Causes::fromThrowable,
-                                            () -> future.get())
-                     .flatMap(result -> result);
+        return result;
     }
 
     private record ResolvedGrammar(String rootText, Grammar root, Grammar resolved) {}

@@ -7,7 +7,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import org.pragmatica.lang.Unit;
@@ -225,60 +224,66 @@ public final class RuleClassifier {
         var ruleMap = grammar.ruleMap();
 
         for (var rule : grammar.rules()) {
-            var info = detectSkipPrefix(rule.expression(), ruleMap);
-
-            if (info.isEmpty()) {
-                continue;
-            }
-
-            var bodyProps = analyse(info.get().bodyExpression());
-            // Body must itself be pure-lexical (no rule references, no back-references, no dictionaries).
-            if (!bodyProps.usesOnlyLexicalConstructs() || bodyProps.referencesAnyRule()) {
-                continue;
-            }
-            // Force LEXER classification so DFA picks it up.
-            kinds.put(rule.name(), RuleKind.LEXER);
-            result.put(rule.name(), info.get());
-            // Update properties so downstream consumers see the body-only shape.
-            properties.put(rule.name(), bodyProps);
+            detectSkipPrefix(rule.expression(), ruleMap).onPresent(info -> recordSkipPrefix(rule,
+                                                                                            info,
+                                                                                            kinds,
+                                                                                            properties,
+                                                                                            result));
         }
 
         return result;
     }
 
-    private static Optional<KeywordSkipInfo> detectSkipPrefix(Expression expr, Map<String, Rule> ruleMap) {
+    private static void recordSkipPrefix(Rule rule,
+                                         KeywordSkipInfo info,
+                                         Map<String, RuleKind> kinds,
+                                         Map<String, RuleProperties> properties,
+                                         Map<String, KeywordSkipInfo> result) {
+        var bodyProps = analyse(info.bodyExpression());
+        // Body must itself be pure-lexical (no rule references, no back-references, no dictionaries).
+        if (!bodyProps.usesOnlyLexicalConstructs() || bodyProps.referencesAnyRule()) {
+            return;
+        }
+        // Force LEXER classification so DFA picks it up.
+        kinds.put(rule.name(), RuleKind.LEXER);
+        result.put(rule.name(), info);
+        // Update properties so downstream consumers see the body-only shape.
+        properties.put(rule.name(), bodyProps);
+    }
+
+    private static Option<KeywordSkipInfo> detectSkipPrefix(Expression expr, Map<String, Rule> ruleMap) {
         var unwrapped = unwrapWrappers(expr);
 
         if (! (unwrapped instanceof Expression.Sequence seq)) {
-            return Optional.empty();
+            return Option.none();
         }
 
         var elements = seq.elements();
 
         if (elements.size() < 2) {
-            return Optional.empty();
+            return Option.none();
         }
 
         var head = unwrapWrappers(elements.get(0));
 
         if (! (head instanceof Expression.Not not)) {
-            return Optional.empty();
+            return Option.none();
         }
 
         var notInner = unwrapWrappers(not.expression());
 
         if (! (notInner instanceof Expression.Reference ref)) {
-            return Optional.empty();
+            return Option.none();
         }
 
         var referenced = ruleMap.get(ref.ruleName());
 
         if (referenced == null) {
-            return Optional.empty();
+            return Option.none();
         }
 
         if (!isLiteralSetRule(referenced.expression())) {
-            return Optional.empty();
+            return Option.none();
         }
 
         var rest = elements.subList(1, elements.size());
@@ -286,7 +291,7 @@ public final class RuleClassifier {
                           ? rest.get(0)
                           : new Expression.Sequence(seq.span(), List.copyOf(rest));
 
-        return Optional.of(new KeywordSkipInfo(ref.ruleName(), body));
+        return Option.some(new KeywordSkipInfo(ref.ruleName(), body));
     }
 
     /**

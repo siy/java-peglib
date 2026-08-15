@@ -119,7 +119,7 @@ public final class VisitorGenerator {
     }
 
     private static boolean isValidIdentifier(String s) {
-        if (s == null || s.isEmpty()) {
+        if (s.isEmpty()) {
             return false;
         }
 
@@ -137,10 +137,7 @@ public final class VisitorGenerator {
     }
 
     private static boolean isValidQualifiedPackage(String s) {
-        if (s == null) {
-            return false;
-        }
-
+        // Required parameter — the package name always comes from generator config.
         if (s.isEmpty()) {
             return true;
         }
