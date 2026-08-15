@@ -44,6 +44,8 @@ import org.pragmatica.peg.lexer.RuleKind;
  *       rule the grammar does not define. Severity: WARNING.</li>
  *   <li>{@code grammar.memo-non-parser-rule} — a {@code %memo} directive on a
  *       LEXER or MIXED rule. Only PARSER rules are memoised. Severity: WARNING.</li>
+ *   <li>{@code grammar.classification-failed} — rule classification failed, so kind-dependent
+ *       checks could not run. Severity: ERROR.</li>
  *   <li>{@code grammar.inert-directive} — a directive the grammar front-end accepts
  *       and stores but the generator never reads, so declaring it has no effect.
  *       Severity: WARNING.</li>
@@ -576,15 +578,15 @@ public final class Analyzer {
                                                              "'%word' is accepted but never consumed; peglib spells word boundaries "
                                                             + "inline (e.g. \"'record' ![a-zA-Z0-9_$]\") instead")));
         for (var rule : grammar.rules()) {
-            rule.expected().onPresent(__ -> findings.add(inertTrailer(rule.name(), "%expected")));
-            rule.recover().onPresent(__ -> findings.add(inertTrailer(rule.name(), "%recover")));
-            rule.tag().onPresent(__ -> findings.add(inertTrailer(rule.name(), "%tag")));
+            rule.expected().onPresent(__ -> findings.add(inertTrailerFinding(rule.name(), "%expected")));
+            rule.recover().onPresent(__ -> findings.add(inertTrailerFinding(rule.name(), "%recover")));
+            rule.tag().onPresent(__ -> findings.add(inertTrailerFinding(rule.name(), "%tag")));
         }
 
         return findings;
     }
 
-    private static Finding inertTrailer(String ruleName, String directive) {
+    private static Finding inertTrailerFinding(String ruleName, String directive) {
         return Finding.warning("grammar.inert-directive",
                                ruleName,
                                "rule-level '" + directive
@@ -608,8 +610,13 @@ public final class Analyzer {
 
         var findings = new ArrayList<Finding>();
         var ruleMap = grammar.ruleMap();
-        // A grammar that fails classification has bigger problems, and the other
-        // checks report them; skip the kind-dependent finding rather than guess.
+        // Classification can fail (e.g. SkippedRuleReferenced). No other check calls
+        // RuleClassifier, so absorbing that failure silently would let peglib:lint report a
+        // clean grammar that peglib:check and peglib:generate reject moments later. Report it.
+        RuleClassifier.classify(grammar).onFailure(cause -> findings.add(Finding.error("grammar.classification-failed",
+                                                                                       "",
+                                                                                       "rule classification failed, so %memo targets could not be "
+                                                                                      + "checked: " + cause.message())));
         var kinds = RuleClassifier.classify(grammar).map(RuleClassifier.Classification::kinds).or(Map::of);
 
         for (var name : grammar.memoRules()) {
