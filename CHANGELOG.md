@@ -15,6 +15,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing connected them — `fromGrammar` went straight to classification and the grammar failed
   with a misleading `references undefined rule` error.
 
+  The single-argument `fromGrammar` now fails on a grammar declaring `%import` with a message
+  naming the fix, instead of reporting a phantom undefined rule.
+
+  Naming is unchanged and worth restating, because the natural assumption is wrong: an
+  unaliased `%import G.R` binds the rule as `G_R`, not as `R`. Use `as Local` for a bare name.
+
+  **Caching:** the parser cache is keyed by grammar text, which cannot distinguish the same
+  root resolved against two different sources. Grammars declaring imports are therefore not
+  cached and recompile on every call — a deliberate trade against handing back a parser built
+  from someone else's imports.
+
+- **`%import` in the maven plugin.** `generate`, `check` and `lint` resolve imports from a
+  filesystem source rooted at the grammar file's own directory, so `%import Shared.Rule` finds
+  `Shared.peg` beside the root grammar with no configuration. Override with the new
+  `importDirectory` parameter (`peglib.importDirectory`).
+
+- **Analyzer check `grammar.inert-directive`.** Flags directives the front-end accepts and
+  stores but the generator never reads: `%word`, and the rule-level `%expected` / `%recover` /
+  `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
+  the same footgun class as the `%memo` no-ops flagged in 0.7.1.
+
+### Documentation
+
+- The maven plugin's goals and parameters are documented in the README for the first time.
+  `peglib:generate` — the primary build-time entry point — appeared nowhere.
+- `%word` is documented, as inert. It was accepted by the grammar parser and mentioned in no
+  document.
+- Grammar-DSL composition section rewritten now that `%import` reaches a working parser; it
+  previously stated, correctly at the time, that no such path existed.
+
 ## [0.7.1] - 2026-08-14
 
 Validated the Java grammar against **javac's own parse phase** over OpenJDK's langtools test
