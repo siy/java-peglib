@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - unreleased
+
+### Added
+
+- **`%import` composition works end to end.** `PegParser.fromGrammar(String, GrammarSource)`
+  resolves the transitive import closure before generating, so a grammar declaring `%import`
+  can now produce a working parser. Previously the directive parsed, the resolver existed, and
+  nothing connected them — `fromGrammar` went straight to classification and the grammar failed
+  with a misleading `references undefined rule` error.
+
 ## [0.7.1] - 2026-08-14
 
 Validated the Java grammar against **javac's own parse phase** over OpenJDK's langtools test
