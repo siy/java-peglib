@@ -235,13 +235,19 @@ class AnalyzerTest {
         @Test
         void flagsRuleLevelTrailers() {
             var grammar = """
-                    Start <- 'a' %expected "thing" %tag "my.tag"
+                    Start <- 'a' %expected "thing" %recover "}" %tag "my.tag"
                     """;
             var report = analyze(grammar);
             assertThat(report.findings()).anyMatch(f ->
             "grammar.inert-directive".equals(f.tag()) && f.message().contains("%expected"));
             assertThat(report.findings()).anyMatch(f ->
             "grammar.inert-directive".equals(f.tag()) && f.message().contains("%tag"));
+            // %recover is the one trailer whose message carries extra guidance; without a
+            // case for it that branch is never executed by any test.
+            assertThat(report.findings()).anyMatch(f ->
+            "grammar.inert-directive".equals(f.tag())
+            && f.message().contains("%recover")
+            && f.message().contains("grammar-level"));
         }
 
         @Test

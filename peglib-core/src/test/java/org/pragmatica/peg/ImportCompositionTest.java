@@ -106,18 +106,28 @@ class ImportCompositionTest {
             %whitespace <- [ \\t]*
             """;
 
-        assertThat(PegParser.fromGrammar(root, source())
-                            .isSuccess())
+        var result = PegParser.fromGrammar(root, source());
+
+        assertThat(result.isSuccess())
         .as("bare 'Ident' must not resolve without an 'as' alias")
         .isFalse();
+        result.onFailure(cause -> assertThat(cause.message())
+                                  .as("the failure must be the unresolved bare name")
+                                  .contains("Ident"));
     }
 
     @Test
     void missingImport_failsWithGrammarNotFound() {
-        assertThat(PegParser.fromGrammar(ROOT_PREFIXED, GrammarSource.empty())
-                            .isSuccess())
+        var result = PegParser.fromGrammar(ROOT_PREFIXED, GrammarSource.empty());
+
+        assertThat(result.isSuccess())
         .as("empty source cannot satisfy %%import")
         .isFalse();
+        // Assert WHY it failed: isSuccess()==false alone would also pass if the grammar
+        // broke for some unrelated reason.
+        result.onFailure(cause -> assertThat(cause.message())
+                                  .contains("Shared")
+                                  .contains("not found"));
     }
 
     @Test
