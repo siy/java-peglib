@@ -5,6 +5,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.error.ParseError;
 import org.pragmatica.peg.grammar.Grammar;
@@ -57,15 +58,11 @@ public final class PegParser {
      * </ol>
      */
     public static Result<Parser> fromGrammar(String grammarText) {
-        Parser cached = CACHE.get(grammarText);
-
-        if (cached != null) {
-            return Result.success(cached);
-        }
-
-        return GrammarParser.parse(grammarText)
-                            .flatMap(PegParser::requireSourceForImports)
-                            .flatMap(grammar -> build(grammarText, grammar, true));
+        return Option.option(CACHE.get(grammarText))
+                     .map(Result::success)
+                     .or(() -> GrammarParser.parse(grammarText)
+                                            .flatMap(PegParser::requireSourceForImports)
+                                            .flatMap(grammar -> build(grammarText, grammar, true)));
     }
 
     /**
@@ -87,22 +84,23 @@ public final class PegParser {
      * @since 0.7.2
      */
     public static Result<Parser> fromGrammar(String grammarText, GrammarSource source) {
-        Parser cached = CACHE.get(grammarText);
+        return Option.option(CACHE.get(grammarText))
+                     .map(Result::success)
+                     .or(() -> resolveAndBuild(grammarText, source));
+    }
 
-        if (cached != null) {
-            return Result.success(cached);
-        }
-
+    private static Result<Parser> resolveAndBuild(String grammarText, GrammarSource source) {
         return GrammarParser.parse(grammarText)
-                            .flatMap(root -> GrammarResolver.resolve(root, source).map(resolved -> new Composed(root,
-                                                                                                                resolved)))
+                            .flatMap(root -> GrammarResolver.resolve(root, source).map(resolved -> new ResolvedGrammar(root,
+                                                                                                                       resolved)))
                             .flatMap(composed -> build(grammarText,
                                                        composed.resolved(),
                                                        composed.root().imports().isEmpty()));
     }
 
-    /** Pairs the parsed root with its resolved form so the caller can see whether imports were involved. */
-    private record Composed(Grammar root, Grammar resolved) {}
+    /** Pairs the parsed root with its resolved form, so the cache decision can be made from the
+     * ROOT's declared imports rather than the resolved grammar's (which are always empty). */
+    private record ResolvedGrammar(Grammar root, Grammar resolved) {}
 
     /**
      * A grammar that declares {@code %import} cannot be compiled without a
@@ -135,27 +133,31 @@ public final class PegParser {
                                                                                                                                                                                         lexerClassName).flatMap(compiledLexer -> compileParser(checked,
                                                                                                                                                                                                                                                classification,
                                                                                                                                                                                                                                                built,
-                                                                                                                                                                                                                                               parserClassName).map(compiledParser -> finish(cacheKey,
-                                                                                                                                                                                                                                                                                             checked,
-                                                                                                                                                                                                                                                                                             compiledLexer,
-                                                                                                                                                                                                                                                                                             compiledParser,
-                                                                                                                                                                                                                                                                                             cacheable))))));
+                                                                                                                                                                                                                                               parserClassName).map(compiledParser -> toParser(cacheKey,
+                                                                                                                                                                                                                                                                                               checked,
+                                                                                                                                                                                                                                                                                               compiledLexer,
+                                                                                                                                                                                                                                                                                               compiledParser,
+                                                                                                                                                                                                                                                                                               cacheable))))));
     }
 
-    private static Parser finish(String cacheKey,
-                                 Grammar grammar,
-                                 CompiledLexer compiledLexer,
-                                 CompiledParser compiledParser,
-                                 boolean cacheable) {
+    private static Parser toParser(String cacheKey,
+                                   Grammar grammar,
+                                   CompiledLexer compiledLexer,
+                                   CompiledParser compiledParser,
+                                   boolean cacheable) {
         return cacheable
                ? cacheAndReturn(cacheKey, grammar, compiledLexer, compiledParser)
                : new Parser(grammar, compiledLexer, compiledParser);
     }
 
     private static Result<Grammar> checkLeftRecursion(Grammar grammar) {
-        return LeftRecursionDetector.detect(grammar).flatMap(result -> result.hasErrors()
-                                                                       ? LeftRecursionCause.of(result).result()
-                                                                       : Result.success(grammar));
+        return LeftRecursionDetector.detect(grammar).flatMap(result -> grammarOrCause(grammar, result));
+    }
+
+    private static Result<Grammar> grammarOrCause(Grammar grammar, LeftRecursionDetector.DetectionResult result) {
+        return result.hasErrors()
+               ? LeftRecursionCause.of(result).result()
+               : Result.success(grammar);
     }
 
     /** Number of cached grammars; useful for tests verifying cache behaviour. */
@@ -174,11 +176,8 @@ public final class PegParser {
                                          CompiledLexer compiledLexer,
                                          CompiledParser compiledParser) {
         Parser parser = new Parser(grammar, compiledLexer, compiledParser);
-        Parser existing = CACHE.putIfAbsent(grammarText, parser);
 
-        return existing != null
-               ? existing
-               : parser;
+        return Option.option(CACHE.putIfAbsent(grammarText, parser)).or(parser);
     }
 
     private static Result<CompiledLexer> compileLexer(Grammar grammar,
