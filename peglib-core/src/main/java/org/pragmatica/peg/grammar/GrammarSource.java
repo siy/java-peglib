@@ -147,7 +147,14 @@ public interface GrammarSource {
 
         @Override
         public Option<String> load(String grammarName) {
-            var file = directory.resolve(grammarName + ".peg");
+            var file = directory.resolve(grammarName + ".peg").normalize();
+            // Defence in depth. Today a grammar name can only ever be an identifier
+            // ([A-Za-z_][A-Za-z0-9_]*) because GrammarLexer produces it, so it cannot contain
+            // "../" or an absolute path. That guarantee lives in a different class, and this
+            // is a public API any caller may hand an arbitrary string — so verify here too.
+            if (!file.startsWith(directory.normalize())) {
+                return Option.none();
+            }
 
             if (!Files.isRegularFile(file)) {
                 return Option.none();

@@ -70,14 +70,20 @@ public record Grammar(List<Rule> rules,
                       Set<String> checkpointRules,
                       Set<String> memoRules) {
     /**
-     * Canonical compact constructor. Applies a defensive copy to
-     * {@code checkpointRules} and {@code memoRules} so the record's exposed
-     * sets are immutable regardless of how callers construct the instance.
-     * Matches the style used for {@code recoverSets}.
+     * Canonical compact constructor. Defensively copies every collection component so the
+     * record is immutable regardless of how callers construct it.
      *
      * @since 0.6.1
      */
     public Grammar {
+        // All six collection components are copied. A Grammar ends up inside a Parser that
+        // PegParser publishes into a process-wide cache and hands to arbitrary threads, so the
+        // whole safety argument rests on it being genuinely immutable after construction —
+        // that must not depend on every producer remembering to pre-copy.
+        rules = List.copyOf(rules);
+        suggestRules = List.copyOf(suggestRules);
+        imports = List.copyOf(imports);
+        recoverSets = Map.copyOf(recoverSets);
         checkpointRules = Set.copyOf(checkpointRules);
         memoRules = Set.copyOf(memoRules);
     }
