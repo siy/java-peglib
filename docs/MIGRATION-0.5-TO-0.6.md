@@ -19,7 +19,7 @@ For the rationale behind every decision listed here, see [`ARCHITECTURE-0.6.0.md
 | Error recovery | `RecoveryStrategy` enum (NONE/BASIC/ADVANCED), `ErrorReporting` enum at gen-time | One always-on panic-mode mechanism; diagnostics always present |
 | Configuration | `ParserConfig` record (~17 fields) | Grammar directives + single optional `maxDiagnostics` parameter |
 | Incremental engine | `IncrementalSession` + stable `long` IDs + `LongLongMap` + `Cursor` | `IncrementalParser` thin wrapper; token index serves as identity |
-| Entry point | `org.pragmatica.peg.PegParser` | `org.pragmatica.peg.PegParser` (during 0.6.0 development; the `.v6` suffix will collapse to `org.pragmatica.peg` at GA) |
+| Entry point | `org.pragmatica.peg.PegParser` | `org.pragmatica.peg.PegParser` (the `.v6` implementation package collapsed into `org.pragmatica.peg` in 0.7.0) |
 | Result type | `Result<CstNode>`, `Result<AstNode>`, `Result<Object>`, `ParseResultWithDiagnostics` | Single `ParseResult(CstArray cst, List<Diagnostic> diagnostics)` |
 
 ---
@@ -39,7 +39,7 @@ Removed:
 New:
 - `PegParser.fromGrammar(String grammarText)` — runs classify → DFA → generate-and-compile-lexer → generate-and-compile-parser; result cached by exact grammar text
 
-The 0.5.x `Builder` knobs (`packrat`, `recovery`, `trivia`, `triviaPostPass`) are all gone. Packrat is auto-detected per rule, recovery is always on, trivia is always captured, and the post-pass mechanism no longer exists.
+The 0.5.x `Builder` knobs (`packrat`, `recovery`, `trivia`, `triviaPostPass`) are all gone. Packrat was dropped entirely — the tokens-first design made it unnecessary — recovery is always on, trivia is always captured, and the post-pass mechanism no longer exists.
 
 ### `org.pragmatica.peg.parser`
 
@@ -52,7 +52,7 @@ Removed entirely:
 - `ParseResultWithDiagnostics`
 - `ParseMode` (standard / withActions / noWhitespace)
 
-New: `org.pragmatica.peg.cst.ParseResult` is a record with two components — `CstArray cst` and `List<Diagnostic> diagnostics`. There is no per-call configuration record; `Parser.parse(String)` and `Parser.parse(String, int maxDiagnostics)` are the only two methods. `maxDiagnostics` is currently a stub (Phase F).
+New: `org.pragmatica.peg.cst.ParseResult` is a record with two components — `CstArray cst` and `List<Diagnostic> diagnostics`. There is no per-call configuration record; `Parser.parse(String)` and `Parser.parse(String, int maxDiagnostics)` are the only two methods. The cap is honoured: `0` records no diagnostics, a negative value means no cap.
 
 ### `org.pragmatica.peg.action`
 
@@ -100,7 +100,7 @@ Removed:
 - `ErrorReporting` enum (BASIC / ADVANCED)
 - All static `generateParser(...)` / `generateCstParser(...)` entry points on `PegParser`
 
-The 0.6.0 generator emits three artifacts per grammar (`GLexer`, `GParser`, `GVisitor`) and is invoked through `PegParser.fromGrammar` rather than by user code directly. Build-time generation through `peglib-maven-plugin` will continue to work; the plugin is being rewritten in Phase E.
+The 0.6.0 generator emits three artifacts per grammar (`GLexer`, `GParser`, `GVisitor`) and is invoked through `PegParser.fromGrammar` rather than by user code directly. Build-time generation through `peglib-maven-plugin` works — the `generate` goal (renamed from `generate-v6` in 0.7.0) is covered by `MojoIntegrationTest`.
 
 ### `peglib-incremental`
 
@@ -361,12 +361,12 @@ var config = new ParserConfig(
 var parser = PegParser.fromGrammar(grammar, config).unwrap();
 ```
 
-After (0.6.0) — no config record. Per-rule packrat, trivia capture, and recovery are the runtime; everything else moved to gen-time analysis:
+After (0.6.0) — no config record. Trivia capture and recovery are always-on runtime behaviour; everything else moved to gen-time analysis:
 ```java
 var parser = PegParser.fromGrammar(grammar).unwrap();
 var result = parser.parse(input);
 
-// Or with a diagnostic cap (currently a stub; full plumbing in Phase F):
+// Or with a diagnostic cap (honoured: 0 records none, negative means no cap):
 var capped = parser.parse(input, /* maxDiagnostics */ 100);
 ```
 
@@ -436,7 +436,7 @@ CstArray current = inc.current();
 
 The cursor abstraction is gone (offsets are sufficient); stable `long` IDs are gone (token index serves as identity); `IncrementalSession` is gone (the parser holds its own state).
 
-True partial reparse (D.1.2) is not yet implemented. Today `edit` does a windowed re-lex but a full reparse; the API surface is final and behaviour will improve in subsequent Phase D commits without source changes.
+True partial reparse landed in 0.6.1. `edit` re-lexes a window and reparses only the affected `%checkpoint` subtree, falling back to a full reparse when no checkpoint ancestor covers the edit. `IncrementalParser.partialReparseCount()` / `fullReparseCount()` expose which path ran.
 
 ---
 
@@ -447,8 +447,8 @@ In nearly all cases: **none**. Grammar files written for 0.5.x parse cleanly und
 - `Rule <- Expression` definitions
 - All operators: ` ` (sequence), `/` (choice), `*`, `+`, `?`, `&`, `!`, `(...)`, `'lit'`, `"lit"`, `[a-z]`, `[^a-z]`, `.`
 - Extensions: `< e >` (token boundary), `~e` (ignore), `'text'i` (case-insensitive), `e{n,m}` (bounded repetition), `$name<e>` / `$name` (named capture / back-reference)
-- Cut operator: `^` and `↑` (parsed; not yet wired into the generator)
-- Directives: `%whitespace <- ...`, `%recover` (declared; full directive parsing not yet implemented)
+- Cut operator: `^` and `↑` (wired into the generator in 0.6.1; commits to the current Choice alternative)
+- Directives: `%whitespace <- ...`, `%recover [chars] Rule`, `%checkpoint Rule`, `%suggest Rule`, `%memo Rule` (all parsed and honoured; `%memo` added in 0.7.1)
 
 The one breaking change is **inline Java action blocks**:
 
@@ -472,11 +472,15 @@ The new directive added in 0.6.0 is `%checkpoint <Rule>` — declares a rule as 
 Cold compile:
 - First call to `PegParser.fromGrammar(g)` for a given grammar text runs the full generate-compile pipeline. Expect a one-time cost in the **hundreds of milliseconds** to roughly **a second** depending on grammar size. Cached afterwards.
 - Subsequent `fromGrammar(g)` with the same text: lookup-only, sub-millisecond.
-- `peglib-maven-plugin` will support build-time generation (Phase E in progress); production deployments ship pre-compiled `.class` and skip compilation entirely.
+- `peglib-maven-plugin` supports build-time generation via the `generate` goal; production deployments ship pre-compiled `.class` and skip compilation entirely.
 
 Warm parse:
-- The 0.6.0 architecture targets **parity with or faster than javac** on Java parsing. The 0.5.1 baseline (785 ms selfhost / 25 ms reference) carried the per-character interpreter penalty; the 0.6.0 lex-then-parse design removes most of it.
-- **Caveat**: end-of-Phase-C bench data shows a 5-13× regression on small fixtures vs 0.5.x packrat. Profile-driven optimization is in progress (Phase F). The architecture target is unchanged; the code is not yet there.
+- The 0.6.0 architecture targeted **parity with or faster than javac** on Java parsing. The 0.5.1 baseline (785 ms selfhost / 25 ms reference) carried the per-character interpreter penalty; the lex-then-parse design removes most of it.
+- **That target was met.** As of 0.7.1 the 40k-LOC selfhost fixture parses in ~67 ms warm. The
+  Phase-C-era caveat about a 5-13× regression on small fixtures is obsolete — it described an
+  intermediate state, and the optimisation work it referred to (first-token guard,
+  link-on-success CST building, `%memo`) has since landed. Current figures live in the
+  CHANGELOG; re-measure rather than quoting any number in this guide.
 
 Memory:
 - 0.5.x CST nodes: ~80-200 bytes each (record header + List allocations + per-trivia-list storage)
@@ -496,31 +500,35 @@ Incremental edit median:
 | **Formatter** | Medium | CST traversal logic translates from sealed-record dispatch to `cst.viewAt(idx)`-based dispatch (or direct array). Trivia emission rewires to token-positional accessors. `peglib-formatter` is being migrated in parallel as a reference. |
 | **IDE plugin** | Medium – High | Incremental engine API changes; cursor abstraction gone; node identity is now token-index-based. Until D.1.2 lands, edits pay full-reparse cost (still well under typing budget for small files). |
 | **Compiler / interpreter** | High | Inline actions are gone; everything that was a `{ ... }` block becomes Visitor code. AST type removed, so user defines its own. The Visitor pattern is mechanical to write but verbose for grammars with many rules. |
-| **Tooling using generated standalone parser** | Medium | The single self-contained Java file output of 0.5.x is now three files (`GLexer`, `GParser`, `GVisitor`) plus dependency on `peglib-core` runtime types (`CstArray`, `TokenArray`, `Diagnostic`, `ParseResult`). The `peglib-maven-plugin` generate mojo migration is in progress (Phase E). |
+| **Tooling using generated standalone parser** | Medium | The single self-contained Java file output of 0.5.x is now three files (`GLexer`, `GParser`, `GVisitor`). These depend ONLY on `peglib-runtime` (`CstArray`, `TokenArray`, `Diagnostic`, `ParseResult`) plus `pragmatica-lite:core` and `java.*` — never on `peglib-core`. The `peglib-maven-plugin` generate mojo is complete. |
 
 Rough rule of thumb: a 0.5.x consumer that only used CST output and never wrote action blocks migrates in **a few hours**. A consumer relying on actions or AST output should budget **one to a few days**, dominated by writing the equivalent visitor.
 
 ---
 
-## Known limitations in 0.6.0 (current state)
+## Known limitations in 0.6.0 — all since resolved
 
-The 0.6.0 entry-point package is `org.pragmatica.peg` while implementation is in progress. The `.v6` suffix collapses to `org.pragmatica.peg` at GA; the rest of the API is final.
+This section listed what 0.6.0 shipped unfinished. **Every item has landed**; it is kept as
+history so anyone reading an old copy of this guide can see what changed and when. If you are
+migrating today, none of these are limitations.
 
-Functionality not yet wired:
-- **Cut operator (`^` / `↑`)** — parsed by the grammar parser but treated as a no-op by the parser generator. PEG ordered-choice semantics still apply; the cut hint is currently ignored. Tracked for Phase F.
-- **MIXED-rule char-level fallback** — rules classified as MIXED (combining char-level and rule references) currently no-op the fallback path. Affects very few real grammars; the Java25 corpus has no MIXED rules.
-- **Per-rule `%recover` sync sets** — `%recover` directive parses (Phase #5) and start-rule sync overrides emit, but per-rule recovery within nested parsers is a no-op. Spec §3.8 calls for per-rule.
-- **`ParserOptions` class** — present as a stub for future configuration extension. `Parser.parse(input, maxDiagnostics)` accepts the parameter but ignores the cap.
-- **True partial parse (D.1.2)** — `IncrementalParser.edit` does a windowed re-lex but currently runs the full parser. The API is final; behaviour improves in subsequent commits without source changes.
-- **Block comment classification through DFA** — works in lexer engine post-pass, but `'/*' (!'*/' .)* '*/'` inside a Choice alternative isn't routed through `compileDelimitedBlock`. LINE_COMMENT classification works.
-- **Per-iteration trivia tokens** — `%whitespace` ZeroOrMore matches the entire whitespace+comments run as ONE token. Inner-iteration token splitting requires lexer driver changes.
-- **Named captures + back-references** — state TBD by #12 task.
-- **`Annotations.java` corpus fixture** — recovers with diagnostics due to annotation-in-body usage; deferred to a future fix.
+| 0.6.0 limitation | resolved in |
+|---|---|
+| Cut operator (`^` / `↑`) parsed but treated as a no-op | 0.6.1 — see `CutOperatorTest` |
+| MIXED-rule char-level fallback no-op | 0.6.1 — see `MixedRuleFallbackTest` |
+| Per-rule `%recover` sync sets (start-rule only) | 0.6.1 — see `PerRuleRecoverDirectiveTest` |
+| `maxDiagnostics` accepted but ignored; `ParserOptions` stub | 0.6.1 — see `MaxDiagnosticsTest`; `ParserOptions` was deleted rather than extended |
+| `IncrementalParser.edit` re-lexed but ran the full parser | 0.6.1 — real partial reparse via checkpoint ancestors |
+| Block comments inside a Choice not routed through `compileDelimitedBlock` | 0.6.0 ship — asymmetric `compileDelimitedBlock` in `DfaBuilder` |
+| `%whitespace` ZeroOrMore coalesced the whole run into one token | 0.6.2 — per-kind trivia tokens |
+| Named captures and back-references dropped | 0.6.1 — restored; see `NamedCaptureRuntimeTest` |
+| `Annotations.java` fixture recovered with diagnostics | 0.6.0 ship |
+| Entry point under `org.pragmatica.peg` with a `.v6` implementation package | 0.7.0 — `org.pragmatica.peg.v6.*` collapsed into `org.pragmatica.peg.*` |
 
 ### Intentional drops (per spec — NOT returning)
 
 - BASIC/ADVANCED `RecoveryStrategy` split: one always-on panic-mode mechanism replaces it. Use `result.diagnostics().isEmpty()` for fail-fast semantics.
-- Inline `{ ... }` action blocks in grammar: replaced by `GVisitor<T>` stub class generated per grammar (Phase E.1). Compile-time rejection with migration message.
+- Inline `{ ... }` action blocks in grammar: replaced by a `GVisitor<T>` stub class generated per grammar. Compile-time rejection with migration message.
 - `AstNode` type: dropped entirely. Build domain ASTs via `GVisitor<T>` walking the CST.
 - Packrat memoization: not needed under tokens-first design. JIT scalar-replacement handles short-lived parse state.
 
