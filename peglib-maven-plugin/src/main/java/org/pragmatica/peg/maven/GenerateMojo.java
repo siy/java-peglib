@@ -92,7 +92,8 @@ public class GenerateMojo extends AbstractMojo {
         var visitorTarget = targetSourceFile(visitorClassName);
 
         if (allUpToDate(lexerTarget, parserTarget, visitorTarget)) {
-            getLog().info("peglib:generate skipped (up-to-date): " + lexerTarget.getFileName()
+            getLog().info("peglib:generate skipped (up-to-date, " + GENERATOR_STAMP.substring(STAMP_PREFIX.length()).trim()
+                         + "): " + lexerTarget.getFileName()
                          + ", " + parserTarget.getFileName()
                          + ", " + visitorTarget.getFileName());
 
@@ -173,8 +174,10 @@ public class GenerateMojo extends AbstractMojo {
     }
 
     private static Result<Path> writeSource(Path targetFile, String source) {
+        var stamped = GENERATOR_STAMP + "\n" + source;
+
         return Result.lift(t -> Causes.cause("Failed to write generated source: " + targetFile + " — " + t.getMessage()),
-                           () -> writeSourceUnchecked(targetFile, source));
+                           () -> writeSourceUnchecked(targetFile, stamped));
     }
 
     // JDK-API adapter: the body of a Result.lift(...) throwing lambda. Files.createDirectories
@@ -232,9 +235,64 @@ public class GenerateMojo extends AbstractMojo {
             if (!file.isFile() || file.lastModified() < grammarMtime) {
                 return false;
             }
+            // Mtime alone is not enough: after a plugin or generator upgrade the grammar is
+            // unchanged but the emitted code should differ, and skipping leaves silently stale
+            // sources behind — worse for projects that commit generated code, where nothing
+            // downstream ever reveals it. Regenerate whenever the stamp does not match.
+            if (!GENERATOR_STAMP.equals(stampOf(target))) {
+                return false;
+            }
         }
 
         return true;
+    }
+
+    /** Marker line prepended to every generated file; also the staleness key. */
+    private static final String STAMP_PREFIX = "// peglib-generator: ";
+
+    private static final String GENERATOR_STAMP = STAMP_PREFIX + generatorVersion();
+
+    /**
+     * Version of the generator actually doing the work — {@code peglib} core, not the plugin,
+     * since that is where the emitters live.
+     */
+    private static String generatorVersion() {
+        var pkg = LexerGenerator.class.getPackage();
+        var fromManifest = pkg == null
+                           ? null
+                           : pkg.getImplementationVersion();
+
+        if (fromManifest != null) {
+            return fromManifest;
+        }
+
+        try (var in = LexerGenerator.class.getResourceAsStream("/META-INF/maven/org.pragmatica-lite/peglib/pom.properties")) {
+            if (in != null) {
+                var props = new java.util.Properties();
+
+                props.load(in);
+                var version = props.getProperty("version");
+
+                if (version != null) {
+                    return version;
+                }
+            }
+        } catch (IOException __) {
+        // fall through to the unknown marker below
+        }
+
+        return "unknown";
+    }
+
+    /** First line of {@code target} when it carries a stamp, else empty. */
+    private static String stampOf(Path target) {
+        try (var lines = Files.lines(target)) {
+            return lines.findFirst()
+                        .filter(line -> line.startsWith(STAMP_PREFIX))
+                        .orElse("");
+        } catch (IOException __) {
+            return "";
+        }
     }
 
     /** Cheap textual pre-check; a full parse here would duplicate work done moments later. */

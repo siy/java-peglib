@@ -219,9 +219,7 @@ public final class DfaBuilder {
                     return;
                 }
 
-                var key = lit.text() + (lit.caseInsensitive()
-                                        ? "/i"
-                                        : "/cs");
+                var key = inlineLiteralKey(lit.text(), lit.caseInsensitive());
 
                 seen.computeIfAbsent(key,
                                      k -> new InlineLiteral(lit.text(), lit.caseInsensitive(), seen.size()));
@@ -930,9 +928,22 @@ public final class DfaBuilder {
      * genuinely different tokens.
      */
     private static String literalKey(InlineLiteral lit) {
-        return lit.caseInsensitive
-               ? lit.text.toLowerCase(Locale.ROOT) + "/i"
-               : lit.text + "/cs";
+        return inlineLiteralKey(lit.text, lit.caseInsensitive);
+    }
+
+    /**
+     * THE definition of an inline literal's identity. Every producer of
+     * {@code inlineLiteralToKind} entries and every consumer looking a kind up must call this —
+     * the formula previously existed as four hand-written copies across two classes, and when
+     * case-folding was added to one of them the others kept building the unfolded key, so a
+     * parser-side {@code 'SET'i} looked up {@code SET/i} while the map held {@code set/i}.
+     *
+     * @since 0.7.2
+     */
+    public static String inlineLiteralKey(String text, boolean caseInsensitive) {
+        return caseInsensitive
+               ? text.toLowerCase(Locale.ROOT) + "/i"
+               : text + "/cs";
     }
 
     /**

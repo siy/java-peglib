@@ -57,6 +57,40 @@ class LargeGrammarScalingTest {
         .hasSize(1);
     }
 
+    /**
+     * A case-insensitive literal may appear both as a named token rule's whole body and bare
+     * inside a parser rule. Both must resolve to the same kind.
+     *
+     * <p>Regression from the case-folding fix above: {@code DfaBuilder} began keying inline
+     * literals by folded text while {@code ParserGenerator} still built the unfolded key, so a
+     * parser-side {@code 'SET'i} looked up {@code SET/i} against a map holding {@code set/i} and
+     * generation died with "references inline literal 'SET' that has no allocated token kind".
+     * The formula now has exactly one definition, {@code DfaBuilder.inlineLiteralKey}.
+     */
+    @Test
+    void caseInsensitiveLiteral_asBothTokenRuleBodyAndBareParserLiteral() {
+        var grammar = """
+            Root            <- Stmt+
+            Stmt            <- SetKW Ident ';' / ClauseKeyword Ident ';'
+            SetKW           <- < 'SET'i ![a-zA-Z0-9_$] >
+            ReservedKeyword <- < 'SELECT'i ![a-zA-Z0-9_$] >
+            ClauseKeyword   <- ReservedKeyword / ('SET'i / 'ORDER'i) ![a-zA-Z0-9_$]
+            Ident           <- < [a-zA-Z_][a-zA-Z0-9_]* >
+            %whitespace <- [ \\t\\r\\n]*
+            """;
+        var parser = PegParser.fromGrammar(grammar)
+                              .unwrap();
+        var input = "SET x; ORDER y;";
+        var result = parser.parse(input);
+
+        assertThat(result.diagnostics())
+        .as("the shared literal must resolve for both the token rule and the parser rule")
+        .isEmpty();
+        assertThat(result.cst()
+                         .reconstruct())
+        .isEqualTo(input);
+    }
+
     /** Case-SENSITIVE literals differing only in case remain distinct tokens. */
     @Test
     void caseSensitiveLiteralsDifferingOnlyInCase_stayDistinct() {

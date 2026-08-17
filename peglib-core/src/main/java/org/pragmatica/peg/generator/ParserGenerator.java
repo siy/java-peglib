@@ -968,9 +968,8 @@ public final class ParserGenerator {
         private Option<java.util.Set<Integer>> mandatoryFirstKinds(Expression expr) {
             return switch (expr) {
                 case Expression.Literal lit -> {
-                    var kind = kinds.inlineLiteralToKind().get(lit.text() + (lit.caseInsensitive()
-                                                                             ? "/i"
-                                                                             : "/cs"));
+                    var kind = kinds.inlineLiteralToKind().get(DfaBuilder.inlineLiteralKey(lit.text(),
+                                                                                           lit.caseInsensitive()));
 
                     yield kind == null
                           ? Option.none()
@@ -1710,9 +1709,7 @@ public final class ParserGenerator {
         }
 
         private Result<Unit> emitLiteral(Expression.Literal lit, EmitContext ctx) {
-            var key = lit.text() + (lit.caseInsensitive()
-                                    ? "/i"
-                                    : "/cs");
+            var key = DfaBuilder.inlineLiteralKey(lit.text(), lit.caseInsensitive());
             var kind = kinds.inlineLiteralToKind().get(key);
 
             if (kind == null) {

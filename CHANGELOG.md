@@ -104,6 +104,22 @@ unnoticed.
   chunk regardless of size. A 7334-state grammar (5.7× the reported failure point) went from
   453,978 oversized int literals to **zero** and compiles cleanly.
 
+### Fixed — follow-ups from downstream retest
+
+- **A case-insensitive literal used both as a token rule's body and bare in a parser rule failed
+  to generate** — `references inline literal 'SET' that has no allocated token kind`. A
+  regression from the case-folding fix above: the inline-literal key formula existed as four
+  hand-written copies across two classes, case-folding was added to one, and the others kept
+  building the unfolded key — so a parser-side `'SET'i` looked up `SET/i` against a map holding
+  `set/i`. There is now exactly one definition, `DfaBuilder.inlineLiteralKey`, and every
+  producer and consumer calls it.
+
+- **`peglib:generate` skipped work after a generator upgrade.** The up-to-date check compared
+  only grammar mtime against output mtime, so upgrading the plugin left the previous output in
+  place with the grammar untouched — silently stale, and invisible in projects that commit
+  generated sources. Generated files now carry a `// peglib-generator: <version>` stamp, a
+  mismatch forces regeneration, and the skip message names the resolved generator version.
+
 ### Documentation
 
 - The maven plugin's goals and parameters are documented in the README for the first time.

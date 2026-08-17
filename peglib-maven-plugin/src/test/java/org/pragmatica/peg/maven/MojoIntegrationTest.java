@@ -278,6 +278,47 @@ class MojoIntegrationTest {
     }
 
     @Test
+    void generateMojo_regeneratesWhenTheGeneratorVersionChanges(@TempDir Path tempDir) throws Exception {
+        // Mtime alone cannot see a plugin/generator upgrade: the grammar is untouched, so the
+        // skip path fires and leaves silently stale sources. That is very hard to notice in a
+        // project that commits generated code — it produced a wrong bug report downstream.
+        var grammarFile = tempDir.resolve("gen.peg")
+                                 .toFile();
+
+        Files.writeString(grammarFile.toPath(), "Sum <- Number '+' Number\nNumber <- [0-9]+\n");
+        var outputDir = tempDir.resolve("generated")
+                               .toFile();
+        var mojo = new GenerateMojo();
+
+        mojo.setGrammarFile(grammarFile);
+        mojo.setOutputDirectory(outputDir);
+        mojo.setPackageName("demo.stamp");
+        mojo.setLexerClassName("StampLexer");
+        mojo.setParserClassName("StampParser");
+        mojo.setVisitorClassName("StampVisitor");
+        mojo.execute();
+
+        var lexer = outputDir.toPath()
+                             .resolve("demo")
+                             .resolve("stamp")
+                             .resolve("StampLexer.java");
+
+        assertThat(Files.readString(lexer)).as("generated sources carry a generator stamp")
+                                           .startsWith("// peglib-generator: ");
+        // Simulate output produced by an older generator, leaving mtimes untouched.
+        var body = Files.readString(lexer)
+                        .lines()
+                        .skip(1)
+                        .collect(java.util.stream.Collectors.joining("\n"));
+
+        Files.writeString(lexer, "// peglib-generator: 0.0.1-old\n" + body);
+        mojo.execute();
+
+        assertThat(Files.readString(lexer)).as("a stamp mismatch must force regeneration")
+                                           .doesNotContain("0.0.1-old");
+    }
+
+    @Test
     void generateMojo_skipsWhenAllArtifactsUpToDate(@TempDir Path tempDir) throws Exception {
         var grammarFile = tempDir.resolve("gen.peg")
                                  .toFile();
