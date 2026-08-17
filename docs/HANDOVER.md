@@ -1,6 +1,91 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-14 — 0.7.1 SHIPPED to Maven Central
+**Last updated:** 2026-08-18 — 0.7.2 on branch, not shipped; two open design items
+
+---
+
+## Session 12 — 0.7.2 (2026-08-15 → 08-18) — NOT SHIPPED
+
+`release-0.7.2`, pushed, published locally, **605 tests / 0 failures**. Everything below was
+driven by a downstream consumer (`aether/pg-tools`, a 753-line PostgreSQL grammar) migrating off
+0.6.0 — which is how five defects surfaced that the Java grammar never exercises.
+
+**Landed:** `%import` end to end (library + all three mojos, nested imports, cycle rejection);
+`%memo`-adjacent analyzer lint for inert directives; case-insensitive literals sharing one token
+kind; DFA transition tables emitted as Base64 (grammars were silently capped near ~1100 states by
+the constant pool); a single definition of the inline-literal key; and a generator-version stamp
+so `peglib:generate` cannot silently skip after an upgrade.
+
+### OPEN: identifier fallback is unreachable for case-insensitive grammars
+
+This is the one thing that blocks `pg-tools` from moving off 0.6.0. It needs a design pass, not a
+patch — **two independent gates** must both be satisfied and they are mutually exclusive as
+written.
+
+**Gate 1 — `DfaBuilder.buildIdentifierFallbacks`** skips every case-insensitive literal:
+
+```java
+if (!key.endsWith("/cs")) { continue; }   // "Java keywords are case-sensitive"
+```
+
+Every SQL keyword is `'SELECT'i`, so the whole mechanism is dead for such grammars. Relaxing this
+also requires folding the hard-keyword containment on BOTH sides — `extractLiteralSet` yields
+`ALL` as written while CI keys are folded, so exact containment would offer genuinely reserved
+words as identifier fallbacks.
+
+**Gate 2 — `RuleClassifier.detectSkipPrefixRules`** requires the skip-prefix body to be
+pure-lexical with no rule references:
+
+```java
+if (!bodyProps.usesOnlyLexicalConstructs() || bodyProps.referencesAnyRule()) { return; }
+```
+
+**Why they conflict.** A grammar needs "identifier that is not a reserved keyword, in any of its
+lexical forms". Gate 2 forbids the body from referencing `QuotedIdentifier` / `UnicodeIdentifier`,
+so the alternatives must be inlined — but inlining the unquoted shape drops quoted-identifier
+support, which PostgreSQL requires (`CREATE TABLE "my table"`). The obvious repair —
+
+```peg
+ColIdRaw <- !ReservedKeyword < [a-zA-Z_] [a-zA-Z0-9_$]* >    # satisfies gate 2
+ColId    <- ColIdRaw / QuotedIdentifier / UnicodeIdentifier   # references only LEXER rules
+```
+
+— is demoted to LEXER by the classifier and rejected. **The guard and the alternatives cannot
+live in the same place.** A fix probably has to grant one of the two gates an exemption, not just
+relax the `/cs` filter.
+
+Inlining the guard at every use site is not an option either: their `ReservedKeyword` has 78
+alternatives and `ColId` is referenced 69 times.
+
+**Do not repeat these dead ends:**
+- Relaxing only the `/cs` filter — measured, still yields `identifierFallbackKinds: 0`, because
+  gate 2 leaves `keywordSkip()` empty.
+- That same change **hung `CharClassHexEscapeTest`**'s surefire fork. Undiagnosed; reverted, never
+  published. Re-apply it to reproduce.
+
+**Non-regression gate:** java25.peg contains **zero** genuine case-insensitive keyword literals, so
+a CI extension is provably neutral for it — java25 alone will not catch a mistake here. Use
+`pg-tools`' `postgres.peg` as the second test case; it is readable and reproduces `ColId`
+allocated at kind 67 and unreachable.
+
+### OPEN: unreachable-kind detection
+
+A LEXER rule can compile into the DFA and then be permanently out-prioritised — allocated,
+unreachable, **not** skipped, so the existing `SkippedRuleReferenced` guard stays silent and the
+reference is silently dead. Minimal reproduction:
+
+```peg
+Item    <- Keyword ';' / Ident ';'
+Ident   <- < [a-z]+ >
+Keyword <- < 'select' >          # allocated, unreachable, no guard fires
+```
+
+Do **not** implement this as "allocated kind absent from `ACCEPT_KIND` is an error" — java25 has
+33 such kinds and parses cleanly, because aliasing remaps those references. The correct invariant
+is: *a kind the generated parser actually tests, unreachable, with no alias / inline-expansion /
+identifier-fallback remap*. Insertion point is `ParserGenerator`'s LEXER-reference emit, right
+after the identifier-fallback branch; reachability has to be plumbed from `Dfa` into
+`TokenKindAssignment`, which `ParserGenerator` does not receive today.
 
 ---
 
