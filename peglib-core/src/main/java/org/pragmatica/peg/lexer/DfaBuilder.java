@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -917,10 +918,21 @@ public final class DfaBuilder {
         return kind;
     }
 
+    /**
+     * Identity of an inline literal for kind allocation.
+     *
+     * <p>Case-INSENSITIVE literals are keyed by their case-folded text: {@code 'time'i} and
+     * {@code 'TIME'i} match exactly the same input, so they must resolve to ONE token kind.
+     * Keying them separately allocated two kinds for identical input — the lexer can only tag
+     * that text with one of them, leaving every parser site testing the other permanently dead.
+     *
+     * <p>Case-SENSITIVE literals keep their exact text: {@code 'time'} and {@code 'TIME'} are
+     * genuinely different tokens.
+     */
     private static String literalKey(InlineLiteral lit) {
-        return lit.text + (lit.caseInsensitive
-                           ? "/i"
-                           : "/cs");
+        return lit.caseInsensitive
+               ? lit.text.toLowerCase(Locale.ROOT) + "/i"
+               : lit.text + "/cs";
     }
 
     /**
@@ -1993,23 +2005,41 @@ public final class DfaBuilder {
      * (two literals normalise to the same name) a numeric suffix is appended.
      */
     private static String uniqueInlineName(InlineLiteral lit, Set<String> taken) {
-        var base = "INLINE_" + encodeForIdentifier(lit.text);
+        // Case-folded for CI literals so 'time'i and 'TIME'i produce the same name as well as
+        // the same kind — they are the same token.
+        var text = lit.caseInsensitive
+                   ? lit.text.toLowerCase(Locale.ROOT)
+                   : lit.text;
+        var base = "INLINE_" + encodeForIdentifier(text);
 
         if (lit.caseInsensitive) {
             base = base + "_CI";
         }
-
-        if (!taken.contains(base)) {
+        // Uniqueness must be case-INSENSITIVE. ParserGenerator emits each kind name as a
+        // constant via toUpperCase, so names differing only in case (e.g. the case-sensitive
+        // pair 'time' / 'TIME') would collapse onto one identifier and produce source that
+        // does not compile: "variable KIND_INLINE_TIME is already defined".
+        if (!containsIgnoreCase(taken, base)) {
             return base;
         }
 
         int n = 2;
 
-        while (taken.contains(base + "_" + n)) {
+        while (containsIgnoreCase(taken, base + "_" + n)) {
             n++;
         }
 
         return base + "_" + n;
+    }
+
+    private static boolean containsIgnoreCase(Set<String> taken, String candidate) {
+        for (var name : taken) {
+            if (name.equalsIgnoreCase(candidate)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static String encodeForIdentifier(String text) {

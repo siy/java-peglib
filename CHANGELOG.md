@@ -81,6 +81,29 @@ Found by the pre-release review round, all in 0.7.2's own new code unless noted:
 - Generator and file-writing steps in `peglib:generate` run as Fork-Join, so a failure in one no
   longer hides simultaneous failures in the others.
 
+### Fixed — code generator (reported downstream)
+
+Both produced sources that `generate-sources` emitted happily and `javac` then rejected. Reported
+against a 753-line PostgreSQL grammar; `java25.peg` slips past both, which is why they went
+unnoticed.
+
+- **Case-insensitive literals spelled differently collided on one generated constant.**
+  `'time'i` and `'TIME'i` produced two token kinds whose Java constants both sanitised to
+  `KIND_INLINE_TIME_CI` — `variable ... is already defined`. Two bugs in one: `literalKey` was
+  case-sensitive, so literals matching *identical* input got two kinds, and the lexer can tag
+  that text with only one of them — leaving every parser site testing the other permanently
+  dead. Case-insensitive literals now key on their case-folded text and share one kind.
+  Case-*sensitive* `'time'` / `'TIME'` remain distinct, and inline-kind names are now unique
+  case-insensitively so they cannot collide after the generator upper-cases them.
+
+- **The generated lexer exceeded the JVM constant-pool limit on large grammars.** The transition
+  table was emitted as inline `t[i]=v;` assignments, so every index and value outside `sipush`
+  range consumed a constant-pool slot against a hard cap of 65535. That bounded grammars at
+  roughly 1100 DFA states — beyond it, `error: too many constants`. Both transition tables are
+  now emitted as Base64 string constants decoded in a static initialiser: one pool entry per
+  chunk regardless of size. A 7334-state grammar (5.7× the reported failure point) went from
+  453,978 oversized int literals to **zero** and compiles cleanly.
+
 ### Documentation
 
 - The maven plugin's goals and parameters are documented in the README for the first time.

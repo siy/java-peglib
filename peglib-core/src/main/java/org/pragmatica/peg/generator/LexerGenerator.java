@@ -43,6 +43,8 @@ import org.pragmatica.peg.lexer.RuleClassifier;
  */
 public final class LexerGenerator {
     static final int ENTRIES_PER_CHUNK = 4096;
+    /** Chars per emitted string literal; Base64 is ASCII so this is also bytes, well under the 65535 cap. */
+    static final int BASE64_CHUNK = 50_000;
 
     private LexerGenerator() {}
 
@@ -218,61 +220,96 @@ public final class LexerGenerator {
      * transition exists. Mirrors {@link Dfa#nonAsciiTransition(int)} in the engine.
      */
     private static void renderNonAsciiTransitions(StringBuilder sb, int[] nonAsciiTransitions) {
-        sb.append("    private static final int[] NON_ASCII_TRANSITIONS = new int[] {");
-        for (int i = 0; i < nonAsciiTransitions.length; i++) {
-            if (i > 0) {
-                sb.append(',');
+        var data = new java.io.ByteArrayOutputStream();
+
+        for (var i = 0; i < nonAsciiTransitions.length; i++) {
+            if (nonAsciiTransitions[i] == Dfa.NO_TRANSITION) {
+                continue;
             }
 
-            sb.append(nonAsciiTransitions[i]);
+            writeInt(data, i);
+            writeInt(data, nonAsciiTransitions[i]);
         }
 
-        sb.append("};\n\n");
+        renderEncodedIntTable(sb, "NON_ASCII_TRANSITIONS", "STATE_COUNT", data.toByteArray());
     }
 
+    /**
+     * Emit the DFA transition table as Base64 string constants decoded in a static
+     * initialiser, rather than as inline {@code t[i]=v;} assignments.
+     *
+     * <p>Inline assignments put every index and value outside the {@code sipush} range into the
+     * class-file constant pool, which is capped at 65535 entries. A 1288-state DFA needs roughly
+     * 75k entries and simply cannot be compiled — {@code error: too many constants} — so grammar
+     * size was silently bounded at around 1100 states. Each Base64 chunk costs ONE pool entry
+     * regardless of length, so the table no longer scales with the pool.
+     *
+     * <p>Only non-default transitions are encoded (the array is pre-filled with
+     * {@code NO_TRANSITION}), four bytes of index followed by four of value. Chunks stay well
+     * under the 65535-byte ceiling on a single string literal; Base64 is ASCII, so one char is
+     * one byte of modified UTF-8 and no escaping is involved.
+     *
+     * @since 0.7.2
+     */
     private static void renderTransitions(StringBuilder sb, int[][] transitions, int stateCount, int alphabet) {
-        long total = (long) stateCount * alphabet;
-        int chunkCount = (int)((total + ENTRIES_PER_CHUNK - 1) / ENTRIES_PER_CHUNK);
+        var data = new java.io.ByteArrayOutputStream();
 
-        sb.append("    private static final int[] TRANSITIONS = buildTransitions();\n\n");
-        sb.append("    private static int[] buildTransitions() {\n");
-        sb.append("        int[] t = new int[STATE_COUNT * ALPHABET_SIZE];\n");
-        sb.append("        java.util.Arrays.fill(t, -1);\n");
-        for (int chunk = 0; chunk < chunkCount; chunk++) {
-            sb.append("        fillT").append(chunk).append("(t);\n");
-        }
-
-        sb.append("        return t;\n");
-        sb.append("    }\n\n");
-        long position = 0;
-
-        for (int chunk = 0; chunk < chunkCount; chunk++) {
-            long start = (long) chunk * ENTRIES_PER_CHUNK;
-            long end = Math.min(start + ENTRIES_PER_CHUNK, total);
-
-            sb.append("    private static void fillT").append(chunk).append("(int[] t) {\n");
-            for (long i = start; i < end; i++) {
-                int state = (int)(i / alphabet);
-                int ch = (int)(i % alphabet);
-                int v = transitions[state][ch];
+        for (var state = 0; state < stateCount; state++) {
+            for (var ch = 0; ch < alphabet; ch++) {
+                var v = transitions[state][ch];
 
                 if (v == Dfa.NO_TRANSITION) {
-                    position = i + 1;
                     continue;
                 }
 
-                sb.append("        t[").append(i).append("]=").append(v).append(";\n");
-                position = i + 1;
+                writeInt(data, state * alphabet + ch);
+                writeInt(data, v);
             }
-
-            sb.append("    }\n\n");
         }
 
-        if (total == 0) {
-            // unreachable in practice (StateCount>0 always after a successful build), but keep
-            // the compiler happy: position must be defined for any future use.
-            assert position == 0;
+        renderEncodedIntTable(sb, "TRANSITIONS", "STATE_COUNT * ALPHABET_SIZE", data.toByteArray());
+    }
+
+    private static void writeInt(java.io.ByteArrayOutputStream out, int v) {
+        out.write((v >>> 24) & 0xFF);
+        out.write((v >>> 16) & 0xFF);
+        out.write((v >>> 8) & 0xFF);
+        out.write(v & 0xFF);
+    }
+
+    /** Emit {@code name} as a -1-filled int[] patched from Base64 (index, value) pairs. */
+    private static void renderEncodedIntTable(StringBuilder sb, String name, String sizeExpr, byte[] data) {
+        var encoded = java.util.Base64.getEncoder().encodeToString(data);
+
+        sb.append("    private static final String[] ").append(name).append("_DATA = {\n");
+        for (var i = 0; i < encoded.length(); i += BASE64_CHUNK) {
+            sb.append("        \"")
+              .append(encoded,
+                      i,
+                      Math.min(i + BASE64_CHUNK,
+                               encoded.length()))
+              .append("\"")
+              .append(i + BASE64_CHUNK< encoded.length()
+                      ? ","
+                      : "")
+              .append("\n");
         }
+
+        sb.append("    };\n\n");
+        sb.append("    private static final int[] ").append(name).append(" = decode").append(name).append("();\n\n");
+        sb.append("    private static int[] decode").append(name).append("() {\n");
+        sb.append("        int[] t = new int[").append(sizeExpr).append("];\n");
+        sb.append("        java.util.Arrays.fill(t, -1);\n");
+        sb.append("        StringBuilder joined = new StringBuilder();\n");
+        sb.append("        for (String part : ").append(name).append("_DATA) { joined.append(part); }\n");
+        sb.append("        byte[] d = java.util.Base64.getDecoder().decode(joined.toString());\n");
+        sb.append("        for (int i = 0; i < d.length; i += 8) {\n");
+        sb.append("            int idx = ((d[i] & 0xFF) << 24) | ((d[i + 1] & 0xFF) << 16) | ((d[i + 2] & 0xFF) << 8) | (d[i + 3] & 0xFF);\n");
+        sb.append("            int val = ((d[i + 4] & 0xFF) << 24) | ((d[i + 5] & 0xFF) << 16) | ((d[i + 6] & 0xFF) << 8) | (d[i + 7] & 0xFF);\n");
+        sb.append("            t[idx] = val;\n");
+        sb.append("        }\n");
+        sb.append("        return t;\n");
+        sb.append("    }\n\n");
     }
 
     private static void renderLexMethod(StringBuilder sb, int alphabet, boolean hasResolvers) {
