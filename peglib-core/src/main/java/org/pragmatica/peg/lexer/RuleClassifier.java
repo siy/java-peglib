@@ -226,6 +226,7 @@ public final class RuleClassifier {
         for (var rule : grammar.rules()) {
             detectSkipPrefix(rule.expression(), ruleMap).onPresent(info -> recordSkipPrefix(rule,
                                                                                             info,
+                                                                                            ruleMap,
                                                                                             kinds,
                                                                                             properties,
                                                                                             result));
@@ -236,19 +237,179 @@ public final class RuleClassifier {
 
     private static void recordSkipPrefix(Rule rule,
                                          KeywordSkipInfo info,
+                                         Map<String, Rule> ruleMap,
                                          Map<String, RuleKind> kinds,
                                          Map<String, RuleProperties> properties,
                                          Map<String, KeywordSkipInfo> result) {
-        var bodyProps = analyse(info.bodyExpression());
-        // Body must itself be pure-lexical (no rule references, no back-references, no dictionaries).
-        if (!bodyProps.usesOnlyLexicalConstructs() || bodyProps.referencesAnyRule()) {
+        var body = resolveSkipBody(info.bodyExpression(), ruleMap, kinds);
+
+        if (body.isEmpty()) {
             return;
         }
+
+        var resolved = body.unwrap();
         // Force LEXER classification so DFA picks it up.
         kinds.put(rule.name(), RuleKind.LEXER);
-        result.put(rule.name(), info);
+        result.put(rule.name(), new KeywordSkipInfo(info.keywordRuleName(), resolved));
         // Update properties so downstream consumers see the body-only shape.
-        properties.put(rule.name(), bodyProps);
+        properties.put(rule.name(), analyse(resolved));
+    }
+
+    /**
+     * The DFA builder compiles a skip-prefix body on its own, so the body has to be pure-lexical.
+     * A body that names other LEXER rules qualifies once those references are substituted — which
+     * is what lets a rule carry both a keyword guard and named alternatives:
+     *
+     * <pre>{@code ColId <- !ReservedKeyword (QuotedIdent / UnquotedIdent)}</pre>
+     *
+     * Before substitution the guard forced the alternatives to be hand-inlined at every use site,
+     * because the guard needs a named rule and a rule naming the alternatives was rejected here.
+     *
+     * <p>Returns {@link Option#none()} when the body cannot be made pure-lexical, leaving the rule
+     * unregistered exactly as before.
+     */
+    private static Option<Expression> resolveSkipBody(Expression body,
+                                                      Map<String, Rule> ruleMap,
+                                                      Map<String, RuleKind> kinds) {
+        var props = analyse(body);
+
+        if (!props.usesOnlyLexicalConstructs()) {
+            return Option.none();
+        }
+
+        if (!props.referencesAnyRule()) {
+            return Option.some(body);
+        }
+
+        var expanded = inlineLexerReferences(body, ruleMap, kinds);
+
+        if (expanded.isEmpty()) {
+            return Option.none();
+        }
+
+        var expandedProps = analyse(expanded.unwrap());
+
+        return expandedProps.usesOnlyLexicalConstructs() && !expandedProps.referencesAnyRule()
+               ? expanded
+               : Option.none();
+    }
+
+    /**
+     * Substitute every {@link Expression.Reference} to a LEXER-classified rule with that rule's
+     * own expression, recursively.
+     *
+     * <p>A DFA has no call stack, so {@link org.pragmatica.peg.lexer.DfaBuilder} cannot compile a
+     * rule reference directly. Before 0.7.2 that made any reference fatal to lexical compilation,
+     * which forced grammar authors to hand-inline shared lexical shapes — and made the
+     * combination "guard plus alternatives" inexpressible, because the guard requires a named
+     * rule and the alternatives then cannot be named. Reference substitution is sound precisely
+     * because the referenced rules are themselves regular: inlining a non-recursive reference
+     * yields the same language.
+     *
+     * <p>Returns {@link Option#none()} when substitution would not terminate (a reference cycle)
+     * or would change classification (a reference to a non-LEXER rule). Callers leave the
+     * expression untouched in that case, so the existing "cannot compile" path reports it.
+     */
+    public static Option<Expression> inlineLexerReferences(Expression expr,
+                                                           Map<String, Rule> ruleMap,
+                                                           Map<String, RuleKind> kinds) {
+        return substitute(expr, ruleMap, kinds, new HashSet<>());
+    }
+
+    private static Option<Expression> substitute(Expression expr,
+                                                 Map<String, Rule> ruleMap,
+                                                 Map<String, RuleKind> kinds,
+                                                 Set<String> onPath) {
+        return switch (expr) {
+            case Expression.Reference ref -> substituteReference(ref, ruleMap, kinds, onPath);
+            case Expression.Sequence seq -> substituteList(seq.elements(), ruleMap, kinds, onPath).map(list -> new Expression.Sequence(seq.span(),
+                                                                                                                                       list));
+            case Expression.Choice ch -> substituteList(ch.alternatives(), ruleMap, kinds, onPath).map(list -> new Expression.Choice(ch.span(),
+                                                                                                                                     list));
+            case Expression.ZeroOrMore z -> substitute(z.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.ZeroOrMore(z.span(),
+                                                                                                                                      inner));
+            case Expression.OneOrMore o -> substitute(o.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.OneOrMore(o.span(),
+                                                                                                                                    inner));
+            case Expression.Optional opt -> substitute(opt.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.Optional(opt.span(),
+                                                                                                                                      inner));
+            case Expression.Repetition rep -> substitute(rep.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.Repetition(rep.span(),
+                                                                                                                                          inner,
+                                                                                                                                          rep.min(),
+                                                                                                                                          rep.max()));
+            case Expression.And and -> substitute(and.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.And(and.span(),
+                                                                                                                            inner));
+            case Expression.Not not -> substitute(not.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.Not(not.span(),
+                                                                                                                            inner));
+            case Expression.TokenBoundary tb -> substitute(tb.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.TokenBoundary(tb.span(),
+                                                                                                                                              inner));
+            case Expression.Ignore ig -> substitute(ig.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.Ignore(ig.span(),
+                                                                                                                                inner));
+            case Expression.Capture cap -> substitute(cap.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.Capture(cap.span(),
+                                                                                                                                    cap.name(),
+                                                                                                                                    inner));
+            case Expression.CaptureScope cs -> substitute(cs.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.CaptureScope(cs.span(),
+                                                                                                                                            inner));
+            case Expression.Group g -> substitute(g.expression(), ruleMap, kinds, onPath).map(inner -> new Expression.Group(g.span(),
+                                                                                                                            inner));
+            // Terminals and categorical non-lexicals substitute to themselves. BackReference and
+            // Dictionary are not regular, but they are rejected by the DFA builder on their own
+            // merits, so passing them through keeps that diagnosis where it already lives.
+            case Expression.Literal __ -> Option.some(expr);
+            case Expression.CharClass __ -> Option.some(expr);
+            case Expression.Any __ -> Option.some(expr);
+            case Expression.Cut __ -> Option.some(expr);
+            case Expression.BackReference __ -> Option.some(expr);
+            case Expression.Dictionary __ -> Option.some(expr);
+        };
+    }
+
+    private static Option<Expression> substituteReference(Expression.Reference ref,
+                                                          Map<String, Rule> ruleMap,
+                                                          Map<String, RuleKind> kinds,
+                                                          Set<String> onPath) {
+        var name = ref.ruleName();
+
+        if (onPath.contains(name)) {
+            // Recursive lexical rule — not regular, cannot be flattened into a DFA.
+            return Option.none();
+        }
+
+        if (kinds.get(name) != RuleKind.LEXER) {
+            return Option.none();
+        }
+
+        var target = ruleMap.get(name);
+
+        if (target == null) {
+            return Option.none();
+        }
+
+        onPath.add(name);
+        var expanded = substitute(target.expression(), ruleMap, kinds, onPath);
+
+        onPath.remove(name);
+        // Wrap in a Group so that substituting into a Sequence cannot re-associate
+        // the referenced rule's own alternation with its neighbours.
+        return expanded.map(inner -> new Expression.Group(ref.span(), inner));
+    }
+
+    private static Option<List<Expression>> substituteList(List<Expression> items,
+                                                           Map<String, Rule> ruleMap,
+                                                           Map<String, RuleKind> kinds,
+                                                           Set<String> onPath) {
+        var out = new ArrayList<Expression>(items.size());
+
+        for (var item : items) {
+            var substituted = substitute(item, ruleMap, kinds, onPath);
+
+            if (substituted.isEmpty()) {
+                return Option.none();
+            }
+
+            out.add(substituted.unwrap());
+        }
+
+        return Option.some(List.copyOf(out));
     }
 
     private static Option<KeywordSkipInfo> detectSkipPrefix(Expression expr, Map<String, Rule> ruleMap) {

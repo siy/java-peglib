@@ -550,8 +550,16 @@ public final class DfaBuilder {
             if (classification.keywordSkip().containsKey(rule.name())) {
                 continue;
             }
-
-            var literalsOpt = collectAliasLiterals(rule.expression());
+            // A rule that just names another LEXER rule (NullConstraint <- NullKW) carries no
+            // literal of its own, so alias detection has to look through the reference. Reusing
+            // the substitution keeps one definition of "what does this reference stand for", and
+            // aliasing is what such a rule needs: it is the same token under a second name, not a
+            // second copy of the same lexeme competing for it.
+            var aliasBody = RuleClassifier.inlineLexerReferences(rule.expression(),
+                                                                 grammar.ruleMap(),
+                                                                 classification.kinds())
+                                          .or(rule.expression());
+            var literalsOpt = collectAliasLiterals(aliasBody);
 
             if (literalsOpt.isEmpty()) {
                 continue;
@@ -1032,8 +1040,17 @@ public final class DfaBuilder {
             var expr = skipInfo != null
                        ? skipInfo.bodyExpression()
                        : rule.expression();
+            // A DFA has no call stack, so a rule reference cannot be compiled directly.
+            // Substituting references to other LEXER rules keeps such a rule compilable
+            // instead of skipping it; when substitution is impossible (a reference cycle,
+            // or a reference to a non-LEXER rule) the expression is left untouched and
+            // tryAbsorb reports it through the existing "cannot compile" path.
+            var expanded = RuleClassifier.inlineLexerReferences(expr,
+                                                                grammar.ruleMap(),
+                                                                classification.kinds())
+                                         .or(expr);
 
-            tryAbsorb(nfa, rule.name(), expr, kind, priorityRef, globalStart, skipped);
+            tryAbsorb(nfa, rule.name(), expanded, kind, priorityRef, globalStart, skipped);
         }
 
         if (assignment.anyCharKind() >= 0) {
