@@ -46,6 +46,51 @@ class IdentifierFallbackTest {
                    "expected clean parse of 'use module;', got diagnostics: " + ok.diagnostics());
     }
 
+    /**
+     * 0.7.2 — the same grammar with case-insensitive literals. Identifier fallback was gated on
+     * a {@code /cs} key suffix with the reasoning "Java keywords are case-sensitive", which made
+     * the whole mechanism dead for any grammar whose keywords are written {@code 'select'i}.
+     * This test differs from {@link #contextualKeywordAcceptedAsIdentifier} only in the {@code i}
+     * suffixes, so a regression shows up as the pair disagreeing.
+     */
+    @Test
+    void contextualKeywordAcceptedAsIdentifierWhenLiteralsAreCaseInsensitive() {
+        var grammar = """
+            Stmt <- 'use'i Identifier ';' / 'module'i ';'
+            Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
+            Keyword <- ('use'i / 'import'i) ![a-zA-Z0-9_$]
+            %whitespace <- [ \\t\\r\\n]*
+            """;
+        var parser = PegParser.fromGrammar(grammar).unwrap();
+
+        assertTrue(parser.parse("use module;").diagnostics().isEmpty(),
+                   "'module' is not a keyword and must match Identifier");
+        assertTrue(parser.parse("USE MODULE;").diagnostics().isEmpty(),
+                   "fallback must hold regardless of the spelling that appears in the input");
+    }
+
+    /**
+     * The keyword set and a case-insensitive literal key are folded differently
+     * ({@code inlineLiteralKey} lowercases CI keys, {@code extractLiteralSet} does not), so
+     * containment has to fold both sides. Without that, a genuinely reserved word is offered as
+     * an identifier fallback and the guard silently stops rejecting it.
+     */
+    @Test
+    void reservedKeywordStillRejectedWhenLiteralsAreCaseInsensitive() {
+        var grammar = """
+            Stmt <- 'USE'i Identifier ';' / 'module'i ';'
+            Identifier <- !Keyword < [a-zA-Z_$] [a-zA-Z0-9_$]* >
+            Keyword <- ('USE'i / 'IMPORT'i) ![a-zA-Z0-9_$]
+            %whitespace <- [ \\t\\r\\n]*
+            """;
+        var parser = PegParser.fromGrammar(grammar).unwrap();
+
+        assertFalse(parser.parse("use use;").diagnostics().isEmpty(),
+                    "'use' is a keyword and must not be accepted as Identifier");
+        assertFalse(parser.parse("use IMPORT;").diagnostics().isEmpty(),
+                    "keyword containment must fold case, not just match the written spelling");
+    }
+
     @Test
     void hardKeywordRejectedAsIdentifier() {
         var grammar = """

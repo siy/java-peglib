@@ -60,7 +60,14 @@ public final class DfaBuilder {
     public static final int KIND_DOC_LINE_COMMENT = 3;
     /** Javadoc-style block comment. Allocated by post-classification, never by the DFA directly. */
     public static final int KIND_DOC_BLOCK_COMMENT = 4;
+
     public static final int FIRST_USER_KIND = 5;
+
+    /** Suffix of a case-INSENSITIVE inline-literal key. See {@link #inlineLiteralKey}. */
+    private static final String CI_KEY_SUFFIX = "/i";
+
+    /** Suffix of a case-SENSITIVE inline-literal key. See {@link #inlineLiteralKey}. */
+    private static final String CS_KEY_SUFFIX = "/cs";
     private static final int ALPHABET = Dfa.ALPHABET_SIZE;
     private static final int REPETITION_CAP = 256;
 
@@ -398,6 +405,15 @@ public final class DfaBuilder {
             if (hardKeywords.isEmpty()) {
                 continue;
             }
+            // Case-insensitive inline literals carry a case-folded key (see
+            // {@link #inlineLiteralKey}), so keyword containment must fold both
+            // sides for them. Without this a genuinely reserved word spelled
+            // 'SELECT'i would be offered as an identifier fallback.
+            var foldedHardKeywords = new HashSet<String>();
+
+            for (var keyword : hardKeywords) {
+                foldedHardKeywords.add(keyword.toLowerCase(Locale.ROOT));
+            }
 
             var fallback = new java.util.TreeSet<Integer>();
             // Walk every inline literal whose text is identifier-shaped and not
@@ -406,20 +422,25 @@ public final class DfaBuilder {
             // etc. remain acceptable wherever Identifier is expected.
             for (var litEntry : inlineLiteralToKind.entrySet()) {
                 var key = litEntry.getKey();
-                // Skip case-insensitive inline literals — identifier fallback only
-                // applies to case-sensitive matches (Java keywords are case-sensitive).
-                if (!key.endsWith("/cs")) {
+                boolean caseInsensitive = key.endsWith(CI_KEY_SUFFIX);
+
+                if (!caseInsensitive && !key.endsWith(CS_KEY_SUFFIX)) {
                     continue;
                 }
 
                 var text = key.substring(0,
-                                         key.length() - "/cs".length());
+                                         key.length() - (caseInsensitive
+                                                         ? CI_KEY_SUFFIX.length()
+                                                         : CS_KEY_SUFFIX.length()));
 
                 if (!isIdentifierShape(text)) {
                     continue;
                 }
-
-                if (hardKeywords.contains(text)) {
+                // A case-insensitive key is already folded by inlineLiteralKey,
+                // so it is compared against the folded keyword set.
+                if (caseInsensitive
+                    ? foldedHardKeywords.contains(text)
+                    : hardKeywords.contains(text)) {
                     continue;
                 }
 
@@ -942,8 +963,8 @@ public final class DfaBuilder {
      */
     public static String inlineLiteralKey(String text, boolean caseInsensitive) {
         return caseInsensitive
-               ? text.toLowerCase(Locale.ROOT) + "/i"
-               : text + "/cs";
+               ? text.toLowerCase(Locale.ROOT) + CI_KEY_SUFFIX
+               : text + CS_KEY_SUFFIX;
     }
 
     /**
