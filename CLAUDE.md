@@ -163,13 +163,33 @@ legitimate lexer rule.
 before DFA compilation (`RuleClassifier.inlineLexerReferences`), with reference cycles refused
 rather than expanded. What a lexer rule still cannot contain is `&` / `!` lookahead — see below.
 
-**A lexer rule still cannot contain `&` or `!` lookahead.** The DFA has no lookahead mechanism, so
-such a rule is skipped and any reference to it fails with `SkippedRuleReferenced` naming
-`expressionKind=Not` (or `And`). Two narrow shapes are handled by special cases: a trailing
-`!CharClass` after a literal or a choice of literals (via aliasing — this covers the 33 `*KW`
-rules in `java25.peg`), and a single leading `!Rule` guard (via skip-prefix detection). Everything
-else — a multi-word lexeme like `< 'GROUPING'i [ \t\r\n]+ 'SETS'i ![a-zA-Z0-9_$] >`, or more than
-one leading guard like `!AKW !BKW ColId` — is not compilable today.
+**Lookahead in a lexer rule is supported in two positions, and only those.** The DFA has no
+lookahead mechanism of its own, so each supported shape is lowered to something it can express.
+
+*Trailing, over a character class* — `X ![c]` or `X &[c]` at the end of a rule. Compiled as a
+constraint on the accepting state: the driver checks the character after the match before
+recording the accept, and a denied accept simply does not count, so maximal munch continues from
+the last one that did. This is what makes a multi-word lexeme work —
+`< 'GROUPING'i [ \t\r\n]+ 'SETS'i ![a-zA-Z0-9_$] >` — where maximal munch cannot stand in for the
+guard, because nothing else in the grammar matches further than the keyword. End of input
+satisfies a negative guard and fails a positive one.
+
+*Leading, over rules* — one or more `!Rule` guards at the head, each naming a literal-set rule
+(a single-keyword rule counts as a set of one). Handled by skip-prefix detection plus the lexer's
+post-match keyword resolution; the guard sets are unioned.
+
+Anything else is skipped, and a reference to such a rule fails with `SkippedRuleReferenced` naming
+`expressionKind=Not` (or `And`). Notably still unsupported:
+
+- **A guarded rule whose body names another guarded rule** — `WindowName <- !PartitionKW … ColId`
+  where `ColId <- !ReservedKeyword (…)`. The outer guards are detected, but inlining `ColId` drags
+  its own leading `!ReservedKeyword` into the body, which the DFA then cannot compile. Composing
+  the two guard sets inside `detectSkipPrefix` was tried and **reverted**: it changed which rules
+  register as skip-prefix, forcing java25 rules to LEXER and failing 35 tests. A fix belongs
+  further down, where the rule is already a confirmed skip-prefix candidate.
+- **Lookahead over anything but a character class**, e.g. `&(Modifier* ClassKW)` — which is why
+  java25 spells its `value` lookahead inline (see below).
+- **Lookahead nested inside a Choice alternative** rather than trailing the whole body.
 
 **Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`).
 
@@ -261,7 +281,7 @@ In 0.6.0's tokens-first parser, contextual keywords get **Identifier-fallback** 
 true, but **not for the reason given before 0.7.2** — a lexer rule may now reference another lexer
 rule. What blocks it is the lookahead itself: `RuleClassifier` types a reference-only rule spanning
 one token as LEXER, and the DFA cannot compile `&` / `!`, so `fromGrammar` rejects it with
-`SkippedRuleReferenced` naming `expressionKind=Not`. Verified 2026-08-18 against the tidy shape
+`SkippedRuleReferenced` naming `expressionKind=Not`. Re-verified 2026-08-18 after the lookahead work against the tidy shape
 (`DeclModifier <- Modifier / ValueMod`, `ValueMod <- ValueKW &(...)`): still rejected, now citing
 the lookahead rather than the reference. Spell the lookahead inline inside the PARSER rule that
 needs it. This is why `value` appears as the literal group

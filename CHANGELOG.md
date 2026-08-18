@@ -53,6 +53,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
   the same footgun class as the `%memo` no-ops flagged in 0.7.1.
 
+### Added — lookahead in lexer rules
+
+- **A lexer rule may end in a lookahead over a character class.** `X ![c]` / `X &[c]` is compiled
+  as a constraint on the accepting state rather than a transition: the driver checks the character
+  following the match before recording the accept, and a denied accept is simply not recorded, so
+  maximal munch carries on from the last one that was. End of input satisfies a negative guard and
+  fails a positive one.
+
+  This is what a multi-word lexeme needs — `< 'GROUPING'i [ \t\r\n]+ 'SETS'i ![a-zA-Z0-9_$] >` —
+  and it is the case maximal munch cannot cover on its own, because nothing else in the grammar
+  matches further than the keyword, so absent the guard the keyword wins even when an identifier
+  character follows.
+
+  Both lexer paths honour it: the interpreted `LexerEngine` and the generated lexer, which emits
+  the tables and the predicate only for a grammar that has a guarded rule — so a grammar without
+  one produces the same lexer as before, with no check in its hot loop.
+
+- **A lexer rule may carry several leading keyword guards.** `WindowName <- !PartitionKW !OrderKW
+  !RowsKW ColId` excludes each of them; previously only the first guard was consumed, which left
+  the rest in the body, made it non-lexical, and dropped the rule from skip-prefix detection
+  altogether. The guard sets are unioned.
+
+- **A single-keyword rule counts as a literal set.** Guard detection required a `Choice`, so a
+  rule like `PartitionKW <- < 'PARTITION'i ![a-zA-Z0-9_$] >` was not usable as a guard at all.
+  `isLiteralSetRule` and `extractLiteralSet` now read one shared definition of "the alternatives
+  of a literal-set body" rather than carrying separate copies of the shape test.
+
+**Still unsupported:** a guarded rule whose body names another guarded rule — `WindowName` above
+resolves its guards, but inlining `ColId` drags `ColId`'s own `!ReservedKeyword` into the body,
+which the DFA cannot compile. Composing the two guard sets inside `detectSkipPrefix` was tried and
+reverted: it changed which rules register as skip-prefix, forcing java25 rules to LEXER and
+failing 35 tests. Also unsupported: lookahead over anything but a character class
+(`&(Modifier* ClassKW)`), and lookahead nested inside a Choice alternative rather than trailing
+the whole body. `postgres.peg` still does not build, now solely because of `WindowName`.
+
 ### Changed — lexical rule classification
 
 - **`< >` now decides whether a reference-only rule is one token.** A rule whose body is nothing
