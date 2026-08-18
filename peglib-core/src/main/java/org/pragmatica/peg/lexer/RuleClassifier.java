@@ -67,10 +67,13 @@ public final class RuleClassifier {
      * the body alone — bypassing the unsupported {@code Not} node — while the
      * lexer engine performs post-match keyword resolution by matched text.
      *
-     * @param keywordRuleName name of the rule referenced by the leading {@code !}
+     * @param keywordRuleNames names of the rules referenced by the leading {@code !} guards, in
+     *                          source order. A rule may carry several — {@code WindowName <-
+     *                          !PartitionKW !OrderKW ColId} excludes each of them — and the guard
+     *                          sets are unioned by the consumers.
      * @param bodyExpression  rest of the sequence after the {@code !Reference} head
      */
-    public record KeywordSkipInfo(String keywordRuleName, Expression bodyExpression) {}
+    public record KeywordSkipInfo(List<String> keywordRuleNames, Expression bodyExpression) {}
 
     public record Classification(Map<String, RuleKind> kinds,
                                  Map<String, KeywordSkipInfo> keywordSkip,
@@ -365,7 +368,7 @@ public final class RuleClassifier {
         var resolved = body.unwrap();
         // Force LEXER classification so DFA picks it up.
         kinds.put(rule.name(), RuleKind.LEXER);
-        result.put(rule.name(), new KeywordSkipInfo(info.keywordRuleName(), resolved));
+        result.put(rule.name(), new KeywordSkipInfo(info.keywordRuleNames(), resolved));
         // Update properties so downstream consumers see the body-only shape.
         properties.put(rule.name(), analyse(resolved));
     }
@@ -539,35 +542,52 @@ public final class RuleClassifier {
         if (elements.size() < 2) {
             return Option.none();
         }
+        // Consume every leading !Rule guard, not just the first. A rule excluding several
+        // keywords — WindowName <- !PartitionKW !OrderKW !RowsKW ColId — is one guarded rule with
+        // a union of guard sets, not a different shape.
+        var guards = new ArrayList<String>();
+        int index = 0;
 
-        var head = unwrapWrappers(elements.get(0));
+        while (index < elements.size() - 1) {
+            var guard = leadingGuardName(elements.get(index), ruleMap);
 
-        if (! (head instanceof Expression.Not not)) {
+            if (guard.isEmpty()) {
+                break;
+            }
+
+            guards.add(guard.unwrap());
+            index++;
+        }
+
+        if (guards.isEmpty()) {
             return Option.none();
         }
 
-        var notInner = unwrapWrappers(not.expression());
+        var rest = elements.subList(index, elements.size());
+        Expression body = rest.size() == 1
+                          ? rest.getFirst()
+                          : new Expression.Sequence(seq.span(), List.copyOf(rest));
 
-        if (! (notInner instanceof Expression.Reference ref)) {
+        return Option.some(new KeywordSkipInfo(List.copyOf(guards), body));
+    }
+
+    /** The rule named by a leading {@code !Rule} guard, when it resolves to a literal-set rule. */
+    private static Option<String> leadingGuardName(Expression element, Map<String, Rule> ruleMap) {
+        if (! (unwrapWrappers(element) instanceof Expression.Not not)) {
+            return Option.none();
+        }
+
+        if (! (unwrapWrappers(not.expression()) instanceof Expression.Reference ref)) {
             return Option.none();
         }
 
         var referenced = ruleMap.get(ref.ruleName());
 
-        if (referenced == null) {
+        if (referenced == null || !isLiteralSetRule(referenced.expression())) {
             return Option.none();
         }
 
-        if (!isLiteralSetRule(referenced.expression())) {
-            return Option.none();
-        }
-
-        var rest = elements.subList(1, elements.size());
-        Expression body = rest.size() == 1
-                          ? rest.get(0)
-                          : new Expression.Sequence(seq.span(), List.copyOf(rest));
-
-        return Option.some(new KeywordSkipInfo(ref.ruleName(), body));
+        return Option.some(ref.ruleName());
     }
 
     /**
@@ -599,27 +619,41 @@ public final class RuleClassifier {
      * guard expressions (which are ignored — only the leading literals matter
      * for keyword resolution).
      */
-    static boolean isLiteralSetRule(Expression expr) {
+    /**
+     * The alternatives of a literal-set body, or empty when the body is not one.
+     *
+     * <p>A body naming a single keyword ({@code PartitionKW <- < 'PARTITION'i ![a-zA-Z0-9_$] >})
+     * is a set of one. Requiring a {@link Expression.Choice} excluded every such rule from guard
+     * detection, which is why a rule guarded by several single-keyword rules was not recognised.
+     *
+     * <p>{@link #isLiteralSetRule} and {@link #extractLiteralSet} both read this: they answer the
+     * same question and must not drift apart.
+     */
+    private static List<Expression> literalSetAlternatives(Expression expr) {
         var unwrapped = unwrapWrappers(expr);
-        Expression choiceCandidate = unwrapped;
+        Expression candidate = unwrapped;
 
         if (unwrapped instanceof Expression.Sequence seq) {
             if (seq.elements().isEmpty()) {
-                return false;
+                return List.of();
             }
 
-            choiceCandidate = unwrapWrappers(seq.elements().get(0));
+            candidate = unwrapWrappers(seq.elements().getFirst());
         }
 
-        if (! (choiceCandidate instanceof Expression.Choice choice)) {
+        return candidate instanceof Expression.Choice choice
+               ? choice.alternatives()
+               : List.of(candidate);
+    }
+
+    static boolean isLiteralSetRule(Expression expr) {
+        var alternatives = literalSetAlternatives(expr);
+
+        if (alternatives.isEmpty()) {
             return false;
         }
 
-        if (choice.alternatives().isEmpty()) {
-            return false;
-        }
-
-        for (var alt : choice.alternatives()) {
+        for (var alt : alternatives) {
             if (extractLeadingLiteral(alt).isEmpty()) {
                 return false;
             }
@@ -634,24 +668,10 @@ public final class RuleClassifier {
      * than a boolean. Returns an empty list if the shape doesn't match.
      */
     static List<String> extractLiteralSet(Expression expr) {
-        var unwrapped = unwrapWrappers(expr);
-        Expression choiceCandidate = unwrapped;
+        var alternatives = literalSetAlternatives(expr);
+        var out = new ArrayList<String>(alternatives.size());
 
-        if (unwrapped instanceof Expression.Sequence seq) {
-            if (seq.elements().isEmpty()) {
-                return List.of();
-            }
-
-            choiceCandidate = unwrapWrappers(seq.elements().get(0));
-        }
-
-        if (! (choiceCandidate instanceof Expression.Choice choice)) {
-            return List.of();
-        }
-
-        var out = new ArrayList<String>(choice.alternatives().size());
-
-        for (var alt : choice.alternatives()) {
+        for (var alt : alternatives) {
             var litOpt = extractLeadingLiteral(alt);
 
             if (litOpt.isEmpty()) {

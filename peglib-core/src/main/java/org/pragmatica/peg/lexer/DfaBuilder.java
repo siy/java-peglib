@@ -8,6 +8,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -19,6 +20,7 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.grammar.Rule;
 
 
 /**
@@ -384,6 +386,29 @@ public final class DfaBuilder {
      * lexer emits the *KW kind for those texts, and the parser must
      * accept it when an identifier is expected.
      */
+    /**
+     * The union of the literal sets excluded by a guarded rule's leading {@code !Rule} guards.
+     *
+     * <p>A rule may carry several; every one of them names text the rule refuses, so the sets
+     * combine. Guards naming a rule that is missing or carries no literals contribute nothing
+     * rather than voiding the rest.
+     */
+    private static Set<String> guardedKeywordTexts(RuleClassifier.KeywordSkipInfo info, Map<String, Rule> ruleMap) {
+        var texts = new LinkedHashSet<String>();
+
+        for (var guardName : info.keywordRuleNames()) {
+            var guardRule = ruleMap.get(guardName);
+
+            if (guardRule == null) {
+                continue;
+            }
+
+            texts.addAll(RuleClassifier.extractLiteralSet(guardRule.expression()));
+        }
+
+        return texts;
+    }
+
     private static Map<String, int[]> buildIdentifierFallbacks(Grammar grammar,
                                                                RuleClassifier.Classification classification,
                                                                Map<String, Integer> ruleNameToKind,
@@ -394,13 +419,7 @@ public final class DfaBuilder {
         for (var entry : classification.keywordSkip().entrySet()) {
             var idRuleName = entry.getKey();
             var info = entry.getValue();
-            var keywordRule = ruleMap.get(info.keywordRuleName());
-
-            if (keywordRule == null) {
-                continue;
-            }
-
-            var hardKeywords = new HashSet<>(RuleClassifier.extractLiteralSet(keywordRule.expression()));
+            var hardKeywords = new HashSet<>(guardedKeywordTexts(info, ruleMap));
 
             if (hardKeywords.isEmpty()) {
                 continue;
@@ -870,13 +889,7 @@ public final class DfaBuilder {
                 continue;
             }
 
-            var keywordRule = ruleMap.get(info.keywordRuleName());
-
-            if (keywordRule == null) {
-                continue;
-            }
-
-            var keywordTexts = RuleClassifier.extractLiteralSet(keywordRule.expression());
+            var keywordTexts = guardedKeywordTexts(info, ruleMap);
 
             if (keywordTexts.isEmpty()) {
                 continue;
