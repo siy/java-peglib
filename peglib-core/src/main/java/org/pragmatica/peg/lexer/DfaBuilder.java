@@ -1254,6 +1254,82 @@ public final class DfaBuilder {
         priorityRef[0]++;
     }
 
+    /** A rule body split into the part that is matched and the constraint on what may follow. */
+    private record FollowGuard(Expression prefix, int[] follow) {}
+
+    /**
+     * Split a trailing {@code ![c]} / {@code &[c]} off a rule body.
+     *
+     * <p>Recognised shape: a sequence whose last element is a lookahead over a character class.
+     * That is what a keyword rule spells — {@code < 'GROUPING'i [ \t]+ 'SETS'i ![a-zA-Z0-9_$] >} —
+     * and it is the shape maximal munch cannot stand in for, because nothing else in the grammar
+     * matches further than the keyword itself.
+     *
+     * <p>A lookahead anywhere else is left alone: only a trailing one is expressible as a
+     * constraint on the accepting state.
+     */
+    private static Option<FollowGuard> splitTrailingFollowGuard(Expression expr) {
+        if (! (unwrapAcceptableWrappers(expr) instanceof Expression.Sequence seq)) {
+            return Option.none();
+        }
+
+        var elements = seq.elements();
+
+        if (elements.size() < 2) {
+            return Option.none();
+        }
+
+        var last = unwrapAcceptableWrappers(elements.getLast());
+        boolean negative = last instanceof Expression.Not;
+        var inner = switch (last) {
+            case Expression.Not not -> unwrapAcceptableWrappers(not.expression());
+            case Expression.And and -> unwrapAcceptableWrappers(and.expression());
+            default -> null;
+        };
+
+        if (! (inner instanceof Expression.CharClass cc)) {
+            return Option.none();
+        }
+
+        var head = elements.subList(0, elements.size() - 1);
+        Expression prefix = head.size() == 1
+                            ? head.getFirst()
+                            : new Expression.Sequence(seq.span(), List.copyOf(head));
+
+        return Option.some(new FollowGuard(prefix, buildFollowRow(cc, negative)));
+    }
+
+    /**
+     * Build the row consulted by {@link Dfa#acceptAllowsFollower}: non-zero where the following
+     * character is ALLOWED. Polarity is resolved here so the driver never branches on it.
+     *
+     * <p>End of input satisfies a negative guard — there is no character there to forbid — and
+     * fails a positive one, which requires a character to be present.
+     */
+    private static int[] buildFollowRow(Expression.CharClass cc, boolean negative) {
+        var matched = parseCharClassPattern(cc.pattern(), cc.negated(), cc.caseInsensitive());
+        // A negated class matches non-ASCII too; a positive one is ASCII-only by definition.
+        boolean matchesNonAscii = cc.negated();
+        var row = new int[Dfa.FOLLOW_ROW];
+
+        for (int c = 0; c < ALPHABET; c++) {
+            boolean allowed = negative != matched.get(c);
+
+            row[c] = allowed
+                     ? 1
+                     : 0;
+        }
+
+        row[Dfa.FOLLOW_NON_ASCII] = negative != matchesNonAscii
+                                    ? 1
+                                    : 0;
+        row[Dfa.FOLLOW_EOF] = negative
+                              ? 1
+                              : 0;
+
+        return row;
+    }
+
     private static void tryAbsorb(Nfa nfa,
                                   String ruleName,
                                   Expression expr,
@@ -1261,6 +1337,29 @@ public final class DfaBuilder {
                                   int[] priorityRef,
                                   int globalStart,
                                   List<SkippedRule> skipped) {
+        // A trailing lookahead over a character class constrains the character AFTER the match
+        // without consuming it. Compile the part before it and hang the constraint on the accept.
+        var guarded = splitTrailingFollowGuard(expr);
+
+        if (guarded.isPresent()) {
+            var split = guarded.unwrap();
+            var guardedResult = compileExpression(nfa, split.prefix(), ruleName);
+
+            if (guardedResult.isSuccess()) {
+                var guardedFragment = guardedResult.unwrap();
+
+                nfa.addEpsilon(globalStart, guardedFragment.start);
+                nfa.markAccept(guardedFragment.accept,
+                               kind,
+                               priorityRef[0],
+                               nfa.internFollow(split.follow()));
+                priorityRef[0]++;
+
+                return;
+            }
+            // The prefix did not compile either; fall through and report against the whole body.
+        }
+
         var result = compileExpression(nfa, expr, ruleName);
 
         if (result.isSuccess()) {
@@ -2155,6 +2254,7 @@ public final class DfaBuilder {
         var transitions = new ArrayList<int[]>();
         var acceptKindList = new ArrayList<Integer>();
         var acceptPriorityList = new ArrayList<Integer>();
+        var acceptFollowList = new ArrayList<Integer>();
         var nonAsciiTargets = new ArrayList<Integer>();
         var queue = new ArrayDeque<BitSet>();
 
@@ -2163,6 +2263,7 @@ public final class DfaBuilder {
                       transitions,
                       acceptKindList,
                       acceptPriorityList,
+                      acceptFollowList,
                       nonAsciiTargets,
                       queue,
                       startSet,
@@ -2185,6 +2286,7 @@ public final class DfaBuilder {
                                              transitions,
                                              acceptKindList,
                                              acceptPriorityList,
+                                             acceptFollowList,
                                              nonAsciiTargets,
                                              queue,
                                              moveSet,
@@ -2204,6 +2306,7 @@ public final class DfaBuilder {
                                                      transitions,
                                                      acceptKindList,
                                                      acceptPriorityList,
+                                                     acceptFollowList,
                                                      nonAsciiTargets,
                                                      queue,
                                                      nonAsciiMoveSet,
@@ -2217,15 +2320,22 @@ public final class DfaBuilder {
         int[][] transitionTable = transitions.toArray(new int[0][]);
         int[] acceptKindArray = new int[stateCount];
         int[] acceptPriorityArray = new int[stateCount];
+        int[] acceptFollowArray = new int[stateCount];
         int[] nonAsciiArray = new int[stateCount];
 
         for (int i = 0; i < stateCount; i++) {
             acceptKindArray[i] = acceptKindList.get(i);
             acceptPriorityArray[i] = acceptPriorityList.get(i);
+            acceptFollowArray[i] = acceptFollowList.get(i);
             nonAsciiArray[i] = nonAsciiTargets.get(i);
         }
 
-        return new Dfa(transitionTable, acceptKindArray, acceptPriorityArray, nonAsciiArray);
+        return new Dfa(transitionTable,
+                       acceptKindArray,
+                       acceptPriorityArray,
+                       nonAsciiArray,
+                       acceptFollowArray,
+                       nfa.followSets.toArray(new int[0][]));
     }
 
     private static int registerState(Map<BitSet, Integer> stateMap,
@@ -2233,6 +2343,7 @@ public final class DfaBuilder {
                                      List<int[]> transitions,
                                      List<Integer> acceptKindList,
                                      List<Integer> acceptPriorityList,
+                                     List<Integer> acceptFollowList,
                                      List<Integer> nonAsciiTargets,
                                      Deque<BitSet> queue,
                                      BitSet stateSet,
@@ -2255,17 +2366,19 @@ public final class DfaBuilder {
 
         acceptKindList.add(accept.kind);
         acceptPriorityList.add(accept.priority);
+        acceptFollowList.add(accept.follow);
         nonAsciiTargets.add(Dfa.NO_TRANSITION);
         queue.add(stateSet);
 
         return id;
     }
 
-    private record AcceptInfo(int kind, int priority) {}
+    private record AcceptInfo(int kind, int priority, int follow) {}
 
     private static AcceptInfo chooseAccept(Nfa nfa, BitSet stateSet) {
         int bestKind = Dfa.NO_ACCEPT;
         int bestPriority = Integer.MAX_VALUE;
+        int bestFollow = Dfa.NO_FOLLOW;
 
         for (int s = stateSet.nextSetBit(0); s >= 0; s = stateSet.nextSetBit(s + 1)) {
             int kind = nfa.acceptKind[s];
@@ -2279,13 +2392,17 @@ public final class DfaBuilder {
             if (priority < bestPriority) {
                 bestPriority = priority;
                 bestKind = kind;
+                bestFollow = nfa.acceptFollow[s];
             }
         }
 
         return new AcceptInfo(bestKind,
                               bestKind == Dfa.NO_ACCEPT
                               ? -1
-                              : bestPriority);
+                              : bestPriority,
+                              bestKind == Dfa.NO_ACCEPT
+                              ? Dfa.NO_FOLLOW
+                              : bestFollow);
     }
 
     private static void epsilonClosure(Nfa nfa, BitSet states) {
@@ -2371,7 +2488,11 @@ public final class DfaBuilder {
     private static final class Nfa {
         int start = -1;
         int[] acceptKind = new int[16];
+
         int[] acceptPriority = new int[16];
+
+        /** Follow-constraint id per accept state; see {@link Dfa#acceptAllowsFollower}. */
+        int[] acceptFollow = new int[16];
         int[][] epsilon = new int[16][];
         int[] epsilonLen = new int[16];
         int[][][] charEdges = new int[16][][];
@@ -2389,9 +2510,24 @@ public final class DfaBuilder {
         int[][] nonAsciiEdges = new int[16][];
         int[] nonAsciiEdgeLens = new int[16];
         int stateCount;
+        /** Interned follow constraints; ids index this list. Grammars have a handful at most. */
+        final List<int[]> followSets = new ArrayList<>();
+
+        int internFollow(int[] row) {
+            for (int i = 0; i < followSets.size(); i++) {
+                if (Arrays.equals(followSets.get(i), row)) {
+                    return i;
+                }
+            }
+
+            followSets.add(row);
+
+            return followSets.size() - 1;
+        }
 
         Nfa() {
             Arrays.fill(acceptKind, Dfa.NO_ACCEPT);
+            Arrays.fill(acceptFollow, Dfa.NO_FOLLOW);
         }
 
         int stateCount() {
@@ -2404,6 +2540,7 @@ public final class DfaBuilder {
 
             acceptKind[id] = Dfa.NO_ACCEPT;
             acceptPriority[id] = -1;
+            acceptFollow[id] = Dfa.NO_FOLLOW;
 
             return id;
         }
@@ -2414,9 +2551,12 @@ public final class DfaBuilder {
             }
 
             int newCap = Math.max(needed, acceptKind.length * 2);
+            int oldCap = acceptKind.length;
 
             acceptKind = Arrays.copyOf(acceptKind, newCap);
             acceptPriority = Arrays.copyOf(acceptPriority, newCap);
+            acceptFollow = Arrays.copyOf(acceptFollow, newCap);
+            Arrays.fill(acceptFollow, oldCap, newCap, Dfa.NO_FOLLOW);
             epsilon = Arrays.copyOf(epsilon, newCap);
             epsilonLen = Arrays.copyOf(epsilonLen, newCap);
             charEdges = Arrays.copyOf(charEdges, newCap);
@@ -2428,9 +2568,14 @@ public final class DfaBuilder {
         }
 
         Result<Unit> markAccept(int state, int kind, int priority) {
+            return markAccept(state, kind, priority, Dfa.NO_FOLLOW);
+        }
+
+        Result<Unit> markAccept(int state, int kind, int priority, int follow) {
             if (acceptKind[state] == Dfa.NO_ACCEPT || priority < acceptPriority[state]) {
                 acceptKind[state] = kind;
                 acceptPriority[state] = priority;
+                acceptFollow[state] = follow;
             }
 
             return Result.unitResult();

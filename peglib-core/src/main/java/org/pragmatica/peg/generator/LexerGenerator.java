@@ -128,12 +128,14 @@ public final class LexerGenerator {
         sb.append("    public static final int WHITESPACE_KIND = ").append(whitespaceKind).append(";\n\n");
         renderKindNames(sb, kinds);
         renderAcceptKinds(sb, acceptKinds);
+        renderFollowConstraints(sb, dfa.acceptFollows(), dfa.followTable(), alphabet);
         renderTransitions(sb, transitions, stateCount, alphabet);
         renderNonAsciiTransitions(sb, dfa.nonAsciiTransitions());
         renderResolvers(sb, kinds);
         renderLexMethod(sb,
                         alphabet,
-                        !kinds.keywordResolutions().isEmpty());
+                        !kinds.keywordResolutions().isEmpty(),
+                        dfa.followTable().length > 0);
         sb.append("}\n");
 
         return sb.toString();
@@ -312,7 +314,64 @@ public final class LexerGenerator {
         sb.append("    }\n\n");
     }
 
-    private static void renderLexMethod(StringBuilder sb, int alphabet, boolean hasResolvers) {
+    /**
+     * Emit the follow-constraint tables and the predicate that reads them.
+     *
+     * <p>Emitted only for a grammar that has at least one guarded rule, so the generated lexer of
+     * a grammar without one is unchanged — both to keep the hot loop free of a check it can never
+     * need, and to keep output stable for grammars that predate the feature.
+     */
+    private static void renderFollowConstraints(StringBuilder sb,
+                                                int[] acceptFollows,
+                                                int[][] followTable,
+                                                int alphabet) {
+        if (followTable.length == 0) {
+            return;
+        }
+
+        int row = alphabet + 2;
+
+        sb.append("    private static final int FOLLOW_ROW = ").append(row).append(";\n");
+        sb.append("    private static final int[] ACCEPT_FOLLOW = new int[] {");
+        for (int i = 0; i < acceptFollows.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+
+            sb.append(acceptFollows[i]);
+        }
+
+        sb.append("};\n");
+        sb.append("    private static final int[] FOLLOW_TABLE = new int[] {");
+        for (int c = 0; c < followTable.length; c++) {
+            for (int i = 0; i < row; i++) {
+                if (c > 0 || i > 0) {
+                    sb.append(',');
+                }
+
+                sb.append(followTable[c][i]);
+            }
+        }
+
+        sb.append("};\n\n");
+        sb.append("    private static boolean allowsFollower(int state, int follower) {\n");
+        sb.append("        int constraint = ACCEPT_FOLLOW[state];\n");
+        sb.append("        if (constraint < 0) return true;\n");
+        sb.append("        int base = constraint * FOLLOW_ROW;\n");
+        sb.append("        if (follower < 0) return FOLLOW_TABLE[base + ").append(alphabet + 1).append("] != 0;\n");
+        sb.append("        if (follower >= ")
+          .append(alphabet)
+          .append(") return FOLLOW_TABLE[base + ")
+          .append(alphabet)
+          .append("] != 0;\n");
+        sb.append("        return FOLLOW_TABLE[base + follower] != 0;\n");
+        sb.append("    }\n\n");
+    }
+
+    private static void renderLexMethod(StringBuilder sb,
+                                        int alphabet,
+                                        boolean hasResolvers,
+                                        boolean hasFollowConstraints) {
         sb.append("    public static TokenArray lex(String input) {\n");
         // No defensive null check on input: the only caller path is
         // CompiledLexer.lex(String), which is invoked from Parser.parse(String)
@@ -338,7 +397,11 @@ public final class LexerGenerator {
         sb.append("                state = next;\n");
         sb.append("                cur++;\n");
         sb.append("                int ak = ACCEPT_KIND[state];\n");
-        sb.append("                if (ak >= 0) {\n");
+        // A guarded accept is recorded only when the following character permits it; maximal
+        // munch then carries on from the last accept that was allowed.
+        sb.append(hasFollowConstraints
+                  ? "                if (ak >= 0 && allowsFollower(state, cur < len ? input.charAt(cur) : -1)) {\n"
+                  : "                if (ak >= 0) {\n");
         sb.append("                    lastAcceptEnd = cur;\n");
         sb.append("                    lastAcceptKind = ak;\n");
         sb.append("                }\n");

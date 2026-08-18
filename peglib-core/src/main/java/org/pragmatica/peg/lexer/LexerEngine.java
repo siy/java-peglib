@@ -132,8 +132,13 @@ public final class LexerEngine {
                 state = next;
                 cur++;
                 int ak = dfa.acceptKind(state);
-
-                if (ak != Dfa.NO_ACCEPT) {
+                // A rule ending in a lookahead constrains the character after the match. A denied
+                // accept is simply not recorded, so maximal munch carries on from the last one that
+                // was — which is what lets a longer rule win where the guarded one is refused.
+                if (ak != Dfa.NO_ACCEPT && dfa.acceptAllowsFollower(state,
+                                                                    cur < len
+                                                                    ? input.charAt(cur)
+                                                                    : Dfa.EOF)) {
                     lastAcceptEnd = cur;
                     lastAcceptKind = ak;
                 }
