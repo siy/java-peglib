@@ -13,6 +13,7 @@ import java.util.Set;
 
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.grammar.Expression;
+import org.pragmatica.peg.grammar.analysis.WidthAnalysis;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
 
@@ -67,7 +68,7 @@ public final class LeftRecursionDetector {
             ruleMap.putIfAbsent(rule.name(), rule);
         }
 
-        var nullable = computeNullable(ruleMap);
+        var nullable = WidthAnalysis.computeNullable(ruleMap);
         var leftmostRefs = computeLeftmostRefs(ruleMap, nullable);
         var errors = new ArrayList<LeftRecursionError>();
 
@@ -85,70 +86,7 @@ public final class LeftRecursionDetector {
     }
 
     // ---------------------------------------------------------------------
-    // Nullable analysis (fixed-point)
-    // ---------------------------------------------------------------------
-    private static Map<String, Boolean> computeNullable(Map<String, Rule> ruleMap) {
-        var nullable = new HashMap<String, Boolean>();
-
-        for (var name : ruleMap.keySet()) {
-            nullable.put(name, false);
-        }
-
-        boolean changed = true;
-
-        while (changed) {
-            changed = false;
-            for (var entry : ruleMap.entrySet()) {
-                if (nullable.get(entry.getKey())) {
-                    continue;
-                }
-
-                if (isNullable(entry.getValue().expression(),
-                               nullable)) {
-                    nullable.put(entry.getKey(), true);
-                    changed = true;
-                }
-            }
-        }
-
-        return nullable;
-    }
-
-    private static boolean isNullable(Expression expr, Map<String, Boolean> nullable) {
-        return switch (expr) {
-            case Expression.Literal lit -> lit.text().isEmpty();
-            case Expression.CharClass __ -> false;
-            case Expression.Any __ -> false;
-            case Expression.Reference ref -> nullable.getOrDefault(ref.ruleName(), false);
-            case Expression.Sequence seq -> allNullable(seq.elements(), nullable);
-            case Expression.Choice ch -> ch.alternatives().stream().anyMatch(a -> isNullable(a, nullable));
-            case Expression.ZeroOrMore __ -> true;
-            case Expression.Optional __ -> true;
-            case Expression.OneOrMore o -> isNullable(o.expression(), nullable);
-            case Expression.Repetition r -> r.min() == 0 || isNullable(r.expression(), nullable);
-            case Expression.And __ -> true;
-            case Expression.Not __ -> true;
-            case Expression.TokenBoundary tb -> isNullable(tb.expression(), nullable);
-            case Expression.Ignore ig -> isNullable(ig.expression(), nullable);
-            case Expression.Capture cap -> isNullable(cap.expression(), nullable);
-            case Expression.CaptureScope cs -> isNullable(cs.expression(), nullable);
-            case Expression.Group g -> isNullable(g.expression(), nullable);
-            case Expression.Cut __ -> false;
-            case Expression.BackReference __ -> false;
-            case Expression.Dictionary __ -> false;
-        };
-    }
-
-    private static boolean allNullable(List<Expression> elements, Map<String, Boolean> nullable) {
-        for (var e : elements) {
-            if (!isNullable(e, nullable)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
+    // Nullable analysis lives in WidthAnalysis — classification needs the same answer.
     // ---------------------------------------------------------------------
     // Leftmost-reference graph (nullable-aware)
     // ---------------------------------------------------------------------
@@ -179,7 +117,7 @@ public final class LeftRecursionDetector {
             case Expression.Sequence seq -> {
                 for (var el : seq.elements()) {
                     collectLeftmost(el, nullable, out);
-                    if (!isNullable(el, nullable)) {
+                    if (!WidthAnalysis.isNullable(el, nullable)) {
                         return;
                     }
                 }

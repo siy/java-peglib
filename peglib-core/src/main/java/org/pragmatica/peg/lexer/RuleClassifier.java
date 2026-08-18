@@ -15,6 +15,7 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
+import org.pragmatica.peg.grammar.analysis.WidthAnalysis;
 
 
 /**
@@ -88,7 +89,9 @@ public final class RuleClassifier {
         }
 
         var properties = collectProperties(rules);
-        var kinds = initialLabelling(properties);
+        var kinds = initialLabelling(properties,
+                                     grammar.ruleMap(),
+                                     WidthAnalysis.computeAlwaysEmpty(grammar.ruleMap()));
 
         runFixedPointDemotion(properties, kinds);
         var keywordSkip = detectSkipPrefixRules(grammar, properties, kinds);
@@ -123,7 +126,9 @@ public final class RuleClassifier {
      *   <li>Empty/combinator-only body → LEXER (degenerate case).</li>
      * </ul>
      */
-    private static Map<String, RuleKind> initialLabelling(Map<String, RuleProperties> properties) {
+    private static Map<String, RuleKind> initialLabelling(Map<String, RuleProperties> properties,
+                                                          Map<String, Rule> ruleMap,
+                                                          Map<String, Boolean> alwaysEmpty) {
         var kinds = new HashMap<String, RuleKind>();
 
         for (var entry : properties.entrySet()) {
@@ -133,12 +138,122 @@ public final class RuleClassifier {
                 kinds.put(entry.getKey(), RuleKind.PARSER);
             } else if (p.referencesAnyRule && p.hasTerminals) {
                 kinds.put(entry.getKey(), RuleKind.PARSER);
+            } else if (alwaysEmpty.getOrDefault(entry.getKey(), false)) {
+                // A token has to consume something. A rule that can match ONLY the empty string
+                // cannot be one — e.g. {@code EmptyStatement <- &';' / !.}, which reads as lexical
+                // because it names no other rule, but asserts a position rather than describing a
+                // lexeme. Note the test is always-empty, not nullable: {@code Word <- [a-z]*} is
+                // nullable and is a legitimate lexer rule, warned about rather than reclassified.
+                kinds.put(entry.getKey(), RuleKind.PARSER);
+            } else if (p.referencesAnyRule && !spansSingleToken(entry.getKey(), ruleMap)) {
+                // A body of nothing but references spanning more than one token is a sequence of
+                // tokens, which is parsing: IfNotExists <- IfKW NotKW ExistsKW is three tokens with
+                // trivia between them, and fusing them into the DFA yields a lexeme spelled
+                // IFNOTEXISTS that no input contains. Composing ONE token out of finer rules is a
+                // real and different intent — Identifier <- IdStart IdCont* — and it is spelled by
+                // wrapping the body in a token boundary, which is what < > already means.
+                kinds.put(entry.getKey(), RuleKind.PARSER);
             } else {
                 kinds.put(entry.getKey(), RuleKind.LEXER);
             }
         }
 
         return kinds;
+    }
+
+    /**
+     * Whether a reference-only rule describes a single token.
+     *
+     * <p>True when the body declares itself a token with {@code < >}, or when it spans exactly one
+     * token anyway (an alias for one rule, or a choice between shapes). The token boundary is an
+     * explicit override and is trusted: an author who writes {@code < IfKW NotKW ExistsKW >} has
+     * asked for the fused lexeme.
+     */
+    private static boolean spansSingleToken(String ruleName, Map<String, Rule> ruleMap) {
+        var rule = ruleMap.get(ruleName);
+
+        if (rule == null) {
+            return true;
+        }
+
+        return declaresTokenBoundary(rule.expression()) || referenceTokenCount(rule.expression()) == 1;
+    }
+
+    private static boolean declaresTokenBoundary(Expression expr) {
+        return switch (expr) {
+            case Expression.TokenBoundary __ -> true;
+            case Expression.Group g -> declaresTokenBoundary(g.expression());
+            default -> false;
+        };
+    }
+
+    /** A token span that depends on the input rather than being fixed by the grammar. */
+    private static final int VARIABLE_TOKEN_COUNT = -1;
+
+    /**
+     * How many tokens a reference-only body spans.
+     *
+     * <p>Only meaningful where the body names no terminal, which is the one place the caller
+     * applies it. A reference counts as one token; lookahead and cut consume nothing; repetition
+     * and optionality make the span depend on the input and so are never a fixed single token.
+     */
+    private static int referenceTokenCount(Expression expr) {
+        return switch (expr) {
+            case Expression.Reference __ -> 1;
+            case Expression.And __ -> 0;
+            case Expression.Not __ -> 0;
+            case Expression.Cut __ -> 0;
+            case Expression.Sequence seq -> sumTokenCounts(seq.elements());
+            case Expression.Choice ch -> maxTokenCount(ch.alternatives());
+            case Expression.Group g -> referenceTokenCount(g.expression());
+            case Expression.TokenBoundary tb -> referenceTokenCount(tb.expression());
+            case Expression.Capture cap -> referenceTokenCount(cap.expression());
+            case Expression.CaptureScope cs -> referenceTokenCount(cs.expression());
+            case Expression.Ignore ig -> referenceTokenCount(ig.expression());
+            case Expression.ZeroOrMore __ -> VARIABLE_TOKEN_COUNT;
+            case Expression.OneOrMore __ -> VARIABLE_TOKEN_COUNT;
+            case Expression.Optional __ -> VARIABLE_TOKEN_COUNT;
+            case Expression.Repetition __ -> VARIABLE_TOKEN_COUNT;
+            // Terminals are characters within a token rather than tokens, so a body containing one
+            // is not reference-only and does not reach here.
+            case Expression.Literal __ -> VARIABLE_TOKEN_COUNT;
+            case Expression.CharClass __ -> VARIABLE_TOKEN_COUNT;
+            case Expression.Any __ -> VARIABLE_TOKEN_COUNT;
+            case Expression.BackReference __ -> VARIABLE_TOKEN_COUNT;
+            case Expression.Dictionary __ -> VARIABLE_TOKEN_COUNT;
+        };
+    }
+
+    private static int sumTokenCounts(List<Expression> elements) {
+        int total = 0;
+
+        for (var element : elements) {
+            int count = referenceTokenCount(element);
+
+            if (count == VARIABLE_TOKEN_COUNT) {
+                return VARIABLE_TOKEN_COUNT;
+            }
+
+            total += count;
+        }
+
+        return total;
+    }
+
+    private static int maxTokenCount(List<Expression> alternatives) {
+        int max = 0;
+
+        for (var alternative : alternatives) {
+            int count = referenceTokenCount(alternative);
+
+            if (count == VARIABLE_TOKEN_COUNT) {
+                return VARIABLE_TOKEN_COUNT;
+            }
+
+            max = Math.max(max, count);
+        }
+
+        return max;
     }
 
     /**
