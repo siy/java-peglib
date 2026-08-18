@@ -53,6 +53,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
   the same footgun class as the `%memo` no-ops flagged in 0.7.1.
 
+### Changed — lexical rule classification
+
+- **`< >` now decides whether a reference-only rule is one token.** A rule whose body is nothing
+  but references is classified LEXER only when it spans a single token — a choice between shapes
+  (`ColLabel <- QuotedIdent / UnquotedIdent`) or an alias (`NullConstraint <- NullKW`). A
+  *sequence* spans several tokens, so it is now a parser rule: `IfNotExists <- IfKW NotKW ExistsKW`
+  is three tokens with trivia between them, and fusing it into the DFA produced a lexeme spelled
+  `IFNOTEXISTS` that no input contains — allocated, and silently never matched.
+
+  Composing **one** token out of finer rules is a different and legitimate intent, and it is now
+  spelled by wrapping the body in a token boundary: `Identifier <- < IdStart IdCont* >`. The
+  override is trusted — `< IfKW NotKW ExistsKW >` will fuse, because you asked for it.
+
+  Nothing else in the grammar separates those two shapes, which is why the boundary decides. This
+  makes `< >` load-bearing for classification where before it only captured text; it is enforcing
+  what the syntax already meant.
+
+  **Migration:** a reference-only rule spanning more than one token, written without `< >`, changes
+  from LEXER to PARSER. In practice no working grammar is affected: before this release
+  `DfaBuilder` rejected every rule reference, so such a rule was skipped and any parser reference
+  to it already failed with `SkippedRuleReferenced`. `java25.peg` has no reference-only lexer rules
+  at all and is unaffected.
+
+### Fixed — lexer rules that no grammar shape could express
+
+Surfaced by `aether/pg-tools`' 753-line `postgres.peg`; none of these are reachable from
+`java25.peg`, which is why they survived to 0.7.2.
+
+- **Identifier fallback was dead for case-insensitive grammars.** `buildIdentifierFallbacks`
+  skipped every literal whose key did not end in `/cs`, reasoning that "Java keywords are
+  case-sensitive" — a Java-specific assumption compiled into a general-purpose library. Every SQL
+  keyword is `'SELECT'i`, so the whole contextual-keyword mechanism was inert for such grammars.
+  Keyword containment now folds both sides, since `inlineLiteralKey` case-folds CI keys while
+  `extractLiteralSet` does not; without that a genuinely reserved word would be offered as an
+  identifier fallback.
+
+- **A lexer rule may now reference another lexer rule.** The DFA has no call stack, so
+  `DfaBuilder` could not compile a reference at all. That made "guard plus named alternatives"
+  inexpressible — the guard requires a named rule, and a rule naming the alternatives was
+  rejected — which is exactly what every SQL-shaped grammar needs for `ColId`:
+
+  ```peg
+  ColId <- !ReservedKeyword (QuotedIdentifier / UnicodeIdentifier / UnquotedIdentifier)
+  ```
+
+  References are now substituted before compilation. Substitution is sound because the referenced
+  rules are themselves regular; reference cycles are refused rather than expanded.
+
+- **A rule that can match only the empty string is no longer a token.** `EmptyStatement <- &';' / !.`
+  was classified LEXER because it names no other rule, but a lexeme has to consume something. The
+  test is *always-empty*, not *nullable* — `Word <- [a-z]*` can match empty yet also consume, and
+  remains a legitimate lexer rule that accepts in its start state.
+
+- **Alias detection now looks through a reference.** `NullConstraint <- NullKW` carries no literal
+  of its own, so it was never recognised as the same token under a second name.
+
+Nullability analysis moved out of `LeftRecursionDetector` into `grammar.analysis.WidthAnalysis`,
+which now holds both width properties — *can* match empty, and *can only* match empty — since
+classification and left-recursion detection need them to agree and the two are easy to conflate.
+
+**Known limitation, unchanged:** a lexer rule still cannot contain `&` / `!` lookahead. Two narrow
+shapes are special-cased (a trailing `!CharClass` after a literal, via aliasing; a single leading
+`!Rule` guard, via skip-prefix detection). A multi-word lexeme such as
+`< 'GROUPING'i [ \t\r\n]+ 'SETS'i ![a-zA-Z0-9_$] >` and more than one leading guard
+(`!AKW !BKW ColId`) remain uncompilable, and `postgres.peg` still does not build because of them.
+This is also why `java25.peg` spells its `value` lookahead inline at four use sites — the same
+root cause, previously recorded as a limitation on rule references.
+
 ### Fixed
 
 Found by the pre-release review round, all in 0.7.2's own new code unless noted:

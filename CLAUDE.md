@@ -117,7 +117,8 @@ e* e+ e?    # Repetition
 .           # Any character
 
 # Extensions
-< e >       # Token boundary (captures matched text)
+< e >       # Token boundary — captures matched text, AND declares a
+            # reference-only rule to be a single token (see Rule classification)
 'text'i     # Case-insensitive literal
 [a-z]i      # Case-insensitive character class
 e{n,m}      # Bounded repetition
@@ -129,6 +130,46 @@ e{n,m}      # Bounded repetition
 %checkpoint Rule              # incremental-reparse boundary
 %memo Rule                    # position memo for a rule re-parsed by overlapping alternatives (0.7.1)
 ```
+
+## Rule classification (LEXER vs PARSER)
+
+`RuleClassifier` decides which rules compile into the lexer DFA. It is inference, not declaration,
+and these four judgements are worth knowing because they change what you can write.
+
+**A rule whose body is only references is LEXER only if it spans one token.** A choice between
+shapes (`ColLabel <- QuotedIdent / UnquotedIdent`) or an alias (`NullConstraint <- NullKW`) spans
+one token and stays lexical. A *sequence* spans several — `IfNotExists <- IfKW NotKW ExistsKW` is
+three tokens with trivia between them — so it is a parser rule. Fusing it into the DFA would
+produce a lexeme spelled `IFNOTEXISTS`, which no input contains: allocated, and never matched.
+
+Composing **one** token out of finer rules is a real and different intent, and it is spelled by
+wrapping the body in a token boundary:
+
+```peg
+Identifier <- < IdStart IdCont* >     # one token, built from character rules
+IfNotExists <- IfKW NotKW ExistsKW    # three tokens — a parser rule
+```
+
+The `< >` is an explicit override and is trusted: `< IfKW NotKW ExistsKW >` will fuse, because you
+asked for it. Nothing else in the grammar distinguishes these two shapes, which is why the
+boundary decides.
+
+**A rule that can match only the empty string is PARSER.** `EmptyStatement <- &';' / !.` reads as
+lexical — it names no other rule — but a token has to consume something. Note the test is
+*always-empty*, not *nullable*: `Word <- [a-z]*` can match empty but can also consume, and stays a
+legitimate lexer rule.
+
+**A lexer rule MAY reference another lexer rule.** Since 0.7.2 such references are substituted
+before DFA compilation (`RuleClassifier.inlineLexerReferences`), with reference cycles refused
+rather than expanded. What a lexer rule still cannot contain is `&` / `!` lookahead — see below.
+
+**A lexer rule still cannot contain `&` or `!` lookahead.** The DFA has no lookahead mechanism, so
+such a rule is skipped and any reference to it fails with `SkippedRuleReferenced` naming
+`expressionKind=Not` (or `And`). Two narrow shapes are handled by special cases: a trailing
+`!CharClass` after a literal or a choice of literals (via aliasing — this covers the 33 `*KW`
+rules in `java25.peg`), and a single leading `!Rule` guard (via skip-prefix detection). Everything
+else — a multi-word lexeme like `< 'GROUPING'i [ \t\r\n]+ 'SETS'i ![a-zA-Z0-9_$] >`, or more than
+one leading guard like `!AKW !BKW ColId` — is not compilable today.
 
 **Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`).
 
@@ -216,13 +257,22 @@ Contextual keywords are matched by specific rules and **fall through to Identifi
 
 In 0.6.0's tokens-first parser, contextual keywords get **Identifier-fallback** at codegen time: where the parser references `Identifier`, it also accepts inline-literal kinds whose text is identifier-shaped and not in the hard-keyword set. See `DfaBuilder.buildIdentifierFallbacks` and `ParserGenerator.emitIdentifierFallback`.
 
-**A contextual keyword whose disambiguation needs lookahead cannot live in a named rule.** `RuleClassifier` types any rule whose body references only lexer rules as LEXER, and a lexer rule may not reference another rule — `fromGrammar` then rejects it with `SkippedRuleReferenced`. Spell the lookahead inline inside the PARSER rule that needs it. This is why `value` appears as the literal group
+**A contextual keyword whose disambiguation needs lookahead cannot live in a named rule.** Still
+true, but **not for the reason given before 0.7.2** — a lexer rule may now reference another lexer
+rule. What blocks it is the lookahead itself: `RuleClassifier` types a reference-only rule spanning
+one token as LEXER, and the DFA cannot compile `&` / `!`, so `fromGrammar` rejects it with
+`SkippedRuleReferenced` naming `expressionKind=Not`. Verified 2026-08-18 against the tidy shape
+(`DeclModifier <- Modifier / ValueMod`, `ValueMod <- ValueKW &(...)`): still rejected, now citing
+the lookahead rather than the reference. Spell the lookahead inline inside the PARSER rule that
+needs it. This is why `value` appears as the literal group
 
 ```peg
 (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))*
 ```
 
-at its four use sites rather than as a tidy `DeclModifier` rule. Both a `DeclModifier <- Modifier / ValueMod` rule and a `ValueMod <- ValueKW &(...)` rule were tried first; each was rejected by the guard.
+at its four use sites rather than as a tidy `DeclModifier` rule. Both a `DeclModifier <- Modifier
+/ ValueMod` rule and a `ValueMod <- ValueKW &(...)` rule were tried first; each is still rejected,
+now by the lookahead limit rather than by the reference limit.
 
 ## JBCT warning policy
 
