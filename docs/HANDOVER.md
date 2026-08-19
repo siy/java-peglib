@@ -17,10 +17,15 @@
 | **Local `~/.m2`** | 0.7.2 installed for all six modules, 2026-08-19. Jar + pom, no `.asc` — a local install, not a release. |
 | **Grammar** | `java25.peg` **unchanged**, so the 99.45% javac agreement carries over untouched |
 
-### THE DECISION, still open
+### THE DECISION — settled 2026-08-19
 
-Ship 0.7.2, or re-pin consumers to 0.7.1 and take it later. Unchanged from session 12 except that
-0.7.2 now carries substantially more, and a downstream consumer needs it.
+**0.7.2 ships only when the `aether/pg-tools` migration succeeds, and absorbs every fix that
+migration needs.** So the release is open-ended by design: it is not "done and waiting", it is
+"gated on a downstream consumer parsing its own grammar". Do not date the CHANGELOG entry or tag
+until that gate passes.
+
+That makes new downstream blockers in-scope for 0.7.2 rather than deferred to 0.7.3 — see the
+dollar-quoting item below.
 
 `mvn -Prelease deploy` uses `autoPublish=true` with `waitUntil=published`: **no staging gate,
 artifacts immutable, a mistake ships 0.7.3.** Do not deploy without an explicit decision.
