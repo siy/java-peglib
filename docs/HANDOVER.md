@@ -163,13 +163,20 @@ a corpus re-run.
   broken, and `DEFAULT true NOT NULL` looked like a working schema tool right up to the point it
   emitted a nullable column into generated code. A consumer's tests can be green because the bug
   and the test agree with each other.
-- **A CST differential is only as good as the corpus behind it.** The pg-tools corpus is **100%
-  DDL — zero SELECT, zero TargetElem, zero WindowSpec.** So the differential that caught the `--`
-  trivia bug in a single run (18 of 34 files) was structurally incapable of seeing anything done to
-  SELECT, aliases, window functions or dollar quoting; the unit tests covered exactly the inverse.
-  Neither instrument alone was sufficient and both were needed repeatedly. Same shape as
-  `java25.peg` being unable to reach any of the eleven defects fixed this session: a gate reports
+- **Presence of a statement type is not coverage of it.** The pg-tools corpus DOES contain SELECT
+  statements — 6 of them, alongside 60 `CreateTableStmt`, 47 `CreateIndexStmt` and 29
+  `AlterTableStmt` — and still has **zero** `TargetElem`, `ColLabel`, `WindowSpec`, `JoinClause`
+  and `CaseExpr`. So it was structurally blind to every SELECT-side change made during this
+  migration: `ColLabel`, `WindowName`, `CompareOp`, dollar quoting. Someone pointing at those six
+  SELECTs would reasonably claim SELECT coverage and be wrong. The unit tests covered exactly the
+  inverse; neither instrument alone sufficed and both were needed repeatedly. Same shape as
+  `java25.peg` being unable to reach any of the eleven defects fixed this session — a gate reports
   on what it exercises and is silent on everything else, so green is not coverage.
+
+  Worth noting how this number was corrected: it was first measured as "100% DDL, zero SELECT"
+  while 18 of 34 files still failed to parse, so the seed files contributed nothing, and it was not
+  re-measured once they parsed. A measurement taken in a broken state stays wrong until someone
+  re-runs it — the same failure mode as a test written against a bug.
 
 ### Verification recipes
 
