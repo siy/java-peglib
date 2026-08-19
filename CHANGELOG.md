@@ -53,6 +53,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
   the same footgun class as the `%memo` no-ops flagged in 0.7.1.
 
+### Fixed — a rule named from `%whitespace` is trivia
+
+- **A `%whitespace` alternative that NAMES a rule was silently dropped**, leaving the standalone
+  rule to match the same text under its own ordinary lexer kind. The token then read as content
+  rather than trivia, the parser's trivia skip never advanced past it, and the first comment in a
+  file ended the parse with `trailing input not consumed` at 1:1.
+
+  Each alternative is compiled on its own so a mixed trivia run does not collapse into one token;
+  an alternative naming a rule could not be compiled at all, because the DFA has no call stack.
+  Those references are now substituted first, so the alternative is absorbed as trivia like any
+  other.
+
+  The C-family shapes were unaffected because `//` and `/*` are conventionally spelled as inline
+  literals — which is why `java25.peg` never saw this, and why its `%whitespace` is untouched by
+  the fix. Any grammar factoring its comment syntax into named rules did see it: SQL's and Lua's
+  `--`, shell and Python's `#`. Found by a downstream CST differential against a 0.6.0 baseline,
+  where 18 of 34 real files failed to parse and every one of them contained a `--` comment.
+
+  Not a regression from this release's own work — the behaviour is identical at the commit this
+  release branched from.
+
 ### Added — `%parser` classification override
 
 - **`%parser RuleName` pins a rule to PARSER**, overriding classification inference.

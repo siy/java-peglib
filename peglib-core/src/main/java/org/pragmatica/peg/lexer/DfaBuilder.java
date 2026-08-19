@@ -1022,6 +1022,8 @@ public final class DfaBuilder {
         if (grammar.whitespace().isPresent()) {
             absorbWhitespace(nfa,
                              grammar.whitespace().unwrap(),
+                             grammar.ruleMap(),
+                             classification.kinds(),
                              priorityRef,
                              globalStart,
                              skipped);
@@ -1106,6 +1108,8 @@ public final class DfaBuilder {
      */
     private static void absorbWhitespace(Nfa nfa,
                                          Expression whitespaceBody,
+                                         Map<String, Rule> ruleMap,
+                                         Map<String, RuleKind> kinds,
                                          int[] priorityRef,
                                          int globalStart,
                                          List<SkippedRule> skipped) {
@@ -1120,8 +1124,14 @@ public final class DfaBuilder {
         int absorbed = 0;
 
         for (var alt : alternatives) {
-            int kind = classifyWhitespaceAlternativeKind(alt);
-            var oneOrMore = ensureNonEmptyWhitespaceAlternative(alt);
+            // An alternative that NAMES a rule cannot be compiled directly — the DFA has no call
+            // stack — and used to be dropped here, leaving the standalone rule to match the same
+            // text under its own ordinary lexer kind. The token then read as content rather than
+            // trivia, and the first comment in a file ended the parse. Substituting the reference
+            // makes the alternative compilable, so it is absorbed as trivia like any other.
+            var resolved = RuleClassifier.inlineLexerReferences(alt, ruleMap, kinds).or(alt);
+            int kind = classifyWhitespaceAlternativeKind(resolved);
+            var oneOrMore = ensureNonEmptyWhitespaceAlternative(resolved);
             var result = compileExpression(nfa, oneOrMore, "%whitespace");
 
             if (!result.isSuccess()) {
