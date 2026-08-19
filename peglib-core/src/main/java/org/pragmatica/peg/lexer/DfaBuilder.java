@@ -489,8 +489,12 @@ public final class DfaBuilder {
                 if (!isIdentifierShape(lowered)) {
                     continue;
                 }
-
-                if (hardKeywords.contains(lowered)) {
+                // Fold both sides, as the inline-literal loop above does. A grammar spelling its
+                // reserved words UPPERCASE ('CREATE'i) never matched a stem derived from the rule
+                // name (CreateKW -> create), so the reserved word was offered as an identifier
+                // fallback and its own guard could not exclude it. Harmless while the rule's kind
+                // was unreachable; live the moment a lexeme adopts it.
+                if (foldedHardKeywords.contains(lowered.toLowerCase(Locale.ROOT))) {
                     continue;
                 }
 

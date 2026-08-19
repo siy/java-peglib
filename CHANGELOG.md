@@ -53,6 +53,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
   the same footgun class as the `%memo` no-ops flagged in 0.7.1.
 
+### Fixed — a guard's own reserved words are no longer offered as identifier fallbacks
+
+- **The identifier-fallback set overlapped the guard set it was supposed to exclude.** Fallback
+  candidates derived from a `*KW` rule name compared the stem (`CreateKW` to `create`) against the
+  keyword set WITHOUT folding case, so a grammar spelling its reserved words uppercase
+  (`'CREATE'i`) never matched and offered them as identifiers. `ColId <- !ReservedKeyword (…)`
+  then accepted `CREATE`, `SELECT`, `FROM` and `PRIMARY` as column names, defeating its own guard.
+
+  The inline-literal half of this comparison was already folded; the rule-name half was not. It
+  stayed harmless only because those rule kinds were unreachable — the moment a lexeme adopted one
+  (see above), the leak went live. Downstream this measured as a 64-kind intersection between
+  `IDFALL_COLID` and `ALIAS_RESERVEDKEYWORD`, where it must be 0.
+
+  The failure mode is worth recording: the parse SUCCEEDS down a wrong alternative rather than
+  failing. `ALTER TABLE users ADD CONSTRAINT uq_email UNIQUE (email)` matched
+  `AddColumnAction` — a column named `CONSTRAINT` of type `uq_email` — and reported "trailing
+  input" at the paren, while the same constraint text inside `CREATE TABLE` parsed correctly
+  because nothing there offered a competing identifier-initial alternative.
+
+  Pinned by an invariant rather than a parse: a guarded rule's fallback kinds must be disjoint from
+  the kinds its guard excludes. A parse-based test passes on a small grammar while the defect is
+  fully present, because the leak only bites when another production competes for the text.
+
 ### Fixed — a lexeme gets one kind, named after the rule that names it
 
 - **A keyword rule lost its identity in the CST when the same literal also appeared inline.** A
