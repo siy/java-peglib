@@ -193,6 +193,7 @@ public final class GrammarResolver {
         var composedCheckpoints = new LinkedHashSet<String>(root.checkpointRules());
         // 0.7.1 — same union for %memo declarations.
         var composedMemo = new LinkedHashSet<String>(root.memoRules());
+        var composedParser = new LinkedHashSet<String>(root.parserRules());
 
         for (var imp : root.imports()) {
             var cached = loadedGrammars.get(imp.grammarName());
@@ -200,6 +201,7 @@ public final class GrammarResolver {
             if (cached != null) {
                 composedCheckpoints.addAll(cached.checkpointRules());
                 composedMemo.addAll(cached.memoRules());
+                composedParser.addAll(cached.parserRules());
             }
         }
 
@@ -211,7 +213,8 @@ public final class GrammarResolver {
                                List.of(),
                                root.recoverSets(),
                                Set.copyOf(composedCheckpoints),
-                               Set.copyOf(composedMemo));
+                               Set.copyOf(composedMemo),
+                               Set.copyOf(composedParser));
     }
 
     private Result<Grammar> loadGrammarOrFail(String grammarName, SourceLocation errorLocation, List<String> chain) {

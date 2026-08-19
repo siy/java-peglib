@@ -95,14 +95,39 @@ public final class RuleClassifier {
         var kinds = initialLabelling(properties,
                                      grammar.ruleMap(),
                                      WidthAnalysis.computeAlwaysEmpty(grammar.ruleMap()));
+        var pinned = pinnedParserRules(grammar, kinds);
 
         runFixedPointDemotion(properties, kinds);
-        var keywordSkip = detectSkipPrefixRules(grammar, properties, kinds);
-        var warnings = collectWarnings(rules, properties, kinds);
+        var keywordSkip = detectSkipPrefixRules(grammar, properties, kinds, pinned);
+        var warnings = collectWarnings(pinned, rules, properties, kinds);
 
         return Result.success(new Classification(Collections.unmodifiableMap(kinds),
                                                  Map.copyOf(keywordSkip),
                                                  List.copyOf(warnings)));
+    }
+
+    /**
+     * Apply {@code %parser RuleName} pins, returning the set that was actually applied.
+     *
+     * <p>Classification is inferred from body shape, and the inference cannot tell a rule that IS
+     * a token from one that merely names tokens: a reference-only body spanning a single token
+     * reads as lexical, which is right for an alias and wrong for a rule whose purpose is to
+     * choose between token kinds at parse time. The pin lets the author say which they meant.
+     *
+     * <p>A pin naming a rule the grammar does not declare is ignored rather than fatal, matching
+     * how {@code %memo} treats unknown names.
+     */
+    private static Set<String> pinnedParserRules(Grammar grammar, Map<String, RuleKind> kinds) {
+        var applied = new HashSet<String>();
+
+        for (var name : grammar.parserRules()) {
+            if (kinds.containsKey(name)) {
+                kinds.put(name, RuleKind.PARSER);
+                applied.add(name);
+            }
+        }
+
+        return applied;
     }
 
     private static Map<String, RuleProperties> collectProperties(List<Rule> rules) {
@@ -303,7 +328,8 @@ public final class RuleClassifier {
         return reverse;
     }
 
-    private static List<Warning> collectWarnings(List<Rule> rules,
+    private static List<Warning> collectWarnings(Set<String> pinned,
+                                                 List<Rule> rules,
                                                  Map<String, RuleProperties> properties,
                                                  Map<String, RuleKind> kinds) {
         var warnings = new ArrayList<Warning>();
@@ -312,7 +338,7 @@ public final class RuleClassifier {
             var name = rule.name();
             var p = properties.get(name);
 
-            if (kinds.get(name) == RuleKind.PARSER && p.usesCharLevelConstructs && p.referencesAnyRule) {
+            if (kinds.get(name) == RuleKind.PARSER && !pinned.contains(name) && p.usesCharLevelConstructs && p.referencesAnyRule) {
                 kinds.put(name, RuleKind.MIXED);
                 warnings.add(new Warning(name,
                                          "rule combines rule references with character-level constructs (., [..], or char-level &/!); "
@@ -337,11 +363,17 @@ public final class RuleClassifier {
      */
     private static Map<String, KeywordSkipInfo> detectSkipPrefixRules(Grammar grammar,
                                                                       Map<String, RuleProperties> properties,
-                                                                      Map<String, RuleKind> kinds) {
+                                                                      Map<String, RuleKind> kinds,
+                                                                      Set<String> pinned) {
         var result = new LinkedHashMap<String, KeywordSkipInfo>();
         var ruleMap = grammar.ruleMap();
 
         for (var rule : grammar.rules()) {
+            // A pinned rule stays PARSER; skip-prefix registration would force it back to LEXER.
+            if (pinned.contains(rule.name())) {
+                continue;
+            }
+
             detectSkipPrefix(rule.expression(), ruleMap).onPresent(info -> recordSkipPrefix(rule,
                                                                                             info,
                                                                                             ruleMap,
