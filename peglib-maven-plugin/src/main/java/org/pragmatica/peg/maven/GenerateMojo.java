@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.List;
 
 import org.pragmatica.lang.Cause;
@@ -250,7 +251,7 @@ public class GenerateMojo extends AbstractMojo {
     /** Marker line prepended to every generated file; also the staleness key. */
     private static final String STAMP_PREFIX = "// peglib-generator: ";
 
-    private static final String GENERATOR_STAMP = STAMP_PREFIX + generatorVersion();
+    private static final String GENERATOR_STAMP = STAMP_PREFIX + generatorVersion() + " " + generatorBuildId();
 
     /**
      * Version of the generator actually doing the work — {@code peglib} core, not the plugin,
@@ -282,6 +283,51 @@ public class GenerateMojo extends AbstractMojo {
         }
 
         return "unknown";
+    }
+
+    /**
+     * Identity of the generator BUILD, not just its version.
+     *
+     * <p>The version alone cannot see a same-version rebuild, and that is the normal case while a
+     * release is still unreleased: reinstalling {@code 0.7.2} with a fixed emitter leaves the
+     * stamp identical, so consumers keep their old generated sources and measure a parser that no
+     * longer matches the library. Reported from downstream, where it cost a full measurement
+     * cycle before a {@code touch} on the grammar revealed the difference.
+     *
+     * <p>Digests the artifact the emitters actually live in. Content, not mtime — mtime has
+     * already been insufficient once here, and a digest costs a few milliseconds once per JVM.
+     * Falls back to a marker when the code source is a directory (running from an IDE or the
+     * reactor's {@code target/classes}), where there is no single file to digest and a stale
+     * skip is not the failure mode anyway.
+     */
+    private static String generatorBuildId() {
+        try {
+            var source = LexerGenerator.class.getProtectionDomain().getCodeSource();
+
+            if (source == null) {
+                return "(build:unknown)";
+            }
+
+            var path = Path.of(source.getLocation().toURI());
+
+            if (!Files.isRegularFile(path)) {
+                return "(build:exploded)";
+            }
+
+            var digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path));
+            var hex = new StringBuilder("(build:");
+
+            for (int i = 0; i < 6; i++) {
+                hex.append(String.format("%02x", digest[i]));
+            }
+
+            return hex.append(')')
+                      .toString();
+        } catch (Exception __) {
+            // A stamp that cannot be computed must not fail the build; regenerating is the safe
+            // outcome, and an unknown marker differs from every real one.
+            return "(build:unknown)";
+        }
     }
 
     /** First line of {@code target} when it carries a stamp, else empty. */

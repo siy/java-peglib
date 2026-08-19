@@ -316,6 +316,15 @@ class MojoIntegrationTest {
 
         assertThat(Files.readString(lexer)).as("a stamp mismatch must force regeneration")
                                            .doesNotContain("0.0.1-old");
+        // The version alone cannot distinguish two builds of the SAME version, which is the
+        // normal case while a release is unreleased: reinstalling with a fixed emitter leaves the
+        // stamp identical, consumers skip regeneration, and they measure a parser that no longer
+        // matches the library. The stamp therefore carries a build identity as well.
+        assertThat(Files.readString(lexer)
+                        .lines()
+                        .findFirst()
+                        .orElse("")).as("the stamp must identify the BUILD, not only the version")
+                                    .containsPattern("// peglib-generator: \\S+ \\(build:[0-9a-z]+\\)");
     }
 
     @Test

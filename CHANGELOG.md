@@ -53,6 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
   the same footgun class as the `%memo` no-ops flagged in 0.7.1.
 
+### Fixed — the generator stamp identifies the build, not just the version
+
+- **A same-version rebuild was invisible to consumers.** The staleness key was
+  `// peglib-generator: <version>`, so reinstalling an unreleased `0.7.2` with a fixed emitter
+  left the stamp identical: the grammar had not changed either, the mojo skipped regeneration, and
+  the consumer measured a parser that no longer matched the library. Reported from downstream,
+  where it cost a full measurement cycle before a `touch` on the grammar revealed the difference.
+
+  The stamp now carries a build identity — `// peglib-generator: 0.7.2 (build:a1b2c3d4e5f6)` — a
+  digest of the artifact the emitters live in. Content rather than mtime, since mtime has already
+  proven insufficient here once; an exploded code source (IDE, reactor `target/classes`) reports a
+  marker instead, where a stale skip is not the failure mode.
+
+  This is the same class as the mtime problem 0.7.2 already fixed, one level up: that one could
+  not see a generator upgrade, this one could not see a generator rebuild.
+
 ### Fixed — a rule named from `%whitespace` is trivia
 
 - **A `%whitespace` alternative that NAMES a rule was silently dropped**, leaving the standalone
