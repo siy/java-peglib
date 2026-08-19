@@ -14,6 +14,7 @@ repeated here.
 3. [Grammar-level directives](#grammar-level-directives)
    - [`%suggest RuleName`](#suggest)
    - [`%memo RuleName`](#memo)
+   - [`%parser RuleName`](#parser)
    - [`%word` (inert)](#word--accepted-but-inert)
    - [`%import Grammar.Rule`](#grammar-composition)
 4. [Directive interaction matrix](#directive-interaction-matrix)
@@ -268,6 +269,45 @@ Unknown rule names are accepted without error, matching `%checkpoint`. All
 three silent cases are reported by the analyzer — see
 `grammar.memo-unknown-rule` and `grammar.memo-non-parser-rule` below.
 
+<a id="parser"></a>
+### `%parser`
+
+`%parser RuleName` *(0.7.2)*
+
+Pins a rule to PARSER classification, overriding inference.
+
+Classification is inferred from body shape, and the inference cannot distinguish a
+rule that **is** a token from one that merely **names** tokens. A body of nothing but
+references, spanning a single token, reads as lexical — correct for an alias, wrong
+for a rule whose purpose is to choose between token kinds at parse time:
+
+```peg
+ColLabel <- ColId / ReservedKeyword
+%parser ColLabel
+```
+
+Without the pin, `ColLabel` is classified LEXER, competes with `ColId` for the same
+input, and the grammar is rejected outright with `SkippedRuleReferenced`.
+
+The pin is applied immediately after initial labelling and survives every later phase
+that could move a rule: fixed-point demotion only travels toward PARSER, skip-prefix
+detection skips pinned rules rather than force-promoting them back to LEXER, and the
+MIXED promotion in warning collection leaves them alone.
+
+Unknown rule names are accepted without error, matching `%memo` and `%checkpoint`.
+Pins compose across `%import`.
+
+**When you need it.** Reach for `%parser` when a rule names only other rules, spans
+one token, and exists to *select* between them. If instead you are composing one
+token out of finer lexical rules, you want the opposite — a token boundary, which
+declares the rule to be a single token:
+
+```peg
+Identifier <- < IdStart IdCont* >     # one token, built from character rules
+ColLabel   <- ColId / ReservedKeyword # a choice between token kinds
+%parser ColLabel
+```
+
 ### `%word` — accepted but inert
 
 `%word <- Expression`
@@ -297,10 +337,13 @@ Declaring `%word` changes nothing. The analyzer reports it as
 | `%suggest` | grammar | yes | no — adds a note to diagnostics | failure-only Levenshtein scan |
 | `%checkpoint` | grammar | yes | no | incremental reparse only |
 | `%memo` | grammar | yes | no — output is identical either way | yes — success path, by design |
+| `%parser` | grammar | yes | yes — changes which rules the lexer produces | no |
 
 Only `%memo` deliberately changes success-path *cost*, and it does not change
-success-path *output*. Everything else is either failure-path or structural. A
-grammar using none of them parses exactly as it would without directives.
+success-path *output*. `%parser` is the one directive that changes *structure* — it
+moves a rule across the lexer/parser boundary, so the token stream itself differs.
+Everything else is failure-path only. A grammar using none of them parses exactly as
+it would without directives.
 
 ## Analyzer
 
