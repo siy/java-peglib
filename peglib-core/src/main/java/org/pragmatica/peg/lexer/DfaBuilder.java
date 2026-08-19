@@ -557,7 +557,31 @@ public final class DfaBuilder {
                                                     int[] nextKindRef,
                                                     List<InlineLiteral> aliasLiteralsOut) {
         var aliases = new LinkedHashMap<String, int[]>();
+        // Adoption runs to completion BEFORE any alias array is built. Interleaving them makes the
+        // result depend on declaration order: a multi-literal rule declared earlier captures the
+        // synthetic kind, a single-literal rule declared later redirects the literal to its own,
+        // and the earlier rule is left holding a kind the lexer no longer emits — silently
+        // unmatchable. PostgreSQL declares ReservedKeyword before CaseKW and CreateKW after it,
+        // so one worked and the other did not.
         var adoptedLiteralKinds = new HashMap<String, Integer>();
+
+        for (var rule : aliasableRules(grammar, classification)) {
+            var literals = aliasLiteralsOf(rule, grammar, classification);
+
+            if (literals.size() != 1) {
+                continue;
+            }
+
+            adoptRuleKindForLiteral(rule.name(),
+                                    literals.getFirst(),
+                                    classification,
+                                    adoptedLiteralKinds,
+                                    inlineLiteralToKind,
+                                    kindNames,
+                                    usedNames,
+                                    nextKindRef,
+                                    aliasLiteralsOut);
+        }
 
         for (var rule : grammar.rules()) {
             var kind = classification.kinds().get(rule.name());
@@ -595,22 +619,15 @@ public final class DfaBuilder {
             int i = 0;
 
             for (var lit : literals) {
-                kinds[i++] = literals.size() == 1
-                             ? adoptRuleKindForLiteral(rule.name(),
-                                                       lit,
-                                                       classification,
-                                                       adoptedLiteralKinds,
-                                                       inlineLiteralToKind,
-                                                       kindNames,
-                                                       usedNames,
-                                                       nextKindRef,
-                                                       aliasLiteralsOut)
-                             : ensureInlineKind(lit,
-                                                inlineLiteralToKind,
-                                                kindNames,
-                                                usedNames,
-                                                nextKindRef,
-                                                aliasLiteralsOut);
+                // Adoption already happened, so this resolves to the adopted kind where a rule
+                // claimed the literal and allocates a synthetic one otherwise. Both paths agree
+                // with what the lexer emits.
+                kinds[i++] = ensureInlineKind(lit,
+                                              inlineLiteralToKind,
+                                              kindNames,
+                                              usedNames,
+                                              nextKindRef,
+                                              aliasLiteralsOut);
             }
             // De-duplicate alias kinds (different aliases of the same text from
             // multiple alternatives would otherwise show up as duplicates) and
@@ -840,6 +857,34 @@ public final class DfaBuilder {
      * (existing or newly allocated). Side-effects {@code inlineLiteralToKind},
      * {@code kindNames}, {@code usedNames}, and {@code nextKindRef}.
      */
+    /** Rules eligible for aliasing: lexical, and not on the skip-prefix path. */
+    private static List<Rule> aliasableRules(Grammar grammar, RuleClassifier.Classification classification) {
+        var out = new ArrayList<Rule>();
+
+        for (var rule : grammar.rules()) {
+            var kind = classification.kinds().get(rule.name());
+
+            if ((kind == RuleKind.LEXER || kind == RuleKind.MIXED) && !classification.keywordSkip()
+                                                                                     .containsKey(rule.name())) {
+                out.add(rule);
+            }
+        }
+
+        return out;
+    }
+
+    /** The literals a rule aliases to, after looking through references. Empty when it aliases none. */
+    private static List<Expression.Literal> aliasLiteralsOf(Rule rule,
+                                                            Grammar grammar,
+                                                            RuleClassifier.Classification classification) {
+        var body = RuleClassifier.inlineLexerReferences(rule.expression(),
+                                                        grammar.ruleMap(),
+                                                        classification.kinds())
+                                 .or(rule.expression());
+
+        return collectAliasLiterals(body).or(List.of());
+    }
+
     /**
      * Give a lexeme ONE kind, named after the rule that names it.
      *

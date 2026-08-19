@@ -73,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly one kind with one meaning. A rule spelling SEVERAL literals keeps synthetic kinds, having
   no single lexeme for its name to describe.
 
+  Adoption completes BEFORE any alias array is built. Interleaving them made the result depend on
+  declaration order: a multi-literal rule declared earlier captured the synthetic kind, a
+  single-literal rule declared later redirected the literal to its own, and the earlier rule was
+  left holding a kind the lexer no longer emits — silently unmatchable. PostgreSQL declares
+  `ReservedKeyword` before `CaseKW` and after `CreateKW`, so `CREATE` worked and `CASE` did not,
+  which is what made the asymmetry hard to read.
+
   Measured neutral for `java25.peg`: 23 of its rules are affected and the full suite, gates and
   corpus fixtures included, is unchanged.
 
