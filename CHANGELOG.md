@@ -53,6 +53,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
   the same footgun class as the `%memo` no-ops flagged in 0.7.1.
 
+### Added — `%parser` classification override
+
+- **`%parser RuleName` pins a rule to PARSER**, overriding classification inference.
+
+  Classification is inferred from body shape, and the inference cannot distinguish a rule that IS
+  a token from one that merely names tokens. A reference-only body spanning a single token reads
+  as lexical — correct for an alias, wrong for a rule whose purpose is to choose between token
+  kinds at parse time. `ColLabel <- ColId / ReservedKeyword` is the canonical case: inferred
+  LEXER, it competes with `ColId` for the same input and the grammar is rejected outright.
+
+  ```peg
+  ColLabel <- ColId / ReservedKeyword
+  %parser ColLabel
+  ```
+
+  The pin is applied after initial labelling and holds through every later phase: fixed-point
+  demotion only moves rules toward PARSER, skip-prefix detection skips pinned rules rather than
+  force-promoting them back to LEXER, and the MIXED promotion in warning collection leaves them
+  alone. A pin naming a rule the grammar does not declare is inert rather than fatal, matching how
+  `%memo` treats unknown names. Pins compose across `%import`.
+
+  This retires a class of contortion that had no other workaround. Verified against two
+  independent cases: PostgreSQL's `ColLabel`, and the shape `java25.peg` avoids by spelling its
+  `value` lookahead inline at four use sites — `DeclModifier <- Modifier / ValueMod` with
+  `ValueMod <- ValueKW &(Modifier* ClassKW)` now compiles and parses once both are pinned.
+  `java25.peg` itself is unchanged; switching it over needs a corpus re-run, not a cleanup.
+
 ### Added — lookahead in lexer rules
 
 - **A lexer rule may end in a lookahead over a character class.** `X ![c]` / `X &[c]` is compiled

@@ -129,6 +129,7 @@ e{n,m}      # Bounded repetition
 %recover <CharSet> Rule       # per-rule sync set (implemented per-rule since 0.6.1)
 %checkpoint Rule              # incremental-reparse boundary
 %memo Rule                    # position memo for a rule re-parsed by overlapping alternatives (0.7.1)
+%parser Rule                  # pin a rule to PARSER, overriding classification inference (0.7.2)
 ```
 
 ## Rule classification (LEXER vs PARSER)
@@ -153,6 +154,21 @@ IfNotExists <- IfKW NotKW ExistsKW    # three tokens — a parser rule
 The `< >` is an explicit override and is trusted: `< IfKW NotKW ExistsKW >` will fuse, because you
 asked for it. Nothing else in the grammar distinguishes these two shapes, which is why the
 boundary decides.
+
+**`%parser Rule` pins a rule to PARSER.** The inference above cannot tell a rule that IS a token
+from one that merely names tokens: a reference-only body spanning a single token reads as lexical,
+which is right for an alias and wrong for a rule whose purpose is to choose between token kinds at
+parse time. `ColLabel <- ColId / ReservedKeyword` is the canonical case — inferred LEXER it
+collides with `ColId` for the same input and is rejected outright. The pin also survives
+skip-prefix detection, which otherwise force-promotes a guarded rule back to LEXER:
+
+```peg
+ColLabel <- ColId / ReservedKeyword
+%parser ColLabel
+```
+
+A pin naming a rule the grammar does not declare is inert, not fatal — the same treatment `%memo`
+gives unknown names.
 
 **A rule that can match only the empty string is PARSER.** `EmptyStatement <- &';' / !.` reads as
 lexical — it names no other rule — but a token has to consume something. Note the test is
@@ -277,8 +293,15 @@ Contextual keywords are matched by specific rules and **fall through to Identifi
 
 In 0.6.0's tokens-first parser, contextual keywords get **Identifier-fallback** at codegen time: where the parser references `Identifier`, it also accepts inline-literal kinds whose text is identifier-shaped and not in the hard-keyword set. See `DfaBuilder.buildIdentifierFallbacks` and `ParserGenerator.emitIdentifierFallback`.
 
-**A contextual keyword whose disambiguation needs lookahead cannot live in a named rule.** Still
-true, but **not for the reason given before 0.7.2** — a lexer rule may now reference another lexer
+**A contextual keyword whose disambiguation needs lookahead can now live in a named rule — pin it
+with `%parser`.** Verified 2026-08-19: `DeclModifier <- Modifier / ValueMod` plus
+`ValueMod <- ValueKW &(Modifier* ClassKW)`, with both pinned, compiles and parses `value class
+Foo;`, `public class Foo;` and `class value;`. `java25.peg` still spells the lookahead inline at
+its four use sites because that is what shipped and is corpus-validated at 99.45%; switching it
+over is a deliberate change that needs a corpus re-run, not a cleanup.
+
+The paragraph below records why the inline spelling was originally forced. It was **not for the
+reason given before 0.7.2** — a lexer rule may now reference another lexer
 rule. What blocks it is the lookahead itself: `RuleClassifier` types a reference-only rule spanning
 one token as LEXER, and the DFA cannot compile `&` / `!`, so `fromGrammar` rejects it with
 `SkippedRuleReferenced` naming `expressionKind=Not`. Re-verified 2026-08-18 after the lookahead work against the tidy shape
