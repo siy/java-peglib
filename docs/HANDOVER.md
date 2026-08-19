@@ -85,12 +85,23 @@ Everything was driven by `aether/pg-tools`' 753-line `postgres.peg`. None of it 
 4. **Lookahead still unsupported** over anything but a character class (`&(Modifier* ClassKW)`),
    and nested inside a Choice alternative rather than trailing the whole body.
 
-### Downstream migration — pg-parser GREEN as of 2026-08-19
+### Downstream migration — COMPLETE as of 2026-08-19, release gate MET
 
-`aether/pg-tools` pg-parser reached **309 tests, 0 failures, 0 errors**, and its CST differential
-against the 0.6.0 baseline shows 34/34 real files parsing with 148 statements against 150
-semicolons of ground truth. pg-schema (112 tests) is still being adapted on the consumer side and
-needs nothing from peglib.
+`aether/pg-tools` is green on 0.7.2:
+
+| Module | Tests | Result |
+|---|---|---|
+| PG Parser | 309 | 0 failures |
+| PG Schema | 112 | 0 failures |
+| PG Codegen | 218 | 0 failures |
+| SQL Splitter | 172 | 2 environmental (Testcontainers, no Docker) |
+| **Total** | **811** | **0 failures** |
+
+Against a 0.6.0 baseline of 807 with the same two exclusions. CST differential: 34/34 real files
+parse, 0 failures, 148 statements against 150 semicolons of ground truth — 0.6.0 reported a
+constant 2 per file (68 total), so that figure was never trustworthy; the `_ROOT` unwrap fixed it.
+
+**This satisfies the release condition.** 0.7.2 may ship.
 
 Eleven defects were found and fixed against that one grammar, none of them reachable from
 `java25.peg`. The final one needed no library change at all: `postgres.peg` had `$` in its
@@ -137,6 +148,18 @@ a corpus re-run.
   statement still failed to parse. Gate on CST node counts, not on the grammar building.
 - **An always-empty alternative at the end of a choice hides every failure.** `postgres.peg`'s
   `EmptyStatement` turned every parse error into a silent zero-token match reported at offset 0.
+- **Making a parser stricter surfaces latent bugs in consumer grammars — budget for it.** Three of
+  the migration's failures were pre-existing grammar bugs that only became observable once peglib
+  stopped being wrong: `!ReservedKeyword` had never fired at 0.6.0, so reserved words silently
+  passed as identifiers and no production accepted `CURRENT_TIMESTAMP`; `IsClause` had a bare
+  `NotKW NullKW` alternative, so `DEFAULT true NOT NULL` parsed as `DEFAULT (true NOT NULL)` and
+  the column stayed nullable; and `$` in the identifier class swallowed dollar-quote delimiters.
+  None were peglib defects. Expect a correctness fix to look like a regression to the consumer
+  until the latent bug it exposed is fixed.
+- **A CST differential is only as good as the corpus behind it.** The pg-tools differential caught
+  the `--` trivia bug immediately (18/34 files) and was silent on dollar quoting, because no repo
+  `.sql` uses it. Same shape as `java25.peg` being unable to reach any of the eleven defects fixed
+  this session: a gate tells you about what it exercises and nothing about what it does not.
 
 ### Verification recipes
 
