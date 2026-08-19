@@ -31,8 +31,11 @@ dollar-quoting item below.
 artifacts immutable, a mistake ships 0.7.3.** Do not deploy without an explicit decision.
 
 Note on the pin: `aether/pg-tools` pins `0.6.0` on `release-1.0.0-rc3`, but the migration branch
-`feat/pg-tools-peglib-0.7.2` already pins `0.7.2` and resolves it from the local install. The
-0.6.0 pin is not a blocker; it is simply the wrong branch to look at.
+`feat/pg-tools-peglib-0.7.2` already pins `0.7.2`. **Publishing changes nothing about the version
+string** — it changes whether that coordinate resolves anywhere other than this machine. Today it
+comes from a local `mvn install` with no `.asc`; after the tag it resolves from Central. So no
+consumer re-pin is needed on either side; what is gated is mergeability, since a reviewer or CI
+cannot resolve 0.7.2 today. pragmatica PR #600 is gated the same way.
 
 ### What landed this session
 
@@ -155,11 +158,18 @@ a corpus re-run.
   `NotKW NullKW` alternative, so `DEFAULT true NOT NULL` parsed as `DEFAULT (true NOT NULL)` and
   the column stayed nullable; and `$` in the identifier class swallowed dollar-quote delimiters.
   None were peglib defects. Expect a correctness fix to look like a regression to the consumer
-  until the latent bug it exposed is fixed.
-- **A CST differential is only as good as the corpus behind it.** The pg-tools differential caught
-  the `--` trivia bug immediately (18/34 files) and was silent on dollar quoting, because no repo
-  `.sql` uses it. Same shape as `java25.peg` being unable to reach any of the eleven defects fixed
-  this session: a gate tells you about what it exercises and nothing about what it does not.
+  until the latent bug it exposed is fixed. Sharper still: these bugs were not merely invisible,
+  they were **inverted** — the guard that never fired made the grammar look permissive when it was
+  broken, and `DEFAULT true NOT NULL` looked like a working schema tool right up to the point it
+  emitted a nullable column into generated code. A consumer's tests can be green because the bug
+  and the test agree with each other.
+- **A CST differential is only as good as the corpus behind it.** The pg-tools corpus is **100%
+  DDL — zero SELECT, zero TargetElem, zero WindowSpec.** So the differential that caught the `--`
+  trivia bug in a single run (18 of 34 files) was structurally incapable of seeing anything done to
+  SELECT, aliases, window functions or dollar quoting; the unit tests covered exactly the inverse.
+  Neither instrument alone was sufficient and both were needed repeatedly. Same shape as
+  `java25.peg` being unable to reach any of the eleven defects fixed this session: a gate reports
+  on what it exercises and is silent on everything else, so green is not coverage.
 
 ### Verification recipes
 
