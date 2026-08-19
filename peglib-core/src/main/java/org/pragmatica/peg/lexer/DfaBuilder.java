@@ -557,6 +557,7 @@ public final class DfaBuilder {
                                                     int[] nextKindRef,
                                                     List<InlineLiteral> aliasLiteralsOut) {
         var aliases = new LinkedHashMap<String, int[]>();
+        var adoptedLiteralKinds = new HashMap<String, Integer>();
 
         for (var rule : grammar.rules()) {
             var kind = classification.kinds().get(rule.name());
@@ -594,12 +595,22 @@ public final class DfaBuilder {
             int i = 0;
 
             for (var lit : literals) {
-                kinds[i++] = ensureInlineKind(lit,
-                                              inlineLiteralToKind,
-                                              kindNames,
-                                              usedNames,
-                                              nextKindRef,
-                                              aliasLiteralsOut);
+                kinds[i++] = literals.size() == 1
+                             ? adoptRuleKindForLiteral(rule.name(),
+                                                       lit,
+                                                       classification,
+                                                       adoptedLiteralKinds,
+                                                       inlineLiteralToKind,
+                                                       kindNames,
+                                                       usedNames,
+                                                       nextKindRef,
+                                                       aliasLiteralsOut)
+                             : ensureInlineKind(lit,
+                                                inlineLiteralToKind,
+                                                kindNames,
+                                                usedNames,
+                                                nextKindRef,
+                                                aliasLiteralsOut);
             }
             // De-duplicate alias kinds (different aliases of the same text from
             // multiple alternatives would otherwise show up as duplicates) and
@@ -829,6 +840,69 @@ public final class DfaBuilder {
      * (existing or newly allocated). Side-effects {@code inlineLiteralToKind},
      * {@code kindNames}, {@code usedNames}, and {@code nextKindRef}.
      */
+    /**
+     * Give a lexeme ONE kind, named after the rule that names it.
+     *
+     * <p>A rule whose body is a single literal ({@code CreateKW <- < 'CREATE'i ![a-zA-Z0-9_$] >})
+     * already owns a kind. Allocating a second, synthetic {@code INLINE_CREATE_CI} kind for the
+     * same text left the rule's kind unreachable and the token anonymous: the CST reported a bare
+     * literal where the grammar had named a rule, and every consumer keying on the rule name saw
+     * nothing. Reusing the rule's kind for the literal makes the one lexeme carry the one name the
+     * author chose.
+     *
+     * <p>Only the kind NUMBER changes. Priority, the guard, DFA absorption and the alias-match
+     * path are all untouched — the literal's own NFA fragment still provides the accept, now
+     * tagged with the rule's kind. A rule spelling several literals keeps synthetic kinds, since
+     * there is no single lexeme for its name to describe.
+     */
+    private static int adoptRuleKindForLiteral(String ruleName,
+                                               Expression.Literal lit,
+                                               RuleClassifier.Classification classification,
+                                               Map<String, Integer> adopted,
+                                               Map<String, Integer> inlineLiteralToKind,
+                                               List<String> kindNames,
+                                               Set<String> usedNames,
+                                               int[] nextKindRef,
+                                               List<InlineLiteral> aliasLiteralsOut) {
+        var inlineLit = new InlineLiteral(lit.text(), lit.caseInsensitive(), inlineLiteralToKind.size());
+        var key = literalKey(inlineLit);
+        var ruleKind = classification.kinds().get(ruleName) == RuleKind.LEXER
+                       ? ruleKindOf(ruleName, kindNames)
+                       : null;
+
+        if (ruleKind == null) {
+            return ensureInlineKind(lit, inlineLiteralToKind, kindNames, usedNames, nextKindRef, aliasLiteralsOut);
+        }
+        // Two rules spelling the same literal: the first to claim it keeps the name, so the lexeme
+        // still has exactly one kind and that kind still has one meaning.
+        var claimed = adopted.get(key);
+
+        if (claimed != null) {
+            return claimed;
+        }
+
+        var existing = inlineLiteralToKind.get(key);
+
+        inlineLiteralToKind.put(key, ruleKind);
+        adopted.put(key, ruleKind);
+        // A literal already collected from a parser body is absorbed from that list and now
+        // carries the rule's kind; one seen only here still needs its own accept fragment.
+        if (existing == null) {
+            aliasLiteralsOut.add(inlineLit);
+        }
+
+        return ruleKind;
+    }
+
+    /** The kind already allocated to {@code ruleName} in the first pass, or null. */
+    private static Integer ruleKindOf(String ruleName, List<String> kindNames) {
+        int index = kindNames.indexOf(ruleName);
+
+        return index < 0
+               ? null
+               : index;
+    }
+
     private static int ensureInlineKind(Expression.Literal lit,
                                         Map<String, Integer> inlineLiteralToKind,
                                         List<String> kindNames,

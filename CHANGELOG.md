@@ -53,6 +53,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
   the same footgun class as the `%memo` no-ops flagged in 0.7.1.
 
+### Fixed — a lexeme gets one kind, named after the rule that names it
+
+- **A keyword rule lost its identity in the CST when the same literal also appeared inline.** A
+  rule whose body is a single literal (`CreateKW <- < 'CREATE'i ![a-zA-Z0-9_$] >`) already owns a
+  kind; when that text also appeared inline in a parser rule, a second synthetic `INLINE_CREATE_CI`
+  kind was allocated for it. Inline literals outrank user rules, so the synthetic kind won and the
+  rule's kind was left unreachable.
+
+  Parsing was unaffected — the generator matches the alias — but the token was anonymous. The CST
+  reported a bare literal where the grammar had named a rule, so consumers keying on rule names saw
+  nothing. Reported downstream as 66 colliding keyword rules across 72 consumer call sites, and the
+  cause of 20 extractor failures.
+
+  The literal now adopts the rule's existing kind instead of allocating a second one. Only the kind
+  NUMBER changes: priority, the trailing guard, DFA absorption and the alias-match path are all
+  untouched, and the literal's own accept fragment still provides the match — now tagged with the
+  rule's kind. Where two rules spell the same literal the first claims it, so a lexeme still has
+  exactly one kind with one meaning. A rule spelling SEVERAL literals keeps synthetic kinds, having
+  no single lexeme for its name to describe.
+
+  Measured neutral for `java25.peg`: 23 of its rules are affected and the full suite, gates and
+  corpus fixtures included, is unchanged.
+
 ### Fixed — the generator stamp identifies the build, not just the version
 
 - **A same-version rebuild was invisible to consumers.** The staleness key was
