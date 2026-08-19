@@ -88,6 +88,11 @@ void walk(CstArray cst, int idx) {
 walk(cst, cst.rootIndex());
 ```
 
+`rootIndex()` is a synthetic `_ROOT` node wrapping your start rule, not the start rule itself —
+it exists so the parser can check full consumption and retry recovery. Code that takes the root's
+children gets one child (your start rule), not your top-level items; unwrap `_ROOT` first. This
+bites when porting a 0.5.x/0.6.x facade, where the start rule was handed back directly.
+
 For the hot path, the direct array API skips view allocation:
 
 ```java
