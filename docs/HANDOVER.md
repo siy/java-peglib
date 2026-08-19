@@ -85,6 +85,20 @@ Everything was driven by `aether/pg-tools`' 753-line `postgres.peg`. None of it 
 4. **Lookahead still unsupported** over anything but a character class (`&(Modifier* ClassKW)`),
    and nested inside a Choice alternative rather than trailing the whole body.
 
+### Downstream migration — pg-parser GREEN as of 2026-08-19
+
+`aether/pg-tools` pg-parser reached **309 tests, 0 failures, 0 errors**, and its CST differential
+against the 0.6.0 baseline shows 34/34 real files parsing with 148 statements against 150
+semicolons of ground truth. pg-schema (112 tests) is still being adapted on the consumer side and
+needs nothing from peglib.
+
+Eleven defects were found and fixed against that one grammar, none of them reachable from
+`java25.peg`. The final one needed no library change at all: `postgres.peg` had `$` in its
+identifier continuation class, so `world$$` lexed as a single 7-char identifier and swallowed the
+closing dollar-quote delimiter. Two grammar lines fixed it — drop `$` from the class, and capture
+the dollar-quote tag as a token (`$tag<ColId>`) rather than as characters, since a
+character-class capture inside a PARSER rule can never match.
+
 ### Downstream: postgres.peg
 
 Four grammar changes take it from "does not compile" to **25/25 statements parsing**, verified
