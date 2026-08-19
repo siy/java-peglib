@@ -10,6 +10,7 @@ import org.pragmatica.lang.Unit;
 import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.peg.Parser;
 import org.pragmatica.peg.PegParser;
+import org.pragmatica.peg.grammar.GrammarSource;
 import org.pragmatica.peg.cst.ParseResult;
 import org.pragmatica.peg.diagnostic.Diagnostic;
 
@@ -41,6 +42,15 @@ public class CheckMojo extends AbstractMojo {
     @Parameter(property = "peglib.failOnWarning", defaultValue = "false")
     private boolean failOnWarning;
 
+    /**
+     * Directory searched for grammars named by {@code %import}. Defaults to the
+     * directory holding {@code grammarFile}.
+     *
+     * @since 0.7.2
+     */
+    @Parameter(property = "peglib.importDirectory")
+    private File importDirectory;
+
     @Parameter(property = "peglib.smokeInput")
     private String smokeInput;
 
@@ -57,6 +67,10 @@ public class CheckMojo extends AbstractMojo {
         var lint = new LintMojo();
 
         lint.setGrammarFile(grammarFile);
+        // Must be propagated: Plexus injects @Parameter fields only into container-managed
+        // instances, so this hand-built LintMojo would otherwise resolve %import against the
+        // grammar's own directory while step 2 below uses the configured one.
+        lint.setImportDirectory(importDirectory);
         lint.setFailOnWarning(failOnWarning);
         var outcome = lint.runAnalyzer();
 
@@ -75,7 +89,7 @@ public class CheckMojo extends AbstractMojo {
             throw new MojoFailureException("peglib:check failed — warnings present (failOnWarning=true)");
         }
         // Step 2: build runtime parser and run smoke input (if configured) as a Result pipeline.
-        var pipeline = readGrammar(grammarFile.toPath()).flatMap(CheckMojo::buildParser).flatMap(this::runSmoke);
+        var pipeline = readGrammar(grammarFile.toPath()).flatMap(this::buildParser).flatMap(this::runSmoke);
 
         if (pipeline instanceof Result.Failure<?> failure) {
             throw new MojoFailureException(failure.cause().message());
@@ -84,8 +98,12 @@ public class CheckMojo extends AbstractMojo {
         getLog().info("peglib:check OK for " + grammarFile);
     }
 
-    private static Result<Parser> buildParser(String grammarText) {
-        return PegParser.fromGrammar(grammarText).mapError(c -> Causes.cause("peglib:check failed — parser build failed: " + c.message()));
+    private Result<Parser> buildParser(String grammarText) {
+        return PegParser.fromGrammar(grammarText, importSource()).mapError(c -> Causes.cause("peglib:check failed — parser build failed: " + c.message()));
+    }
+
+    private GrammarSource importSource() {
+        return ImportSources.forGrammar(grammarFile, importDirectory);
     }
 
     private Result<Unit> runSmoke(Parser parser) {
@@ -139,5 +157,11 @@ public class CheckMojo extends AbstractMojo {
     @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
     public void setSmokeInput(String smokeInput) {
         this.smokeInput = smokeInput;
+    }
+
+    /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setImportDirectory(File importDirectory) {
+        this.importDirectory = importDirectory;
     }
 }

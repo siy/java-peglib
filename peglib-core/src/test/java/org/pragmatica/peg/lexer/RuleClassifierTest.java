@@ -49,6 +49,10 @@ class RuleClassifierTest {
         return new Expression.ZeroOrMore(SPAN, e);
     }
 
+    private static Expression.TokenBoundary tok(Expression e) {
+        return new Expression.TokenBoundary(SPAN, e);
+    }
+
     private static Expression.Any any() {
         return new Expression.Any(SPAN);
     }
@@ -116,24 +120,96 @@ class RuleClassifierTest {
         .containsEntry("Pair", RuleKind.PARSER);
     }
 
+    /**
+     * A rule built only from lookaheads asserts a position; it never consumes, so it cannot be a
+     * token. {@code EmptyStatement <- &';' / !.} reads as lexical — it names no other rule — but
+     * compiling it would give the DFA an accept state reached without advancing.
+     */
     @Test
-    void classify_lexerRuleReferencingLexerRule_allLexer() {
+    void classify_lookaheadOnlyRule_isParser() {
+        var semi = rule("Semi", lit(";"));
+        var empty = rule("Empty", new Expression.Choice(SPAN,
+                                                        List.of(new Expression.And(SPAN, lit(";")),
+                                                                new Expression.Not(SPAN, any()))));
+        var classification = RuleClassifier.classify(grammar(semi, empty))
+                                           .unwrap();
+
+        assertThat(classification.kinds())
+        .containsEntry("Empty", RuleKind.PARSER);
+    }
+
+    /**
+     * The companion to the case above, and the one that makes the distinction load-bearing:
+     * {@code Word <- [a-z]*} CAN match empty but can also consume, so it stays a lexer rule. It is
+     * warned about elsewhere rather than reclassified. Classifying on nullability instead of
+     * always-empty would sweep this up with the lookahead-only case and leave grammars whose only
+     * lexer rule is a repetition with nothing to compile.
+     */
+    @Test
+    void classify_nullableButConsumingRule_staysLexer() {
+        var word = rule("Word", star(cc("a-z")));
+        var classification = RuleClassifier.classify(grammar(word))
+                                           .unwrap();
+
+        assertThat(classification.kinds())
+        .containsEntry("Word", RuleKind.LEXER);
+    }
+
+    /**
+     * Composing one token out of finer lexical rules is spelled with a token boundary.
+     *
+     * <p>The {@code < >} was not required before 0.7.2, but a rule of this shape never compiled
+     * either: {@code DfaBuilder} rejected every rule reference, so the rule was skipped and any
+     * parser reference to it failed with {@code SkippedRuleReferenced}. References are substituted
+     * now, which makes the shape genuinely usable — and makes it ambiguous with
+     * {@code IfNotExists <- IfKW NotKW ExistsKW}, a sequence of three separate tokens. Nothing
+     * else in the grammar separates the two, so the token boundary decides.
+     */
+    @Test
+    void classify_tokenBoundaryComposedOfLexerRules_isLexer() {
         var idStart = rule("IdStart", cc("a-zA-Z"));
         var idCont = rule("IdCont", cc("a-zA-Z0-9"));
-        var identifier = rule("Identifier", seq(ref("IdStart"), star(ref("IdCont"))));
-        var g = grammar(idStart, idCont, identifier);
-        var classification = RuleClassifier.classify(g)
+        var identifier = rule("Identifier", tok(seq(ref("IdStart"), star(ref("IdCont")))));
+        var classification = RuleClassifier.classify(grammar(idStart, idCont, identifier))
                                            .unwrap();
         assertThat(classification.kinds())
         .containsEntry("IdStart", RuleKind.LEXER);
         assertThat(classification.kinds())
         .containsEntry("IdCont", RuleKind.LEXER);
-        // Identifier transitively references only LEXER rules: it should remain LEXER candidate
-        // after fixed-point demotion since none of its referenced rules ever flip non-LEXER.
         assertThat(classification.kinds())
         .containsEntry("Identifier", RuleKind.LEXER);
         assertThat(classification.warnings())
         .isEmpty();
+    }
+
+    /**
+     * The same body without the token boundary is a sequence of tokens, so it belongs to the
+     * parser. Fusing it into the DFA would produce one lexeme with the trivia between the tokens
+     * removed, which no input contains — the rule would be allocated and never match.
+     */
+    @Test
+    void classify_referenceSequenceWithoutTokenBoundary_isParser() {
+        var idStart = rule("IdStart", cc("a-zA-Z"));
+        var idCont = rule("IdCont", cc("a-zA-Z0-9"));
+        var identifier = rule("Identifier", seq(ref("IdStart"), star(ref("IdCont"))));
+        var classification = RuleClassifier.classify(grammar(idStart, idCont, identifier))
+                                           .unwrap();
+
+        assertThat(classification.kinds())
+        .containsEntry("Identifier", RuleKind.PARSER);
+    }
+
+    /** A reference-only body spanning exactly one token needs no boundary: it already is one. */
+    @Test
+    void classify_choiceOfLexerRules_staysLexerWithoutTokenBoundary() {
+        var quoted = rule("Quoted", seq(lit("\""), plus(cc("a-z")), lit("\"")));
+        var plain = rule("Plain", plus(cc("a-z")));
+        var label = rule("Label", new Expression.Choice(SPAN, List.of(ref("Quoted"), ref("Plain"))));
+        var classification = RuleClassifier.classify(grammar(quoted, plain, label))
+                                           .unwrap();
+
+        assertThat(classification.kinds())
+        .containsEntry("Label", RuleKind.LEXER);
     }
 
     @Test

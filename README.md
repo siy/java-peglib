@@ -3,7 +3,7 @@
 A PEG (Parsing Expression Grammar) parser library for Java. Tokens-first lex-then-parse
 architecture, flat int[] CST, visitor pattern, true incremental reparse.
 
-Maven Central: `org.pragmatica-lite:peglib:0.7.1`
+Maven Central: `org.pragmatica-lite:peglib:0.7.2`
 
 Migrating from 0.5.x? See [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md).
 Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
@@ -29,7 +29,7 @@ Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.7.1</version>
+    <version>0.7.2</version>
 </dependency>
 ```
 
@@ -88,6 +88,29 @@ void walk(CstArray cst, int idx) {
 walk(cst, cst.rootIndex());
 ```
 
+**Do not identify a fallback identifier by its rule name.** Where a grammar uses identifier
+fallback — `ColId <- !ReservedKeyword <...>` and friends — the same identifier reaches the CST
+under three different kinds depending only on what else in the grammar spells that text:
+
+```
+CREATE TABLE users (id bigint, name text, public text)
+
+id      ->  Token ColId        the identifier rule's own kind
+public  ->  Token PublicKW     a named rule spells that literal, so it owns the kind
+name    ->  Terminal [name]    the text collides with an inline literal, so it carries that kind
+```
+
+All three are the same grammatical thing — a column name — and only the third looks unusual.
+`findAll("ColId")` silently returns two of those three columns, and a dropped column reads as
+"no column here" rather than as an error. Select by grammatical **position** instead: the first
+leaf under `ColumnDef`, the leaf children of `QualifiedName`. The kind tells you how the lexer
+resolved the text; it does not tell you what role the grammar gave it.
+
+`rootIndex()` is a synthetic `_ROOT` node wrapping your start rule, not the start rule itself —
+it exists so the parser can check full consumption and retry recovery. Code that takes the root's
+children gets one child (your start rule), not your top-level items; unwrap `_ROOT` first. This
+bites when porting a 0.5.x/0.6.x facade, where the start rule was handed back directly.
+
 For the hot path, the direct array API skips view allocation:
 
 ```java
@@ -142,7 +165,8 @@ e{3}  e{2,}  e{2,5}          # bounded repetition
 .                            # any character
 'text'i   [a-z]i             # case-insensitive
 
-< e >                        # token boundary (captures matched span)
+< e >                        # token boundary: captures the matched span, and
+                             # declares a reference-only rule to be ONE token
 ```
 
 ### Directives
@@ -153,6 +177,8 @@ e{3}  e{2,}  e{2,5}          # bounded repetition
 %checkpoint Rule             # incremental-reparse boundary
 %suggest Rule "message"      # diagnostic hint for parse failures
 %memo Rule                   # cache a rule re-parsed at the same position (0.7.1)
+%import Grammar.Rule         # compose grammars; pass a GrammarSource (0.7.2)
+%parser Rule                 # pin a rule to PARSER, overriding classification (0.7.2)
 ```
 
 See [`docs/GRAMMAR-DSL.md`](docs/GRAMMAR-DSL.md) for the full reference.
@@ -284,7 +310,7 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.7.1</version>
+    <version>0.7.2</version>
     <executions>
         <execution>
             <goals><goal>generate</goal></goals>
@@ -300,6 +326,33 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
 
 Defaults emit `GLexer.java`, `GParser.java`, `GVisitor.java` under the configured
 package. Generated sources depend ONLY on `peglib-runtime` + `pragmatica-lite:core`.
+
+### Goals
+
+| Goal | Phase | Does |
+|---|---|---|
+| `generate` | `generate-sources` | Emits lexer, parser and visitor sources |
+| `lint` | `validate` | Runs the grammar analyzer; reports findings |
+| `check` | `verify` | Builds the parser and optionally parses a smoke input |
+
+### Parameters
+
+All are settable as properties (`-Dpeglib.<name>=…`).
+
+| Parameter | Goals | Default | Purpose |
+|---|---|---|---|
+| `grammarFile` | all | *(required)* | The `.peg` file |
+| `outputDirectory` | `generate` | *(required)* | Where sources are written |
+| `packageName` | `generate` | *(required)* | Package for the emitted classes |
+| `lexerClassName` | `generate` | `GLexer` | Emitted lexer name |
+| `parserClassName` | `generate` | `GParser` | Emitted parser name |
+| `visitorClassName` | `generate` | `GVisitor` | Emitted visitor name |
+| `importDirectory` | all | grammar file's own directory | Where `%import` looks for `<Name>.peg` |
+| `failOnWarning` | `lint`, `check` | `false` | Treat analyzer warnings as build failures |
+| `smokeInput` | `check` | *(none)* | Input parsed to prove the grammar works end to end |
+
+`%import` resolves against `importDirectory`, so a grammar importing `Shared.Rule`
+finds `Shared.peg` beside it with no configuration.
 
 ---
 
@@ -343,6 +396,7 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 | Version | Date | What |
 |---|---|---|
+| **0.7.2** | 2026-08-19 | Grammars that are not Java-shaped. Identifier fallback works for case-insensitive keywords; a lexer rule may reference another lexer rule, end in a character-class lookahead, or carry several leading keyword guards; `%parser` pins classification the inference gets wrong; `< >` decides whether a reference-only rule is one token. Plus `%import` end to end, Base64 DFA tables (lifting a ~1100-state ceiling), case-folded literal keys, and generator-version stamping. 628 tests. |
 | **0.7.1** | 2026-08-14 | Java grammar validated against javac's own parse phase over OpenJDK's langtools suite: agreement 95.55% → **99.45%** (5,614/5,645). Engine fixes: nullable start rules, trailing-input reporting, Unicode escape translation (JLS 3.3), hex escapes in character classes. New `%memo` directive plus a first-token guard and link-on-success CST building, holding parse throughput within ~1% of 0.7.0 despite the JLS 14.8 statement-expression restriction. The `*Probe` gates now actually execute. 576 tests. |
 | **0.7.0** | 2026-08-05 | **Breaking.** 0.5.x interpreter path removed (146 files, ~38,900 lines) along with the `peglib-incremental` artifact; `org.pragmatica.peg.v6.*` collapsed to `org.pragmatica.peg.*`; maven goal `generate-v6` → `generate`; `pragmatica-lite:core` → 1.0.0-rc2. Adds JEP 401 value classes, `outer.new`, annotated type parameters, hex float literals, and a CST-shape gate. 528 tests, zero JBCT errors. |
 | **0.6.3** | 2026-06-07 | Patch release. Legacy interpreter cut-failure symmetry: `Optional`/`ZeroOrMore`/`OneOrMore`/bounded repetition now restore the pending-trivia snapshot on `CutFailure`. Test suite reaches zero skips (1424 tests). |

@@ -44,6 +44,11 @@ import org.pragmatica.peg.lexer.RuleKind;
  *       rule the grammar does not define. Severity: WARNING.</li>
  *   <li>{@code grammar.memo-non-parser-rule} — a {@code %memo} directive on a
  *       LEXER or MIXED rule. Only PARSER rules are memoised. Severity: WARNING.</li>
+ *   <li>{@code grammar.classification-failed} — rule classification failed, so kind-dependent
+ *       checks could not run. Severity: ERROR.</li>
+ *   <li>{@code grammar.inert-directive} — a directive the grammar front-end accepts
+ *       and stores but the generator never reads, so declaring it has no effect.
+ *       Severity: WARNING.</li>
  * </ol>
  */
 public final class Analyzer {
@@ -70,6 +75,7 @@ public final class Analyzer {
         findings.addAll(checkWhitespaceCycle());
         findings.addAll(checkBackReferences());
         findings.addAll(checkMemoRules());
+        findings.addAll(checkInertDirectives());
         // Stable sort: by rule name, then tag, then severity. Ensures deterministic output.
         findings.sort(Comparator.<Finding, String> comparing(Finding::ruleName)
                                 .thenComparing(Finding::tag)
@@ -558,6 +564,39 @@ public final class Analyzer {
         };
     }
 
+    // === Check 8: directives that are accepted and then ignored ===
+    //
+    // %word, and the rule-level %expected / %recover / %tag trailers, are parsed and
+    // stored on the IR but never read by ParserGenerator. Silence here means the only
+    // symptom is that the declared behaviour never materialises.
+    private List<Finding> checkInertDirectives() {
+        var findings = new ArrayList<Finding>();
+
+        grammar.word()
+               .onPresent(__ -> findings.add(Finding.warning("grammar.inert-directive",
+                                                             "",
+                                                             "'%word' is accepted but never consumed; peglib spells word boundaries "
+                                                            + "inline (e.g. \"'record' ![a-zA-Z0-9_$]\") instead")));
+        for (var rule : grammar.rules()) {
+            rule.expected().onPresent(__ -> findings.add(inertTrailerFinding(rule.name(), "%expected")));
+            rule.recover().onPresent(__ -> findings.add(inertTrailerFinding(rule.name(), "%recover")));
+            rule.tag().onPresent(__ -> findings.add(inertTrailerFinding(rule.name(), "%tag")));
+        }
+
+        return findings;
+    }
+
+    private static Finding inertTrailerFinding(String ruleName, String directive) {
+        return Finding.warning("grammar.inert-directive",
+                               ruleName,
+                               "rule-level '" + directive
+                              + "' on '" + ruleName
+                              + "' is accepted but never consumed by the generator" + ("%recover".equals(directive)
+                                                                                       ? "; use the grammar-level form '%recover [chars] " + ruleName
+                                                                                        + "'"
+                                                                                       : ""));
+    }
+
     // === Check 7: %memo directives that silently do nothing ===
     //
     // Both failure modes are accepted without complaint by the front-end (the
@@ -571,8 +610,13 @@ public final class Analyzer {
 
         var findings = new ArrayList<Finding>();
         var ruleMap = grammar.ruleMap();
-        // A grammar that fails classification has bigger problems, and the other
-        // checks report them; skip the kind-dependent finding rather than guess.
+        // Classification can fail (e.g. SkippedRuleReferenced). No other check calls
+        // RuleClassifier, so absorbing that failure silently would let peglib:lint report a
+        // clean grammar that peglib:check and peglib:generate reject moments later. Report it.
+        RuleClassifier.classify(grammar).onFailure(cause -> findings.add(Finding.error("grammar.classification-failed",
+                                                                                       "",
+                                                                                       "rule classification failed, so %memo targets could not be "
+                                                                                      + "checked: " + cause.message())));
         var kinds = RuleClassifier.classify(grammar).map(RuleClassifier.Classification::kinds).or(Map::of);
 
         for (var name : grammar.memoRules()) {

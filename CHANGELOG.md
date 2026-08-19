@@ -5,6 +5,350 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-08-19
+
+### Added
+
+- **`%import` composition works end to end.** `PegParser.fromGrammar(String, GrammarSource)`
+  resolves the transitive import closure before generating, so a grammar declaring `%import`
+  can now produce a working parser. Previously the directive parsed, the resolver existed, and
+  nothing connected them — `fromGrammar` went straight to classification and the grammar failed
+  with a misleading `references undefined rule` error.
+
+  The single-argument `fromGrammar` now fails on a grammar declaring `%import` with a message
+  naming the fix, instead of reporting a phantom undefined rule.
+
+  Naming is unchanged and worth restating, because the natural assumption is wrong: an
+  unaliased `%import G.R` binds the rule as `G_R`, not as `R`. Use `as Local` for a bare name.
+
+  **Caching:** the parser cache is keyed by grammar text, which cannot distinguish the same
+  root resolved against two different sources. Grammars declaring imports are therefore not
+  cached and recompile on every call — a deliberate trade against handing back a parser built
+  from someone else's imports.
+
+- **`%import` in the maven plugin.** `generate`, `check` and `lint` resolve imports from a
+  filesystem source rooted at the grammar file's own directory, so `%import Shared.Rule` finds
+  `Shared.peg` beside the root grammar with no configuration. Override with the new
+  `importDirectory` parameter (`peglib.importDirectory`).
+
+- **Nested `%import`.** An imported grammar may itself declare `%import`; it is now fully
+  composed before the importer takes its closure. Previously a rule pulled from such a grammar
+  could reference a name only its own imports provided, and composition failed with an
+  "undefined rule" for a reference that was resolvable one level down. Cycles through nested
+  imports are rejected with a witness rather than recursing until the stack gives out.
+
+  *Known limitation:* prefixing is path-dependent, so a diamond (two paths reaching one grammar)
+  brings the shared rule in once per path — `Left_Leaf_Atom` and `Right_Leaf_Atom`. Composition
+  succeeds, but duplicated LEXER rules collide at tokenization. Pinned by test; converging both
+  paths on one name needs the resolver to track where a rule is defined rather than how it was
+  reached.
+
+- **Single-flight parser cache.** Concurrent misses on the same grammar now serialise on the
+  build. Previously each racing thread ran the full classify → DFA → compile pipeline
+  (~100-500 ms) and every result but one was discarded. A failed build leaves no cache entry, so
+  a later call retries rather than inheriting the failure.
+
+- **Analyzer check `grammar.inert-directive`.** Flags directives the front-end accepts and
+  stores but the generator never reads: `%word`, and the rule-level `%expected` / `%recover` /
+  `%tag` trailers. Declaring any of them has no effect, and until now that failed silently —
+  the same footgun class as the `%memo` no-ops flagged in 0.7.1.
+
+### Fixed — a guard's own reserved words are no longer offered as identifier fallbacks
+
+- **The identifier-fallback set overlapped the guard set it was supposed to exclude.** Fallback
+  candidates derived from a `*KW` rule name compared the stem (`CreateKW` to `create`) against the
+  keyword set WITHOUT folding case, so a grammar spelling its reserved words uppercase
+  (`'CREATE'i`) never matched and offered them as identifiers. `ColId <- !ReservedKeyword (…)`
+  then accepted `CREATE`, `SELECT`, `FROM` and `PRIMARY` as column names, defeating its own guard.
+
+  The inline-literal half of this comparison was already folded; the rule-name half was not. It
+  stayed harmless only because those rule kinds were unreachable — the moment a lexeme adopted one
+  (see above), the leak went live. Downstream this measured as a 64-kind intersection between
+  `IDFALL_COLID` and `ALIAS_RESERVEDKEYWORD`, where it must be 0.
+
+  The failure mode is worth recording: the parse SUCCEEDS down a wrong alternative rather than
+  failing. `ALTER TABLE users ADD CONSTRAINT uq_email UNIQUE (email)` matched
+  `AddColumnAction` — a column named `CONSTRAINT` of type `uq_email` — and reported "trailing
+  input" at the paren, while the same constraint text inside `CREATE TABLE` parsed correctly
+  because nothing there offered a competing identifier-initial alternative.
+
+  Pinned by an invariant rather than a parse: a guarded rule's fallback kinds must be disjoint from
+  the kinds its guard excludes. A parse-based test passes on a small grammar while the defect is
+  fully present, because the leak only bites when another production competes for the text.
+
+### Fixed — a lexeme gets one kind, named after the rule that names it
+
+- **A keyword rule lost its identity in the CST when the same literal also appeared inline.** A
+  rule whose body is a single literal (`CreateKW <- < 'CREATE'i ![a-zA-Z0-9_$] >`) already owns a
+  kind; when that text also appeared inline in a parser rule, a second synthetic `INLINE_CREATE_CI`
+  kind was allocated for it. Inline literals outrank user rules, so the synthetic kind won and the
+  rule's kind was left unreachable.
+
+  Parsing was unaffected — the generator matches the alias — but the token was anonymous. The CST
+  reported a bare literal where the grammar had named a rule, so consumers keying on rule names saw
+  nothing. Reported downstream as 66 colliding keyword rules across 72 consumer call sites, and the
+  cause of 20 extractor failures.
+
+  The literal now adopts the rule's existing kind instead of allocating a second one. Only the kind
+  NUMBER changes: priority, the trailing guard, DFA absorption and the alias-match path are all
+  untouched, and the literal's own accept fragment still provides the match — now tagged with the
+  rule's kind. Where two rules spell the same literal the first claims it, so a lexeme still has
+  exactly one kind with one meaning. A rule spelling SEVERAL literals keeps synthetic kinds, having
+  no single lexeme for its name to describe.
+
+  Adoption completes BEFORE any alias array is built. Interleaving them made the result depend on
+  declaration order: a multi-literal rule declared earlier captured the synthetic kind, a
+  single-literal rule declared later redirected the literal to its own, and the earlier rule was
+  left holding a kind the lexer no longer emits — silently unmatchable. PostgreSQL declares
+  `ReservedKeyword` before `CaseKW` and after `CreateKW`, so `CREATE` worked and `CASE` did not,
+  which is what made the asymmetry hard to read.
+
+  Measured neutral for `java25.peg`: 23 of its rules are affected and the full suite, gates and
+  corpus fixtures included, is unchanged.
+
+### Fixed — the generator stamp identifies the build, not just the version
+
+- **A same-version rebuild was invisible to consumers.** The staleness key was
+  `// peglib-generator: <version>`, so reinstalling an unreleased `0.7.2` with a fixed emitter
+  left the stamp identical: the grammar had not changed either, the mojo skipped regeneration, and
+  the consumer measured a parser that no longer matched the library. Reported from downstream,
+  where it cost a full measurement cycle before a `touch` on the grammar revealed the difference.
+
+  The stamp now carries a build identity — `// peglib-generator: 0.7.2 (build:a1b2c3d4e5f6)` — a
+  digest of the artifact the emitters live in. Content rather than mtime, since mtime has already
+  proven insufficient here once; an exploded code source (IDE, reactor `target/classes`) reports a
+  marker instead, where a stale skip is not the failure mode.
+
+  This is the same class as the mtime problem 0.7.2 already fixed, one level up: that one could
+  not see a generator upgrade, this one could not see a generator rebuild.
+
+### Fixed — a rule named from `%whitespace` is trivia
+
+- **A `%whitespace` alternative that NAMES a rule was silently dropped**, leaving the standalone
+  rule to match the same text under its own ordinary lexer kind. The token then read as content
+  rather than trivia, the parser's trivia skip never advanced past it, and the first comment in a
+  file ended the parse with `trailing input not consumed` at 1:1.
+
+  Each alternative is compiled on its own so a mixed trivia run does not collapse into one token;
+  an alternative naming a rule could not be compiled at all, because the DFA has no call stack.
+  Those references are now substituted first, so the alternative is absorbed as trivia like any
+  other.
+
+  The C-family shapes were unaffected because `//` and `/*` are conventionally spelled as inline
+  literals — which is why `java25.peg` never saw this, and why its `%whitespace` is untouched by
+  the fix. Any grammar factoring its comment syntax into named rules did see it: SQL's and Lua's
+  `--`, shell and Python's `#`. Found by a downstream CST differential against a 0.6.0 baseline,
+  where 18 of 34 real files failed to parse and every one of them contained a `--` comment.
+
+  Not a regression from this release's own work — the behaviour is identical at the commit this
+  release branched from.
+
+### Added — `%parser` classification override
+
+- **`%parser RuleName` pins a rule to PARSER**, overriding classification inference.
+
+  Classification is inferred from body shape, and the inference cannot distinguish a rule that IS
+  a token from one that merely names tokens. A reference-only body spanning a single token reads
+  as lexical — correct for an alias, wrong for a rule whose purpose is to choose between token
+  kinds at parse time. `ColLabel <- ColId / ReservedKeyword` is the canonical case: inferred
+  LEXER, it competes with `ColId` for the same input and the grammar is rejected outright.
+
+  ```peg
+  ColLabel <- ColId / ReservedKeyword
+  %parser ColLabel
+  ```
+
+  The pin is applied after initial labelling and holds through every later phase: fixed-point
+  demotion only moves rules toward PARSER, skip-prefix detection skips pinned rules rather than
+  force-promoting them back to LEXER, and the MIXED promotion in warning collection leaves them
+  alone. A pin naming a rule the grammar does not declare is inert rather than fatal, matching how
+  `%memo` treats unknown names. Pins compose across `%import`.
+
+  This retires a class of contortion that had no other workaround. Verified against two
+  independent cases: PostgreSQL's `ColLabel`, and the shape `java25.peg` avoids by spelling its
+  `value` lookahead inline at four use sites — `DeclModifier <- Modifier / ValueMod` with
+  `ValueMod <- ValueKW &(Modifier* ClassKW)` now compiles and parses once both are pinned.
+  `java25.peg` itself is unchanged; switching it over needs a corpus re-run, not a cleanup.
+
+### Added — lookahead in lexer rules
+
+- **A lexer rule may end in a lookahead over a character class.** `X ![c]` / `X &[c]` is compiled
+  as a constraint on the accepting state rather than a transition: the driver checks the character
+  following the match before recording the accept, and a denied accept is simply not recorded, so
+  maximal munch carries on from the last one that was. End of input satisfies a negative guard and
+  fails a positive one.
+
+  This is what a multi-word lexeme needs — `< 'GROUPING'i [ \t\r\n]+ 'SETS'i ![a-zA-Z0-9_$] >` —
+  and it is the case maximal munch cannot cover on its own, because nothing else in the grammar
+  matches further than the keyword, so absent the guard the keyword wins even when an identifier
+  character follows.
+
+  Both lexer paths honour it: the interpreted `LexerEngine` and the generated lexer, which emits
+  the tables and the predicate only for a grammar that has a guarded rule — so a grammar without
+  one produces the same lexer as before, with no check in its hot loop.
+
+- **A lexer rule may carry several leading keyword guards.** `WindowName <- !PartitionKW !OrderKW
+  !RowsKW ColId` excludes each of them; previously only the first guard was consumed, which left
+  the rest in the body, made it non-lexical, and dropped the rule from skip-prefix detection
+  altogether. The guard sets are unioned.
+
+- **A single-keyword rule counts as a literal set.** Guard detection required a `Choice`, so a
+  rule like `PartitionKW <- < 'PARTITION'i ![a-zA-Z0-9_$] >` was not usable as a guard at all.
+  `isLiteralSetRule` and `extractLiteralSet` now read one shared definition of "the alternatives
+  of a literal-set body" rather than carrying separate copies of the shape test.
+
+**Still unsupported:** a guarded rule whose body names another guarded rule — `WindowName` above
+resolves its guards, but inlining `ColId` drags `ColId`'s own `!ReservedKeyword` into the body,
+which the DFA cannot compile. Composing the two guard sets inside `detectSkipPrefix` was tried and
+reverted: it changed which rules register as skip-prefix, forcing java25 rules to LEXER and
+failing 35 tests. Also unsupported: lookahead over anything but a character class
+(`&(Modifier* ClassKW)`), and lookahead nested inside a Choice alternative rather than trailing
+the whole body. `postgres.peg` still does not build, now solely because of `WindowName`.
+
+### Changed — lexical rule classification
+
+- **`< >` now decides whether a reference-only rule is one token.** A rule whose body is nothing
+  but references is classified LEXER only when it spans a single token — a choice between shapes
+  (`ColLabel <- QuotedIdent / UnquotedIdent`) or an alias (`NullConstraint <- NullKW`). A
+  *sequence* spans several tokens, so it is now a parser rule: `IfNotExists <- IfKW NotKW ExistsKW`
+  is three tokens with trivia between them, and fusing it into the DFA produced a lexeme spelled
+  `IFNOTEXISTS` that no input contains — allocated, and silently never matched.
+
+  Composing **one** token out of finer rules is a different and legitimate intent, and it is now
+  spelled by wrapping the body in a token boundary: `Identifier <- < IdStart IdCont* >`. The
+  override is trusted — `< IfKW NotKW ExistsKW >` will fuse, because you asked for it.
+
+  Nothing else in the grammar separates those two shapes, which is why the boundary decides. This
+  makes `< >` load-bearing for classification where before it only captured text; it is enforcing
+  what the syntax already meant.
+
+  **Migration:** a reference-only rule spanning more than one token, written without `< >`, changes
+  from LEXER to PARSER. In practice no working grammar is affected: before this release
+  `DfaBuilder` rejected every rule reference, so such a rule was skipped and any parser reference
+  to it already failed with `SkippedRuleReferenced`. `java25.peg` has no reference-only lexer rules
+  at all and is unaffected.
+
+### Fixed — lexer rules that no grammar shape could express
+
+Surfaced by `aether/pg-tools`' 753-line `postgres.peg`; none of these are reachable from
+`java25.peg`, which is why they survived to 0.7.2.
+
+- **Identifier fallback was dead for case-insensitive grammars.** `buildIdentifierFallbacks`
+  skipped every literal whose key did not end in `/cs`, reasoning that "Java keywords are
+  case-sensitive" — a Java-specific assumption compiled into a general-purpose library. Every SQL
+  keyword is `'SELECT'i`, so the whole contextual-keyword mechanism was inert for such grammars.
+  Keyword containment now folds both sides, since `inlineLiteralKey` case-folds CI keys while
+  `extractLiteralSet` does not; without that a genuinely reserved word would be offered as an
+  identifier fallback.
+
+- **A lexer rule may now reference another lexer rule.** The DFA has no call stack, so
+  `DfaBuilder` could not compile a reference at all. That made "guard plus named alternatives"
+  inexpressible — the guard requires a named rule, and a rule naming the alternatives was
+  rejected — which is exactly what every SQL-shaped grammar needs for `ColId`:
+
+  ```peg
+  ColId <- !ReservedKeyword (QuotedIdentifier / UnicodeIdentifier / UnquotedIdentifier)
+  ```
+
+  References are now substituted before compilation. Substitution is sound because the referenced
+  rules are themselves regular; reference cycles are refused rather than expanded.
+
+- **A rule that can match only the empty string is no longer a token.** `EmptyStatement <- &';' / !.`
+  was classified LEXER because it names no other rule, but a lexeme has to consume something. The
+  test is *always-empty*, not *nullable* — `Word <- [a-z]*` can match empty yet also consume, and
+  remains a legitimate lexer rule that accepts in its start state.
+
+- **Alias detection now looks through a reference.** `NullConstraint <- NullKW` carries no literal
+  of its own, so it was never recognised as the same token under a second name.
+
+Nullability analysis moved out of `LeftRecursionDetector` into `grammar.analysis.WidthAnalysis`,
+which now holds both width properties — *can* match empty, and *can only* match empty — since
+classification and left-recursion detection need them to agree and the two are easy to conflate.
+
+**Known limitation, unchanged:** a lexer rule still cannot contain `&` / `!` lookahead. Two narrow
+shapes are special-cased (a trailing `!CharClass` after a literal, via aliasing; a single leading
+`!Rule` guard, via skip-prefix detection). A multi-word lexeme such as
+`< 'GROUPING'i [ \t\r\n]+ 'SETS'i ![a-zA-Z0-9_$] >` and more than one leading guard
+(`!AKW !BKW ColId`) remain uncompilable, and `postgres.peg` still does not build because of them.
+This is also why `java25.peg` spells its `value` lookahead inline at four use sites — the same
+root cause, previously recorded as a limitation on rule references.
+
+### Fixed
+
+Found by the pre-release review round, all in 0.7.2's own new code unless noted:
+
+- **`peglib:check` ignored `importDirectory` in half of its work.** `CheckMojo` runs an embedded
+  `LintMojo` it constructs by hand, so Plexus never injects `@Parameter` fields into it. With a
+  configured `importDirectory`, the lint stage resolved `%import` against the grammar's own
+  directory while the parser-build stage used the configured one — the two halves of a single
+  `check` disagreed, failing valid grammars.
+- **`peglib:generate` could ship stale sources.** The up-to-date check compares generated files
+  against the *root* grammar's mtime, so editing an imported grammar without touching the root
+  left the previous output in place with no warning. Grammars declaring `%import` now always
+  regenerate.
+- **`peglib:lint` mislabelled import failures.** Resolution errors ("grammar not found", cyclic
+  import, name collision) were reported under a "Grammar parse failed:" prefix. Each stage now
+  labels its own failures.
+- **`Grammar` only defensively copied two of its six collections** despite javadoc claiming
+  otherwise. A `Grammar` lives inside a cached `Parser` shared across threads, so its
+  immutability cannot depend on every producer remembering to pre-copy. Pre-existing.
+- **The analyzer silently absorbed rule-classification failures**, letting `peglib:lint` report a
+  clean grammar that `check` and `generate` reject moments later. Now reported as
+  `grammar.classification-failed`. Pre-existing.
+- **`GrammarSource.filesystem` now verifies the resolved path stays inside its directory.** Not
+  exploitable via `%import` — grammar names are lexically restricted to identifiers — but the
+  guarantee lived in a different class than the one reading files, and this is public API.
+- Generator and file-writing steps in `peglib:generate` run as Fork-Join, so a failure in one no
+  longer hides simultaneous failures in the others.
+
+### Fixed — code generator (reported downstream)
+
+Both produced sources that `generate-sources` emitted happily and `javac` then rejected. Reported
+against a 753-line PostgreSQL grammar; `java25.peg` slips past both, which is why they went
+unnoticed.
+
+- **Case-insensitive literals spelled differently collided on one generated constant.**
+  `'time'i` and `'TIME'i` produced two token kinds whose Java constants both sanitised to
+  `KIND_INLINE_TIME_CI` — `variable ... is already defined`. Two bugs in one: `literalKey` was
+  case-sensitive, so literals matching *identical* input got two kinds, and the lexer can tag
+  that text with only one of them — leaving every parser site testing the other permanently
+  dead. Case-insensitive literals now key on their case-folded text and share one kind.
+  Case-*sensitive* `'time'` / `'TIME'` remain distinct, and inline-kind names are now unique
+  case-insensitively so they cannot collide after the generator upper-cases them.
+
+- **The generated lexer exceeded the JVM constant-pool limit on large grammars.** The transition
+  table was emitted as inline `t[i]=v;` assignments, so every index and value outside `sipush`
+  range consumed a constant-pool slot against a hard cap of 65535. That bounded grammars at
+  roughly 1100 DFA states — beyond it, `error: too many constants`. Both transition tables are
+  now emitted as Base64 string constants decoded in a static initialiser: one pool entry per
+  chunk regardless of size. A 7334-state grammar (5.7× the reported failure point) went from
+  453,978 oversized int literals to **zero** and compiles cleanly.
+
+### Fixed — follow-ups from downstream retest
+
+- **A case-insensitive literal used both as a token rule's body and bare in a parser rule failed
+  to generate** — `references inline literal 'SET' that has no allocated token kind`. A
+  regression from the case-folding fix above: the inline-literal key formula existed as four
+  hand-written copies across two classes, case-folding was added to one, and the others kept
+  building the unfolded key — so a parser-side `'SET'i` looked up `SET/i` against a map holding
+  `set/i`. There is now exactly one definition, `DfaBuilder.inlineLiteralKey`, and every
+  producer and consumer calls it.
+
+- **`peglib:generate` skipped work after a generator upgrade.** The up-to-date check compared
+  only grammar mtime against output mtime, so upgrading the plugin left the previous output in
+  place with the grammar untouched — silently stale, and invisible in projects that commit
+  generated sources. Generated files now carry a `// peglib-generator: <version>` stamp, a
+  mismatch forces regeneration, and the skip message names the resolved generator version.
+
+### Documentation
+
+- The maven plugin's goals and parameters are documented in the README for the first time.
+  `peglib:generate` — the primary build-time entry point — appeared nowhere.
+- `%word` is documented, as inert. It was accepted by the grammar parser and mentioned in no
+  document.
+- Grammar-DSL composition section rewritten now that `%import` reaches a working parser; it
+  previously stated, correctly at the time, that no such path existed.
+
 ## [0.7.1] - 2026-08-14
 
 Validated the Java grammar against **javac's own parse phase** over OpenJDK's langtools test

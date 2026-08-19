@@ -50,6 +50,7 @@ public final class GrammarParser {
         var recoverSets = new LinkedHashMap<String, Set<Character>>();
         var checkpointRules = new LinkedHashSet<String>();
         var memoRules = new LinkedHashSet<String>();
+        var parserRules = new LinkedHashSet<String>();
         Option<String> startRule = Option.none();
         Option<Expression> whitespace = Option.none();
         Option<Expression> word = Option.none();
@@ -142,6 +143,20 @@ public final class GrammarParser {
                     memoRules.add(result.unwrap());
                     continue;
                 }
+                // 0.7.2 — Grammar-level %parser RuleName pins a rule to PARSER, overriding
+                // classification inference. Same shape as %memo: argument is a rule name.
+                if ("parser".equals(directive.name()) && pos + 1 < tokens.size() && tokens.get(pos + 1) instanceof GrammarToken.Identifier) {
+                    advance();
+                    var result = parseRuleNameArgument("%parser");
+
+                    if (result instanceof Result.Failure<?> f) {
+                        return f.cause()
+                                .result();
+                    }
+
+                    parserRules.add(result.unwrap());
+                    continue;
+                }
 
                 advance();
                 var result = parseDirective(directive);
@@ -180,6 +195,7 @@ public final class GrammarParser {
         var copiedRecover = Map.copyOf(recoverSets);
         var copiedCheckpoint = Set.copyOf(checkpointRules);
         var copiedMemo = Set.copyOf(memoRules);
+        var copiedParser = Set.copyOf(parserRules);
         // 0.4.0 — when a grammar declares no imports, validate eagerly via the
         // parse-don't-validate factory. With imports, the root grammar may
         // legitimately reference rule names that only appear after %import
@@ -196,7 +212,8 @@ public final class GrammarParser {
                                    copiedImports,
                                    copiedRecover,
                                    copiedCheckpoint,
-                                   copiedMemo);
+                                   copiedMemo,
+                                   copiedParser);
         }
 
         return Result.success(new Grammar(rules,
@@ -207,7 +224,8 @@ public final class GrammarParser {
                                           copiedImports,
                                           copiedRecover,
                                           copiedCheckpoint,
-                                          copiedMemo));
+                                          copiedMemo,
+                                          copiedParser));
     }
 
     /** Result tuple for a parsed {@code %recover &lt;CharClass&gt; RuleName} directive. */
@@ -266,10 +284,15 @@ public final class GrammarParser {
      * @since 0.7.1
      */
     private Result<String> parseMemoDirective() {
+        return parseRuleNameArgument("%memo");
+    }
+
+    /** Read the single rule-name argument of a directive such as {@code %memo} or {@code %parser}. */
+    private Result<String> parseRuleNameArgument(String directiveName) {
         if (! (peek() instanceof GrammarToken.Identifier ruleId)) {
             return new ParseError.UnexpectedInput(peek().span().start(),
                                                   tokenDescription(peek()),
-                                                  "rule name for '%memo'").result();
+                                                  "rule name for '" + directiveName + "'").result();
         }
 
         advance();

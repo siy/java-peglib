@@ -8,7 +8,9 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -18,6 +20,7 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.lang.Unit;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.grammar.Rule;
 
 
 /**
@@ -59,7 +62,14 @@ public final class DfaBuilder {
     public static final int KIND_DOC_LINE_COMMENT = 3;
     /** Javadoc-style block comment. Allocated by post-classification, never by the DFA directly. */
     public static final int KIND_DOC_BLOCK_COMMENT = 4;
+
     public static final int FIRST_USER_KIND = 5;
+
+    /** Suffix of a case-INSENSITIVE inline-literal key. See {@link #inlineLiteralKey}. */
+    private static final String CI_KEY_SUFFIX = "/i";
+
+    /** Suffix of a case-SENSITIVE inline-literal key. See {@link #inlineLiteralKey}. */
+    private static final String CS_KEY_SUFFIX = "/cs";
     private static final int ALPHABET = Dfa.ALPHABET_SIZE;
     private static final int REPETITION_CAP = 256;
 
@@ -218,9 +228,7 @@ public final class DfaBuilder {
                     return;
                 }
 
-                var key = lit.text() + (lit.caseInsensitive()
-                                        ? "/i"
-                                        : "/cs");
+                var key = inlineLiteralKey(lit.text(), lit.caseInsensitive());
 
                 seen.computeIfAbsent(key,
                                      k -> new InlineLiteral(lit.text(), lit.caseInsensitive(), seen.size()));
@@ -378,6 +386,29 @@ public final class DfaBuilder {
      * lexer emits the *KW kind for those texts, and the parser must
      * accept it when an identifier is expected.
      */
+    /**
+     * The union of the literal sets excluded by a guarded rule's leading {@code !Rule} guards.
+     *
+     * <p>A rule may carry several; every one of them names text the rule refuses, so the sets
+     * combine. Guards naming a rule that is missing or carries no literals contribute nothing
+     * rather than voiding the rest.
+     */
+    private static Set<String> guardedKeywordTexts(RuleClassifier.KeywordSkipInfo info, Map<String, Rule> ruleMap) {
+        var texts = new LinkedHashSet<String>();
+
+        for (var guardName : info.keywordRuleNames()) {
+            var guardRule = ruleMap.get(guardName);
+
+            if (guardRule == null) {
+                continue;
+            }
+
+            texts.addAll(RuleClassifier.extractLiteralSet(guardRule.expression()));
+        }
+
+        return texts;
+    }
+
     private static Map<String, int[]> buildIdentifierFallbacks(Grammar grammar,
                                                                RuleClassifier.Classification classification,
                                                                Map<String, Integer> ruleNameToKind,
@@ -388,16 +419,19 @@ public final class DfaBuilder {
         for (var entry : classification.keywordSkip().entrySet()) {
             var idRuleName = entry.getKey();
             var info = entry.getValue();
-            var keywordRule = ruleMap.get(info.keywordRuleName());
-
-            if (keywordRule == null) {
-                continue;
-            }
-
-            var hardKeywords = new HashSet<>(RuleClassifier.extractLiteralSet(keywordRule.expression()));
+            var hardKeywords = new HashSet<>(guardedKeywordTexts(info, ruleMap));
 
             if (hardKeywords.isEmpty()) {
                 continue;
+            }
+            // Case-insensitive inline literals carry a case-folded key (see
+            // {@link #inlineLiteralKey}), so keyword containment must fold both
+            // sides for them. Without this a genuinely reserved word spelled
+            // 'SELECT'i would be offered as an identifier fallback.
+            var foldedHardKeywords = new HashSet<String>();
+
+            for (var keyword : hardKeywords) {
+                foldedHardKeywords.add(keyword.toLowerCase(Locale.ROOT));
             }
 
             var fallback = new java.util.TreeSet<Integer>();
@@ -407,20 +441,25 @@ public final class DfaBuilder {
             // etc. remain acceptable wherever Identifier is expected.
             for (var litEntry : inlineLiteralToKind.entrySet()) {
                 var key = litEntry.getKey();
-                // Skip case-insensitive inline literals — identifier fallback only
-                // applies to case-sensitive matches (Java keywords are case-sensitive).
-                if (!key.endsWith("/cs")) {
+                boolean caseInsensitive = key.endsWith(CI_KEY_SUFFIX);
+
+                if (!caseInsensitive && !key.endsWith(CS_KEY_SUFFIX)) {
                     continue;
                 }
 
                 var text = key.substring(0,
-                                         key.length() - "/cs".length());
+                                         key.length() - (caseInsensitive
+                                                         ? CI_KEY_SUFFIX.length()
+                                                         : CS_KEY_SUFFIX.length()));
 
                 if (!isIdentifierShape(text)) {
                     continue;
                 }
-
-                if (hardKeywords.contains(text)) {
+                // A case-insensitive key is already folded by inlineLiteralKey,
+                // so it is compared against the folded keyword set.
+                if (caseInsensitive
+                    ? foldedHardKeywords.contains(text)
+                    : hardKeywords.contains(text)) {
                     continue;
                 }
 
@@ -450,8 +489,12 @@ public final class DfaBuilder {
                 if (!isIdentifierShape(lowered)) {
                     continue;
                 }
-
-                if (hardKeywords.contains(lowered)) {
+                // Fold both sides, as the inline-literal loop above does. A grammar spelling its
+                // reserved words UPPERCASE ('CREATE'i) never matched a stem derived from the rule
+                // name (CreateKW -> create), so the reserved word was offered as an identifier
+                // fallback and its own guard could not exclude it. Harmless while the rule's kind
+                // was unreachable; live the moment a lexeme adopts it.
+                if (foldedHardKeywords.contains(lowered.toLowerCase(Locale.ROOT))) {
                     continue;
                 }
 
@@ -518,6 +561,31 @@ public final class DfaBuilder {
                                                     int[] nextKindRef,
                                                     List<InlineLiteral> aliasLiteralsOut) {
         var aliases = new LinkedHashMap<String, int[]>();
+        // Adoption runs to completion BEFORE any alias array is built. Interleaving them makes the
+        // result depend on declaration order: a multi-literal rule declared earlier captures the
+        // synthetic kind, a single-literal rule declared later redirects the literal to its own,
+        // and the earlier rule is left holding a kind the lexer no longer emits — silently
+        // unmatchable. PostgreSQL declares ReservedKeyword before CaseKW and CreateKW after it,
+        // so one worked and the other did not.
+        var adoptedLiteralKinds = new HashMap<String, Integer>();
+
+        for (var rule : aliasableRules(grammar, classification)) {
+            var literals = aliasLiteralsOf(rule, grammar, classification);
+
+            if (literals.size() != 1) {
+                continue;
+            }
+
+            adoptRuleKindForLiteral(rule.name(),
+                                    literals.getFirst(),
+                                    classification,
+                                    adoptedLiteralKinds,
+                                    inlineLiteralToKind,
+                                    kindNames,
+                                    usedNames,
+                                    nextKindRef,
+                                    aliasLiteralsOut);
+        }
 
         for (var rule : grammar.rules()) {
             var kind = classification.kinds().get(rule.name());
@@ -530,8 +598,16 @@ public final class DfaBuilder {
             if (classification.keywordSkip().containsKey(rule.name())) {
                 continue;
             }
-
-            var literalsOpt = collectAliasLiterals(rule.expression());
+            // A rule that just names another LEXER rule (NullConstraint <- NullKW) carries no
+            // literal of its own, so alias detection has to look through the reference. Reusing
+            // the substitution keeps one definition of "what does this reference stand for", and
+            // aliasing is what such a rule needs: it is the same token under a second name, not a
+            // second copy of the same lexeme competing for it.
+            var aliasBody = RuleClassifier.inlineLexerReferences(rule.expression(),
+                                                                 grammar.ruleMap(),
+                                                                 classification.kinds())
+                                          .or(rule.expression());
+            var literalsOpt = collectAliasLiterals(aliasBody);
 
             if (literalsOpt.isEmpty()) {
                 continue;
@@ -547,6 +623,9 @@ public final class DfaBuilder {
             int i = 0;
 
             for (var lit : literals) {
+                // Adoption already happened, so this resolves to the adopted kind where a rule
+                // claimed the literal and allocates a synthetic one otherwise. Both paths agree
+                // with what the lexer emits.
                 kinds[i++] = ensureInlineKind(lit,
                                               inlineLiteralToKind,
                                               kindNames,
@@ -782,6 +861,97 @@ public final class DfaBuilder {
      * (existing or newly allocated). Side-effects {@code inlineLiteralToKind},
      * {@code kindNames}, {@code usedNames}, and {@code nextKindRef}.
      */
+    /** Rules eligible for aliasing: lexical, and not on the skip-prefix path. */
+    private static List<Rule> aliasableRules(Grammar grammar, RuleClassifier.Classification classification) {
+        var out = new ArrayList<Rule>();
+
+        for (var rule : grammar.rules()) {
+            var kind = classification.kinds().get(rule.name());
+
+            if ((kind == RuleKind.LEXER || kind == RuleKind.MIXED) && !classification.keywordSkip()
+                                                                                     .containsKey(rule.name())) {
+                out.add(rule);
+            }
+        }
+
+        return out;
+    }
+
+    /** The literals a rule aliases to, after looking through references. Empty when it aliases none. */
+    private static List<Expression.Literal> aliasLiteralsOf(Rule rule,
+                                                            Grammar grammar,
+                                                            RuleClassifier.Classification classification) {
+        var body = RuleClassifier.inlineLexerReferences(rule.expression(),
+                                                        grammar.ruleMap(),
+                                                        classification.kinds())
+                                 .or(rule.expression());
+
+        return collectAliasLiterals(body).or(List.of());
+    }
+
+    /**
+     * Give a lexeme ONE kind, named after the rule that names it.
+     *
+     * <p>A rule whose body is a single literal ({@code CreateKW <- < 'CREATE'i ![a-zA-Z0-9_$] >})
+     * already owns a kind. Allocating a second, synthetic {@code INLINE_CREATE_CI} kind for the
+     * same text left the rule's kind unreachable and the token anonymous: the CST reported a bare
+     * literal where the grammar had named a rule, and every consumer keying on the rule name saw
+     * nothing. Reusing the rule's kind for the literal makes the one lexeme carry the one name the
+     * author chose.
+     *
+     * <p>Only the kind NUMBER changes. Priority, the guard, DFA absorption and the alias-match
+     * path are all untouched — the literal's own NFA fragment still provides the accept, now
+     * tagged with the rule's kind. A rule spelling several literals keeps synthetic kinds, since
+     * there is no single lexeme for its name to describe.
+     */
+    private static int adoptRuleKindForLiteral(String ruleName,
+                                               Expression.Literal lit,
+                                               RuleClassifier.Classification classification,
+                                               Map<String, Integer> adopted,
+                                               Map<String, Integer> inlineLiteralToKind,
+                                               List<String> kindNames,
+                                               Set<String> usedNames,
+                                               int[] nextKindRef,
+                                               List<InlineLiteral> aliasLiteralsOut) {
+        var inlineLit = new InlineLiteral(lit.text(), lit.caseInsensitive(), inlineLiteralToKind.size());
+        var key = literalKey(inlineLit);
+        var ruleKind = classification.kinds().get(ruleName) == RuleKind.LEXER
+                       ? ruleKindOf(ruleName, kindNames)
+                       : null;
+
+        if (ruleKind == null) {
+            return ensureInlineKind(lit, inlineLiteralToKind, kindNames, usedNames, nextKindRef, aliasLiteralsOut);
+        }
+        // Two rules spelling the same literal: the first to claim it keeps the name, so the lexeme
+        // still has exactly one kind and that kind still has one meaning.
+        var claimed = adopted.get(key);
+
+        if (claimed != null) {
+            return claimed;
+        }
+
+        var existing = inlineLiteralToKind.get(key);
+
+        inlineLiteralToKind.put(key, ruleKind);
+        adopted.put(key, ruleKind);
+        // A literal already collected from a parser body is absorbed from that list and now
+        // carries the rule's kind; one seen only here still needs its own accept fragment.
+        if (existing == null) {
+            aliasLiteralsOut.add(inlineLit);
+        }
+
+        return ruleKind;
+    }
+
+    /** The kind already allocated to {@code ruleName} in the first pass, or null. */
+    private static Integer ruleKindOf(String ruleName, List<String> kindNames) {
+        int index = kindNames.indexOf(ruleName);
+
+        return index < 0
+               ? null
+               : index;
+    }
+
     private static int ensureInlineKind(Expression.Literal lit,
                                         Map<String, Integer> inlineLiteralToKind,
                                         List<String> kindNames,
@@ -806,9 +976,8 @@ public final class DfaBuilder {
         // Record the literal so the caller can append its NFA accept fragment to
         // the lexer (otherwise the kind exists in the table but no DFA path
         // produces tokens of that kind).
-        if (aliasLiteralsOut != null) {
-            aliasLiteralsOut.add(inlineLit);
-        }
+        // Required parameter — the single entry point always supplies a fresh list.
+        aliasLiteralsOut.add(inlineLit);
 
         return kind;
     }
@@ -843,13 +1012,7 @@ public final class DfaBuilder {
                 continue;
             }
 
-            var keywordRule = ruleMap.get(info.keywordRuleName());
-
-            if (keywordRule == null) {
-                continue;
-            }
-
-            var keywordTexts = RuleClassifier.extractLiteralSet(keywordRule.expression());
+            var keywordTexts = guardedKeywordTexts(info, ruleMap);
 
             if (keywordTexts.isEmpty()) {
                 continue;
@@ -918,10 +1081,34 @@ public final class DfaBuilder {
         return kind;
     }
 
+    /**
+     * Identity of an inline literal for kind allocation.
+     *
+     * <p>Case-INSENSITIVE literals are keyed by their case-folded text: {@code 'time'i} and
+     * {@code 'TIME'i} match exactly the same input, so they must resolve to ONE token kind.
+     * Keying them separately allocated two kinds for identical input — the lexer can only tag
+     * that text with one of them, leaving every parser site testing the other permanently dead.
+     *
+     * <p>Case-SENSITIVE literals keep their exact text: {@code 'time'} and {@code 'TIME'} are
+     * genuinely different tokens.
+     */
     private static String literalKey(InlineLiteral lit) {
-        return lit.text + (lit.caseInsensitive
-                           ? "/i"
-                           : "/cs");
+        return inlineLiteralKey(lit.text, lit.caseInsensitive);
+    }
+
+    /**
+     * THE definition of an inline literal's identity. Every producer of
+     * {@code inlineLiteralToKind} entries and every consumer looking a kind up must call this —
+     * the formula previously existed as four hand-written copies across two classes, and when
+     * case-folding was added to one of them the others kept building the unfolded key, so a
+     * parser-side {@code 'SET'i} looked up {@code SET/i} while the map held {@code set/i}.
+     *
+     * @since 0.7.2
+     */
+    public static String inlineLiteralKey(String text, boolean caseInsensitive) {
+        return caseInsensitive
+               ? text.toLowerCase(Locale.ROOT) + CI_KEY_SUFFIX
+               : text + CS_KEY_SUFFIX;
     }
 
     /**
@@ -958,6 +1145,8 @@ public final class DfaBuilder {
         if (grammar.whitespace().isPresent()) {
             absorbWhitespace(nfa,
                              grammar.whitespace().unwrap(),
+                             grammar.ruleMap(),
+                             classification.kinds(),
                              priorityRef,
                              globalStart,
                              skipped);
@@ -989,8 +1178,17 @@ public final class DfaBuilder {
             var expr = skipInfo != null
                        ? skipInfo.bodyExpression()
                        : rule.expression();
+            // A DFA has no call stack, so a rule reference cannot be compiled directly.
+            // Substituting references to other LEXER rules keeps such a rule compilable
+            // instead of skipping it; when substitution is impossible (a reference cycle,
+            // or a reference to a non-LEXER rule) the expression is left untouched and
+            // tryAbsorb reports it through the existing "cannot compile" path.
+            var expanded = RuleClassifier.inlineLexerReferences(expr,
+                                                                grammar.ruleMap(),
+                                                                classification.kinds())
+                                         .or(expr);
 
-            tryAbsorb(nfa, rule.name(), expr, kind, priorityRef, globalStart, skipped);
+            tryAbsorb(nfa, rule.name(), expanded, kind, priorityRef, globalStart, skipped);
         }
 
         if (assignment.anyCharKind() >= 0) {
@@ -1033,6 +1231,8 @@ public final class DfaBuilder {
      */
     private static void absorbWhitespace(Nfa nfa,
                                          Expression whitespaceBody,
+                                         Map<String, Rule> ruleMap,
+                                         Map<String, RuleKind> kinds,
                                          int[] priorityRef,
                                          int globalStart,
                                          List<SkippedRule> skipped) {
@@ -1047,8 +1247,14 @@ public final class DfaBuilder {
         int absorbed = 0;
 
         for (var alt : alternatives) {
-            int kind = classifyWhitespaceAlternativeKind(alt);
-            var oneOrMore = ensureNonEmptyWhitespaceAlternative(alt);
+            // An alternative that NAMES a rule cannot be compiled directly — the DFA has no call
+            // stack — and used to be dropped here, leaving the standalone rule to match the same
+            // text under its own ordinary lexer kind. The token then read as content rather than
+            // trivia, and the first comment in a file ended the parse. Substituting the reference
+            // makes the alternative compilable, so it is absorbed as trivia like any other.
+            var resolved = RuleClassifier.inlineLexerReferences(alt, ruleMap, kinds).or(alt);
+            int kind = classifyWhitespaceAlternativeKind(resolved);
+            var oneOrMore = ensureNonEmptyWhitespaceAlternative(resolved);
             var result = compileExpression(nfa, oneOrMore, "%whitespace");
 
             if (!result.isSuccess()) {
@@ -1194,6 +1400,82 @@ public final class DfaBuilder {
         priorityRef[0]++;
     }
 
+    /** A rule body split into the part that is matched and the constraint on what may follow. */
+    private record FollowGuard(Expression prefix, int[] follow) {}
+
+    /**
+     * Split a trailing {@code ![c]} / {@code &[c]} off a rule body.
+     *
+     * <p>Recognised shape: a sequence whose last element is a lookahead over a character class.
+     * That is what a keyword rule spells — {@code < 'GROUPING'i [ \t]+ 'SETS'i ![a-zA-Z0-9_$] >} —
+     * and it is the shape maximal munch cannot stand in for, because nothing else in the grammar
+     * matches further than the keyword itself.
+     *
+     * <p>A lookahead anywhere else is left alone: only a trailing one is expressible as a
+     * constraint on the accepting state.
+     */
+    private static Option<FollowGuard> splitTrailingFollowGuard(Expression expr) {
+        if (! (unwrapAcceptableWrappers(expr) instanceof Expression.Sequence seq)) {
+            return Option.none();
+        }
+
+        var elements = seq.elements();
+
+        if (elements.size() < 2) {
+            return Option.none();
+        }
+
+        var last = unwrapAcceptableWrappers(elements.getLast());
+        boolean negative = last instanceof Expression.Not;
+        var inner = switch (last) {
+            case Expression.Not not -> unwrapAcceptableWrappers(not.expression());
+            case Expression.And and -> unwrapAcceptableWrappers(and.expression());
+            default -> null;
+        };
+
+        if (! (inner instanceof Expression.CharClass cc)) {
+            return Option.none();
+        }
+
+        var head = elements.subList(0, elements.size() - 1);
+        Expression prefix = head.size() == 1
+                            ? head.getFirst()
+                            : new Expression.Sequence(seq.span(), List.copyOf(head));
+
+        return Option.some(new FollowGuard(prefix, buildFollowRow(cc, negative)));
+    }
+
+    /**
+     * Build the row consulted by {@link Dfa#acceptAllowsFollower}: non-zero where the following
+     * character is ALLOWED. Polarity is resolved here so the driver never branches on it.
+     *
+     * <p>End of input satisfies a negative guard — there is no character there to forbid — and
+     * fails a positive one, which requires a character to be present.
+     */
+    private static int[] buildFollowRow(Expression.CharClass cc, boolean negative) {
+        var matched = parseCharClassPattern(cc.pattern(), cc.negated(), cc.caseInsensitive());
+        // A negated class matches non-ASCII too; a positive one is ASCII-only by definition.
+        boolean matchesNonAscii = cc.negated();
+        var row = new int[Dfa.FOLLOW_ROW];
+
+        for (int c = 0; c < ALPHABET; c++) {
+            boolean allowed = negative != matched.get(c);
+
+            row[c] = allowed
+                     ? 1
+                     : 0;
+        }
+
+        row[Dfa.FOLLOW_NON_ASCII] = negative != matchesNonAscii
+                                    ? 1
+                                    : 0;
+        row[Dfa.FOLLOW_EOF] = negative
+                              ? 1
+                              : 0;
+
+        return row;
+    }
+
     private static void tryAbsorb(Nfa nfa,
                                   String ruleName,
                                   Expression expr,
@@ -1201,6 +1483,29 @@ public final class DfaBuilder {
                                   int[] priorityRef,
                                   int globalStart,
                                   List<SkippedRule> skipped) {
+        // A trailing lookahead over a character class constrains the character AFTER the match
+        // without consuming it. Compile the part before it and hang the constraint on the accept.
+        var guarded = splitTrailingFollowGuard(expr);
+
+        if (guarded.isPresent()) {
+            var split = guarded.unwrap();
+            var guardedResult = compileExpression(nfa, split.prefix(), ruleName);
+
+            if (guardedResult.isSuccess()) {
+                var guardedFragment = guardedResult.unwrap();
+
+                nfa.addEpsilon(globalStart, guardedFragment.start);
+                nfa.markAccept(guardedFragment.accept,
+                               kind,
+                               priorityRef[0],
+                               nfa.internFollow(split.follow()));
+                priorityRef[0]++;
+
+                return;
+            }
+            // The prefix did not compile either; fall through and report against the whole body.
+        }
+
         var result = compileExpression(nfa, expr, ruleName);
 
         if (result.isSuccess()) {
@@ -1994,23 +2299,41 @@ public final class DfaBuilder {
      * (two literals normalise to the same name) a numeric suffix is appended.
      */
     private static String uniqueInlineName(InlineLiteral lit, Set<String> taken) {
-        var base = "INLINE_" + encodeForIdentifier(lit.text);
+        // Case-folded for CI literals so 'time'i and 'TIME'i produce the same name as well as
+        // the same kind — they are the same token.
+        var text = lit.caseInsensitive
+                   ? lit.text.toLowerCase(Locale.ROOT)
+                   : lit.text;
+        var base = "INLINE_" + encodeForIdentifier(text);
 
         if (lit.caseInsensitive) {
             base = base + "_CI";
         }
-
-        if (!taken.contains(base)) {
+        // Uniqueness must be case-INSENSITIVE. ParserGenerator emits each kind name as a
+        // constant via toUpperCase, so names differing only in case (e.g. the case-sensitive
+        // pair 'time' / 'TIME') would collapse onto one identifier and produce source that
+        // does not compile: "variable KIND_INLINE_TIME is already defined".
+        if (!containsIgnoreCase(taken, base)) {
             return base;
         }
 
         int n = 2;
 
-        while (taken.contains(base + "_" + n)) {
+        while (containsIgnoreCase(taken, base + "_" + n)) {
             n++;
         }
 
         return base + "_" + n;
+    }
+
+    private static boolean containsIgnoreCase(Set<String> taken, String candidate) {
+        for (var name : taken) {
+            if (name.equalsIgnoreCase(candidate)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static String encodeForIdentifier(String text) {
@@ -2077,6 +2400,7 @@ public final class DfaBuilder {
         var transitions = new ArrayList<int[]>();
         var acceptKindList = new ArrayList<Integer>();
         var acceptPriorityList = new ArrayList<Integer>();
+        var acceptFollowList = new ArrayList<Integer>();
         var nonAsciiTargets = new ArrayList<Integer>();
         var queue = new ArrayDeque<BitSet>();
 
@@ -2085,6 +2409,7 @@ public final class DfaBuilder {
                       transitions,
                       acceptKindList,
                       acceptPriorityList,
+                      acceptFollowList,
                       nonAsciiTargets,
                       queue,
                       startSet,
@@ -2107,6 +2432,7 @@ public final class DfaBuilder {
                                              transitions,
                                              acceptKindList,
                                              acceptPriorityList,
+                                             acceptFollowList,
                                              nonAsciiTargets,
                                              queue,
                                              moveSet,
@@ -2126,6 +2452,7 @@ public final class DfaBuilder {
                                                      transitions,
                                                      acceptKindList,
                                                      acceptPriorityList,
+                                                     acceptFollowList,
                                                      nonAsciiTargets,
                                                      queue,
                                                      nonAsciiMoveSet,
@@ -2139,15 +2466,22 @@ public final class DfaBuilder {
         int[][] transitionTable = transitions.toArray(new int[0][]);
         int[] acceptKindArray = new int[stateCount];
         int[] acceptPriorityArray = new int[stateCount];
+        int[] acceptFollowArray = new int[stateCount];
         int[] nonAsciiArray = new int[stateCount];
 
         for (int i = 0; i < stateCount; i++) {
             acceptKindArray[i] = acceptKindList.get(i);
             acceptPriorityArray[i] = acceptPriorityList.get(i);
+            acceptFollowArray[i] = acceptFollowList.get(i);
             nonAsciiArray[i] = nonAsciiTargets.get(i);
         }
 
-        return new Dfa(transitionTable, acceptKindArray, acceptPriorityArray, nonAsciiArray);
+        return new Dfa(transitionTable,
+                       acceptKindArray,
+                       acceptPriorityArray,
+                       nonAsciiArray,
+                       acceptFollowArray,
+                       nfa.followSets.toArray(new int[0][]));
     }
 
     private static int registerState(Map<BitSet, Integer> stateMap,
@@ -2155,6 +2489,7 @@ public final class DfaBuilder {
                                      List<int[]> transitions,
                                      List<Integer> acceptKindList,
                                      List<Integer> acceptPriorityList,
+                                     List<Integer> acceptFollowList,
                                      List<Integer> nonAsciiTargets,
                                      Deque<BitSet> queue,
                                      BitSet stateSet,
@@ -2177,17 +2512,19 @@ public final class DfaBuilder {
 
         acceptKindList.add(accept.kind);
         acceptPriorityList.add(accept.priority);
+        acceptFollowList.add(accept.follow);
         nonAsciiTargets.add(Dfa.NO_TRANSITION);
         queue.add(stateSet);
 
         return id;
     }
 
-    private record AcceptInfo(int kind, int priority) {}
+    private record AcceptInfo(int kind, int priority, int follow) {}
 
     private static AcceptInfo chooseAccept(Nfa nfa, BitSet stateSet) {
         int bestKind = Dfa.NO_ACCEPT;
         int bestPriority = Integer.MAX_VALUE;
+        int bestFollow = Dfa.NO_FOLLOW;
 
         for (int s = stateSet.nextSetBit(0); s >= 0; s = stateSet.nextSetBit(s + 1)) {
             int kind = nfa.acceptKind[s];
@@ -2201,13 +2538,17 @@ public final class DfaBuilder {
             if (priority < bestPriority) {
                 bestPriority = priority;
                 bestKind = kind;
+                bestFollow = nfa.acceptFollow[s];
             }
         }
 
         return new AcceptInfo(bestKind,
                               bestKind == Dfa.NO_ACCEPT
                               ? -1
-                              : bestPriority);
+                              : bestPriority,
+                              bestKind == Dfa.NO_ACCEPT
+                              ? Dfa.NO_FOLLOW
+                              : bestFollow);
     }
 
     private static void epsilonClosure(Nfa nfa, BitSet states) {
@@ -2293,7 +2634,11 @@ public final class DfaBuilder {
     private static final class Nfa {
         int start = -1;
         int[] acceptKind = new int[16];
+
         int[] acceptPriority = new int[16];
+
+        /** Follow-constraint id per accept state; see {@link Dfa#acceptAllowsFollower}. */
+        int[] acceptFollow = new int[16];
         int[][] epsilon = new int[16][];
         int[] epsilonLen = new int[16];
         int[][][] charEdges = new int[16][][];
@@ -2311,9 +2656,24 @@ public final class DfaBuilder {
         int[][] nonAsciiEdges = new int[16][];
         int[] nonAsciiEdgeLens = new int[16];
         int stateCount;
+        /** Interned follow constraints; ids index this list. Grammars have a handful at most. */
+        final List<int[]> followSets = new ArrayList<>();
+
+        int internFollow(int[] row) {
+            for (int i = 0; i < followSets.size(); i++) {
+                if (Arrays.equals(followSets.get(i), row)) {
+                    return i;
+                }
+            }
+
+            followSets.add(row);
+
+            return followSets.size() - 1;
+        }
 
         Nfa() {
             Arrays.fill(acceptKind, Dfa.NO_ACCEPT);
+            Arrays.fill(acceptFollow, Dfa.NO_FOLLOW);
         }
 
         int stateCount() {
@@ -2326,6 +2686,7 @@ public final class DfaBuilder {
 
             acceptKind[id] = Dfa.NO_ACCEPT;
             acceptPriority[id] = -1;
+            acceptFollow[id] = Dfa.NO_FOLLOW;
 
             return id;
         }
@@ -2336,9 +2697,12 @@ public final class DfaBuilder {
             }
 
             int newCap = Math.max(needed, acceptKind.length * 2);
+            int oldCap = acceptKind.length;
 
             acceptKind = Arrays.copyOf(acceptKind, newCap);
             acceptPriority = Arrays.copyOf(acceptPriority, newCap);
+            acceptFollow = Arrays.copyOf(acceptFollow, newCap);
+            Arrays.fill(acceptFollow, oldCap, newCap, Dfa.NO_FOLLOW);
             epsilon = Arrays.copyOf(epsilon, newCap);
             epsilonLen = Arrays.copyOf(epsilonLen, newCap);
             charEdges = Arrays.copyOf(charEdges, newCap);
@@ -2350,9 +2714,14 @@ public final class DfaBuilder {
         }
 
         Result<Unit> markAccept(int state, int kind, int priority) {
+            return markAccept(state, kind, priority, Dfa.NO_FOLLOW);
+        }
+
+        Result<Unit> markAccept(int state, int kind, int priority, int follow) {
             if (acceptKind[state] == Dfa.NO_ACCEPT || priority < acceptPriority[state]) {
                 acceptKind[state] = kind;
                 acceptPriority[state] = priority;
+                acceptFollow[state] = follow;
             }
 
             return Result.unitResult();

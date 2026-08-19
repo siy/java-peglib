@@ -6,6 +6,13 @@
 grammar against javac's own parse phase (99.45% agreement over OpenJDK's langtools suite), adds
 the `%memo` directive, and holds parse throughput within ~1% of 0.7.0.
 
+**0.7.2 is complete on `release-0.7.2` and not yet shipped.** Beyond the `%import`/Base64/kind
+fixes it started with, it makes peglib usable for grammars that are not Java-shaped: identifier
+fallback works for case-insensitive keywords, a lexer rule may reference another lexer rule, a
+lexer rule may end in a character-class lookahead or carry several leading keyword guards, and
+`%parser` lets an author pin classification the inference gets wrong. See the CHANGELOG for the
+full list and `docs/HANDOVER.md` for where it stands.
+
 0.7.0 (2026-08-05) was the **breaking** one: the 0.5.x interpreter path and the
 `peglib-incremental` artifact were removed, and `org.pragmatica.peg.v6.*` collapsed into
 `org.pragmatica.peg.*`.
@@ -117,7 +124,8 @@ e* e+ e?    # Repetition
 .           # Any character
 
 # Extensions
-< e >       # Token boundary (captures matched text)
+< e >       # Token boundary — captures matched text, AND declares a
+            # reference-only rule to be a single token (see Rule classification)
 'text'i     # Case-insensitive literal
 [a-z]i      # Case-insensitive character class
 e{n,m}      # Bounded repetition
@@ -128,7 +136,83 @@ e{n,m}      # Bounded repetition
 %recover <CharSet> Rule       # per-rule sync set (implemented per-rule since 0.6.1)
 %checkpoint Rule              # incremental-reparse boundary
 %memo Rule                    # position memo for a rule re-parsed by overlapping alternatives (0.7.1)
+%parser Rule                  # pin a rule to PARSER, overriding classification inference (0.7.2)
 ```
+
+## Rule classification (LEXER vs PARSER)
+
+`RuleClassifier` decides which rules compile into the lexer DFA. It is inference, not declaration,
+and these four judgements are worth knowing because they change what you can write.
+
+**A rule whose body is only references is LEXER only if it spans one token.** A choice between
+shapes (`ColLabel <- QuotedIdent / UnquotedIdent`) or an alias (`NullConstraint <- NullKW`) spans
+one token and stays lexical. A *sequence* spans several — `IfNotExists <- IfKW NotKW ExistsKW` is
+three tokens with trivia between them — so it is a parser rule. Fusing it into the DFA would
+produce a lexeme spelled `IFNOTEXISTS`, which no input contains: allocated, and never matched.
+
+Composing **one** token out of finer rules is a real and different intent, and it is spelled by
+wrapping the body in a token boundary:
+
+```peg
+Identifier <- < IdStart IdCont* >     # one token, built from character rules
+IfNotExists <- IfKW NotKW ExistsKW    # three tokens — a parser rule
+```
+
+The `< >` is an explicit override and is trusted: `< IfKW NotKW ExistsKW >` will fuse, because you
+asked for it. Nothing else in the grammar distinguishes these two shapes, which is why the
+boundary decides.
+
+**`%parser Rule` pins a rule to PARSER.** The inference above cannot tell a rule that IS a token
+from one that merely names tokens: a reference-only body spanning a single token reads as lexical,
+which is right for an alias and wrong for a rule whose purpose is to choose between token kinds at
+parse time. `ColLabel <- ColId / ReservedKeyword` is the canonical case — inferred LEXER it
+collides with `ColId` for the same input and is rejected outright. The pin also survives
+skip-prefix detection, which otherwise force-promotes a guarded rule back to LEXER:
+
+```peg
+ColLabel <- ColId / ReservedKeyword
+%parser ColLabel
+```
+
+A pin naming a rule the grammar does not declare is inert, not fatal — the same treatment `%memo`
+gives unknown names.
+
+**A rule that can match only the empty string is PARSER.** `EmptyStatement <- &';' / !.` reads as
+lexical — it names no other rule — but a token has to consume something. Note the test is
+*always-empty*, not *nullable*: `Word <- [a-z]*` can match empty but can also consume, and stays a
+legitimate lexer rule.
+
+**A lexer rule MAY reference another lexer rule.** Since 0.7.2 such references are substituted
+before DFA compilation (`RuleClassifier.inlineLexerReferences`), with reference cycles refused
+rather than expanded. What a lexer rule still cannot contain is `&` / `!` lookahead — see below.
+
+**Lookahead in a lexer rule is supported in two positions, and only those.** The DFA has no
+lookahead mechanism of its own, so each supported shape is lowered to something it can express.
+
+*Trailing, over a character class* — `X ![c]` or `X &[c]` at the end of a rule. Compiled as a
+constraint on the accepting state: the driver checks the character after the match before
+recording the accept, and a denied accept simply does not count, so maximal munch continues from
+the last one that did. This is what makes a multi-word lexeme work —
+`< 'GROUPING'i [ \t\r\n]+ 'SETS'i ![a-zA-Z0-9_$] >` — where maximal munch cannot stand in for the
+guard, because nothing else in the grammar matches further than the keyword. End of input
+satisfies a negative guard and fails a positive one.
+
+*Leading, over rules* — one or more `!Rule` guards at the head, each naming a literal-set rule
+(a single-keyword rule counts as a set of one). Handled by skip-prefix detection plus the lexer's
+post-match keyword resolution; the guard sets are unioned.
+
+Anything else is skipped, and a reference to such a rule fails with `SkippedRuleReferenced` naming
+`expressionKind=Not` (or `And`). Notably still unsupported:
+
+- **A guarded rule whose body names another guarded rule** — `WindowName <- !PartitionKW … ColId`
+  where `ColId <- !ReservedKeyword (…)`. The outer guards are detected, but inlining `ColId` drags
+  its own leading `!ReservedKeyword` into the body, which the DFA then cannot compile. Composing
+  the two guard sets inside `detectSkipPrefix` was tried and **reverted**: it changed which rules
+  register as skip-prefix, forcing java25 rules to LEXER and failing 35 tests. A fix belongs
+  further down, where the rule is already a confirmed skip-prefix candidate.
+- **Lookahead over anything but a character class**, e.g. `&(Modifier* ClassKW)` — which is why
+  java25 spells its `value` lookahead inline (see below).
+- **Lookahead nested inside a Choice alternative** rather than trailing the whole body.
 
 **Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`).
 
@@ -216,13 +300,29 @@ Contextual keywords are matched by specific rules and **fall through to Identifi
 
 In 0.6.0's tokens-first parser, contextual keywords get **Identifier-fallback** at codegen time: where the parser references `Identifier`, it also accepts inline-literal kinds whose text is identifier-shaped and not in the hard-keyword set. See `DfaBuilder.buildIdentifierFallbacks` and `ParserGenerator.emitIdentifierFallback`.
 
-**A contextual keyword whose disambiguation needs lookahead cannot live in a named rule.** `RuleClassifier` types any rule whose body references only lexer rules as LEXER, and a lexer rule may not reference another rule — `fromGrammar` then rejects it with `SkippedRuleReferenced`. Spell the lookahead inline inside the PARSER rule that needs it. This is why `value` appears as the literal group
+**A contextual keyword whose disambiguation needs lookahead can now live in a named rule — pin it
+with `%parser`.** Verified 2026-08-19: `DeclModifier <- Modifier / ValueMod` plus
+`ValueMod <- ValueKW &(Modifier* ClassKW)`, with both pinned, compiles and parses `value class
+Foo;`, `public class Foo;` and `class value;`. `java25.peg` still spells the lookahead inline at
+its four use sites because that is what shipped and is corpus-validated at 99.45%; switching it
+over is a deliberate change that needs a corpus re-run, not a cleanup.
+
+The paragraph below records why the inline spelling was originally forced. It was **not for the
+reason given before 0.7.2** — a lexer rule may now reference another lexer
+rule. What blocks it is the lookahead itself: `RuleClassifier` types a reference-only rule spanning
+one token as LEXER, and the DFA cannot compile `&` / `!`, so `fromGrammar` rejects it with
+`SkippedRuleReferenced` naming `expressionKind=Not`. Re-verified 2026-08-18 after the lookahead work against the tidy shape
+(`DeclModifier <- Modifier / ValueMod`, `ValueMod <- ValueKW &(...)`): still rejected, now citing
+the lookahead rather than the reference. Spell the lookahead inline inside the PARSER rule that
+needs it. This is why `value` appears as the literal group
 
 ```peg
 (Modifier / ValueKW &(Modifier* (ClassKW / RecordKW)))*
 ```
 
-at its four use sites rather than as a tidy `DeclModifier` rule. Both a `DeclModifier <- Modifier / ValueMod` rule and a `ValueMod <- ValueKW &(...)` rule were tried first; each was rejected by the guard.
+at its four use sites rather than as a tidy `DeclModifier` rule. Both a `DeclModifier <- Modifier
+/ ValueMod` rule and a `ValueMod <- ValueKW &(...)` rule were tried first; each is still rejected,
+now by the lookahead limit rather than by the reference limit.
 
 ## JBCT warning policy
 
@@ -283,8 +383,9 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**576 tests across 5 modules**, 0 failures, 0 skips. The count dropped from 1445 in 0.6.3 because
-the 0.5.x interpreter and its parity suites were deleted, not because coverage was lost.
+**628 tests across 5 modules**, 0 failures, 0 skips (0.7.2 branch; 576 at 0.7.1). The count
+dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were deleted, not
+because coverage was lost.
 
 Notable test classes for verification gates:
 - `JavaCoverageProbe` / `JavaRejectionProbe` / `ModernJavaSyntaxProbe` — the accept/reject

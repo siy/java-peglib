@@ -287,8 +287,11 @@ local declaration). Two untriaged: `TextBlockLang`, `BadTypeReference`.
 - **Do not change the shape `'"""' (!'"""' .)* '"""'`.** `DfaBuilder` pattern-matches it to route
   through `compileDelimitedBlock`; the generic DFA cannot handle `Not(Literal)`. Adding a
   text-block opening-delimiter check broke **226 files** — every text block in the corpus.
-- **A lexer rule may not reference another rule.** Factoring a repeated character run into its
-  own rule gets rejected at `fromGrammar` with `SkippedRuleReferenced`; spell it inline.
+- **A lexer rule referencing another rule was rejected before 0.7.2.** Factoring a repeated
+  character run into its own rule got `SkippedRuleReferenced` at `fromGrammar`, so it had to be
+  spelled inline. Since 0.7.2 such references are substituted before DFA compilation and the
+  factored form works — but wrap it in a token boundary (`< IdStart IdCont* >`) to declare it a
+  single token, or classification reads a reference-only sequence as several tokens.
 - **A lexer rule that is too permissive can desync the whole file.** `NumLit`'s leading-dot
   alternative was `< '.' [0-9_]+ ... >`; since `_` is in `[0-9_]`, `t._field` lexed `._` as one
   2-char token, which beat the 1-char `.` on maximal munch. One bad token turned into

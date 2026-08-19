@@ -68,18 +68,26 @@ public record Grammar(List<Rule> rules,
                       List<Import> imports,
                       Map<String, Set<Character>> recoverSets,
                       Set<String> checkpointRules,
-                      Set<String> memoRules) {
+                      Set<String> memoRules,
+                      Set<String> parserRules) {
     /**
-     * Canonical compact constructor. Applies a defensive copy to
-     * {@code checkpointRules} and {@code memoRules} so the record's exposed
-     * sets are immutable regardless of how callers construct the instance.
-     * Matches the style used for {@code recoverSets}.
+     * Canonical compact constructor. Defensively copies every collection component so the
+     * record is immutable regardless of how callers construct it.
      *
      * @since 0.6.1
      */
     public Grammar {
+        // Every collection component is copied. A Grammar ends up inside a Parser that
+        // PegParser publishes into a process-wide cache and hands to arbitrary threads, so the
+        // whole safety argument rests on it being genuinely immutable after construction —
+        // that must not depend on every producer remembering to pre-copy.
+        rules = List.copyOf(rules);
+        suggestRules = List.copyOf(suggestRules);
+        imports = List.copyOf(imports);
+        recoverSets = Map.copyOf(recoverSets);
         checkpointRules = Set.copyOf(checkpointRules);
         memoRules = Set.copyOf(memoRules);
+        parserRules = Set.copyOf(parserRules);
     }
 
     /**
@@ -164,6 +172,36 @@ public record Grammar(List<Rule> rules,
                                           Map<String, Set<Character>> recoverSets,
                                           Set<String> checkpointRules,
                                           Set<String> memoRules) {
+        return grammar(rules,
+                       startRule,
+                       whitespace,
+                       word,
+                       suggestRules,
+                       imports,
+                       recoverSets,
+                       checkpointRules,
+                       memoRules,
+                       Set.of());
+    }
+
+    /**
+     * @since 0.7.2 — accepts grammar-level {@code parserRules} populated from
+     * {@code %parser RuleName} directives, which pin a rule to PARSER classification.
+     *
+     * <p>Like {@code memoRules}, these are NOT validated here: a pin naming a rule the grammar
+     * does not declare is inert rather than fatal, so a grammar stays usable while it is being
+     * edited.
+     */
+    public static Result<Grammar> grammar(List<Rule> rules,
+                                          Option<String> startRule,
+                                          Option<Expression> whitespace,
+                                          Option<Expression> word,
+                                          List<String> suggestRules,
+                                          List<Import> imports,
+                                          Map<String, Set<Character>> recoverSets,
+                                          Set<String> checkpointRules,
+                                          Set<String> memoRules,
+                                          Set<String> parserRules) {
         return validate(new Grammar(rules,
                                     startRule,
                                     whitespace,
@@ -172,7 +210,8 @@ public record Grammar(List<Rule> rules,
                                     imports,
                                     recoverSets,
                                     checkpointRules,
-                                    memoRules));
+                                    memoRules,
+                                    parserRules));
     }
 
     /**
@@ -219,7 +258,7 @@ public record Grammar(List<Rule> rules,
                    List<String> suggestRules,
                    List<Import> imports,
                    Map<String, Set<Character>> recoverSets) {
-        this(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, Set.of(), Set.of());
+        this(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, Set.of(), Set.of(), Set.of());
     }
 
     /**
@@ -236,7 +275,34 @@ public record Grammar(List<Rule> rules,
                    List<Import> imports,
                    Map<String, Set<Character>> recoverSets,
                    Set<String> checkpointRules) {
-        this(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, checkpointRules, Set.of());
+        this(rules, startRule, whitespace, word, suggestRules, imports, recoverSets, checkpointRules, Set.of(), Set.of());
+    }
+
+    /**
+     * Backwards-compatible 9-arg canonical constructor. Defaults {@code parserRules} to the
+     * empty set.
+     *
+     * @since 0.7.2
+     */
+    public Grammar(List<Rule> rules,
+                   Option<String> startRule,
+                   Option<Expression> whitespace,
+                   Option<Expression> word,
+                   List<String> suggestRules,
+                   List<Import> imports,
+                   Map<String, Set<Character>> recoverSets,
+                   Set<String> checkpointRules,
+                   Set<String> memoRules) {
+        this(rules,
+             startRule,
+             whitespace,
+             word,
+             suggestRules,
+             imports,
+             recoverSets,
+             checkpointRules,
+             memoRules,
+             Set.of());
     }
 
     /**

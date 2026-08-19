@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.List;
 
 import org.pragmatica.lang.Cause;
@@ -11,6 +12,8 @@ import org.pragmatica.lang.Result;
 import org.pragmatica.lang.utils.Causes;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
+import org.pragmatica.peg.grammar.GrammarResolver;
+import org.pragmatica.peg.grammar.GrammarSource;
 import org.pragmatica.peg.generator.LexerGenerator;
 import org.pragmatica.peg.generator.LexerGenerator.Generated;
 import org.pragmatica.peg.generator.ParserGenerator;
@@ -60,6 +63,16 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter(property = "peglib.parserClassName", defaultValue = "GParser")
     private String parserClassName;
 
+    /**
+     * Directory searched for grammars named by {@code %import}. Defaults to the
+     * directory holding {@code grammarFile}, so a grammar importing {@code Shared.Rule}
+     * finds {@code Shared.peg} beside it. Ignored when the grammar declares no imports.
+     *
+     * @since 0.7.2
+     */
+    @Parameter(property = "peglib.importDirectory")
+    private File importDirectory;
+
     @Parameter(property = "peglib.visitorClassName", defaultValue = "GVisitor")
     private String visitorClassName;
 
@@ -80,7 +93,8 @@ public class GenerateMojo extends AbstractMojo {
         var visitorTarget = targetSourceFile(visitorClassName);
 
         if (allUpToDate(lexerTarget, parserTarget, visitorTarget)) {
-            getLog().info("peglib:generate skipped (up-to-date): " + lexerTarget.getFileName()
+            getLog().info("peglib:generate skipped (up-to-date, " + GENERATOR_STAMP.substring(STAMP_PREFIX.length()).trim()
+                         + "): " + lexerTarget.getFileName()
                          + ", " + parserTarget.getFileName()
                          + ", " + visitorTarget.getFileName());
 
@@ -117,32 +131,42 @@ public class GenerateMojo extends AbstractMojo {
      * sources. Each step is a Result so failures surface as a Cause.
      */
     private Result<GeneratedBundle> buildAll(String grammarText) {
-        return GrammarParser.parse(grammarText).flatMap(grammar -> RuleClassifier.classify(grammar).flatMap(classification -> DfaBuilder.build(grammar,
-                                                                                                                                               classification).flatMap(built -> generateBundle(grammar,
-                                                                                                                                                                                               classification,
-                                                                                                                                                                                               built))));
+        return GrammarParser.parse(grammarText)
+                            .flatMap(root -> GrammarResolver.resolve(root,
+                                                                     importSource()))
+                            .flatMap(grammar -> RuleClassifier.classify(grammar).flatMap(classification -> DfaBuilder.build(grammar,
+                                                                                                                            classification).flatMap(built -> generateBundle(grammar,
+                                                                                                                                                                            classification,
+                                                                                                                                                                            built))));
     }
 
+    /**
+     * The three generators are independent — none consumes another's output — so they run as a
+     * Fork-Join. Chaining them meant a lexer-generation failure hid simultaneous parser or
+     * visitor failures, which is the wrong trade in the goal a developer runs to find out why
+     * codegen broke. Generation is pure text assembly, so evaluating all three costs nothing
+     * material.
+     */
     private Result<GeneratedBundle> generateBundle(Grammar grammar,
                                                    RuleClassifier.Classification classification,
                                                    DfaBuilder.Built built) {
-        return LexerGenerator.generate(grammar,
-                                       classification,
-                                       built.dfa(),
-                                       built.kinds(),
-                                       packageName,
-                                       lexerClassName)
-                             .flatMap(lexer -> ParserGenerator.generate(grammar,
-                                                                        classification,
-                                                                        built.kinds(),
-                                                                        packageName,
-                                                                        parserClassName)
-                                                              .flatMap(parser -> VisitorGenerator.generate(grammar,
-                                                                                                           classification,
-                                                                                                           packageName,
-                                                                                                           visitorClassName).map(visitor -> new GeneratedBundle(lexer,
-                                                                                                                                                                parser,
-                                                                                                                                                                visitor))));
+        return Result.all(LexerGenerator.generate(grammar,
+                                                  classification,
+                                                  built.dfa(),
+                                                  built.kinds(),
+                                                  packageName,
+                                                  lexerClassName),
+                          ParserGenerator.generate(grammar,
+                                                   classification,
+                                                   built.kinds(),
+                                                   packageName,
+                                                   parserClassName),
+                          VisitorGenerator.generate(grammar, classification, packageName, visitorClassName))
+                     .map(GeneratedBundle::new);
+    }
+
+    private GrammarSource importSource() {
+        return ImportSources.forGrammar(grammarFile, importDirectory);
     }
 
     private static Result<String> readGrammar(Path path) {
@@ -151,8 +175,10 @@ public class GenerateMojo extends AbstractMojo {
     }
 
     private static Result<Path> writeSource(Path targetFile, String source) {
+        var stamped = GENERATOR_STAMP + "\n" + source;
+
         return Result.lift(t -> Causes.cause("Failed to write generated source: " + targetFile + " — " + t.getMessage()),
-                           () -> writeSourceUnchecked(targetFile, source));
+                           () -> writeSourceUnchecked(targetFile, stamped));
     }
 
     // JDK-API adapter: the body of a Result.lift(...) throwing lambda. Files.createDirectories
@@ -164,17 +190,18 @@ public class GenerateMojo extends AbstractMojo {
         return Files.writeString(targetFile, source);
     }
 
+    /** Three unrelated files; a failure on one should not hide the others. */
     private static Result<List<Path>> writeAll(GeneratedBundle bundle,
                                                Path lexerTarget,
                                                Path parserTarget,
                                                Path visitorTarget) {
-        return writeSource(lexerTarget,
-                           bundle.lexer().source()).flatMap(l -> writeSource(parserTarget,
-                                                                             bundle.parser().source()).flatMap(p -> writeSource(visitorTarget,
-                                                                                                                                bundle.visitor()
-                                                                                                                                      .source()).map(v -> List.of(l,
-                                                                                                                                                                  p,
-                                                                                                                                                                  v))));
+        return Result.all(writeSource(lexerTarget,
+                                      bundle.lexer().source()),
+                          writeSource(parserTarget,
+                                      bundle.parser().source()),
+                          writeSource(visitorTarget,
+                                      bundle.visitor().source()))
+                     .map(List::of);
     }
 
     private Path targetSourceFile(String className) {
@@ -185,7 +212,22 @@ public class GenerateMojo extends AbstractMojo {
                               .resolve(className + ".java");
     }
 
+    /**
+     * True when every target is newer than the root grammar.
+     *
+     * <p>Deliberately returns false for any grammar declaring {@code %import}: the check
+     * compares against the ROOT grammar's mtime only, so editing an imported grammar while
+     * leaving the root untouched would otherwise leave stale generated sources in place with
+     * no warning. Matching the trade already made in {@code PegParser}, which does not cache
+     * grammars with imports, correctness wins over skipping work.
+     *
+     * @since 0.7.2 — the import-aware bail-out
+     */
     private boolean allUpToDate(Path... targets) {
+        if (declaresImports()) {
+            return false;
+        }
+
         long grammarMtime = grammarFile.lastModified();
 
         for (var target : targets) {
@@ -194,9 +236,121 @@ public class GenerateMojo extends AbstractMojo {
             if (!file.isFile() || file.lastModified() < grammarMtime) {
                 return false;
             }
+            // Mtime alone is not enough: after a plugin or generator upgrade the grammar is
+            // unchanged but the emitted code should differ, and skipping leaves silently stale
+            // sources behind — worse for projects that commit generated code, where nothing
+            // downstream ever reveals it. Regenerate whenever the stamp does not match.
+            if (!GENERATOR_STAMP.equals(stampOf(target))) {
+                return false;
+            }
         }
 
         return true;
+    }
+
+    /** Marker line prepended to every generated file; also the staleness key. */
+    private static final String STAMP_PREFIX = "// peglib-generator: ";
+
+    private static final String GENERATOR_STAMP = STAMP_PREFIX + generatorVersion() + " " + generatorBuildId();
+
+    /**
+     * Version of the generator actually doing the work — {@code peglib} core, not the plugin,
+     * since that is where the emitters live.
+     */
+    private static String generatorVersion() {
+        var pkg = LexerGenerator.class.getPackage();
+        var fromManifest = pkg == null
+                           ? null
+                           : pkg.getImplementationVersion();
+
+        if (fromManifest != null) {
+            return fromManifest;
+        }
+
+        try (var in = LexerGenerator.class.getResourceAsStream("/META-INF/maven/org.pragmatica-lite/peglib/pom.properties")) {
+            if (in != null) {
+                var props = new java.util.Properties();
+
+                props.load(in);
+                var version = props.getProperty("version");
+
+                if (version != null) {
+                    return version;
+                }
+            }
+        } catch (IOException __) {
+        // fall through to the unknown marker below
+        }
+
+        return "unknown";
+    }
+
+    /**
+     * Identity of the generator BUILD, not just its version.
+     *
+     * <p>The version alone cannot see a same-version rebuild, and that is the normal case while a
+     * release is still unreleased: reinstalling {@code 0.7.2} with a fixed emitter leaves the
+     * stamp identical, so consumers keep their old generated sources and measure a parser that no
+     * longer matches the library. Reported from downstream, where it cost a full measurement
+     * cycle before a {@code touch} on the grammar revealed the difference.
+     *
+     * <p>Digests the artifact the emitters actually live in. Content, not mtime — mtime has
+     * already been insufficient once here, and a digest costs a few milliseconds once per JVM.
+     * Falls back to a marker when the code source is a directory (running from an IDE or the
+     * reactor's {@code target/classes}), where there is no single file to digest and a stale
+     * skip is not the failure mode anyway.
+     */
+    private static String generatorBuildId() {
+        try {
+            var source = LexerGenerator.class.getProtectionDomain().getCodeSource();
+
+            if (source == null) {
+                return "(build:unknown)";
+            }
+
+            var path = Path.of(source.getLocation().toURI());
+
+            if (!Files.isRegularFile(path)) {
+                return "(build:exploded)";
+            }
+
+            var digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path));
+            var hex = new StringBuilder("(build:");
+
+            for (int i = 0; i < 6; i++) {
+                hex.append(String.format("%02x", digest[i]));
+            }
+
+            return hex.append(')')
+                      .toString();
+        } catch (Exception __) {
+            // A stamp that cannot be computed must not fail the build; regenerating is the safe
+            // outcome, and an unknown marker differs from every real one.
+            return "(build:unknown)";
+        }
+    }
+
+    /** First line of {@code target} when it carries a stamp, else empty. */
+    private static String stampOf(Path target) {
+        try (var lines = Files.lines(target)) {
+            return lines.findFirst()
+                        .filter(line -> line.startsWith(STAMP_PREFIX))
+                        .orElse("");
+        } catch (IOException __) {
+            return "";
+        }
+    }
+
+    /** Cheap textual pre-check; a full parse here would duplicate work done moments later. */
+    private boolean declaresImports() {
+        return readGrammar(grammarFile.toPath()).map(GenerateMojo::hasImportDirective)
+                          .or(Boolean.TRUE);
+    }
+
+    private static boolean hasImportDirective(String text) {
+        return text.lines()
+                   .anyMatch(line -> line.strip()
+                                         .startsWith("%import"));
     }
 
     /** For programmatic invocation from tests. */
@@ -233,5 +387,11 @@ public class GenerateMojo extends AbstractMojo {
     /** Package-name-aware Cause helper for tests. */
     sealed interface GenerateError extends Cause {
         record GrammarReadError(String message) implements GenerateError {}
+    }
+
+    /** For programmatic invocation from tests. */
+    @SuppressWarnings("JBCT-RET-01")  // Maven plexus setter injection requires the void setX(T) shape.
+    public void setImportDirectory(File importDirectory) {
+        this.importDirectory = importDirectory;
     }
 }

@@ -344,14 +344,10 @@ public final class CstArray {
      *     equivalently the change in size of the spliced subtree's token span
      */
     public CstArray spliceSubtree(int oldNodeIdx, CstArray newSubtree, TokenArray newTokens, int tokenDelta) {
-        return spliceSubtree(oldNodeIdx,
-                             newSubtree,
-                             newSubtree == null
-                             ? NO_NODE
-                             : newSubtree.rootIndex(),
-                             newTokens,
-                             tokenDelta,
-
+        // No null check on newSubtree: it is required, no caller passes null, and the javadoc
+        // never gave null a meaning. A caller that genuinely wants to delete a subtree passes
+        // NO_NODE explicitly through the six-argument overload below, so nothing is lost.
+        return spliceSubtree(oldNodeIdx, newSubtree, newSubtree.rootIndex(), newTokens, tokenDelta,
         /* absoluteTokenIndices */
         false);
     }

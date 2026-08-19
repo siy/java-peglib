@@ -105,8 +105,15 @@ class LexerGeneratorTest {
         .contains("private static final int[] ACCEPT_KIND");
         assertThat(src)
         .contains("private static final int[] TRANSITIONS");
+        // 0.7.2 — the table is emitted as Base64 chunks decoded at class-init, not as inline
+        // t[i]=v assignments, so it no longer consumes one constant-pool entry per value.
         assertThat(src)
-        .contains("private static int[] buildTransitions()");
+        .contains("private static final String[] TRANSITIONS_DATA");
+        assertThat(src)
+        .contains("private static int[] decodeTRANSITIONS()");
+        assertThat(src)
+        .as("inline per-entry assignments would reintroduce the constant-pool ceiling")
+        .doesNotContain("private static void fillT0(");
         assertThat(src)
         .contains("import org.pragmatica.peg.token.TokenArray;");
         assertThat(src)

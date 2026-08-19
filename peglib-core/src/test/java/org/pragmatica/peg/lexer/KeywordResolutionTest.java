@@ -58,8 +58,31 @@ class KeywordResolutionTest {
         .containsKey("MiniIdent");
         var info = classification.keywordSkip()
                                  .get("MiniIdent");
-        assertThat(info.keywordRuleName())
-        .isEqualTo("MiniKw");
+        assertThat(info.keywordRuleNames())
+        .containsExactly("MiniKw");
+    }
+
+    /**
+     * A rule may exclude several keywords. Each leading {@code !Rule} guard is consumed, and the
+     * bodies they exclude combine — before 0.7.2 only the first was taken, which left the rest of
+     * the sequence in the body, made it non-lexical, and dropped the rule from skip-prefix
+     * detection entirely.
+     */
+    @Test
+    void skipPrefixDetected_withSeveralLeadingGuards() {
+        var grammar = """
+            MiniIdent <- !MiniKw !OtherKw [a-z]+
+            MiniKw <- 'if' / 'while'
+            OtherKw <- 'for' / 'do'
+            """;
+        var classification = classify(grammar);
+
+        assertThat(classification.keywordSkip())
+        .containsKey("MiniIdent");
+        assertThat(classification.keywordSkip()
+                                 .get("MiniIdent")
+                                 .keywordRuleNames())
+        .containsExactly("MiniKw", "OtherKw");
     }
 
     @Test
