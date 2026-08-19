@@ -88,6 +88,24 @@ void walk(CstArray cst, int idx) {
 walk(cst, cst.rootIndex());
 ```
 
+**Do not identify a fallback identifier by its rule name.** Where a grammar uses identifier
+fallback — `ColId <- !ReservedKeyword <...>` and friends — the same identifier reaches the CST
+under three different kinds depending only on what else in the grammar spells that text:
+
+```
+CREATE TABLE users (id bigint, name text, public text)
+
+id      ->  Token ColId        the identifier rule's own kind
+public  ->  Token PublicKW     a named rule spells that literal, so it owns the kind
+name    ->  Terminal [name]    the text collides with an inline literal, so it carries that kind
+```
+
+All three are the same grammatical thing — a column name — and only the third looks unusual.
+`findAll("ColId")` silently returns two of those three columns, and a dropped column reads as
+"no column here" rather than as an error. Select by grammatical **position** instead: the first
+leaf under `ColumnDef`, the leaf children of `QualifiedName`. The kind tells you how the lexer
+resolved the text; it does not tell you what role the grammar gave it.
+
 `rootIndex()` is a synthetic `_ROOT` node wrapping your start rule, not the start rule itself —
 it exists so the parser can check full consumption and retry recovery. Code that takes the root's
 children gets one child (your start rule), not your top-level items; unwrap `_ROOT` first. This
