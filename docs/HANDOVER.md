@@ -1,23 +1,24 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-19 — 0.7.2 complete on branch, release decision open
+**Last updated:** 2026-08-21 — 0.7.2 SHIPPED
 
 ---
 
-## Session 13 — 0.7.2 (2026-08-18 → 08-19) — READY, not shipped
+## Session 13 — 0.7.2 (2026-08-18 → 08-21) — SHIPPED
 
 ### State at a glance
 
 | | |
 |---|---|
-| **Branch** | `release-0.7.2`, 27 commits ahead of `main`. Last 9 commits are **local, not pushed**. |
-| **Ship state** | **NOT shipped.** Not on Central; `v0.7.2` tag does not exist. |
+| **Ship state** | **SHIPPED 2026-08-19.** On Maven Central, signatures included. Announced on LinkedIn 2026-08-21. |
+| **Merged** | PR #44 → `main` at `6fd769b`, CI green on the merge commit |
+| **Tag / release** | `v0.7.2` at `6fd769b`; GitHub release cut (first since v0.4.3 — the practice was resumed deliberately) |
 | **Build** | `mvn install` — BUILD SUCCESS, lint + format-check on |
-| **Tests** | **628** across 5 modules, 0 failures, 0 skips (was 605 at session start) |
-| **Local `~/.m2`** | 0.7.2 installed for all six modules, 2026-08-19. Jar + pom, no `.asc` — a local install, not a release. |
+| **Tests** | **635** across 5 modules, 0 failures, 0 skips (605 at session start) |
 | **Grammar** | `java25.peg` **unchanged**, so the 99.45% javac agreement carries over untouched |
+| **Downstream** | `aether/pg-tools` green on 0.7.2 — 811 tests, 0 failures |
 
-### THE DECISION — settled 2026-08-19
+### THE DECISION — settled 2026-08-19, discharged 2026-08-19
 
 **0.7.2 ships only when the `aether/pg-tools` migration succeeds, and absorbs every fix that
 migration needs.** So the release is open-ended by design: it is not "done and waiting", it is
@@ -28,7 +29,10 @@ That makes new downstream blockers in-scope for 0.7.2 rather than deferred to 0.
 dollar-quoting item below.
 
 `mvn -Prelease deploy` uses `autoPublish=true` with `waitUntil=published`: **no staging gate,
-artifacts immutable, a mistake ships 0.7.3.** Do not deploy without an explicit decision.
+artifacts immutable, a mistake ships the next version.** Do not deploy without an explicit
+decision. For the record the 0.7.2 deploy was clean — deployment `43e982c6` published without the
+`UnrecognizedPropertyException` that made 0.7.0 report BUILD FAILURE for a successful publish, so
+the 0.11.0 plugin pin is doing its job and should stay.
 
 Note on the pin: `aether/pg-tools` pins `0.6.0` on `release-1.0.0-rc3`, but the migration branch
 `feat/pg-tools-peglib-0.7.2` already pins `0.7.2`. **Publishing changes nothing about the version
