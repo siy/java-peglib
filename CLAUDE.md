@@ -2,16 +2,17 @@
 
 ## Project Status
 
-**0.7.1 is the latest shipped release** (Maven Central, 2026-08-14). It validates the Java
-grammar against javac's own parse phase (99.45% agreement over OpenJDK's langtools suite), adds
-the `%memo` directive, and holds parse throughput within ~1% of 0.7.0.
+**0.7.2 is the latest shipped release** (Maven Central, 2026-08-19). It makes peglib usable for
+grammars that are not Java-shaped: identifier fallback works for case-insensitive keywords, a
+lexer rule may reference another lexer rule, end in a character-class lookahead or carry several
+leading keyword guards, `%parser` pins classification the inference gets wrong, and a rule named
+from `%whitespace` is trivia. Eleven defects, every one found by a downstream PostgreSQL grammar
+and **none reachable from `java25.peg`** — see the handover for why that matters. `java25.peg` is
+unchanged, so 0.7.1's 99.45% javac agreement carries over.
 
-**0.7.2 is complete on `release-0.7.2` and not yet shipped.** Beyond the `%import`/Base64/kind
-fixes it started with, it makes peglib usable for grammars that are not Java-shaped: identifier
-fallback works for case-insensitive keywords, a lexer rule may reference another lexer rule, a
-lexer rule may end in a character-class lookahead or carry several leading keyword guards, and
-`%parser` lets an author pin classification the inference gets wrong. See the CHANGELOG for the
-full list and `docs/HANDOVER.md` for where it stands.
+0.7.1 (2026-08-14) validated the Java grammar against javac's own parse phase (99.45% agreement
+over OpenJDK's langtools suite), added the `%memo` directive, and held parse throughput within
+~1% of 0.7.0.
 
 0.7.0 (2026-08-05) was the **breaking** one: the 0.5.x interpreter path and the
 `peglib-incremental` artifact were removed, and `org.pragmatica.peg.v6.*` collapsed into
@@ -383,7 +384,7 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**628 tests across 5 modules**, 0 failures, 0 skips (0.7.2 branch; 576 at 0.7.1). The count
+**635 tests across 5 modules**, 0 failures, 0 skips (0.7.2; 576 at 0.7.1). The count
 dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were deleted, not
 because coverage was lost.
 

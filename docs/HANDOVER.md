@@ -10,188 +10,148 @@
 
 | | |
 |---|---|
-| **Ship state** | **SHIPPED 2026-08-19.** On Maven Central, signatures included. Announced on LinkedIn 2026-08-21. |
-| **Merged** | PR #44 → `main` at `6fd769b`, CI green on the merge commit |
-| **Tag / release** | `v0.7.2` at `6fd769b`; GitHub release cut (first since v0.4.3 — the practice was resumed deliberately) |
+| **Ship state** | **SHIPPED.** `org.pragmatica-lite:peglib:0.7.2` on Maven Central with signatures, verified by fetch. Announced 2026-08-21. |
+| **Merged / tagged** | PR #44 → `main` at `6fd769b`, CI green; tag `v0.7.2`; GitHub release cut (first since v0.4.3 — practice resumed deliberately) |
 | **Build** | `mvn install` — BUILD SUCCESS, lint + format-check on |
 | **Tests** | **635** across 5 modules, 0 failures, 0 skips (605 at session start) |
 | **Grammar** | `java25.peg` **unchanged**, so the 99.45% javac agreement carries over untouched |
-| **Downstream** | `aether/pg-tools` green on 0.7.2 — 811 tests, 0 failures |
+| **Downstream** | `aether/pg-tools` green on 0.7.2 — 811 tests, 0 failures, 34/34 real schema files parsing |
 
-### THE DECISION — settled 2026-08-19, discharged 2026-08-19
+The deploy was clean: deployment `43e982c6` published without the `UnrecognizedPropertyException`
+that made 0.7.0 report BUILD FAILURE for a publish that had in fact succeeded. **Keep the
+`central-publishing` 0.11.0 pin** — it is doing its job. `autoPublish=true` with
+`waitUntil=published` still means no staging gate and immutable artifacts, so a mistake ships the
+next version.
 
-**0.7.2 ships only when the `aether/pg-tools` migration succeeds, and absorbs every fix that
-migration needs.** So the release is open-ended by design: it is not "done and waiting", it is
-"gated on a downstream consumer parsing its own grammar". Do not date the CHANGELOG entry or tag
-until that gate passes.
+### What this release was
 
-That makes new downstream blockers in-scope for 0.7.2 rather than deferred to 0.7.3 — see the
-dollar-quoting item below.
+0.7.2 is the release where peglib stopped being a Java parser generator that happened to be
+general. Every fix below was found by one downstream consumer — `aether/pg-tools`, a 753-line
+PostgreSQL grammar — and **none was reachable from `java25.peg`**, which has zero case-insensitive
+keyword literals and zero reference-only lexer rules. Eleven defects, plus two tooling fixes.
 
-`mvn -Prelease deploy` uses `autoPublish=true` with `waitUntil=published`: **no staging gate,
-artifacts immutable, a mistake ships the next version.** Do not deploy without an explicit
-decision. For the record the 0.7.2 deploy was clean — deployment `43e982c6` published without the
-`UnrecognizedPropertyException` that made 0.7.0 report BUILD FAILURE for a successful publish, so
-the 0.11.0 plugin pin is doing its job and should stay.
+**Lexing and classification**
 
-Note on the pin: `aether/pg-tools` pins `0.6.0` on `release-1.0.0-rc3`, but the migration branch
-`feat/pg-tools-peglib-0.7.2` already pins `0.7.2`. **Publishing changes nothing about the version
-string** — it changes whether that coordinate resolves anywhere other than this machine. Today it
-comes from a local `mvn install` with no `.asc`; after the tag it resolves from Central. So no
-consumer re-pin is needed on either side; what is gated is mergeability, since a reviewer or CI
-cannot resolve 0.7.2 today. pragmatica PR #600 is gated the same way.
-
-### What landed this session
-
-Everything was driven by `aether/pg-tools`' 753-line `postgres.peg`. None of it is reachable from
-`java25.peg`, which is exactly why it survived this long — see the lesson at the end.
-
-- **Identifier fallback works for case-insensitive grammars.** `buildIdentifierFallbacks` skipped
-  every literal whose key did not end in `/cs`, reasoning "Java keywords are case-sensitive" — a
-  Java assumption compiled into a general library. Keyword containment now folds both sides.
+- **Identifier fallback works for case-insensitive grammars.** It was gated on a `/cs` key suffix
+  reasoning "Java keywords are case-sensitive" — a Java assumption compiled into a general
+  library. Keyword containment now folds both sides.
 - **A lexer rule may reference another lexer rule.** References are substituted before DFA
-  compilation, cycles refused. This makes "guard plus named alternatives" expressible at all.
-- **A rule that can match only the empty string is PARSER.** Note *always-empty*, not *nullable*:
+  compilation, cycles refused. This is what makes "guard plus named alternatives" expressible.
+- **A rule that can match only the empty string is PARSER.** *Always-empty*, not *nullable* —
   `Word <- [a-z]*` is nullable and stays a legitimate lexer rule.
 - **`< >` is load-bearing for classification.** A reference-only body spanning more than one token
-  is a parser rule unless a token boundary declares otherwise. Migration note in the CHANGELOG;
-  no working grammar is affected, because such rules could not compile before.
+  is a parser rule unless a token boundary declares otherwise.
 - **Trailing character-class lookahead compiles** — `X ![c]` becomes a constraint on the accepting
   state. This is what multi-word lexemes need.
-- **Several leading keyword guards** on one rule, and a single-keyword rule now counts as a
-  literal set.
+- **Several leading keyword guards** on one rule; a single-keyword rule counts as a literal set.
 - **`%parser RuleName`** pins a rule to PARSER, overriding inference.
+- **A rule named from `%whitespace` is trivia.** Such alternatives could not compile (no call
+  stack in a DFA) and were *silently dropped*, so the standalone rule matched the same text under
+  an ordinary kind and the first `--` comment in a file ended the parse. 18 of 34 real files.
+- **A lexeme gets one kind, named after the rule that names it.** A second synthetic `INLINE_*`
+  kind for the same text left the rule's kind unreachable and the keyword anonymous in the CST.
+- **Adoption runs before alias arrays are built.** Interleaving them made the result depend on
+  declaration order — `ReservedKeyword` before `CaseKW` broke, after `CreateKW` worked.
+- **A guard's own reserved words are no longer offered as identifier fallbacks.** The `*KW`
+  rule-name half of the fold was never case-folded, so `ColId` accepted `CREATE` and `SELECT` as
+  column names. Latent while those kinds were unreachable; live the moment adoption landed.
 
-### Both of session 12's open design items are closed
+**Tooling**
 
-- *Identifier fallback unreachable for case-insensitive grammars* — fixed. The handover's claim
-  that relaxing `/cs` "still yields `identifierFallbackKinds: 0`" was true only for `postgres.peg`,
-  where a second defect emptied `keywordSkip`; the two were conflated.
-- *The `CharClassHexEscapeTest` hang* — **does not reproduce.** It passes in 0.94 s. Whatever the
-  earlier attempt changed, it was not the `/cs` relaxation.
-- *Unreachable-kind detection* — still not implemented, and now demonstrated live: in
-  `postgres.peg`, `WindowName` out-prioritised `ColId` so every identifier in the language lexed
-  as `WindowName`, leaving `ColId` allocated and dead with no guard firing. Diagnosed by hand.
-  This remains the most valuable unbuilt check.
+- **`%import` works end to end**, plus all three mojos; **Base64 DFA tables** lifting a ~1100-state
+  ceiling (both from session 12).
+- **The generator stamp identifies the build, not the version.** A same-version rebuild — the
+  normal case for an entire unreleased version — was invisible to consumers, who kept stale
+  generated sources and measured a parser that no longer matched the library.
 
 ### Open items
 
 1. **A guarded rule whose body names another guarded rule.** `WindowName <- !PartitionKW … ColId`
    where `ColId <- !ReservedKeyword (…)`: the outer guards resolve, but inlining `ColId` drags its
    own guard into the body, which the DFA cannot compile. Composing the guard sets inside
-   `detectSkipPrefix` was tried and **reverted — it failed 35 java25 tests** by changing which
-   rules register as skip-prefix. **The reason for those 35 failures was never diagnosed**; that
-   is a hypothesis, not a finding. Diagnose before trusting any reasoning about blast radius. A
-   fix probably belongs in `resolveSkipBody`, where the rule is already a confirmed candidate.
-2. **Unreachable-kind detection** — see above.
+   `detectSkipPrefix` was tried and **reverted — it failed 35 java25 tests**. **The reason was
+   never diagnosed**; the explanation recorded at the time is a hypothesis, not a finding.
+   Diagnose before trusting any reasoning about blast radius. A fix probably belongs in
+   `resolveSkipBody`, where the rule is already a confirmed candidate.
+2. **Unreachable-kind detection.** Still the most valuable unbuilt check, and now demonstrated
+   live: `WindowName` out-prioritised `ColId`, so every identifier in the language lexed as
+   `WindowName` while `ColId` sat allocated and dead with no guard firing. Diagnosed by hand over
+   several rounds; a check would have caught it instantly.
 3. **Generated output is not reproducible.** Two runs of the *same commit* emit different
    `GLexer.java`: `Map.copyOf(textToKind)` at `DfaBuilder.java:912` has randomised iteration order
-   per JVM, and `renderResolvers` iterates it. Pre-existing, unrelated to this session's work, and
-   it defeats any content-based staleness check — including the generator-version stamping added
-   in 0.7.2. Small fix (sort, or keep the `LinkedHashMap`). Not done: not this session's mess.
-4. **Lookahead still unsupported** over anything but a character class (`&(Modifier* ClassKW)`),
-   and nested inside a Choice alternative rather than trailing the whole body.
-
-### Downstream migration — COMPLETE as of 2026-08-19, release gate MET
-
-`aether/pg-tools` is green on 0.7.2:
-
-| Module | Tests | Result |
-|---|---|---|
-| PG Parser | 309 | 0 failures |
-| PG Schema | 112 | 0 failures |
-| PG Codegen | 218 | 0 failures |
-| SQL Splitter | 172 | 2 environmental (Testcontainers, no Docker) |
-| **Total** | **811** | **0 failures** |
-
-Against a 0.6.0 baseline of 807 with the same two exclusions. CST differential: 34/34 real files
-parse, 0 failures, 148 statements against 150 semicolons of ground truth — 0.6.0 reported a
-constant 2 per file (68 total), so that figure was never trustworthy; the `_ROOT` unwrap fixed it.
-
-**This satisfies the release condition.** 0.7.2 may ship.
-
-Eleven defects were found and fixed against that one grammar, none of them reachable from
-`java25.peg`. The final one needed no library change at all: `postgres.peg` had `$` in its
-identifier continuation class, so `world$$` lexed as a single 7-char identifier and swallowed the
-closing dollar-quote delimiter. Two grammar lines fixed it — drop `$` from the class, and capture
-the dollar-quote tag as a token (`$tag<ColId>`) rather than as characters, since a
-character-class capture inside a PARSER rule can never match.
-
-### Downstream: postgres.peg
-
-Four grammar changes take it from "does not compile" to **25/25 statements parsing**, verified
-with CST node counts to rule out empty-match collapse. Patch and full grammar are NOT in this
-repo — they were handed to the pg-tools side. The changes: delete `WindowName` (inline its guards
-at its one use site), re-point `ColLabel <- ColId / ReservedKeyword` with `%parser ColLabel`, drop
-`CompareOp`'s dead `!'<<'` / `!'>>'` guards, and optionally restructure `Input` to drop the
-always-empty `EmptyStatement` alternative.
-
-`java25.peg` could now use `%parser` for its `value` contortion too — verified working — but it is
-deliberately unchanged, because that spelling is corpus-validated at 99.45% and switching it needs
-a corpus re-run.
+   per JVM and `renderResolvers` iterates it. Pre-existing. It defeats any content-based staleness
+   check, including the stamping added in 0.7.2. Small fix (sort, or keep the `LinkedHashMap`).
+4. **Lookahead unsupported** over anything but a character class (`&(Modifier* ClassKW)`), and
+   nested inside a Choice alternative rather than trailing the whole body. This is why `java25.peg`
+   still spells its `value` lookahead inline at four use sites — though `%parser` now rescues that
+   shape (verified), so switching it is possible and needs only a corpus re-run to justify.
 
 ### Where to pick up, in order
 
-1. **Answer the release decision.** If shipping: push the 9 local commits, PR → merge → tag
-   `v0.7.2` → `mvn -Prelease deploy`, remembering there is no staging gate.
-2. **Diagnose the 35 java25 failures** from the guard-composition attempt, then fix open item 1.
-3. **Unreachable-kind detection** — the check that would have caught the `WindowName` collision
-   automatically instead of by hand.
-4. **Generator reproducibility** — small, and it makes "did the output change?" a meaningful
-   question again.
+1. **Diagnose the 35 java25 failures** from the guard-composition attempt, then fix open item 1.
+2. **Unreachable-kind detection** — item 2.
+3. **Generator reproducibility** — item 3; small, and it makes "did the output change?" a
+   meaningful question again.
+
+Nothing is release-blocked. 0.7.2 is out and `main` is clean.
 
 ### Things worth not re-learning
 
-- **A test can pass against the bug it was written for — twice this session.** The first
-  trailing-lookahead tests asserted "the parse reports diagnostics", which held whether or not the
-  guard was honoured (both readings fail, for different reasons). The first recursion tests
-  asserted grammars were refused, but left-recursion detection refused them several phases before
-  the guard under test. Mutation-check every regression test; assert the property, not a
-  downstream symptom.
-- **`java25.peg` cannot validate lexer-level changes.** Zero genuine case-insensitive literals,
-  zero reference-only lexer rules. Several defects here were provably unreachable from it. Use a
-  second grammar for anything touching kinds, classification or fallbacks.
+- **A test can pass against the bug it was written for. This happened FOUR times in one session** —
+  three of mine, one downstream. Trailing-lookahead tests asserted "the parse reports
+  diagnostics", true whether or not the guard was honoured. Recursion tests asserted grammars were
+  refused, but left-recursion detection refused them phases before the guard under test. A
+  kind-adoption test passed because an unrelated collision in the fixture masked the defect. The
+  fix each time was the same: **assert the mechanism, not a downstream symptom** — "no alias array
+  names a kind the map no longer points at", "the fallback set is disjoint from the guard set".
+  Mutation-check every regression test, and treat a green mutation run as the test failing.
+- **`java25.peg` cannot validate lexer-level changes.** Zero case-insensitive literals, zero
+  reference-only lexer rules. Eleven defects were provably unreachable from it. "Measured neutral
+  on java25, therefore safe" was asserted this session and was wrong — neutrality on a grammar
+  that lacks a shape says nothing about grammars that have it. Use a second grammar.
 - **Compiling is not parsing.** `postgres.peg` reached `fromGrammar: SUCCESS` while every single
-  statement still failed to parse. Gate on CST node counts, not on the grammar building.
+  statement still failed to parse. Gate on CST node counts.
 - **An always-empty alternative at the end of a choice hides every failure.** `postgres.peg`'s
-  `EmptyStatement` turned every parse error into a silent zero-token match reported at offset 0.
+  `EmptyStatement` turned every parse error into a silent zero-token match at offset 0.
 - **Making a parser stricter surfaces latent bugs in consumer grammars — budget for it.** Three of
-  the migration's failures were pre-existing grammar bugs that only became observable once peglib
-  stopped being wrong: `!ReservedKeyword` had never fired at 0.6.0, so reserved words silently
-  passed as identifiers and no production accepted `CURRENT_TIMESTAMP`; `IsClause` had a bare
-  `NotKW NullKW` alternative, so `DEFAULT true NOT NULL` parsed as `DEFAULT (true NOT NULL)` and
-  the column stayed nullable; and `$` in the identifier class swallowed dollar-quote delimiters.
-  None were peglib defects. Expect a correctness fix to look like a regression to the consumer
-  until the latent bug it exposed is fixed. Sharper still: these bugs were not merely invisible,
-  they were **inverted** — the guard that never fired made the grammar look permissive when it was
-  broken, and `DEFAULT true NOT NULL` looked like a working schema tool right up to the point it
-  emitted a nullable column into generated code. A consumer's tests can be green because the bug
-  and the test agree with each other.
-- **Presence of a statement type is not coverage of it.** The pg-tools corpus DOES contain SELECT
-  statements — 6 of them, alongside 60 `CreateTableStmt`, 47 `CreateIndexStmt` and 29
-  `AlterTableStmt` — and still has **zero** `TargetElem`, `ColLabel`, `WindowSpec`, `JoinClause`
-  and `CaseExpr`. So it was structurally blind to every SELECT-side change made during this
-  migration: `ColLabel`, `WindowName`, `CompareOp`, dollar quoting. Someone pointing at those six
+  the migration's failures were pre-existing grammar bugs that only became visible once peglib
+  stopped being wrong: `!ReservedKeyword` had never fired at 0.6.0 (so no production accepted
+  `CURRENT_TIMESTAMP`); `IsClause` had a bare `NotKW NullKW` alternative, so `DEFAULT true NOT
+  NULL` parsed as `DEFAULT (true NOT NULL)` and the column stayed nullable; `$` in the identifier
+  class swallowed dollar-quote delimiters. None were peglib defects. They were not merely
+  invisible but **inverted** — the broken guard made the grammar look permissive, and the nullable
+  column looked like a working schema tool right up to the point it reached generated code.
+  **A consumer's tests can be green because the bug and the test agree with each other.**
+- **Presence of a statement type is not coverage of it.** The pg-tools corpus contains SELECT
+  statements — 6, alongside 60 `CreateTableStmt`, 47 `CreateIndexStmt`, 29 `AlterTableStmt` — and
+  has **zero** `TargetElem`, `ColLabel`, `WindowSpec`, `JoinClause`, `CaseExpr`. It was
+  structurally blind to every SELECT-side change in this migration. Someone pointing at those six
   SELECTs would reasonably claim SELECT coverage and be wrong. The unit tests covered exactly the
-  inverse; neither instrument alone sufficed and both were needed repeatedly. Same shape as
-  `java25.peg` being unable to reach any of the eleven defects fixed this session — a gate reports
-  on what it exercises and is silent on everything else, so green is not coverage.
-
-  Worth noting how this number was corrected: it was first measured as "100% DDL, zero SELECT"
-  while 18 of 34 files still failed to parse, so the seed files contributed nothing, and it was not
-  re-measured once they parsed. A measurement taken in a broken state stays wrong until someone
-  re-runs it — the same failure mode as a test written against a bug.
+  inverse; both instruments were needed, repeatedly.
+- **A measurement taken in a broken state stays wrong until someone re-runs it.** The corpus figure
+  above was first reported as "100% DDL, zero SELECT" — measured while 18 of 34 files failed to
+  parse, so the seed files contributed nothing, and never re-measured once they parsed. Same
+  failure mode as a test written against a bug, one level out.
+- **Send a mechanism and a reproduction, not a conclusion.** Every round of the downstream
+  collaboration that started with a conclusion cost a cycle — a tag-delimited-block lexer feature
+  was proposed twice for what turned out to be two grammar lines. Every round that shipped a diff
+  plus a diagnostic did not. The best diagnostics of the session came from downstream: an
+  `ALTER`-vs-`CREATE` pair with identical constraint text and opposite outcomes, an
+  intersection-must-be-zero invariant, and a `CreateKW`/`CaseKW` declaration-order asymmetry.
 
 ### Verification recipes
 
 ```bash
-mvn install                                    # full reactor, lint + format-check, 628 tests
+mvn install                                    # full reactor, lint + format-check, 635 tests
 mvn -q jbct:format                             # before committing new main-source code
 ```
 
 Corpus agreement (~6 s once fetched; never vendor the GPLv2 corpus):
 see `tools/langtools-corpus/README.md`. Last measured live 2026-08-14 at **99.45%**;
 `java25.peg` is unchanged since, so it still holds.
+
+`%memo` semantics after any change to `CstArrayBuilder` replay:
+`tools/memo-differential/README.md` — differential vs the same grammar without the directive.
 
 ---
 
