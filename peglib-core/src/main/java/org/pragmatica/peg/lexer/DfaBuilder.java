@@ -4,6 +4,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -358,15 +359,35 @@ public final class DfaBuilder {
                                                                classification,
                                                                ruleNameToKind,
                                                                inlineLiteralToKind);
-
-        return Result.success(new TokenKindAssignment(Map.copyOf(ruleNameToKind),
-                                                      Map.copyOf(inlineLiteralToKind),
-                                                      Map.copyOf(keywordResolutions),
-                                                      Map.copyOf(ruleNameToAliasKinds),
-                                                      Map.copyOf(identifierFallbackKinds),
-                                                      Map.copyOf(inlineExpansions),
+        // 0.7.3 — orderedCopy, not Map.copyOf. Every map in this record feeds code generation,
+        // and Map.copyOf returns an immutable map whose iteration order is randomised per JVM
+        // run. Emitting from one therefore produced a DIFFERENT GLexer.java for the same commit
+        // and the same grammar on every run, which defeats any content-based staleness check —
+        // including the generator stamping added in 0.7.2. Each of these was already built as a
+        // LinkedHashMap, so the order-preserving intent was there and Map.copyOf discarded it.
+        return Result.success(new TokenKindAssignment(orderedCopy(ruleNameToKind),
+                                                      orderedCopy(inlineLiteralToKind),
+                                                      orderedCopy(keywordResolutions),
+                                                      orderedCopy(ruleNameToAliasKinds),
+                                                      orderedCopy(identifierFallbackKinds),
+                                                      orderedCopy(inlineExpansions),
                                                       anyCharKind,
                                                       kindNames.toArray(new String[0])));
+    }
+
+    /**
+     * Immutable copy that preserves iteration order.
+     *
+     * <p>{@link Map#copyOf} is the obvious spelling and the wrong one anywhere the result is
+     * iterated to produce output: its iteration order is deliberately randomised per JVM run,
+     * so generated source built from it is not reproducible. This keeps the same immutability
+     * guarantee — a defensive copy behind an unmodifiable view — while leaving the order the
+     * caller established intact.
+     *
+     * @since 0.7.3
+     */
+    private static <K, V> Map<K, V> orderedCopy(Map<K, V> source) {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(source));
     }
 
     /**
@@ -1032,7 +1053,7 @@ public final class DfaBuilder {
                 textToKind.put(text, kw);
             }
 
-            result.put(identKind, new KeywordResolution(identKind, Map.copyOf(textToKind)));
+            result.put(identKind, new KeywordResolution(identKind, orderedCopy(textToKind)));
         }
 
         return result;

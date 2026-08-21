@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Generated source is reproducible.** Two runs of the same commit against the same grammar
+  emitted different `GLexer.java`. Measured before the fix: five fresh JVMs produced **four
+  distinct SHA-256 hashes** of the generated source for `java25.peg`, and all 108 differing
+  lines were `RESOLVERS` `.put(...)` lines. After: ten runs, one hash.
+
+  The cause was `Map.copyOf`, whose iteration order is deliberately randomised per JVM run.
+  `DfaBuilder` built each keyword-resolution map as a `LinkedHashMap` — the order-preserving
+  intent was there — then passed it through `Map.copyOf`, which discarded it, and
+  `renderResolvers` iterates the result. Replaced with an `orderedCopy` helper keeping the same
+  immutability guarantee (defensive copy behind an unmodifiable view) without reordering,
+  applied to every map in `TokenKindAssignment` since all of them feed code generation.
+
+  This is what makes "did the generated output change?" a meaningful question again. Any
+  content-based staleness check was defeated by it, including the generator stamping added in
+  0.7.2 — a consumer comparing generated sources saw spurious changes on every rebuild.
+
+  The regression test deliberately does **not** generate twice and compare: the randomisation
+  seed is chosen once per JVM, so two calls in one test JVM agree with each other and that test
+  passes against the bug. It asserts instead that emitted order equals the grammar's keyword
+  declaration order — a property that holds in any JVM. (Verified: reintroducing `Map.copyOf`
+  turns both mechanism tests red while the generate-twice check stays green.)
+
 ### Changed
 
 ### Added
