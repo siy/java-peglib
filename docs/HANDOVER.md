@@ -1,6 +1,6 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-21 — 0.7.2 SHIPPED
+**Last updated:** 2026-08-21 — 0.7.2 shipped; 0.7.3 cycle open on `release-0.7.3`
 
 ---
 
@@ -93,7 +93,9 @@ keyword literals and zero reference-only lexer rules. Eleven defects, plus two t
 3. **Generator reproducibility** — item 3; small, and it makes "did the output change?" a
    meaningful question again.
 
-Nothing is release-blocked. 0.7.2 is out and `main` is clean.
+Nothing is release-blocked. 0.7.2 is out and `main` is clean. `release-0.7.3` is branched from
+`main` at `d548f2a` with versions bumped and an empty CHANGELOG section; it carries no changes of
+its own yet.
 
 ### Things worth not re-learning
 
