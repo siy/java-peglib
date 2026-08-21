@@ -138,6 +138,8 @@ e{n,m}      # Bounded repetition
 %checkpoint Rule              # incremental-reparse boundary
 %memo Rule                    # position memo for a rule re-parsed by overlapping alternatives (0.7.1)
 %parser Rule                  # pin a rule to PARSER, overriding classification inference (0.7.2)
+%nest '<open>' '<close>'      # delimiter pair whose occurrences nest — depth-counted, not
+                              # DFA-matched. Nested block comments (0.7.3)
 ```
 
 ## Rule classification (LEXER vs PARSER)
@@ -216,6 +218,34 @@ Anything else is skipped, and a reference to such a rule fails with `SkippedRule
 - **Lookahead nested inside a Choice alternative** rather than trailing the whole body.
 
 **Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`).
+
+## Nesting trivia — the one thing the DFA structurally cannot do
+
+`%nest '/*' '*/'` (0.7.3) declares a delimiter pair whose occurrences **nest**. Everything else
+in this file is about what the DFA can be persuaded to compile; this is the case where no
+spelling would work, because a nested block comment is **not a regular language** and a DFA has
+no counter. The recursive rule is refused twice over — `grammar.whitespace-cycle` rejects it
+before compilation is even attempted — so the delimiters are stated outright rather than
+recovered from a rule body that cannot be written.
+
+Four properties are load-bearing and easy to break:
+
+- **The counting scan REPLACES the DFA scan** at a token start; it does not run before it.
+  Written the other way a comment would be scanned twice. `LexerEngine.lex` implements this by
+  setting `lastAcceptEnd`/`lastAcceptKind` and skipping the DFA loop, which also means keyword
+  resolution and the doc-variant refinement still run — emit-and-continue would silently make
+  `DOC_BLOCK_COMMENT` unreachable under `%nest`.
+- **Delimiters are tested only at a token start.** That is what makes `"/*"` inside a string
+  literal safe. A global scan would be wrong.
+- **Unterminated blocks fall through to the DFA**, so malformed input reads exactly as it did
+  before the directive existed.
+- **Emission is guarded on the grammar declaring `%nest`**, so `GLexer` for every other grammar
+  is byte-identical to 0.7.2 — no new per-token cost, no regeneration churn. `NestingLexerParityTest`
+  asserts this, and pins the two lexer paths to the same token stream.
+
+The scanner itself lives in **peglib-runtime** (`token/NestingScanner.java`) precisely so
+`LexerEngine` and generated `GLexer` share one definition — this project's recorded failure mode
+is those two drifting while the suite, which exercises only the former, stays green.
 
 Named captures `$name<e>` and back-references `$name` were dropped in 0.6.0 but **restored in 0.6.1** — they are supported at runtime via `ParserGenerator`'s capture map. `NamedCaptureDetector` no longer exists.
 

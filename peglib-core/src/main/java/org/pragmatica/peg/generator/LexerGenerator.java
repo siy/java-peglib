@@ -6,6 +6,7 @@ import java.util.List;
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Result;
 import org.pragmatica.peg.grammar.Grammar;
+import org.pragmatica.peg.grammar.NestingPair;
 import org.pragmatica.peg.lexer.Dfa;
 import org.pragmatica.peg.lexer.DfaBuilder;
 import org.pragmatica.peg.lexer.RuleClassifier;
@@ -99,7 +100,7 @@ public final class LexerGenerator {
         int whitespaceKind = grammar.whitespace().isPresent()
                              ? DfaBuilder.KIND_WHITESPACE
                              : -1;
-        var source = renderSource(packageName, className, dfa, kinds, whitespaceKind);
+        var source = renderSource(packageName, className, dfa, kinds, whitespaceKind, grammar.nestingTrivia());
 
         return Result.success(new Generated(packageName, className, source, List.copyOf(warnings)));
     }
@@ -108,19 +109,31 @@ public final class LexerGenerator {
                                        String className,
                                        Dfa dfa,
                                        DfaBuilder.TokenKindAssignment kinds,
-                                       int whitespaceKind) {
+                                       int whitespaceKind,
+                                       List<NestingPair> nestingTrivia) {
         int stateCount = dfa.stateCount();
         int alphabet = dfa.alphabetSize();
         int[][] transitions = dfa.transitionTable();
         int[] acceptKinds = dfa.acceptKinds();
         var sb = new StringBuilder(stateCount * alphabet * 6);
+        // 0.7.3 — every %nest-dependent emission below is guarded on this flag, so the source
+        // generated for a grammar that declares none is byte-identical to what 0.7.2 emitted.
+        // That is worth preserving deliberately: consumers cache generated sources and detect
+        // staleness by comparing them, so a gratuitous diff would force every downstream
+        // grammar to regenerate for a feature it does not use.
+        boolean hasNesting = !nestingTrivia.isEmpty();
 
         if (!packageName.isEmpty()) {
             sb.append("package ").append(packageName).append(";\n\n");
         }
 
         sb.append("import org.pragmatica.peg.token.TokenArray;\n");
-        sb.append("import org.pragmatica.peg.token.TokenArrayBuilder;\n\n");
+        sb.append("import org.pragmatica.peg.token.TokenArrayBuilder;\n");
+        if (hasNesting) {
+            sb.append("import org.pragmatica.peg.token.NestingScanner;\n");
+        }
+
+        sb.append("\n");
         sb.append("public final class ").append(className).append(" {\n\n");
         sb.append("    private ").append(className).append("() {}\n\n");
         sb.append("    public static final int STATE_COUNT = ").append(stateCount).append(";\n");
@@ -132,13 +145,67 @@ public final class LexerGenerator {
         renderTransitions(sb, transitions, stateCount, alphabet);
         renderNonAsciiTransitions(sb, dfa.nonAsciiTransitions());
         renderResolvers(sb, kinds);
+        renderNestingTables(sb, nestingTrivia);
         renderLexMethod(sb,
                         alphabet,
                         !kinds.keywordResolutions().isEmpty(),
-                        dfa.followTable().length > 0);
+                        dfa.followTable().length > 0,
+                        hasNesting);
         sb.append("}\n");
 
         return sb.toString();
+    }
+
+    /**
+     * 0.7.3 — emit the {@code %nest} delimiter tables and the per-token reject test.
+     *
+     * <p>Emits nothing at all when the grammar declares no {@code %nest}, which keeps both the
+     * generated source and the generated lexer's per-token cost exactly what they were.
+     *
+     * <p>The trivia kind is resolved HERE, at generation time, by the same
+     * {@link DfaBuilder#triviaKindForPrefix} the interpreted engine asks — so a delimiter
+     * names the same kind on both paths, and the generated lexer does no kind classification
+     * at run time.
+     */
+    private static void renderNestingTables(StringBuilder sb, List<NestingPair> nestingTrivia) {
+        if (nestingTrivia.isEmpty()) {
+            return;
+        }
+
+        var first = new StringBuilder();
+        var open = new StringBuilder();
+        var close = new StringBuilder();
+        var kind = new StringBuilder();
+
+        for (int i = 0; i < nestingTrivia.size(); i++) {
+            var pair = nestingTrivia.get(i);
+
+            if (i > 0) {
+                first.append(", ");
+                open.append(", ");
+                close.append(", ");
+                kind.append(", ");
+            }
+
+            first.append("'").append(escapeJavaString(String.valueOf(pair.open().charAt(0)))).append("'");
+            open.append("\"").append(escapeJavaString(pair.open())).append("\"");
+            close.append("\"").append(escapeJavaString(pair.close())).append("\"");
+            kind.append(DfaBuilder.triviaKindForPrefix(pair.open()));
+        }
+
+        sb.append("    private static final char[] NEST_FIRST = {").append(first).append("};\n");
+        sb.append("    private static final String[] NEST_OPEN = {").append(open).append("};\n");
+        sb.append("    private static final String[] NEST_CLOSE = {").append(close).append("};\n");
+        sb.append("    private static final int[] NEST_KIND = {").append(kind).append("};\n\n");
+        // Reject on a single char compare; startsWith is reached only at a position whose
+        // first character already matched a delimiter.
+        sb.append("    private static int nestingOpenAt(String input, int pos) {\n");
+        sb.append("        char c = input.charAt(pos);\n");
+        sb.append("        for (int i = 0; i < NEST_FIRST.length; i++) {\n");
+        sb.append("            if (NEST_FIRST[i] == c && input.startsWith(NEST_OPEN[i], pos)) return i;\n");
+        sb.append("        }\n");
+        sb.append("        return -1;\n");
+        sb.append("    }\n\n");
     }
 
     /**
@@ -371,7 +438,8 @@ public final class LexerGenerator {
     private static void renderLexMethod(StringBuilder sb,
                                         int alphabet,
                                         boolean hasResolvers,
-                                        boolean hasFollowConstraints) {
+                                        boolean hasFollowConstraints,
+                                        boolean hasNesting) {
         sb.append("    public static TokenArray lex(String input) {\n");
         // No defensive null check on input: the only caller path is
         // CompiledLexer.lex(String), which is invoked from Parser.parse(String)
@@ -381,10 +449,31 @@ public final class LexerGenerator {
         sb.append("        int len = input.length();\n");
         sb.append("        int pos = 0;\n");
         sb.append("        while (pos < len) {\n");
-        sb.append("            int state = 0;\n");
-        sb.append("            int lastAcceptEnd = -1;\n");
-        sb.append("            int lastAcceptKind = -1;\n");
-        sb.append("            int cur = pos;\n");
+        if (hasNesting) {
+            // Mirrors LexerEngine.lex: a %nest open delimiter at a token start is consumed by
+            // the depth counter INSTEAD OF the DFA, so a nesting comment is scanned once. An
+            // unterminated block leaves lastAcceptEnd at -1 and falls through to the DFA,
+            // which keeps malformed input reading exactly as it did without the directive.
+            sb.append("            int lastAcceptEnd = -1;\n");
+            sb.append("            int lastAcceptKind = -1;\n");
+            sb.append("            int nested = nestingOpenAt(input, pos);\n");
+            sb.append("            if (nested >= 0) {\n");
+            sb.append("                int nestEnd = NestingScanner.scanEnd(input, pos, NEST_OPEN[nested], NEST_CLOSE[nested]);\n");
+            sb.append("                if (nestEnd != NestingScanner.UNTERMINATED) {\n");
+            sb.append("                    lastAcceptEnd = nestEnd;\n");
+            sb.append("                    lastAcceptKind = NEST_KIND[nested];\n");
+            sb.append("                }\n");
+            sb.append("            }\n");
+            sb.append("            if (lastAcceptEnd < 0) {\n");
+            sb.append("            int state = 0;\n");
+            sb.append("            int cur = pos;\n");
+        } else {
+            sb.append("            int state = 0;\n");
+            sb.append("            int lastAcceptEnd = -1;\n");
+            sb.append("            int lastAcceptKind = -1;\n");
+            sb.append("            int cur = pos;\n");
+        }
+
         sb.append("            while (cur < len) {\n");
         sb.append("                int ch = input.charAt(cur);\n");
         sb.append("                int next;\n");
@@ -406,6 +495,11 @@ public final class LexerGenerator {
         sb.append("                    lastAcceptKind = ak;\n");
         sb.append("                }\n");
         sb.append("            }\n");
+        if (hasNesting) {
+            // Close the `if (lastAcceptEnd < 0)` that skips the DFA when the counting scanner
+            // already produced a token.
+            sb.append("            }\n");
+        }
         // No-DFA-transition stall: emit a 1-char synthetic WHITESPACE token to
         // make progress; the parser surfaces this as a trailing-input diagnostic.
         // Matches the recovery contract LexerEngine.lex() uses for the

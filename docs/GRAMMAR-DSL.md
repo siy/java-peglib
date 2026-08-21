@@ -15,6 +15,7 @@ repeated here.
    - [`%suggest RuleName`](#suggest)
    - [`%memo RuleName`](#memo)
    - [`%parser RuleName`](#parser)
+   - [`%nest '<open>' '<close>'`](#nest)
    - [`%word` (inert)](#word--accepted-but-inert)
    - [`%import Grammar.Rule`](#grammar-composition)
 4. [Directive interaction matrix](#directive-interaction-matrix)
@@ -308,6 +309,69 @@ ColLabel   <- ColId / ReservedKeyword # a choice between token kinds
 %parser ColLabel
 ```
 
+<a id="nest"></a>
+### `%nest`
+
+`%nest '<open>' '<close>'` *(0.7.3)*
+
+Declares one delimiter pair whose occurrences **nest**, lexed by a depth-counting
+scanner instead of a DFA path.
+
+```peg
+%nest '/*' '*/'
+```
+
+**Why a directive and not a rule.** The natural spelling is recursion:
+
+```peg
+BlockComment <- '/*' (BlockComment / !'*/' .)* '*/'
+```
+
+and it cannot work, for two independent reasons. `BlockComment` is reachable from
+`%whitespace` and transitively references itself, so the analyzer refuses it as
+`grammar.whitespace-cycle`. And were it accepted, a nested comment is **not a regular
+language** — a DFA has no counter — so nothing could compile it. Naming a rule would
+therefore mean recovering the delimiters from a rule body that cannot be written, so
+the directive states them outright.
+
+**What goes wrong without it.** The non-recursive form closes at the *first* close
+delimiter:
+
+```peg
+BlockComment <- '/*' (!'*/' .)* '*/'
+```
+
+Given `/* outer /* inner */ still a comment */`, the comment ends at the inner `*/`
+and `still a comment */` leaks into the token stream as live source. That is not
+reliably a parse error — when the leaked text happens to compose into valid source,
+the parser accepts a **different program with no diagnostic at all**. SQL/PostgreSQL,
+Rust, Swift, Haskell, D, OCaml and Scala 3 all nest, so for those this is a
+correctness defect rather than a coverage gap.
+
+**Trivia kind.** Decided from the open delimiter by the same rule that classifies
+`%whitespace` alternatives, so `'/*'` yields `BLOCK_COMMENT` and the doc-variant
+refinement still applies to the matched text (a nested `/** … */` is
+`DOC_BLOCK_COMMENT`). An open delimiter matching no comment prefix peglib knows —
+Haskell's `{-`, ML's `(*` — yields plain whitespace trivia.
+
+**Standalone.** A `%nest` pair neither requires nor is required by a matching
+`%whitespace` alternative; the pair alone is enough to lex the comment. Where both are
+present the counting scanner takes precedence at a token start.
+
+**Unterminated input falls through.** A block whose delimiters never balance is *not*
+consumed to end of input — the lexer falls back to its ordinary DFA path, so malformed
+input reads exactly as it did before the directive was added. `%nest` can only change
+the reading of comments that actually balance.
+
+**Delimiters are tested only at a token start**, which is what makes an open delimiter
+inside a string literal safe: the string rule's token begins at the quote and swallows
+it.
+
+Both delimiters must be non-empty — an empty open delimiter would match at every
+position and advance the counter by zero, so it is refused at parse time rather than
+accepted inertly. The directive may appear more than once; each occurrence contributes
+an independent pair, and pairs compose across `%import`.
+
 ### `%word` — accepted but inert
 
 `%word <- Expression`
@@ -338,10 +402,14 @@ Declaring `%word` changes nothing. The analyzer reports it as
 | `%checkpoint` | grammar | yes | no | incremental reparse only |
 | `%memo` | grammar | yes | no — output is identical either way | yes — success path, by design |
 | `%parser` | grammar | yes | yes — changes which rules the lexer produces | no |
+| `%nest` | grammar | yes | yes — changes where a comment ends | lexer, per comment |
 
 Only `%memo` deliberately changes success-path *cost*, and it does not change
-success-path *output*. `%parser` is the one directive that changes *structure* — it
-moves a rule across the lexer/parser boundary, so the token stream itself differs.
+success-path *output*. `%parser` and `%nest` are the two directives that change
+*structure* — `%parser` moves a rule across the lexer/parser boundary, and `%nest`
+changes where a comment token ends, so in both cases the token stream itself differs.
+`%nest` replaces the DFA scan of a comment rather than adding to it, so it does not
+make a comment cost more to lex; a grammar declaring none pays nothing at all.
 Everything else is failure-path only. A grammar using none of them parses exactly as
 it would without directives.
 

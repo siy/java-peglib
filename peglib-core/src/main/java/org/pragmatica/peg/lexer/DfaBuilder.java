@@ -1310,8 +1310,27 @@ public final class DfaBuilder {
      * whitespace char-class — maps to {@link #KIND_WHITESPACE}.
      */
     private static int classifyWhitespaceAlternativeKind(Expression alternative) {
-        var prefix = leadingLiteralText(alternative);
+        return triviaKindForPrefix(leadingLiteralText(alternative));
+    }
 
+    /**
+     * Decide a trivia kind from a leading literal prefix.
+     *
+     * <p>Extracted in 0.7.3 so that {@code %whitespace} absorption and the {@code %nest}
+     * counting scanner cannot disagree about what a delimiter means. Both ask this method,
+     * so {@code '/*'} names the same kind whether the comment is matched by the DFA or by
+     * the depth counter — and a token's kind therefore does not depend on which of the two
+     * paths happened to consume it.
+     *
+     * <p>Note the deliberate precedence: {@code /**} is tested before {@code /*}, and
+     * {@code ///} before {@code //}, matching the longest-prefix order the post-match text
+     * sniff uses. Anything unrecognised — including a leading whitespace char class, or an
+     * open delimiter from a language whose comments peglib knows no doc convention for, such
+     * as Haskell's <code>{-</code> — maps to {@link #KIND_WHITESPACE}.
+     *
+     * @since 0.7.3
+     */
+    public static int triviaKindForPrefix(String prefix) {
         if (prefix.startsWith("/**")) {
             return KIND_DOC_BLOCK_COMMENT;
         }

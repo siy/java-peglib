@@ -179,6 +179,8 @@ e{3}  e{2,}  e{2,5}          # bounded repetition
 %memo Rule                   # cache a rule re-parsed at the same position (0.7.1)
 %import Grammar.Rule         # compose grammars; pass a GrammarSource (0.7.2)
 %parser Rule                 # pin a rule to PARSER, overriding classification (0.7.2)
+%nest '/*' '*/'              # delimiter pair whose occurrences nest, e.g. nested
+                             # block comments; depth-counted, not DFA-matched (0.7.3)
 ```
 
 See [`docs/GRAMMAR-DSL.md`](docs/GRAMMAR-DSL.md) for the full reference.

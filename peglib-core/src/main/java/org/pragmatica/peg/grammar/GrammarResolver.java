@@ -194,6 +194,12 @@ public final class GrammarResolver {
         // 0.7.1 — same union for %memo declarations.
         var composedMemo = new LinkedHashSet<String>(root.memoRules());
         var composedParser = new LinkedHashSet<String>(root.parserRules());
+        // 0.7.3 — union the %nest pairs. A grammar that is imported for its lexical layer
+        // brings its comment syntax with it, so an importer gets nesting comments without
+        // having to restate the delimiters. LinkedHashSet, not a list: importing the same
+        // grammar down two paths must not install the same pair twice, which would make the
+        // lexer test one delimiter against every position twice over for no effect.
+        var composedNesting = new LinkedHashSet<NestingPair>(root.nestingTrivia());
 
         for (var imp : root.imports()) {
             var cached = loadedGrammars.get(imp.grammarName());
@@ -202,6 +208,7 @@ public final class GrammarResolver {
                 composedCheckpoints.addAll(cached.checkpointRules());
                 composedMemo.addAll(cached.memoRules());
                 composedParser.addAll(cached.parserRules());
+                composedNesting.addAll(cached.nestingTrivia());
             }
         }
 
@@ -214,7 +221,8 @@ public final class GrammarResolver {
                                root.recoverSets(),
                                Set.copyOf(composedCheckpoints),
                                Set.copyOf(composedMemo),
-                               Set.copyOf(composedParser));
+                               Set.copyOf(composedParser),
+                               List.copyOf(composedNesting));
     }
 
     private Result<Grammar> loadGrammarOrFail(String grammarName, SourceLocation errorLocation, List<String> chain) {

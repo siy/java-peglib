@@ -13,6 +13,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`%nest '<open>' '<close>'` — nested block comments** ([#45](https://github.com/siy/java-peglib/issues/45)).
+  Declares one delimiter pair whose occurrences nest, lexed by a depth-counting scanner
+  instead of a DFA path. A nested comment is not a regular language, so no DFA can match
+  one: the compiled `'/*' (!'*/' .)* '*/'` alternative closes at the **first** `*/` and the
+  remainder of the comment leaks into the token stream as live source. The recursive
+  spelling is no escape — `BlockComment <- '/*' (BlockComment / !'*/' .)* '*/'` is reachable
+  from `%whitespace` and self-referential, so the analyzer refuses it as
+  `grammar.whitespace-cycle`, and it could not have compiled in any case.
+
+  The failure this fixes is **not reliably loud**, which is why it is filed as a correctness
+  defect rather than a coverage gap. Reported downstream against a PostgreSQL grammar, where
+  `SELECT 1 /* /* */ , 999 -- */ FROM t;` parsed cleanly with two target elements where
+  correct nesting demands one — a query silently meaning something other than what it says.
+  SQL/PostgreSQL, Rust, Swift, Haskell, D, OCaml and Scala 3 all nest.
+
+  Behaviour worth knowing:
+  - The counting scan **replaces** the DFA scan at a token start rather than running before
+    it, so a nesting comment is scanned once and no comment costs more to lex than it did.
+  - Testing delimiters only at a token start is what keeps an open delimiter inside a string
+    literal safe — the string rule's token begins at the quote and swallows it.
+  - An **unterminated** block falls through to the DFA rather than consuming to end of input,
+    so malformed input reads exactly as it did before the directive existed. `%nest` can only
+    change the reading of comments that actually balance.
+  - The trivia kind comes from the open delimiter via the same classifier `%whitespace`
+    absorption uses, so `'/*'` is a block comment and the doc-variant refinement still applies
+    (`/** … */` nested is `DOC_BLOCK_COMMENT`). Haskell's `{-` yields plain whitespace trivia.
+  - A pair is standalone: it neither requires nor is required by a `%whitespace` alternative.
+  - Both delimiters must be non-empty. An empty open delimiter would match at every position
+    and advance the counter by zero, so it is refused at parse time — the one directive
+    argument where the relaxed "unknown names are inert" policy would be unsafe.
+  - The directive may repeat; pairs compose across `%import`.
+
+  A grammar that declares no `%nest` is **unaffected in every respect**: the emitted `GLexer`
+  source is byte-identical to what 0.7.2 produced — no tables, no import, no reject test — so
+  there is no new per-token cost and no regeneration churn. `NestingLexerParityTest` asserts
+  that property, and also pins the interpreted `LexerEngine` and the generated `GLexer` to the
+  same token stream, since the interception had to be written on both paths and the test suite
+  exercises the former while `PegParser` runs the latter.
+
 ## [0.7.2] - 2026-08-19
 
 ### Added
