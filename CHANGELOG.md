@@ -33,6 +33,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A guarded rule whose body names another guarded rule is documented correctly.** No code
+  change — this entry exists because two releases of documentation described the shape as a
+  blocking limitation, and it is not one.
+
+  `WindowName <- !PartitionKW ColId` where `ColId <- !ReservedKeyword (...)` falls back to PARSER
+  classification, and **the PARSER reading is correct**: measured, `hello` is accepted while
+  `partition`, `select` and `from` are all rejected — both the outer and the inner guard fire, via
+  token-level lookahead instead of the DFA.
+
+  The recorded "fix" — composing the guard sets so the rule is promoted to LEXER — was attempted
+  twice, reverted twice, and has now been diagnosed. It breaks 36 tests through exactly one rule:
+  `PlainTypeName <- !RestrictedTypeName Identifier` (`java25.peg:247`) is this same shape, and
+  promoted to LEXER it out-prioritises `Identifier` (line 322). Every identifier in Java then
+  lexes as `PlainTypeName`, `Identifier` goes dead, and `CompilationUnit` fails at offset 0 —
+  hence every failure reading `trailing input not consumed`. The new `grammar.unreachable-kind`
+  check reports it in one line.
+
+  `NestedGuardRuleTest` pins the PARSER classification with that reasoning attached, so a third
+  attempt fails at the cause instead of in 36 downstream assertions. The genuine limitation is
+  narrower than recorded: a guarded rule cannot be *fused* into a larger token, and a `< >` around
+  one is silently ignored rather than honoured.
+
+
 ### Added
 
 - **`grammar.unreachable-kind` — detection of allocated-but-unproducible token kinds.**

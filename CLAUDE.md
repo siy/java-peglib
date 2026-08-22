@@ -210,10 +210,30 @@ Anything else is skipped, and a reference to such a rule fails with `SkippedRule
 
 - **A guarded rule whose body names another guarded rule** — `WindowName <- !PartitionKW … ColId`
   where `ColId <- !ReservedKeyword (…)`. The outer guards are detected, but inlining `ColId` drags
-  its own leading `!ReservedKeyword` into the body, which the DFA then cannot compile. Composing
-  the two guard sets inside `detectSkipPrefix` was tried and **reverted**: it changed which rules
-  register as skip-prefix, forcing java25 rules to LEXER and failing 35 tests. A fix belongs
-  further down, where the rule is already a confirmed skip-prefix candidate.
+  its own leading `!ReservedKeyword` into the body, so `resolveSkipBody` refuses and the rule falls
+  back to PARSER.
+
+  **This is not a defect, and it must not be "fixed" — diagnosed 2026-08-22, measured, not
+  theorised.** The PARSER fallback parses *correctly*: for the canonical shape, `hello` is
+  accepted while `partition`, `select` and `from` are all rejected — both the outer and the inner
+  guard fire, via token-level lookahead instead of the DFA. Nothing is wrong with the output.
+
+  Composing the guard sets so the rule is promoted to LEXER was tried, reverted, and has now been
+  re-tried and diagnosed. It breaks **36 tests via exactly one rule**: `PlainTypeName <-
+  !RestrictedTypeName Identifier` (java25.peg:247) is this very shape, and promoting it to LEXER
+  makes it out-prioritise `Identifier` (line 322), which matches the same text. Every identifier
+  in Java then lexes as `PlainTypeName`, `Identifier` goes dead, and `CompilationUnit` fails at
+  offset 0 — every failure reads `trailing input not consumed`. Promotion buys nothing (the
+  PARSER reading was already correct) and costs the whole grammar.
+
+  `grammar.unreachable-kind` (0.7.3) reports this instantly as `Identifier` — verified by
+  re-applying the change and running the check. If anyone attempts promotion again, run that
+  check first; it turns several rounds of hand diagnosis into one line.
+
+  What is genuinely unavailable is *fusion*: a guarded rule cannot be absorbed into a larger
+  token, and a `< >` around one — `Qualified <- < ColId '.' ColId >` — is silently ignored rather
+  than honoured. That is the real limitation, and it is a narrower one than "guarded rules cannot
+  nest".
 - **Lookahead over anything but a character class**, e.g. `&(Modifier* ClassKW)` — which is why
   java25 spells its `value` lookahead inline (see below).
 - **Lookahead nested inside a Choice alternative** rather than trailing the whole body.
