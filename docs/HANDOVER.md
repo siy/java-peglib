@@ -1,6 +1,6 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-22 — 0.7.2 shipped; 0.7.3 in progress on `release-0.7.3`
+**Last updated:** 2026-08-22 — **0.7.3 SHIPPED**
 
 ---
 
@@ -112,7 +112,9 @@ keyword literals and zero reference-only lexer rules. Eleven defects, plus two t
 
 Items 1-3 below are **done** (2026-08-22, on `release-0.7.3`). What is left:
 
-1. **Ship 0.7.3.** Everything below is done; nothing is outstanding.
+1. **Nothing is outstanding.** 0.7.3 shipped 2026-08-22: PR #46 merged at `6688343`, tag
+   `v0.7.3`, GitHub release cut, Maven Central deployment `60fe059a` verified by fetching
+   concrete artifacts from repo1 — all 6 modules plus sources, javadoc and GPG signatures.
 
 Corpus **re-measured 2026-08-22** rather than inherited — 99.45%, with the failure counts
 *identical* to baseline (21 false accepts, 10 false rejects). The +7 `AGREE_CLEAN` is corpus
@@ -123,7 +125,7 @@ One practical trap now recorded in `tools/langtools-corpus/README.md`: the `--fi
 clone fetches file contents lazily, so the FIRST differential run downloads ~5,700 blobs one at
 a time and looks like a hang — >10 min, against 7 s once warm. Warm the checkout before timing.
 
-### Session 14 — 0.7.3 (2026-08-22, in progress)
+## Session 14 — 0.7.3 (2026-08-22) — SHIPPED
 
 `release-0.7.3` is branched from `main` at `d548f2a`. Four commits so far:
 
@@ -143,6 +145,23 @@ after diagnosis. See the rewritten item list above; the short version is that it
 premise was wrong, and the check built for item 2 is what proved it.
 
 ### Things worth not re-learning
+
+- **A review bot caught two defects in work already called verified — one of them unfixable
+  after publish.** `NEST_FIRST` emitted a delimiter's first character through the STRING escaper
+  inside a CHAR literal, so a `%nest` delimiter starting with an apostrophe produced `'''` and
+  the generated lexer would not compile. Central artifacts are immutable; that ships as 0.7.4 or
+  not at all. The second was a test of mine asserting nothing — `openDelimiterInsideAContentToken`
+  fed input containing no delimiter. **Hold the merge until review settles even when CI is green
+  and the branch is unprotected**; verify each finding against the code rather than trusting or
+  dismissing it (one of five was a false alarm on a recipe I had actually run correctly).
+
+- **A benchmark with no comparable baseline proves nothing — prefer an identity proof.** The
+  stored JMH baselines use a `(variant)` axis; the current suite uses `(fixture)`, so the numbers
+  cannot be compared and a green run would have been false comfort. Generating `GLexer`/`GParser`
+  from both revisions and diffing is exact and noise-free: GParser came out byte-identical and
+  GLexer differed only in `.put` ordering, which settles the hot-path question outright. Reach for
+  this whenever the change is expected to be behaviour-preserving.
+
 
 - **A test can pass against the bug it was written for. This happened FOUR times in one session** —
   three of mine, one downstream. Trailing-lookahead tests asserted "the parse reports

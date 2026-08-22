@@ -2,12 +2,13 @@
 
 ## Project Status
 
-**0.7.3 is in progress on `release-0.7.3`** (unreleased). It adds `%nest` for nested block
+**0.7.3 is the latest shipped release** (Maven Central, 2026-08-22; deployment `60fe059a`,
+verified by fetching concrete artifacts from repo1 rather than trusting the plugin). It adds `%nest` for nested block
 comments (issue #45), the `grammar.unreachable-kind` and `grammar.token-boundary-ignored`
 analyzer checks, reproducible generated sources, and honours a whole-body `< >` token boundary
 that was previously ignored in silence. Corpus agreement re-measured at 99.45%, unchanged.
 
-**0.7.2 is the latest shipped release** (Maven Central, 2026-08-19). It makes peglib usable for
+**0.7.2** (Maven Central, 2026-08-19). It makes peglib usable for
 grammars that are not Java-shaped: identifier fallback works for case-insensitive keywords, a
 lexer rule may reference another lexer rule, end in a character-class lookahead or carry several
 leading keyword guards, `%parser` pins classification the inference gets wrong, and a rule named
