@@ -487,6 +487,22 @@ dated claim, not a live measurement.
 
 - **Bisection-first on parser bugs.** When a real-world file produces N diagnostics, write a bisect that narrows to a minimal failing input. Theorizing about likely causes wastes more time than running a 10-line bisect. (from 0.6.0 ship: 13,529 diagnostics on FactoryClassGenerator narrowed to one em-dash via 6 bisect rounds; the prior 3 theoretical hypotheses were all wrong.)
 
+- **Count the delimiters before deciding what the right answer is.** For any nesting construct,
+  work out whether the disputed text falls inside or outside the balanced span *first*. A
+  balanced nested comment is exactly the case where the buggy and the correct lexer agree — the
+  early close leaves an orphaned delimiter that something else (a line comment) swallows, landing
+  on the same answer by a different route. (from issue #45: two examples were offered as silent
+  divergences; only one was. `SELECT 1 /* /* */ , 999 -- */` has `, 999` INSIDE the span and
+  genuinely diverges — 2 items before, 1 after. `SELECT 1 /* a /* b */ -- */` has `, 2` OUTSIDE
+  it and is identical on both. Both are now regression tests, in both directions: a fix that only
+  ever made comments longer would pass the first and fail the second.)
+
+- **A conclusion read off a token dump does not exercise the code that will assert it.** The
+  divergence above was confirmed by eyeballing token *text*, which was correct — but the helper
+  written to *count* the items was never run, and it counted the wrong kind name (`Item` absorbs
+  `Num`/`Name`, so the finer kinds never reach the stream). It returned zero on every input.
+  Print what the assertion will actually compute, not a proxy a human can interpret.
+
 - **CST shape sanity is part of phase gates.** N LOC of source code should produce roughly N/3 to N CST nodes for this grammar. Order of magnitude shallower means parser is matching empty alternatives and bailing. "20/20 corpus round-trip" with 11 nodes/fixture is a false positive. (from 0.6.0 ship: the empty-CompilationUnit issue went undetected for two sessions because round-trip-via-tokens passed.)
 
 - **Validate against real-world Java input early.** Curated test fixtures prove not-broken; they don't prove complete. Test against an actual codebase (e.g., a real JBCT slice generator) before declaring a parsing phase done. (from 0.6.0 ship: 20/20 curated corpus passed cleanly; FactoryClassGenerator surfaced contextual-keyword + Unicode + delimited-block bugs the corpus never exercised.)

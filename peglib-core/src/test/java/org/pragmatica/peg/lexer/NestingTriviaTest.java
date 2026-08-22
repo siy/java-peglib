@@ -98,11 +98,12 @@ class NestingTriviaTest {
     }
 
     /**
-     * The first of the two cases from #45 that fail SILENTLY. The trailing {@code --} in the
-     * ticket was a SQL line comment swallowing the orphaned outer close; here the same shape is
-     * produced without needing line comments, by letting the leaked text be ordinary words.
-     * Under the bug the parse succeeds and yields extra content tokens; there is no diagnostic
-     * to assert on, which is exactly why the assertion counts words.
+     * The silent divergence from #45, in miniature: the leaked text sits INSIDE a balanced span,
+     * so correct nesting must not see it. Under the bug the parse succeeds and yields extra
+     * content tokens, with no diagnostic to assert on — which is why the assertion counts words.
+     *
+     * <p>See {@code SqlShapedIssue45} below for the ticket's own SQL examples, including the one
+     * that looks like a divergence and is not.
      */
     @Test
     void leakedRemainderDoesNotBecomeContent() {
@@ -321,5 +322,91 @@ class NestingTriviaTest {
         }
 
         return count;
+    }
+
+    /**
+     * The two SQL examples from issue #45, kept in the shape the ticket used — line comments and
+     * all — because the distinction between them is the whole point and a simplified grammar
+     * loses it.
+     *
+     * <p>The ticket originally offered both as silent divergences. Only one is. The reporter
+     * corrected it afterwards, and the correction is worth encoding rather than paraphrasing:
+     * <b>a balanced nested comment is exactly the case where the buggy and the correct lexer
+     * agree</b>. Where the leaked text falls outside the balanced span, the old lexer reached the
+     * right answer by a different route — its early close left {@code -- *&#47;} as a line
+     * comment, which swallowed the orphaned close — so `%nest` changes nothing there and must be
+     * shown not to.
+     *
+     * <p>Both directions are asserted. A fix that only ever made comments longer would pass the
+     * divergence test and fail the control.
+     */
+    @org.junit.jupiter.api.Nested
+    class SqlShapedIssue45 {
+        private static final String SQL = """
+            Stmt  <- 'SELECT' Items 'FROM' Name ';'
+            Items <- Item (',' Item)*
+            Item  <- Num / Name
+            Num   <- < [0-9]+ >
+            Name  <- < [a-zA-Z_][a-zA-Z0-9_]* >
+            LineComment  <- '--' [^\\n]*
+            BlockComment <- '/*' (!'*/' .)* '*/'
+            %whitespace  <- ([ \\t\\r\\n] / LineComment / BlockComment)*
+            """;
+
+        private static final String SQL_NESTING = SQL + "%nest '/*' '*/'\n";
+
+        /**
+         * Select-list items in {@code input}.
+         *
+         * <p>Counts tokens of kind {@code Item}, not {@code Num}/{@code Name}: {@code Item <- Num
+         * / Name} is reference-only and spans one token, so it classifies LEXER and absorbs both
+         * — the token stream never mentions the finer kinds. The trailing {@code FROM t}
+         * contributes one more {@code Item}, which is subtracted.
+         */
+        private static int selectItems(String grammar, String input) {
+            var tokens = PegParser.fromGrammar(grammar)
+                                  .unwrap()
+                                  .parse(input)
+                                  .cst()
+                                  .tokens();
+            int items = 0;
+
+            for (int i = 0; i < tokens.count(); i++) {
+                if (!tokens.isTrivia(i) && "Item".equals(tokens.kindName(i))) {
+                    items++;
+                }
+            }
+
+            return items - 1;
+        }
+
+        /** {@code , 999} sits INSIDE the balanced span, so correct nesting yields one item. */
+        private static final String INSIDE = "SELECT 1 /* /* */ , 999 -- */\n FROM t;";
+
+        /** {@code , 2} sits OUTSIDE the balanced span, so two items is right either way. */
+        private static final String OUTSIDE = "SELECT 1 /* a /* b */ -- */\n , 2 FROM t;";
+
+        @Test
+        void textInsideABalancedSpanIsNotContent() {
+            assertThat(selectItems(SQL_NESTING, INSIDE))
+            .withFailMessage("', 999' is inside the balanced comment; correct nesting sees one select item")
+            .isEqualTo(1);
+        }
+
+        @Test
+        void withoutTheDirectiveThatTextLeaksAsContent() {
+            // The divergence, stated as a measurement rather than a claim: two items, no
+            // diagnostic about comments, a query meaning something other than what it says.
+            assertThat(selectItems(SQL, INSIDE)).isEqualTo(2);
+        }
+
+        @Test
+        void textOutsideABalancedSpanIsUnaffectedByTheDirective() {
+            // The control, and the ticket's own correction. Both lexers must agree here — the old
+            // one arrives at the right answer by a different route. If %nest changed this, it
+            // would be over-consuming.
+            assertThat(selectItems(SQL_NESTING, OUTSIDE)).isEqualTo(2);
+            assertThat(selectItems(SQL, OUTSIDE)).isEqualTo(selectItems(SQL_NESTING, OUTSIDE));
+        }
     }
 }

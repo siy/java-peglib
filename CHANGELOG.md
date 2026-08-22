@@ -113,9 +113,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The failure this fixes is **not reliably loud**, which is why it is filed as a correctness
   defect rather than a coverage gap. Reported downstream against a PostgreSQL grammar, where
-  `SELECT 1 /* /* */ , 999 -- */ FROM t;` parsed cleanly with two target elements where
-  correct nesting demands one — a query silently meaning something other than what it says.
+  `SELECT 1 /* /* */ , 999 -- */ FROM t;` parsed cleanly with two select items where correct
+  nesting demands one — a query silently meaning something other than what it says.
   SQL/PostgreSQL, Rust, Swift, Haskell, D, OCaml and Scala 3 all nest.
+
+  Note the boundary of the claim, which the reporter corrected on the issue: only text falling
+  **inside** a balanced span diverges. `SELECT 1 /* a /* b */ -- */` leaves `, 2` outside the
+  span, and there the old lexer reached the right answer by a different route — its early close
+  left `-- */` as a line comment that swallowed the orphaned close. `%nest` changes nothing
+  there, and `NestingTriviaTest.SqlShapedIssue45` asserts both directions: a fix that only ever
+  made comments longer would pass the divergence case and fail the control.
 
   Behaviour worth knowing:
   - The counting scan **replaces** the DFA scan at a token start rather than running before
