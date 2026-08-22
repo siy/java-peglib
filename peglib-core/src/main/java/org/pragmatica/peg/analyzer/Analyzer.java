@@ -81,6 +81,7 @@ public final class Analyzer {
         findings.addAll(checkMemoRules());
         findings.addAll(checkInertDirectives());
         findings.addAll(checkUnreachableKinds());
+        findings.addAll(checkIgnoredTokenBoundaries());
         // Stable sort: by rule name, then tag, then severity. Ensures deterministic output.
         findings.sort(Comparator.<Finding, String> comparing(Finding::ruleName)
                                 .thenComparing(Finding::tag)
@@ -144,6 +145,42 @@ public final class Analyzer {
                                                                                         + "' is allocated token kind " + unreachable.kind()
                                                                                         + " but " + unreachable.reason()))
                                                      .toList())
+                             .or(List::of);
+    }
+
+    // === Check 12: Token boundary that could not be honoured ===
+    /**
+     * 0.7.3 — report a rule that wraps its whole body in {@code < >} and is classified PARSER
+     * anyway.
+     *
+     * <p>The token boundary is documented as an explicit override that is trusted: an author who
+     * writes {@code < IfKW NotKW ExistsKW >} has asked for the fused lexeme. When the classifier
+     * cannot deliver it the rule quietly becomes a sequence of separate tokens instead — which
+     * parses, so nothing fails, and the author's instruction is simply gone.
+     *
+     * <p>The usual reason is that the body names a rule carrying a keyword guard: inlining it
+     * drags a lookahead into the body, and the DFA has no lookahead mechanism. That is a real
+     * limit, not a bug — but it should be said out loud rather than inferred from a token stream.
+     *
+     * <p>Only a boundary around the WHOLE body counts. {@code Literal <- < 'null' > / CharLit}
+     * wraps one alternative and is correctly a PARSER rule; flagging it would be noise.
+     */
+    private List<Finding> checkIgnoredTokenBoundaries() {
+        return RuleClassifier.classify(grammar)
+                             .map(classification -> grammar.rules()
+                                                           .stream()
+                                                           .filter(rule -> RuleClassifier.declaresWholeBodyTokenBoundary(rule.expression()))
+                                                           .filter(rule -> classification.kinds()
+                                                                                         .get(rule.name()) == RuleKind.PARSER)
+                                                           .map(rule -> Finding.warning("grammar.token-boundary-ignored",
+                                                                                        rule.name(),
+                                                                                        "rule '" + rule.name()
+                                                                                       + "' wraps its body in a token boundary, but could not be"
+                                                                                       + " compiled as one token and is parsed as a sequence of"
+                                                                                       + " separate tokens; the usual cause is a body naming a rule"
+                                                                                       + " that carries a keyword guard, whose lookahead the lexer"
+                                                                                       + " cannot compile"))
+                                                           .toList())
                              .or(List::of);
     }
 

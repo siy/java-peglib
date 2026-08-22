@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `< >` token boundary around a whole rule body is honoured, or reported.** The boundary is
+  documented as "an explicit override and is trusted", and it was not. A body mixing rule
+  references with a terminal — `Qualified <- < ColId '.' ColId >` — was classified PARSER by a
+  check that ran *before* the override was consulted, so the rule silently became a sequence of
+  separate tokens. Nothing failed, which is why it went unnoticed: the three-token reading parses
+  perfectly well, and the author's instruction simply vanished.
+
+  Now the boundary wins where the body is lexically compilable: `< Plain '.' Plain >` lexes `a.b`
+  as one token. An unmarked body is untouched — `Sum <- Number '+' Number` must not fuse, and does
+  not.
+
+  Where the boundary *cannot* be delivered the rule still falls back to PARSER, because the body
+  names a guarded rule whose lookahead the DFA has no way to compile. That case is now reported as
+  **`grammar.token-boundary-ignored`** rather than left to be inferred from a token stream. A
+  boundary around one alternative (`Literal <- < 'null' > / CharLit`, java25's shape) is correctly
+  PARSER and is not flagged.
+
+  Blast radius on `java25.peg`: none — no rule there wraps its whole body in a boundary while
+  naming other rules, and both new checks report zero findings on it.
+
 - **Generated source is reproducible.** Two runs of the same commit against the same grammar
   emitted different `GLexer.java`. Measured before the fix: five fresh JVMs produced **four
   distinct SHA-256 hashes** of the generated source for `java25.peg`, and all 108 differing

@@ -164,7 +164,7 @@ public final class RuleClassifier {
 
             if (!p.usesOnlyLexicalConstructs) {
                 kinds.put(entry.getKey(), RuleKind.PARSER);
-            } else if (p.referencesAnyRule && p.hasTerminals) {
+            } else if (p.referencesAnyRule && p.hasTerminals && !declaresBoundary(entry.getKey(), ruleMap)) {
                 kinds.put(entry.getKey(), RuleKind.PARSER);
             } else if (alwaysEmpty.getOrDefault(entry.getKey(), false)) {
                 // A token has to consume something. A rule that can match ONLY the empty string
@@ -205,6 +205,26 @@ public final class RuleClassifier {
         }
 
         return declaresTokenBoundary(rule.expression()) || referenceTokenCount(rule.expression()) == 1;
+    }
+
+    /** Whether the named rule wraps its whole body in a token boundary. */
+    private static boolean declaresBoundary(String ruleName, Map<String, Rule> ruleMap) {
+        var rule = ruleMap.get(ruleName);
+
+        return rule != null && declaresTokenBoundary(rule.expression());
+    }
+
+    /**
+     * Whether {@code expr} wraps a rule's WHOLE body in a token boundary.
+     *
+     * <p>Public since 0.7.3 so the analyzer can report a boundary the classifier could not
+     * honour. Note "whole body": {@code Literal <- < 'null' > / CharLit} declares a boundary
+     * around one alternative, not around the rule, and is not this.
+     *
+     * @since 0.7.3
+     */
+    public static boolean declaresWholeBodyTokenBoundary(Expression expr) {
+        return declaresTokenBoundary(expr);
     }
 
     private static boolean declaresTokenBoundary(Expression expr) {

@@ -166,6 +166,16 @@ The `< >` is an explicit override and is trusted: `< IfKW NotKW ExistsKW >` will
 asked for it. Nothing else in the grammar distinguishes these two shapes, which is why the
 boundary decides.
 
+**Since 0.7.3 the boundary also outranks the terminals-and-references rule.** A body mixing
+references with a literal — `Qualified <- < ColId '.' ColId >` — used to be classified PARSER by a
+check that ran before the override was consulted, so the rule silently became separate tokens.
+An *unmarked* body of that shape is still PARSER (`Sum <- Number '+' Number` must not fuse); only
+the explicit boundary changes the answer.
+
+Where the boundary cannot be delivered — the body names a guarded rule, and the DFA cannot compile
+its lookahead — the rule still falls back to PARSER, but the analyzer now reports
+`grammar.token-boundary-ignored`. The failure was never incorrect, only silent.
+
 **`%parser Rule` pins a rule to PARSER.** The inference above cannot tell a rule that IS a token
 from one that merely names tokens: a reference-only body spanning a single token reads as lexical,
 which is right for an alias and wrong for a rule whose purpose is to choose between token kinds at

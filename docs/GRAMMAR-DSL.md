@@ -434,6 +434,7 @@ Each finding has a stable tag for tooling integration. The full catalog:
 | `grammar.memo-non-parser-rule` | WARNING | `%memo` targets a LEXER or MIXED rule; only PARSER rules are memoised — the directive is ignored |
 | `grammar.inert-directive` | WARNING | A directive the front-end accepts but the generator never reads (`%word`, rule-level `%expected` / `%recover` / `%tag`) — declaring it has no effect |
 | `grammar.unreachable-kind` | WARNING | A rule was allocated a token kind that no input can produce, because a higher-priority rule matches the same text *(0.7.3)* |
+| `grammar.token-boundary-ignored` | WARNING | A rule wraps its whole body in `< >` but could not be compiled as one token, so it is parsed as separate tokens *(0.7.3)* |
 
 The ambiguous-choice check is conservative: it flags only choices where
 *every* alternative has a fixed literal prefix. Rule-reference-prefixed or
