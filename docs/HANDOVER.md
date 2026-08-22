@@ -111,16 +111,16 @@ keyword literals and zero reference-only lexer rules. Eleven defects, plus two t
 
 Items 1-3 below are **done** (2026-08-22, on `release-0.7.3`). What is left:
 
-1. **`< >` around a guarded rule is silently ignored.** `Qualified <- < ColId '.' ColId >` becomes
-   a PARSER rule instead of one fused token, with no diagnostic. CLAUDE.md documents the token
-   boundary as "an explicit override and is trusted", so this is a real contract violation — but
-   it is a *silence* problem, not a correctness one: the three-token reading parses fine. Cheapest
-   honest fix is an analyzer finding saying the boundary could not be honoured and why.
-2. **Ship 0.7.3.** `%nest`, `grammar.unreachable-kind`, and generator reproducibility are in.
-3. **Re-run the langtools corpus before shipping.** `java25.peg` is unchanged, so 99.45% should
-   carry over untouched — but the lexer path changed (nesting interception) and the generated
-   output changed shape (map ordering), so inheriting the figure rather than re-measuring it is
-   exactly the mistake this document warns about elsewhere.
+1. **Ship 0.7.3.** Everything below is done; nothing is outstanding.
+
+Corpus **re-measured 2026-08-22** rather than inherited — 99.45%, with the failure counts
+*identical* to baseline (21 false accepts, 10 false rejects). The +7 `AGREE_CLEAN` is corpus
+growth, not a fix. Re-running mattered because 0.7.3 changed the lexer path and the
+classification of whole-body token boundaries, even though `java25.peg` itself is untouched.
+
+One practical trap now recorded in `tools/langtools-corpus/README.md`: the `--filter=blob:none`
+clone fetches file contents lazily, so the FIRST differential run downloads ~5,700 blobs one at
+a time and looks like a hang — >10 min, against 7 s once warm. Warm the checkout before timing.
 
 ### Session 14 — 0.7.3 (2026-08-22, in progress)
 
@@ -132,8 +132,10 @@ Items 1-3 below are **done** (2026-08-22, on `release-0.7.3`). What is left:
 | `feat: depth-counting scanner for nesting trivia via %nest` | **issue #45** — nested block comments |
 | `fix: preserve map order so generated sources are reproducible` | handover item 3 |
 | `feat: detect token kinds no input can produce` | handover item 2 — `grammar.unreachable-kind` |
+| `docs: close the nested-guard item as diagnosed, not defective` | handover item 1 — closed, not a defect |
+| `fix: honour a whole-body token boundary, or report that it could not be` | the `< >` silent-ignore found while diagnosing item 1 |
 
-Tests **679**, 0 failures, 0 skips, lint and format-check on (635 at 0.7.2 ship).
+Tests **693**, 0 failures, 0 skips, lint and format-check on (635 at 0.7.2 ship). Corpus 99.45%, re-measured.
 
 The three open items from session 13 are all resolved — two fixed, one closed as *not a defect*
 after diagnosis. See the rewritten item list above; the short version is that item 1's recorded
@@ -190,9 +192,11 @@ mvn install                                    # full reactor, lint + format-che
 mvn -q jbct:format                             # before committing new main-source code
 ```
 
-Corpus agreement (~6 s once fetched; never vendor the GPLv2 corpus):
-see `tools/langtools-corpus/README.md`. Last measured live 2026-08-14 at **99.45%**;
-`java25.peg` is unchanged since, so it still holds.
+Corpus agreement (~7 s once the blobs are warm; never vendor the GPLv2 corpus):
+see `tools/langtools-corpus/README.md`. **Re-measured live 2026-08-22 at 99.45%** on
+`release-0.7.3` — failure counts identical to baseline (21 false accepts, 10 false rejects).
+Note the first run after a `--filter=blob:none` clone fetches contents lazily and takes minutes,
+not seconds; warm the checkout before timing.
 
 `%memo` semantics after any change to `CstArrayBuilder` replay:
 `tools/memo-differential/README.md` — differential vs the same grammar without the directive.

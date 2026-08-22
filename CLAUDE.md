@@ -2,6 +2,11 @@
 
 ## Project Status
 
+**0.7.3 is in progress on `release-0.7.3`** (unreleased). It adds `%nest` for nested block
+comments (issue #45), the `grammar.unreachable-kind` and `grammar.token-boundary-ignored`
+analyzer checks, reproducible generated sources, and honours a whole-body `< >` token boundary
+that was previously ignored in silence. Corpus agreement re-measured at 99.45%, unchanged.
+
 **0.7.2 is the latest shipped release** (Maven Central, 2026-08-19). It makes peglib usable for
 grammars that are not Java-shaped: identifier fallback works for case-insensitive keywords, a
 lexer rule may reference another lexer rule, end in a character-class lookahead or carry several
@@ -445,9 +450,13 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**635 tests across 5 modules**, 0 failures, 0 skips (0.7.2; 576 at 0.7.1). The count
-dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were deleted, not
-because coverage was lost.
+**693 tests across 5 modules**, 0 failures, 0 skips (0.7.3; 635 at 0.7.2, 576 at 0.7.1). The
+count dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were
+deleted, not because coverage was lost.
+
+Corpus agreement re-measured 2026-08-22 at **99.45%**, failure counts identical to the 0.7.1
+baseline. `java25.peg` is unchanged, but 0.7.3 altered the lexer path and token-boundary
+classification, so the figure was re-run rather than inherited.
 
 Notable test classes for verification gates:
 - `JavaCoverageProbe` / `JavaRejectionProbe` / `ModernJavaSyntaxProbe` — the accept/reject
