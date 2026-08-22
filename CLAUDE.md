@@ -87,7 +87,8 @@ peglib-core/src/main/java/org/pragmatica/peg/
 │   ├── DfaBuilder.java              NFA→DFA + inline literals + aliases + delimited-block
 │   └── LexerEngine.java
 ├── analyzer/
-│   ├── Analyzer.java                grammar linter behind peglib:lint / peglib:check
+│   ├── Analyzer.java                grammar linter behind peglib:lint / peglib:check;
+│   │                                grammar.unreachable-kind added 0.7.3
 │   ├── AnalyzerMain.java            CLI entry point
 │   ├── AnalyzerReport.java, Finding.java
 │   ├── LeftRecursionDetector.java   rejects at fromGrammar with witness

@@ -35,6 +35,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`grammar.unreachable-kind` — detection of allocated-but-unproducible token kinds.**
+  The lexer resolves competing rules by priority. When one always wins for the same input, the
+  loser's kind is allocated and then never appears in any token stream: no guard fires, nothing
+  fails, and the grammar parses as though the rule were absent.
+
+  This is the check that would have caught the defect costing several rounds of hand diagnosis
+  during the 0.7.2 PostgreSQL migration — `WindowName` out-prioritised `ColId`, so *every
+  identifier in the language* lexed as `WindowName` while `ColId` sat dead. Reported by
+  `peglib:lint` / `peglib:check`.
+
+  A kind is producible if a DFA accepting state carries it or post-match keyword resolution
+  remaps something to it; those are the only two writers of a token's kind. **Rules represented
+  elsewhere are excused**, and that distinction is what makes the check usable rather than
+  noise: the naive form reports five rules on `java25.peg`, corpus-validated against javac at
+  99.45% — `Keyword`, `Modifier`, `PrimType`, `RestrictedTypeName`, `IllegalLocalClassMod`, all
+  literal-set rules whose individual literals carry their own higher-priority kinds. That is
+  correct behaviour, so a rule is excused when every kind in its alias set is producible, or
+  when it was inlined into another lexer rule. A rule whose alias kinds are only *partly*
+  producible is still reported with the count — one shadowed keyword is the interesting case
+  and would otherwise hide behind its live siblings.
+
+  The `java25.peg`-produces-nothing test is the gate that decides whether the check is worth
+  having, and it is written against the real grammar for that reason.
+
 - **`%nest '<open>' '<close>'` — nested block comments** ([#45](https://github.com/siy/java-peglib/issues/45)).
   Declares one delimiter pair whose occurrences nest, lexed by a depth-counting scanner
   instead of a DFA path. A nested comment is not a regular language, so no DFA can match

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -143,6 +144,116 @@ public final class DfaBuilder {
     public record SkippedRule(String ruleName, String reason) {}
 
     public record Built(Dfa dfa, TokenKindAssignment kinds, List<SkippedRule> skipped) {}
+
+    /**
+     * A token kind that was allocated but which no input can ever produce.
+     *
+     * @param ruleName the rule that owns the kind
+     * @param kind     the allocated kind id
+     * @param reason   why it cannot be produced, phrased for a grammar author
+     *
+     * @since 0.7.3
+     */
+    public record UnreachableKind(String ruleName, int kind, String reason) {}
+
+    /**
+     * 0.7.3 — find allocated token kinds that no input can produce.
+     *
+     * <p>This is the check that would have caught the defect that cost several rounds of hand
+     * diagnosis during the 0.7.2 migration: a rule out-prioritised another matching the same
+     * input, so every identifier in the language lexed as the wrong kind while the intended rule
+     * sat allocated and dead, with no guard ever firing and no diagnostic anywhere. Compare the
+     * {@code IFNOTEXISTS} case recorded in CLAUDE.md — a fused lexeme spelled as no input
+     * contains it, allocated and never matched. Both are silent: the grammar compiles, parses
+     * something, and means the wrong thing.
+     *
+     * <h2>Producible kinds</h2>
+     *
+     * <p>Exactly two things write a token's kind: a DFA accepting state, and the post-match
+     * keyword resolution that remaps one kind to another. A kind reachable by neither cannot
+     * appear in any token stream.
+     *
+     * <h2>Why "not a DFA accept kind" is not on its own the answer</h2>
+     *
+     * <p>Because it is wrong on real grammars — measured, not assumed. The naive test reports
+     * five rules on {@code java25.peg}, which is corpus-validated at 99.45%: {@code Keyword},
+     * {@code Modifier}, {@code PrimType}, {@code RestrictedTypeName} and
+     * {@code IllegalLocalClassMod}. All five are literal-set rules whose individual literals
+     * each carry their own higher-priority kind, so the rule's own kind never wins — and that is
+     * correct behaviour, not a defect. A check that fires five times on the canonical grammar is
+     * noise, and noise gets ignored.
+     *
+     * <p>So a rule is excused when it is represented elsewhere:
+     * <ul>
+     *   <li>every kind in its {@code ruleNameToAliasKinds} entry is producible — the rule IS
+     *       lexed, under the kinds of the keywords it names;</li>
+     *   <li>it was inlined into another lexer rule, so it has no independent existence.</li>
+     * </ul>
+     *
+     * <p>A rule whose alias kinds are only <em>partly</em> producible is still reported, naming
+     * the count: that is a specific keyword being shadowed, which is exactly the interesting
+     * case and would otherwise hide behind its live siblings.
+     *
+     * <p>Verified against both grammars in the repository — zero findings — and against a rule
+     * deliberately shadowed by a higher-priority twin, which it reports.
+     *
+     * @since 0.7.3
+     */
+    public static List<UnreachableKind> unreachableKinds(Built built) {
+        var producible = new HashSet<Integer>();
+
+        for (int kind : built.dfa().acceptKinds()) {
+            if (kind != Dfa.NO_ACCEPT) {
+                producible.add(kind);
+            }
+        }
+
+        for (var resolution : built.kinds().keywordResolutions().values()) {
+            producible.addAll(resolution.textToKind().values());
+        }
+
+        var found = new ArrayList<UnreachableKind>();
+
+        for (var entry : built.kinds().ruleNameToKind().entrySet()) {
+            var ruleName = entry.getKey();
+            int kind = entry.getValue();
+
+            if (producible.contains(kind) || built.kinds().inlineExpansions().containsKey(ruleName)) {
+                continue;
+            }
+
+            var aliases = built.kinds().ruleNameToAliasKinds().get(ruleName);
+
+            if (aliases == null || aliases.length == 0) {
+                found.add(new UnreachableKind(ruleName,
+                                              kind,
+                                              "no lexer state can accept it — a higher-priority rule matches the same"
+                                             + " input, so this rule is allocated but never produced"));
+                continue;
+            }
+
+            int dead = 0;
+
+            for (int alias : aliases) {
+                if (!producible.contains(alias)) {
+                    dead++;
+                }
+            }
+
+            if (dead > 0) {
+                found.add(new UnreachableKind(ruleName,
+                                              kind,
+                                              dead
+                                             + " of the " + aliases.length
+                                             + " keyword kinds it names cannot be produced — those keywords are"
+                                             + " shadowed by a higher-priority rule matching the same text"));
+            }
+        }
+
+        found.sort(Comparator.comparing(UnreachableKind::ruleName));
+
+        return List.copyOf(found);
+    }
 
     public sealed interface DfaBuildError extends Cause {
         record UnsupportedExpression(String ruleName, String expressionKind, String detail) implements DfaBuildError {

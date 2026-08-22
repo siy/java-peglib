@@ -433,6 +433,7 @@ Each finding has a stable tag for tooling integration. The full catalog:
 | `grammar.memo-unknown-rule` | WARNING | `%memo` names a rule the grammar does not define — the directive is ignored |
 | `grammar.memo-non-parser-rule` | WARNING | `%memo` targets a LEXER or MIXED rule; only PARSER rules are memoised — the directive is ignored |
 | `grammar.inert-directive` | WARNING | A directive the front-end accepts but the generator never reads (`%word`, rule-level `%expected` / `%recover` / `%tag`) — declaring it has no effect |
+| `grammar.unreachable-kind` | WARNING | A rule was allocated a token kind that no input can produce, because a higher-priority rule matches the same text *(0.7.3)* |
 
 The ambiguous-choice check is conservative: it flags only choices where
 *every* alternative has a fixed literal prefix. Rule-reference-prefixed or
@@ -459,6 +460,35 @@ analyzer: 1 error, 1 warning, 0 info
 The CLI exits with status `0` when no errors, `1` when errors found,
 `2` on I/O or grammar-parse failure. Warnings/info alone do not fail
 the CLI — only `ERROR` findings do.
+
+### `grammar.unreachable-kind` — a rule that is allocated but never produced
+
+*(0.7.3)* The lexer resolves competing rules by priority. When one rule always wins for
+the same input, the loser's token kind is allocated and then never appears in any token
+stream — no guard fires, nothing fails, and the grammar parses as though the rule were
+not there.
+
+This is the check that would have caught the defect which cost several rounds of hand
+diagnosis during the 0.7.2 PostgreSQL migration: `WindowName` out-prioritised `ColId`,
+so *every identifier in the language* lexed as `WindowName` while `ColId` sat dead.
+
+A kind is producible if a DFA accepting state carries it, or if post-match keyword
+resolution remaps something to it. Those are the only two writers of a token's kind.
+
+**Rules represented elsewhere are not reported.** The naive form of this check — "no DFA
+state accepts this kind" — reports five rules on `java25.peg`, which is corpus-validated
+against javac at 99.45%: `Keyword`, `Modifier`, `PrimType`, `RestrictedTypeName` and
+`IllegalLocalClassMod`. Each is a literal-set rule whose individual literals carry their
+own higher-priority kinds, so the rule's own kind never wins — and that is correct. A rule
+is therefore excused when every kind in its alias set is producible, or when it was
+inlined into another lexer rule.
+
+A rule whose alias kinds are only *partly* producible **is** reported, with the count: one
+specific keyword being shadowed is the interesting case, and it would otherwise hide behind
+its live siblings. This is the shape of the `IFNOTEXISTS` failure — a fused lexeme spelled
+as no input contains it, allocated and never matched.
+
+Run it with `peglib:lint` or `peglib:check`.
 
 ## Actions were removed in 0.6.0
 
