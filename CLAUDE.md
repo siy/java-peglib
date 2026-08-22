@@ -59,7 +59,7 @@ Nine decisions (per spec §3 — all implemented or documented):
 
 ```
 peglib/
-├── peglib-runtime/         25KB; generated parsers depend ONLY on this + pragmatica-lite:core
+├── peglib-runtime/         27KB; generated parsers depend ONLY on this + pragmatica-lite:core
 ├── peglib-core/            grammar parser, codegen, analyzers, implementation, IncrementalParser
 ├── peglib-formatter/       Wadler-Lindig pretty printer on flat CST
 ├── peglib-maven-plugin/    build-time codegen mojo
@@ -73,6 +73,7 @@ peglib-runtime/src/main/java/org/pragmatica/peg/
 ├── token/
 │   ├── TokenArray.java              flat int[] tokens; spliceLex for incremental
 │   ├── TokenArrayBuilder.java
+│   ├── NestingScanner.java          depth counter behind %nest; shared by both lexer paths
 │   └── LexFn.java                   functional lexer adapter
 ├── cst/
 │   ├── CstArray.java                flat int[]; findCheckpointAncestor; spliceSubtree
@@ -93,13 +94,15 @@ peglib-core/src/main/java/org/pragmatica/peg/
 │   └── LexerEngine.java
 ├── analyzer/
 │   ├── Analyzer.java                grammar linter behind peglib:lint / peglib:check;
-│   │                                grammar.unreachable-kind added 0.7.3
+│   │                                grammar.unreachable-kind and
+│   │                                grammar.token-boundary-ignored added 0.7.3
 │   ├── AnalyzerMain.java            CLI entry point
 │   ├── AnalyzerReport.java, Finding.java
 │   ├── LeftRecursionDetector.java   rejects at fromGrammar with witness
 │   └── LeftRecursionCause.java
 ├── grammar/                         shared front-end: GrammarParser, GrammarLexer,
-│                                    GrammarResolver, Grammar, Expression, Rule, Import
+│                                    GrammarResolver, Grammar, Expression, Rule, Import,
+│                                    NestingPair
 │   └── analysis/LeftRecursionAnalysis.java
 ├── error/ParseError.java
 ├── source/                          SourceLocation, SourceSpan
@@ -142,6 +145,8 @@ e{n,m}      # Bounded repetition
 %whitespace <- [ \t\r\n]*
 %recover <CharSet> Rule       # per-rule sync set (implemented per-rule since 0.6.1)
 %checkpoint Rule              # incremental-reparse boundary
+%suggest Rule                 # suggestion vocabulary for "did you mean" hints
+%import Grammar.Rule          # compose grammars; needs a GrammarSource (0.7.2)
 %memo Rule                    # position memo for a rule re-parsed by overlapping alternatives (0.7.1)
 %parser Rule                  # pin a rule to PARSER, overriding classification inference (0.7.2)
 %nest '<open>' '<close>'      # delimiter pair whose occurrences nest — depth-counted, not
@@ -151,7 +156,7 @@ e{n,m}      # Bounded repetition
 ## Rule classification (LEXER vs PARSER)
 
 `RuleClassifier` decides which rules compile into the lexer DFA. It is inference, not declaration,
-and these four judgements are worth knowing because they change what you can write.
+and these judgements are worth knowing because they change what you can write.
 
 **A rule whose body is only references is LEXER only if it spans one token.** A choice between
 shapes (`ColLabel <- QuotedIdent / UnquotedIdent`) or an alias (`NullConstraint <- NullKW`) spans
@@ -246,9 +251,9 @@ Anything else is skipped, and a reference to such a rule fails with `SkippedRule
   check first; it turns several rounds of hand diagnosis into one line.
 
   What is genuinely unavailable is *fusion*: a guarded rule cannot be absorbed into a larger
-  token, and a `< >` around one — `Qualified <- < ColId '.' ColId >` — is silently ignored rather
-  than honoured. That is the real limitation, and it is a narrower one than "guarded rules cannot
-  nest".
+  token: `Qualified <- < ColId '.' ColId >` still falls back to PARSER, because inlining `ColId`
+  drags its lookahead in. Since 0.7.3 that is *reported* — `grammar.token-boundary-ignored` — so
+  it is a stated limit rather than a silent one. Narrower than "guarded rules cannot nest".
 - **Lookahead over anything but a character class**, e.g. `&(Modifier* ClassKW)` — which is why
   java25 spells its `value` lookahead inline (see below).
 - **Lookahead nested inside a Choice alternative** rather than trailing the whole body.
@@ -450,7 +455,7 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**693 tests across 5 modules**, 0 failures, 0 skips (0.7.3; 635 at 0.7.2, 576 at 0.7.1). The
+**696 tests across 5 modules**, 0 failures, 0 skips (0.7.3; 635 at 0.7.2, 576 at 0.7.1). The
 count dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were
 deleted, not because coverage was lost.
 

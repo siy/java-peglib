@@ -117,7 +117,7 @@ AGREE_REJECT           186
 EXCLUDED_ORACLE_OLD     24
 FALSE_ACCEPT            21
 FALSE_REJECT            10
-agreement: 99.45% (5545/5642 scored, 24 excluded)
+agreement: 99.45% (5611/5642 scored, 24 excluded)
 ```
 
 Re-measured 2026-08-22 on `release-0.7.3` (5,673 files; the corpus grows over time):
@@ -269,10 +269,15 @@ is broken for real codebases, whereas one that accepts an emoji as an identifier
 to reject code that does not compile anyway. Corpus parity is a proxy for correctness, not the
 goal — do not "fix" this by reverting to ASCII-only identifiers.
 
-## The remaining 37 disagreements, and why
+## The remaining disagreements, and why
 
 Reviewed file by file. Roughly half are permanent by design; the rest are individually
-expensive. **99.34% is close to the practical ceiling; ~19 of the 37 will never close.**
+expensive. **99.45% is close to the practical ceiling; roughly two thirds of what is left will
+never close.**
+
+*The file-by-file breakdown below was written when the count was 37 and the agreement 99.34%.
+Six have since been fixed; the current count is 31 (21 false accepts, 10 false rejects), stable
+across 0.7.1 and 0.7.3. The categories still hold — the totals quoted inside them do not.*
 
 **Permanently waived — not context-free (8 false accepts).** Numeric magnitude
 (`int i = 12345678901234567890`, `1e9999`, `1e-9999`), duplicate modifiers

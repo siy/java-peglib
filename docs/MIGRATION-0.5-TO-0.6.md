@@ -448,7 +448,7 @@ In nearly all cases: **none**. Grammar files written for 0.5.x parse cleanly und
 - All operators: ` ` (sequence), `/` (choice), `*`, `+`, `?`, `&`, `!`, `(...)`, `'lit'`, `"lit"`, `[a-z]`, `[^a-z]`, `.`
 - Extensions: `< e >` (token boundary), `~e` (ignore), `'text'i` (case-insensitive), `e{n,m}` (bounded repetition), `$name<e>` / `$name` (named capture / back-reference)
 - Cut operator: `^` and `↑` (wired into the generator in 0.6.1; commits to the current Choice alternative)
-- Directives: `%whitespace <- ...`, `%recover [chars] Rule`, `%checkpoint Rule`, `%suggest Rule`, `%memo Rule` (all parsed and honoured; `%memo` added in 0.7.1)
+- Directives: `%whitespace <- ...`, `%recover [chars] Rule`, `%checkpoint Rule`, `%suggest Rule`, `%memo Rule` (0.7.1), `%import Grammar.Rule` and `%parser Rule` (0.7.2), `%nest '<open>' '<close>'` (0.7.3) — all parsed and honoured
 
 The one breaking change is **inline Java action blocks**:
 

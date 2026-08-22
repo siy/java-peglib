@@ -88,10 +88,11 @@ keyword literals and zero reference-only lexer rules. Eleven defects, plus two t
    in 36 downstream assertions.
 
    What *is* genuinely unavailable is fusion: a guarded rule cannot be absorbed into a larger
-   token, and a `< >` around one — `Qualified <- < ColId '.' ColId >` — is silently ignored
-   rather than honoured. That is a narrower limitation than the one recorded here, and the
-   silent-ignore is arguably the part worth addressing.
-2. ~~**Unreachable-kind detection.**~~ **BUILT 2026-08-22** — `grammar.unreachable-kind`, in the
+   token: `Qualified <- < ColId '.' ColId >` still falls back to PARSER. **The silent half was
+   fixed in 0.7.3** — it now reports `grammar.token-boundary-ignored`, and a whole-body `< >`
+   over a compilable body is honoured rather than dropped. What remains is the genuine DFA
+   limit: a guarded rule's lookahead cannot be inlined into a larger token.
+2. ~~**Unreachable-kind detection.**~~ **BUILT 2026-08-22** (alongside `grammar.token-boundary-ignored`) — `grammar.unreachable-kind`, in the
    Analyzer, behind `peglib:lint` / `peglib:check`. It earned itself immediately: it diagnoses
    open item 1 above in one line (`Identifier` dead) where the original took several rounds by
    hand. The design work was all in *not* firing on correct grammars — the naive form reports
@@ -135,7 +136,7 @@ a time and looks like a hang — >10 min, against 7 s once warm. Warm the checko
 | `docs: close the nested-guard item as diagnosed, not defective` | handover item 1 — closed, not a defect |
 | `fix: honour a whole-body token boundary, or report that it could not be` | the `< >` silent-ignore found while diagnosing item 1 |
 
-Tests **693**, 0 failures, 0 skips, lint and format-check on (635 at 0.7.2 ship). Corpus 99.45%, re-measured.
+Tests **696**, 0 failures, 0 skips, lint and format-check on (635 at 0.7.2 ship). Corpus 99.45%, re-measured.
 
 The three open items from session 13 are all resolved — two fixed, one closed as *not a defect*
 after diagnosis. See the rewritten item list above; the short version is that item 1's recorded
@@ -188,7 +189,7 @@ premise was wrong, and the check built for item 2 is what proved it.
 ### Verification recipes
 
 ```bash
-mvn install                                    # full reactor, lint + format-check, 635 tests
+mvn install                                    # full reactor, lint + format-check, 696 tests
 mvn -q jbct:format                             # before committing new main-source code
 ```
 
@@ -197,6 +198,13 @@ see `tools/langtools-corpus/README.md`. **Re-measured live 2026-08-22 at 99.45%*
 `release-0.7.3` — failure counts identical to baseline (21 false accepts, 10 false rejects).
 Note the first run after a `--filter=blob:none` clone fetches contents lazily and takes minutes,
 not seconds; warm the checkout before timing.
+
+Hot-path verification after any change to `LexerEngine.lex` or generated emit — prefer the
+identity proof in `docs/bench-results/0.7.3-java25-parse.md` over a timing comparison. The stored
+0.4.x baselines use a `(variant)` axis and are NOT comparable to the current `(fixture)` one, so a
+bare benchmark run has nothing to compare against. Generating `GLexer`/`GParser` from both
+revisions and diffing is exact and noise-free; 0.7.3 was verified that way (GParser
+byte-identical, GLexer differing only in `.put` ordering).
 
 `%memo` semantics after any change to `CstArrayBuilder` replay:
 `tools/memo-differential/README.md` — differential vs the same grammar without the directive.

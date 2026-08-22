@@ -1,6 +1,6 @@
 # Peglib Playground
 
-The `peglib-playground` module ships with peglib 0.2.7. It provides two
+The `peglib-playground` module ships with peglib 0.7.3. It provides two
 complementary surfaces for experimenting with a grammar: a terminal REPL and
 an embedded web UI.
 
@@ -13,20 +13,20 @@ across surfaces.
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-playground</artifactId>
-    <version>0.2.7</version>
+    <version>0.7.3</version>
 </dependency>
 ```
 
-The module depends on `peglib:0.2.7`. Distribution includes a regular
-`peglib-playground-0.2.7.jar` (classpath use) and a runnable uberjar
-`peglib-playground-0.2.7-uber.jar` (includes `peglib` and `pragmatica-lite:core`).
+The module depends on `peglib:0.7.3`. Distribution includes a regular
+`peglib-playground-0.7.3.jar` (classpath use) and a runnable uberjar
+`peglib-playground-0.7.3-uber.jar` (includes `peglib` and `pragmatica-lite:core`).
 
 ## CLI REPL
 
 Launch against a grammar file:
 
 ```bash
-java -cp peglib-playground-0.2.7-uber.jar \
+java -cp peglib-playground-0.7.3-uber.jar \
      org.pragmatica.peg.playground.PlaygroundRepl \
      my-grammar.peg [--trace]
 ```
@@ -67,8 +67,8 @@ peg> :quit
 Start the HTTP server:
 
 ```bash
-java -jar peglib-playground-0.2.7-uber.jar          # default port 8080
-java -jar peglib-playground-0.2.7-uber.jar --port 9090
+java -jar peglib-playground-0.7.3-uber.jar          # default port 8080
+java -jar peglib-playground-0.7.3-uber.jar --port 9090
 ```
 
 Then open `http://localhost:8080` in a browser.
