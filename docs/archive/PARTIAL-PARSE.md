@@ -6,7 +6,7 @@ parsing stopped. Unlike `parseCst`, the matched rule is not required to consume
 all remaining input — parsing stops when the rule itself finishes.
 
 The feature is primarily consumed by the `peglib-incremental` module for
-cursor-anchored reparsing (see [`docs/archive/SPEC-incremental-original.md`](archive/SPEC-incremental-original.md) §5.6)
+cursor-anchored reparsing (see [`docs/archive/SPEC-incremental-original.md`](SPEC-incremental-original.md) §5.6)
 but is also useful for grammar debugging and testing.
 
 ## API
@@ -104,9 +104,9 @@ lookup.
 
 ## See also
 
-- [`docs/archive/SPEC-incremental-original.md`](archive/SPEC-incremental-original.md) — original incremental reparse spec (archived; current architecture in [`incremental/ARCHITECTURE-0.5.0.md`](incremental/ARCHITECTURE-0.5.0.md))
-- [`GRAMMAR-DSL.md`](GRAMMAR-DSL.md) — grammar syntax reference
-- [`RuleId`](../peglib-core/src/main/java/org/pragmatica/peg/action/RuleId.java)
+- [`docs/archive/SPEC-incremental-original.md`](SPEC-incremental-original.md) — original incremental reparse spec (archived; current architecture in [`incremental/ARCHITECTURE-0.5.0.md`](../incremental/ARCHITECTURE-0.5.0.md))
+- [`GRAMMAR-DSL.md`](../GRAMMAR-DSL.md) — grammar syntax reference
+- `RuleId` (removed in 0.6.0 with the `action` package)
   and
-  [`Actions`](../peglib-core/src/main/java/org/pragmatica/peg/action/Actions.java)
+  `Actions` (removed in 0.6.0 with the `action` package)
   — marker type and programmatic action API

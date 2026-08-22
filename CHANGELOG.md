@@ -5,6 +5,151 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-08-22
+
+696 tests across 5 modules, 0 failures, 0 skips. Corpus agreement re-measured at 99.45%.
+
+### Fixed
+
+- **A `< >` token boundary around a whole rule body is honoured, or reported.** The boundary is
+  documented as "an explicit override and is trusted", and it was not. A body mixing rule
+  references with a terminal — `Qualified <- < ColId '.' ColId >` — was classified PARSER by a
+  check that ran *before* the override was consulted, so the rule silently became a sequence of
+  separate tokens. Nothing failed, which is why it went unnoticed: the three-token reading parses
+  perfectly well, and the author's instruction simply vanished.
+
+  Now the boundary wins where the body is lexically compilable: `< Plain '.' Plain >` lexes `a.b`
+  as one token. An unmarked body is untouched — `Sum <- Number '+' Number` must not fuse, and does
+  not.
+
+  Where the boundary *cannot* be delivered the rule still falls back to PARSER, because the body
+  names a guarded rule whose lookahead the DFA has no way to compile. That case is now reported as
+  **`grammar.token-boundary-ignored`** rather than left to be inferred from a token stream. A
+  boundary around one alternative (`Literal <- < 'null' > / CharLit`, java25's shape) is correctly
+  PARSER and is not flagged.
+
+  Blast radius on `java25.peg`: none — no rule there wraps its whole body in a boundary while
+  naming other rules, and both new checks report zero findings on it.
+
+- **Generated source is reproducible.** Two runs of the same commit against the same grammar
+  emitted different `GLexer.java`. Measured before the fix: five fresh JVMs produced **four
+  distinct SHA-256 hashes** of the generated source for `java25.peg`, and all 108 differing
+  lines were `RESOLVERS` `.put(...)` lines. After: ten runs, one hash.
+
+  The cause was `Map.copyOf`, whose iteration order is deliberately randomised per JVM run.
+  `DfaBuilder` built each keyword-resolution map as a `LinkedHashMap` — the order-preserving
+  intent was there — then passed it through `Map.copyOf`, which discarded it, and
+  `renderResolvers` iterates the result. Replaced with an `orderedCopy` helper keeping the same
+  immutability guarantee (defensive copy behind an unmodifiable view) without reordering,
+  applied to every map in `TokenKindAssignment` since all of them feed code generation.
+
+  This is what makes "did the generated output change?" a meaningful question again. Any
+  content-based staleness check was defeated by it, including the generator stamping added in
+  0.7.2 — a consumer comparing generated sources saw spurious changes on every rebuild.
+
+  The regression test deliberately does **not** generate twice and compare: the randomisation
+  seed is chosen once per JVM, so two calls in one test JVM agree with each other and that test
+  passes against the bug. It asserts instead that emitted order equals the grammar's keyword
+  declaration order — a property that holds in any JVM. (Verified: reintroducing `Map.copyOf`
+  turns both mechanism tests red while the generate-twice check stays green.)
+
+### Changed
+
+- **A guarded rule whose body names another guarded rule is documented correctly.** No code
+  change — this entry exists because two releases of documentation described the shape as a
+  blocking limitation, and it is not one.
+
+  `WindowName <- !PartitionKW ColId` where `ColId <- !ReservedKeyword (...)` falls back to PARSER
+  classification, and **the PARSER reading is correct**: measured, `hello` is accepted while
+  `partition`, `select` and `from` are all rejected — both the outer and the inner guard fire, via
+  token-level lookahead instead of the DFA.
+
+  The recorded "fix" — composing the guard sets so the rule is promoted to LEXER — was attempted
+  twice, reverted twice, and has now been diagnosed. It breaks 36 tests through exactly one rule:
+  `PlainTypeName <- !RestrictedTypeName Identifier` (`java25.peg:247`) is this same shape, and
+  promoted to LEXER it out-prioritises `Identifier` (line 322). Every identifier in Java then
+  lexes as `PlainTypeName`, `Identifier` goes dead, and `CompilationUnit` fails at offset 0 —
+  hence every failure reading `trailing input not consumed`. The new `grammar.unreachable-kind`
+  check reports it in one line.
+
+  `NestedGuardRuleTest` pins the PARSER classification with that reasoning attached, so a third
+  attempt fails at the cause instead of in 36 downstream assertions. The genuine limitation is
+  narrower than recorded: a guarded rule cannot be *fused* into a larger token, and a `< >` around
+  one is silently ignored rather than honoured.
+
+
+### Added
+
+- **`grammar.unreachable-kind` — detection of allocated-but-unproducible token kinds.**
+  The lexer resolves competing rules by priority. When one always wins for the same input, the
+  loser's kind is allocated and then never appears in any token stream: no guard fires, nothing
+  fails, and the grammar parses as though the rule were absent.
+
+  This is the check that would have caught the defect costing several rounds of hand diagnosis
+  during the 0.7.2 PostgreSQL migration — `WindowName` out-prioritised `ColId`, so *every
+  identifier in the language* lexed as `WindowName` while `ColId` sat dead. Reported by
+  `peglib:lint` / `peglib:check`.
+
+  A kind is producible if a DFA accepting state carries it or post-match keyword resolution
+  remaps something to it; those are the only two writers of a token's kind. **Rules represented
+  elsewhere are excused**, and that distinction is what makes the check usable rather than
+  noise: the naive form reports five rules on `java25.peg`, corpus-validated against javac at
+  99.45% — `Keyword`, `Modifier`, `PrimType`, `RestrictedTypeName`, `IllegalLocalClassMod`, all
+  literal-set rules whose individual literals carry their own higher-priority kinds. That is
+  correct behaviour, so a rule is excused when every kind in its alias set is producible, or
+  when it was inlined into another lexer rule. A rule whose alias kinds are only *partly*
+  producible is still reported with the count — one shadowed keyword is the interesting case
+  and would otherwise hide behind its live siblings.
+
+  The `java25.peg`-produces-nothing test is the gate that decides whether the check is worth
+  having, and it is written against the real grammar for that reason.
+
+- **`%nest '<open>' '<close>'` — nested block comments** ([#45](https://github.com/siy/java-peglib/issues/45)).
+  Declares one delimiter pair whose occurrences nest, lexed by a depth-counting scanner
+  instead of a DFA path. A nested comment is not a regular language, so no DFA can match
+  one: the compiled `'/*' (!'*/' .)* '*/'` alternative closes at the **first** `*/` and the
+  remainder of the comment leaks into the token stream as live source. The recursive
+  spelling is no escape — `BlockComment <- '/*' (BlockComment / !'*/' .)* '*/'` is reachable
+  from `%whitespace` and self-referential, so the analyzer refuses it as
+  `grammar.whitespace-cycle`, and it could not have compiled in any case.
+
+  The failure this fixes is **not reliably loud**, which is why it is filed as a correctness
+  defect rather than a coverage gap. Reported downstream against a PostgreSQL grammar, where
+  `SELECT 1 /* /* */ , 999 -- */ FROM t;` parsed cleanly with two select items where correct
+  nesting demands one — a query silently meaning something other than what it says.
+  SQL/PostgreSQL, Rust, Swift, Haskell, D, OCaml and Scala 3 all nest.
+
+  Note the boundary of the claim, which the reporter corrected on the issue: only text falling
+  **inside** a balanced span diverges. `SELECT 1 /* a /* b */ -- */` leaves `, 2` outside the
+  span, and there the old lexer reached the right answer by a different route — its early close
+  left `-- */` as a line comment that swallowed the orphaned close. `%nest` changes nothing
+  there, and `NestingTriviaTest.SqlShapedIssue45` asserts both directions: a fix that only ever
+  made comments longer would pass the divergence case and fail the control.
+
+  Behaviour worth knowing:
+  - The counting scan **replaces** the DFA scan at a token start rather than running before
+    it, so a nesting comment is scanned once and no comment costs more to lex than it did.
+  - Testing delimiters only at a token start is what keeps an open delimiter inside a string
+    literal safe — the string rule's token begins at the quote and swallows it.
+  - An **unterminated** block falls through to the DFA rather than consuming to end of input,
+    so malformed input reads exactly as it did before the directive existed. `%nest` can only
+    change the reading of comments that actually balance.
+  - The trivia kind comes from the open delimiter via the same classifier `%whitespace`
+    absorption uses, so `'/*'` is a block comment and the doc-variant refinement still applies
+    (`/** … */` nested is `DOC_BLOCK_COMMENT`). Haskell's `{-` yields plain whitespace trivia.
+  - A pair is standalone: it neither requires nor is required by a `%whitespace` alternative.
+  - Both delimiters must be non-empty. An empty open delimiter would match at every position
+    and advance the counter by zero, so it is refused at parse time — the one directive
+    argument where the relaxed "unknown names are inert" policy would be unsafe.
+  - The directive may repeat; pairs compose across `%import`.
+
+  A grammar that declares no `%nest` is **unaffected in every respect**: the emitted `GLexer`
+  source is byte-identical to what 0.7.2 produced — no tables, no import, no reject test — so
+  there is no new per-token cost and no regeneration churn. `NestingLexerParityTest` asserts
+  that property, and also pins the interpreted `LexerEngine` and the generated `GLexer` to the
+  same token stream, since the interception had to be written on both paths and the test suite
+  exercises the former while `PegParser` runs the latter.
+
 ## [0.7.2] - 2026-08-19
 
 ### Added

@@ -15,6 +15,7 @@ repeated here.
    - [`%suggest RuleName`](#suggest)
    - [`%memo RuleName`](#memo)
    - [`%parser RuleName`](#parser)
+   - [`%nest '<open>' '<close>'`](#nest)
    - [`%word` (inert)](#word--accepted-but-inert)
    - [`%import Grammar.Rule`](#grammar-composition)
 4. [Directive interaction matrix](#directive-interaction-matrix)
@@ -308,6 +309,69 @@ ColLabel   <- ColId / ReservedKeyword # a choice between token kinds
 %parser ColLabel
 ```
 
+<a id="nest"></a>
+### `%nest`
+
+`%nest '<open>' '<close>'` *(0.7.3)*
+
+Declares one delimiter pair whose occurrences **nest**, lexed by a depth-counting
+scanner instead of a DFA path.
+
+```peg
+%nest '/*' '*/'
+```
+
+**Why a directive and not a rule.** The natural spelling is recursion:
+
+```peg
+BlockComment <- '/*' (BlockComment / !'*/' .)* '*/'
+```
+
+and it cannot work, for two independent reasons. `BlockComment` is reachable from
+`%whitespace` and transitively references itself, so the analyzer refuses it as
+`grammar.whitespace-cycle`. And were it accepted, a nested comment is **not a regular
+language** — a DFA has no counter — so nothing could compile it. Naming a rule would
+therefore mean recovering the delimiters from a rule body that cannot be written, so
+the directive states them outright.
+
+**What goes wrong without it.** The non-recursive form closes at the *first* close
+delimiter:
+
+```peg
+BlockComment <- '/*' (!'*/' .)* '*/'
+```
+
+Given `/* outer /* inner */ still a comment */`, the comment ends at the inner `*/`
+and `still a comment */` leaks into the token stream as live source. That is not
+reliably a parse error — when the leaked text happens to compose into valid source,
+the parser accepts a **different program with no diagnostic at all**. SQL/PostgreSQL,
+Rust, Swift, Haskell, D, OCaml and Scala 3 all nest, so for those this is a
+correctness defect rather than a coverage gap.
+
+**Trivia kind.** Decided from the open delimiter by the same rule that classifies
+`%whitespace` alternatives, so `'/*'` yields `BLOCK_COMMENT` and the doc-variant
+refinement still applies to the matched text (a nested `/** … */` is
+`DOC_BLOCK_COMMENT`). An open delimiter matching no comment prefix peglib knows —
+Haskell's `{-`, ML's `(*` — yields plain whitespace trivia.
+
+**Standalone.** A `%nest` pair neither requires nor is required by a matching
+`%whitespace` alternative; the pair alone is enough to lex the comment. Where both are
+present the counting scanner takes precedence at a token start.
+
+**Unterminated input falls through.** A block whose delimiters never balance is *not*
+consumed to end of input — the lexer falls back to its ordinary DFA path, so malformed
+input reads exactly as it did before the directive was added. `%nest` can only change
+the reading of comments that actually balance.
+
+**Delimiters are tested only at a token start**, which is what makes an open delimiter
+inside a string literal safe: the string rule's token begins at the quote and swallows
+it.
+
+Both delimiters must be non-empty — an empty open delimiter would match at every
+position and advance the counter by zero, so it is refused at parse time rather than
+accepted inertly. The directive may appear more than once; each occurrence contributes
+an independent pair, and pairs compose across `%import`.
+
 ### `%word` — accepted but inert
 
 `%word <- Expression`
@@ -338,10 +402,14 @@ Declaring `%word` changes nothing. The analyzer reports it as
 | `%checkpoint` | grammar | yes | no | incremental reparse only |
 | `%memo` | grammar | yes | no — output is identical either way | yes — success path, by design |
 | `%parser` | grammar | yes | yes — changes which rules the lexer produces | no |
+| `%nest` | grammar | yes | yes — changes where a comment ends | lexer, per comment |
 
 Only `%memo` deliberately changes success-path *cost*, and it does not change
-success-path *output*. `%parser` is the one directive that changes *structure* — it
-moves a rule across the lexer/parser boundary, so the token stream itself differs.
+success-path *output*. `%parser` and `%nest` are the two directives that change
+*structure* — `%parser` moves a rule across the lexer/parser boundary, and `%nest`
+changes where a comment token ends, so in both cases the token stream itself differs.
+`%nest` replaces the DFA scan of a comment rather than adding to it, so it does not
+make a comment cost more to lex; a grammar declaring none pays nothing at all.
 Everything else is failure-path only. A grammar using none of them parses exactly as
 it would without directives.
 
@@ -365,6 +433,8 @@ Each finding has a stable tag for tooling integration. The full catalog:
 | `grammar.memo-unknown-rule` | WARNING | `%memo` names a rule the grammar does not define — the directive is ignored |
 | `grammar.memo-non-parser-rule` | WARNING | `%memo` targets a LEXER or MIXED rule; only PARSER rules are memoised — the directive is ignored |
 | `grammar.inert-directive` | WARNING | A directive the front-end accepts but the generator never reads (`%word`, rule-level `%expected` / `%recover` / `%tag`) — declaring it has no effect |
+| `grammar.unreachable-kind` | WARNING | A rule was allocated a token kind that no input can produce, because a higher-priority rule matches the same text *(0.7.3)* |
+| `grammar.token-boundary-ignored` | WARNING | A rule wraps its whole body in `< >` but could not be compiled as one token, so it is parsed as separate tokens *(0.7.3)* |
 
 The ambiguous-choice check is conservative: it flags only choices where
 *every* alternative has a fixed literal prefix. Rule-reference-prefixed or
@@ -391,6 +461,35 @@ analyzer: 1 error, 1 warning, 0 info
 The CLI exits with status `0` when no errors, `1` when errors found,
 `2` on I/O or grammar-parse failure. Warnings/info alone do not fail
 the CLI — only `ERROR` findings do.
+
+### `grammar.unreachable-kind` — a rule that is allocated but never produced
+
+*(0.7.3)* The lexer resolves competing rules by priority. When one rule always wins for
+the same input, the loser's token kind is allocated and then never appears in any token
+stream — no guard fires, nothing fails, and the grammar parses as though the rule were
+not there.
+
+This is the check that would have caught the defect which cost several rounds of hand
+diagnosis during the 0.7.2 PostgreSQL migration: `WindowName` out-prioritised `ColId`,
+so *every identifier in the language* lexed as `WindowName` while `ColId` sat dead.
+
+A kind is producible if a DFA accepting state carries it, or if post-match keyword
+resolution remaps something to it. Those are the only two writers of a token's kind.
+
+**Rules represented elsewhere are not reported.** The naive form of this check — "no DFA
+state accepts this kind" — reports five rules on `java25.peg`, which is corpus-validated
+against javac at 99.45%: `Keyword`, `Modifier`, `PrimType`, `RestrictedTypeName` and
+`IllegalLocalClassMod`. Each is a literal-set rule whose individual literals carry their
+own higher-priority kinds, so the rule's own kind never wins — and that is correct. A rule
+is therefore excused when every kind in its alias set is producible, or when it was
+inlined into another lexer rule.
+
+A rule whose alias kinds are only *partly* producible **is** reported, with the count: one
+specific keyword being shadowed is the interesting case, and it would otherwise hide behind
+its live siblings. This is the shape of the `IFNOTEXISTS` failure — a fused lexeme spelled
+as no input contains it, allocated and never matched.
+
+Run it with `peglib:lint` or `peglib:check`.
 
 ## Actions were removed in 0.6.0
 

@@ -3,7 +3,7 @@
 A PEG (Parsing Expression Grammar) parser library for Java. Tokens-first lex-then-parse
 architecture, flat int[] CST, visitor pattern, true incremental reparse.
 
-Maven Central: `org.pragmatica-lite:peglib:0.7.2`
+Maven Central: `org.pragmatica-lite:peglib:0.7.3`
 
 Migrating from 0.5.x? See [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md).
 Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
@@ -29,14 +29,14 @@ Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.7.2</version>
+    <version>0.7.3</version>
 </dependency>
 ```
 
 Requires Java 25+ and [`pragmatica-lite:core`](https://github.com/siy/pragmatica-lite)
 for `Result` / `Option` types (transitive).
 
-If you only consume a generated parser, depend on `peglib-runtime` (25 KB) instead of
+If you only consume a generated parser, depend on `peglib-runtime` (27 KB) instead of
 `peglib` — the runtime is enough to walk a `CstArray` and read diagnostics.
 
 ### Parse some text
@@ -179,6 +179,8 @@ e{3}  e{2,}  e{2,5}          # bounded repetition
 %memo Rule                   # cache a rule re-parsed at the same position (0.7.1)
 %import Grammar.Rule         # compose grammars; pass a GrammarSource (0.7.2)
 %parser Rule                 # pin a rule to PARSER, overriding classification (0.7.2)
+%nest '/*' '*/'              # delimiter pair whose occurrences nest, e.g. nested
+                             # block comments; depth-counted, not DFA-matched (0.7.3)
 ```
 
 See [`docs/GRAMMAR-DSL.md`](docs/GRAMMAR-DSL.md) for the full reference.
@@ -293,7 +295,7 @@ edits that span checkpoints fall back to full reparse.
 
 | Module | Purpose |
 |---|---|
-| `peglib-runtime` | 25 KB; the only dep generated parsers need (plus pragmatica-lite:core) |
+| `peglib-runtime` | 27 KB; the only dep generated parsers need (plus pragmatica-lite:core) |
 | `peglib` (`peglib-core`) | grammar parser, codegen, analyzers, `PegParser.fromGrammar`, `IncrementalParser` |
 | `peglib-formatter` | Wadler-Lindig pretty printer over `CstArray` |
 | `peglib-maven-plugin` | build-time codegen mojo (`generate`) |
@@ -310,7 +312,7 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.7.2</version>
+    <version>0.7.3</version>
     <executions>
         <execution>
             <goals><goal>generate</goal></goals>
@@ -361,7 +363,9 @@ finds `Shared.peg` beside it with no configuration.
 - Parity-class with `javac` parse-only on real Java 25 source (1.2x-1.8x of javac
   wallclock on 1900-LOC and 40k-LOC fixtures, while emitting full CST + trivia +
   diagnostics that javac doesn't expose).
-- Roughly 12x faster than the 0.5.x source-generated parser.
+- Was measured at roughly 12x the 0.5.x source-generated parser. **Dated claim, not a live
+  measurement** — the 0.5.x A/B benchmarks were deleted with the legacy path in 0.7.0, so it
+  can no longer be reproduced in-tree.
 - Memory: ~32 bytes per CST node (flat `int[]`), ~10x less than 0.5.x record-based CST.
 - Incremental edit p50 sub-millisecond when the edit lies inside a `%checkpoint` subtree.
 
@@ -374,16 +378,18 @@ data.
 ## Build
 
 ```bash
-mvn install -Djbct.skip=true
+mvn install
 ```
 
-`-Djbct.skip=true` works around a JBCT 0.25.0 formatter-convergence issue on a few
-files; lint itself passes cleanly.
+Lint and format-check run as part of the build and pass cleanly. The
+`-Djbct.skip=true` escape hatch still exists (the property defaults to `false` in the
+parent pom) but is no longer needed — the 0.25.0 formatter-convergence issue it worked
+around was fixed in JBCT 1.0.0-rc2.
 
 Run tests for a single module:
 
 ```bash
-mvn -pl peglib-core test -Djbct.skip=true
+mvn -pl peglib-core test
 ```
 
 JMH benchmark harness reference: [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md).
@@ -396,7 +402,8 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 | Version | Date | What |
 |---|---|---|
-| **0.7.2** | 2026-08-19 | Grammars that are not Java-shaped. Identifier fallback works for case-insensitive keywords; a lexer rule may reference another lexer rule, end in a character-class lookahead, or carry several leading keyword guards; `%parser` pins classification the inference gets wrong; `< >` decides whether a reference-only rule is one token. Plus `%import` end to end, Base64 DFA tables (lifting a ~1100-state ceiling), case-folded literal keys, and generator-version stamping. 628 tests. |
+| **0.7.3** | 2026-08-22 | Grammars whose comments nest. `%nest '<open>' '<close>'` lexes a nesting delimiter pair with a depth-counting scanner, because a nested block comment is not a regular language and no DFA path can match one — the old reading closed at the first `*/` and leaked the remainder into the token stream, sometimes as a *silently different* program. Two new analyzer checks: `grammar.unreachable-kind` (a rule allocated a token kind no input can produce) and `grammar.token-boundary-ignored` (a `< >` the classifier could not honour). A whole-body `< >` now outranks the terminals-and-references rule instead of being dropped in silence, and generated sources are reproducible across JVM runs. Corpus agreement re-measured at 99.45%, unchanged. 696 tests. |
+| **0.7.2** | 2026-08-19 | Grammars that are not Java-shaped. Identifier fallback works for case-insensitive keywords; a lexer rule may reference another lexer rule, end in a character-class lookahead, or carry several leading keyword guards; `%parser` pins classification the inference gets wrong; `< >` decides whether a reference-only rule is one token. Plus `%import` end to end, Base64 DFA tables (lifting a ~1100-state ceiling), case-folded literal keys, and generator-version stamping. 635 tests. |
 | **0.7.1** | 2026-08-14 | Java grammar validated against javac's own parse phase over OpenJDK's langtools suite: agreement 95.55% → **99.45%** (5,614/5,645). Engine fixes: nullable start rules, trailing-input reporting, Unicode escape translation (JLS 3.3), hex escapes in character classes. New `%memo` directive plus a first-token guard and link-on-success CST building, holding parse throughput within ~1% of 0.7.0 despite the JLS 14.8 statement-expression restriction. The `*Probe` gates now actually execute. 576 tests. |
 | **0.7.0** | 2026-08-05 | **Breaking.** 0.5.x interpreter path removed (146 files, ~38,900 lines) along with the `peglib-incremental` artifact; `org.pragmatica.peg.v6.*` collapsed to `org.pragmatica.peg.*`; maven goal `generate-v6` → `generate`; `pragmatica-lite:core` → 1.0.0-rc2. Adds JEP 401 value classes, `outer.new`, annotated type parameters, hex float literals, and a CST-shape gate. 528 tests, zero JBCT errors. |
 | **0.6.3** | 2026-06-07 | Patch release. Legacy interpreter cut-failure symmetry: `Optional`/`ZeroOrMore`/`OneOrMore`/bounded repetition now restore the pending-trivia snapshot on `CutFailure`. Test suite reaches zero skips (1424 tests). |

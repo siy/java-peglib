@@ -83,6 +83,11 @@ Four verdicts:
 git clone --depth 1 --filter=blob:none --sparse https://github.com/openjdk/jdk.git /tmp/jdk
 cd /tmp/jdk && git sparse-checkout set test/langtools/tools/javac
 
+# 1b. Materialise the blobs BEFORE timing anything. --filter=blob:none makes a partial clone
+# that fetches file contents lazily, on first read — so the first differential run downloads
+# ~5,700 blobs one at a time and looks like a hang (observed: >10 min, vs 7 s once warm).
+grep -rq nonexistent-token /tmp/jdk/test/langtools/tools/javac 2>/dev/null || true
+
 # 2. Build a classpath (absolute — the harness is run from elsewhere)
 cd <peglib>
 mvn -q -pl peglib-core dependency:build-classpath \
@@ -112,8 +117,25 @@ AGREE_REJECT           186
 EXCLUDED_ORACLE_OLD     24
 FALSE_ACCEPT            21
 FALSE_REJECT            10
-agreement: 99.45% (5545/5642 scored, 24 excluded)
+agreement: 99.45% (5611/5642 scored, 24 excluded)
 ```
+
+Re-measured 2026-08-22 on `release-0.7.3` (5,673 files; the corpus grows over time):
+
+```text
+AGREE_CLEAN           5432
+AGREE_REJECT           186
+EXCLUDED_ORACLE_OLD     24
+FALSE_ACCEPT            21
+FALSE_REJECT            10
+agreement: 99.45% (5618/5649 scored, 24 excluded)
+```
+
+`java25.peg` is unchanged, so this is the expected result — but it was re-run rather than
+inherited because 0.7.3 changed the lexer path (nesting interception at token start) and the
+classification of whole-body token boundaries. **The failure counts are identical to the
+baseline**: same 21 false accepts, same 10 false rejects. The +7 `AGREE_CLEAN` is corpus growth,
+not a fix.
 
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
 false-accept fix tightens the grammar and can create new false rejects; several candidate fixes
@@ -247,10 +269,15 @@ is broken for real codebases, whereas one that accepts an emoji as an identifier
 to reject code that does not compile anyway. Corpus parity is a proxy for correctness, not the
 goal — do not "fix" this by reverting to ASCII-only identifiers.
 
-## The remaining 37 disagreements, and why
+## The remaining disagreements, and why
 
 Reviewed file by file. Roughly half are permanent by design; the rest are individually
-expensive. **99.34% is close to the practical ceiling; ~19 of the 37 will never close.**
+expensive. **99.45% is close to the practical ceiling; roughly two thirds of what is left will
+never close.**
+
+*The file-by-file breakdown below was written when the count was 37 and the agreement 99.34%.
+Six have since been fixed; the current count is 31 (21 false accepts, 10 false rejects), stable
+across 0.7.1 and 0.7.3. The categories still hold — the totals quoted inside them do not.*
 
 **Permanently waived — not context-free (8 false accepts).** Numeric magnitude
 (`int i = 12345678901234567890`, `1e9999`, `1e-9999`), duplicate modifiers

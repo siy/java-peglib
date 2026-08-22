@@ -2,6 +2,11 @@
 
 ## Project Status
 
+**0.7.3 is in progress on `release-0.7.3`** (unreleased). It adds `%nest` for nested block
+comments (issue #45), the `grammar.unreachable-kind` and `grammar.token-boundary-ignored`
+analyzer checks, reproducible generated sources, and honours a whole-body `< >` token boundary
+that was previously ignored in silence. Corpus agreement re-measured at 99.45%, unchanged.
+
 **0.7.2 is the latest shipped release** (Maven Central, 2026-08-19). It makes peglib usable for
 grammars that are not Java-shaped: identifier fallback works for case-insensitive keywords, a
 lexer rule may reference another lexer rule, end in a character-class lookahead or carry several
@@ -54,7 +59,7 @@ Nine decisions (per spec §3 — all implemented or documented):
 
 ```
 peglib/
-├── peglib-runtime/         25KB; generated parsers depend ONLY on this + pragmatica-lite:core
+├── peglib-runtime/         27KB; generated parsers depend ONLY on this + pragmatica-lite:core
 ├── peglib-core/            grammar parser, codegen, analyzers, implementation, IncrementalParser
 ├── peglib-formatter/       Wadler-Lindig pretty printer on flat CST
 ├── peglib-maven-plugin/    build-time codegen mojo
@@ -68,6 +73,7 @@ peglib-runtime/src/main/java/org/pragmatica/peg/
 ├── token/
 │   ├── TokenArray.java              flat int[] tokens; spliceLex for incremental
 │   ├── TokenArrayBuilder.java
+│   ├── NestingScanner.java          depth counter behind %nest; shared by both lexer paths
 │   └── LexFn.java                   functional lexer adapter
 ├── cst/
 │   ├── CstArray.java                flat int[]; findCheckpointAncestor; spliceSubtree
@@ -87,13 +93,16 @@ peglib-core/src/main/java/org/pragmatica/peg/
 │   ├── DfaBuilder.java              NFA→DFA + inline literals + aliases + delimited-block
 │   └── LexerEngine.java
 ├── analyzer/
-│   ├── Analyzer.java                grammar linter behind peglib:lint / peglib:check
+│   ├── Analyzer.java                grammar linter behind peglib:lint / peglib:check;
+│   │                                grammar.unreachable-kind and
+│   │                                grammar.token-boundary-ignored added 0.7.3
 │   ├── AnalyzerMain.java            CLI entry point
 │   ├── AnalyzerReport.java, Finding.java
 │   ├── LeftRecursionDetector.java   rejects at fromGrammar with witness
 │   └── LeftRecursionCause.java
 ├── grammar/                         shared front-end: GrammarParser, GrammarLexer,
-│                                    GrammarResolver, Grammar, Expression, Rule, Import
+│                                    GrammarResolver, Grammar, Expression, Rule, Import,
+│                                    NestingPair
 │   └── analysis/LeftRecursionAnalysis.java
 ├── error/ParseError.java
 ├── source/                          SourceLocation, SourceSpan
@@ -136,14 +145,18 @@ e{n,m}      # Bounded repetition
 %whitespace <- [ \t\r\n]*
 %recover <CharSet> Rule       # per-rule sync set (implemented per-rule since 0.6.1)
 %checkpoint Rule              # incremental-reparse boundary
+%suggest Rule                 # suggestion vocabulary for "did you mean" hints
+%import Grammar.Rule          # compose grammars; needs a GrammarSource (0.7.2)
 %memo Rule                    # position memo for a rule re-parsed by overlapping alternatives (0.7.1)
 %parser Rule                  # pin a rule to PARSER, overriding classification inference (0.7.2)
+%nest '<open>' '<close>'      # delimiter pair whose occurrences nest — depth-counted, not
+                              # DFA-matched. Nested block comments (0.7.3)
 ```
 
 ## Rule classification (LEXER vs PARSER)
 
 `RuleClassifier` decides which rules compile into the lexer DFA. It is inference, not declaration,
-and these four judgements are worth knowing because they change what you can write.
+and these judgements are worth knowing because they change what you can write.
 
 **A rule whose body is only references is LEXER only if it spans one token.** A choice between
 shapes (`ColLabel <- QuotedIdent / UnquotedIdent`) or an alias (`NullConstraint <- NullKW`) spans
@@ -162,6 +175,16 @@ IfNotExists <- IfKW NotKW ExistsKW    # three tokens — a parser rule
 The `< >` is an explicit override and is trusted: `< IfKW NotKW ExistsKW >` will fuse, because you
 asked for it. Nothing else in the grammar distinguishes these two shapes, which is why the
 boundary decides.
+
+**Since 0.7.3 the boundary also outranks the terminals-and-references rule.** A body mixing
+references with a literal — `Qualified <- < ColId '.' ColId >` — used to be classified PARSER by a
+check that ran before the override was consulted, so the rule silently became separate tokens.
+An *unmarked* body of that shape is still PARSER (`Sum <- Number '+' Number` must not fuse); only
+the explicit boundary changes the answer.
+
+Where the boundary cannot be delivered — the body names a guarded rule, and the DFA cannot compile
+its lookahead — the rule still falls back to PARSER, but the analyzer now reports
+`grammar.token-boundary-ignored`. The failure was never incorrect, only silent.
 
 **`%parser Rule` pins a rule to PARSER.** The inference above cannot tell a rule that IS a token
 from one that merely names tokens: a reference-only body spanning a single token reads as lexical,
@@ -207,15 +230,63 @@ Anything else is skipped, and a reference to such a rule fails with `SkippedRule
 
 - **A guarded rule whose body names another guarded rule** — `WindowName <- !PartitionKW … ColId`
   where `ColId <- !ReservedKeyword (…)`. The outer guards are detected, but inlining `ColId` drags
-  its own leading `!ReservedKeyword` into the body, which the DFA then cannot compile. Composing
-  the two guard sets inside `detectSkipPrefix` was tried and **reverted**: it changed which rules
-  register as skip-prefix, forcing java25 rules to LEXER and failing 35 tests. A fix belongs
-  further down, where the rule is already a confirmed skip-prefix candidate.
+  its own leading `!ReservedKeyword` into the body, so `resolveSkipBody` refuses and the rule falls
+  back to PARSER.
+
+  **This is not a defect, and it must not be "fixed" — diagnosed 2026-08-22, measured, not
+  theorised.** The PARSER fallback parses *correctly*: for the canonical shape, `hello` is
+  accepted while `partition`, `select` and `from` are all rejected — both the outer and the inner
+  guard fire, via token-level lookahead instead of the DFA. Nothing is wrong with the output.
+
+  Composing the guard sets so the rule is promoted to LEXER was tried, reverted, and has now been
+  re-tried and diagnosed. It breaks **36 tests via exactly one rule**: `PlainTypeName <-
+  !RestrictedTypeName Identifier` (java25.peg:247) is this very shape, and promoting it to LEXER
+  makes it out-prioritise `Identifier` (line 322), which matches the same text. Every identifier
+  in Java then lexes as `PlainTypeName`, `Identifier` goes dead, and `CompilationUnit` fails at
+  offset 0 — every failure reads `trailing input not consumed`. Promotion buys nothing (the
+  PARSER reading was already correct) and costs the whole grammar.
+
+  `grammar.unreachable-kind` (0.7.3) reports this instantly as `Identifier` — verified by
+  re-applying the change and running the check. If anyone attempts promotion again, run that
+  check first; it turns several rounds of hand diagnosis into one line.
+
+  What is genuinely unavailable is *fusion*: a guarded rule cannot be absorbed into a larger
+  token: `Qualified <- < ColId '.' ColId >` still falls back to PARSER, because inlining `ColId`
+  drags its lookahead in. Since 0.7.3 that is *reported* — `grammar.token-boundary-ignored` — so
+  it is a stated limit rather than a silent one. Narrower than "guarded rules cannot nest".
 - **Lookahead over anything but a character class**, e.g. `&(Modifier* ClassKW)` — which is why
   java25 spells its `value` lookahead inline (see below).
 - **Lookahead nested inside a Choice alternative** rather than trailing the whole body.
 
 **Dropped in 0.6.0**: inline `{ ... }` action blocks (use `GVisitor<T>`).
+
+## Nesting trivia — the one thing the DFA structurally cannot do
+
+`%nest '/*' '*/'` (0.7.3) declares a delimiter pair whose occurrences **nest**. Everything else
+in this file is about what the DFA can be persuaded to compile; this is the case where no
+spelling would work, because a nested block comment is **not a regular language** and a DFA has
+no counter. The recursive rule is refused twice over — `grammar.whitespace-cycle` rejects it
+before compilation is even attempted — so the delimiters are stated outright rather than
+recovered from a rule body that cannot be written.
+
+Four properties are load-bearing and easy to break:
+
+- **The counting scan REPLACES the DFA scan** at a token start; it does not run before it.
+  Written the other way a comment would be scanned twice. `LexerEngine.lex` implements this by
+  setting `lastAcceptEnd`/`lastAcceptKind` and skipping the DFA loop, which also means keyword
+  resolution and the doc-variant refinement still run — emit-and-continue would silently make
+  `DOC_BLOCK_COMMENT` unreachable under `%nest`.
+- **Delimiters are tested only at a token start.** That is what makes `"/*"` inside a string
+  literal safe. A global scan would be wrong.
+- **Unterminated blocks fall through to the DFA**, so malformed input reads exactly as it did
+  before the directive existed.
+- **Emission is guarded on the grammar declaring `%nest`**, so `GLexer` for every other grammar
+  is byte-identical to 0.7.2 — no new per-token cost, no regeneration churn. `NestingLexerParityTest`
+  asserts this, and pins the two lexer paths to the same token stream.
+
+The scanner itself lives in **peglib-runtime** (`token/NestingScanner.java`) precisely so
+`LexerEngine` and generated `GLexer` share one definition — this project's recorded failure mode
+is those two drifting while the suite, which exercises only the former, stays green.
 
 Named captures `$name<e>` and back-references `$name` were dropped in 0.6.0 but **restored in 0.6.1** — they are supported at runtime via `ParserGenerator`'s capture map. `NamedCaptureDetector` no longer exists.
 
@@ -384,9 +455,13 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**635 tests across 5 modules**, 0 failures, 0 skips (0.7.2; 576 at 0.7.1). The count
-dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were deleted, not
-because coverage was lost.
+**696 tests across 5 modules**, 0 failures, 0 skips (0.7.3; 635 at 0.7.2, 576 at 0.7.1). The
+count dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were
+deleted, not because coverage was lost.
+
+Corpus agreement re-measured 2026-08-22 at **99.45%**, failure counts identical to the 0.7.1
+baseline. `java25.peg` is unchanged, but 0.7.3 altered the lexer path and token-boundary
+classification, so the figure was re-run rather than inherited.
 
 Notable test classes for verification gates:
 - `JavaCoverageProbe` / `JavaRejectionProbe` / `ModernJavaSyntaxProbe` — the accept/reject
@@ -416,6 +491,22 @@ dated claim, not a live measurement.
 ## Parser-domain rules
 
 - **Bisection-first on parser bugs.** When a real-world file produces N diagnostics, write a bisect that narrows to a minimal failing input. Theorizing about likely causes wastes more time than running a 10-line bisect. (from 0.6.0 ship: 13,529 diagnostics on FactoryClassGenerator narrowed to one em-dash via 6 bisect rounds; the prior 3 theoretical hypotheses were all wrong.)
+
+- **Count the delimiters before deciding what the right answer is.** For any nesting construct,
+  work out whether the disputed text falls inside or outside the balanced span *first*. A
+  balanced nested comment is exactly the case where the buggy and the correct lexer agree — the
+  early close leaves an orphaned delimiter that something else (a line comment) swallows, landing
+  on the same answer by a different route. (from issue #45: two examples were offered as silent
+  divergences; only one was. `SELECT 1 /* /* */ , 999 -- */` has `, 999` INSIDE the span and
+  genuinely diverges — 2 items before, 1 after. `SELECT 1 /* a /* b */ -- */` has `, 2` OUTSIDE
+  it and is identical on both. Both are now regression tests, in both directions: a fix that only
+  ever made comments longer would pass the first and fail the second.)
+
+- **A conclusion read off a token dump does not exercise the code that will assert it.** The
+  divergence above was confirmed by eyeballing token *text*, which was correct — but the helper
+  written to *count* the items was never run, and it counted the wrong kind name (`Item` absorbs
+  `Num`/`Name`, so the finer kinds never reach the stream). It returned zero on every input.
+  Print what the assertion will actually compute, not a proxy a human can interpret.
 
 - **CST shape sanity is part of phase gates.** N LOC of source code should produce roughly N/3 to N CST nodes for this grammar. Order of magnitude shallower means parser is matching empty alternatives and bailing. "20/20 corpus round-trip" with 11 nodes/fixture is a false positive. (from 0.6.0 ship: the empty-CompilationUnit issue went undetected for two sessions because round-trip-via-tokens passed.)
 

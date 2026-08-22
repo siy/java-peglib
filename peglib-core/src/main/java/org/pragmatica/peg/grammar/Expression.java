@@ -70,7 +70,7 @@ public sealed interface Expression {
 
     // === Predicates ===
     /**
-     * Positive lookahead: &e
+     * Positive lookahead: {@code &e}
      */
     record And(SourceSpan span, Expression expression) implements Expression {}
 
@@ -81,7 +81,7 @@ public sealed interface Expression {
 
     // === Special ===
     /**
-     * Token boundary: < e > - captures matched text
+     * Token boundary: {@code < e >} - captures matched text
      */
     record TokenBoundary(SourceSpan span, Expression expression) implements Expression {}
 
@@ -91,7 +91,7 @@ public sealed interface Expression {
     record Ignore(SourceSpan span, Expression expression) implements Expression {}
 
     /**
-     * Named capture: $name< e >
+     * Named capture: {@code $name< e >}
      */
     record Capture(SourceSpan span, String name, Expression expression) implements Expression {}
 

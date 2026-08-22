@@ -1,6 +1,10 @@
 # peglib 0.6.0 — Architecture Spec
 
-**Status:** design — locked decisions from 2026-05-09 session. Implementation pending.
+**Status:** **implemented and shipped in 0.6.0**; retained as the design rationale for the
+current architecture, to which both README and CLAUDE.md link. Written as a forward-
+looking spec from the 2026-05-09 session, so it is phrased in the future tense throughout —
+read that as "what was decided", not "what is pending". Where it and the code disagree, the
+code is authoritative.
 **Author:** session at HEAD `f1eb332` (post-0.5.1 ship).
 **Predecessor:** `docs/incremental/ARCHITECTURE-0.5.0.md` (Path D stable IDs); 0.5.x cumulative arcs (HANDOVER §11).
 

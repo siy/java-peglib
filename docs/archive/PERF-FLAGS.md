@@ -8,12 +8,12 @@ deterministic, byte-identical Java source.
 
 > **0.5.0 update:** `inlineLocations`, `selectivePackrat`, and `tokenFastPath`
 > are now default `true`. `mutableParseResult` was added as an opt-in flag
-> (default `false`) — see [`THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md)
+> (default `false`) — see [`THROUGHPUT-ENGINE-MOVE-B.md`](../incremental/THROUGHPUT-ENGINE-MOVE-B.md)
 > for why the singleton-mutation extension on top of it was abandoned.
 
 For the design rationale behind each flag — including the patches
 originally prototyped and the measured wins — see
-[`archive/PERF-REWORK-SPEC.md`](archive/PERF-REWORK-SPEC.md) §§6–7
+[`archive/PERF-REWORK-SPEC.md`](PERF-REWORK-SPEC.md) §§6–7
 (archived). This document is a tabular quick-reference; the spec is
 the source of truth.
 
@@ -24,7 +24,7 @@ the source of truth.
   unaffected by all ten flags.
 - Flags do **not** apply to the interpreter (`PegEngine`). The
   interpreter unconditionally runs all six phase-1 optimizations as of
-  0.2.3 (see [CHANGELOG 0.2.3](../CHANGELOG.md#023---2026-04-22)); the
+  0.2.3 (see [CHANGELOG 0.2.3](../../CHANGELOG.md#023---2026-04-22)); the
   flag-gated dual-path model is a generator-only concept.
 
 ## Flags
@@ -57,7 +57,7 @@ any regression can be bisected to a single flag.
 | `inlineLocations` | `true` (since 0.5.0) | Per-rule `int startOffset` / `startLine` / `startColumn` locals; materialize `SourceLocation` only at span boundaries. Default flipped on in 0.5.0 after the emission-template sweep that eliminated SourceLocation/SourceSpan allocations on the rule-entry path. |
 | `selectivePackrat` | `true` (since 0.5.0) | Skip packrat cache for rules listed in `packratSkipRules`. **0.5.0 semantics:** when `packratSkipRules` is empty, the generator auto-derives the skip-set via `PackratAnalyzer.autoSkipPackratRules(grammar)` — leaf-like rules and single-call-site rules without quantifiers bypass the cache; left-recursive rules are excluded. Pass a non-empty explicit set to override. **Biggest single win in the 0.5.0 throughput-engine arc: -38% reference / -14% self-host wallclock; -75% gc.count.** |
 | `tokenFastPath` | `true` (since 0.5.0) | DFA fast-path scanner for token-shaped rules: detects `< CharClass + ZeroOrMore<CharClass> >` (Identifier-shape) and emits a tight inline scanner with pre-computed ASCII bitmasks instead of going through `matchCharClass` per character. **-9.8% reference / -7.6% self-host wallclock.** |
-| `mutableParseResult` | `false` (opt-in) | Emits a mutable `CstParseResult` class with raw nullable fields (no `Option<Object> value` / `Option<String> expected` wrappers) plus raw-nullable `furthestFailure` / `furthestExpected` / `pendingFailureRecoveryOverride`. Eliminates Option boxing on every result construction. The Move B extension that replaced per-call records with a heap-bound singleton was attempted and abandoned; see [`THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md) for the post-mortem. |
+| `mutableParseResult` | `false` (opt-in) | Emits a mutable `CstParseResult` class with raw nullable fields (no `Option<Object> value` / `Option<String> expected` wrappers) plus raw-nullable `furthestFailure` / `furthestExpected` / `pendingFailureRecoveryOverride`. Eliminates Option boxing on every result construction. The Move B extension that replaced per-call records with a heap-bound singleton was attempted and abandoned; see [`THROUGHPUT-ENGINE-MOVE-B.md`](../incremental/THROUGHPUT-ENGINE-MOVE-B.md) for the post-mortem. |
 
 ### `packratSkipRules`
 
@@ -108,15 +108,15 @@ Guidance:
   full perf envelope. Eliminates Option boxing on every parse-method result.
   The Move B singleton extension on top of this flag was attempted and
   abandoned (modern JIT escape analysis already scalar-replaces the per-call
-  records); see [`THROUGHPUT-ENGINE-MOVE-B.md`](incremental/THROUGHPUT-ENGINE-MOVE-B.md).
+  records); see [`THROUGHPUT-ENGINE-MOVE-B.md`](../incremental/THROUGHPUT-ENGINE-MOVE-B.md).
 
 ## Measured reference numbers
 
 Reference workload: `src/test/resources/perf-corpus/large/FactoryClassGenerator.java.txt`
 (1,900 LOC real-world Java 25). JMH 1.37, average-time mode, 3 warmup × 2s,
 5 measurement × 2s, 2 forks, JDK 25.0.2, Apple Silicon. Raw data:
-[`docs/bench-results/java25-parse.json`](bench-results/java25-parse.json),
-[`docs/bench-results/java25-parse.log`](bench-results/java25-parse.log).
+[`docs/bench-results/java25-parse.json`](../bench-results/java25-parse.json),
+[`docs/bench-results/java25-parse.log`](../bench-results/java25-parse.log).
 
 | Variant | ms/op (± CI) | vs `none` | vs `phase1` |
 |---|---|---|---|
@@ -129,7 +129,7 @@ Reference workload: `src/test/resources/perf-corpus/large/FactoryClassGenerator.
 | `phase1 + all structural + selectivePackrat` | 110.7 ± 32.6 | 3.85× | 2.26× |
 
 To run the full matrix on your own workload or JVM, see
-[`BENCHMARKING.md`](BENCHMARKING.md).
+[`BENCHMARKING.md`](../BENCHMARKING.md).
 
 ## Parity guarantees
 

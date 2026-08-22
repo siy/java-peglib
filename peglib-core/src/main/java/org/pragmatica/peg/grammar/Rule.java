@@ -5,7 +5,7 @@ import org.pragmatica.peg.source.SourceSpan;
 
 
 /**
- * A grammar rule: Name <- Expression { action } { error_message "..." }
+ * A grammar rule: {@code Name <- Expression { action } { error_message "..." }}
  *
  * <p>Additionally supports optional 0.2.4 directives:
  * <ul>

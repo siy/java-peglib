@@ -1,6 +1,6 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-21 — 0.7.2 SHIPPED
+**Last updated:** 2026-08-22 — 0.7.2 shipped; 0.7.3 in progress on `release-0.7.3`
 
 ---
 
@@ -66,21 +66,43 @@ keyword literals and zero reference-only lexer rules. Eleven defects, plus two t
 
 ### Open items
 
-1. **A guarded rule whose body names another guarded rule.** `WindowName <- !PartitionKW … ColId`
-   where `ColId <- !ReservedKeyword (…)`: the outer guards resolve, but inlining `ColId` drags its
-   own guard into the body, which the DFA cannot compile. Composing the guard sets inside
-   `detectSkipPrefix` was tried and **reverted — it failed 35 java25 tests**. **The reason was
-   never diagnosed**; the explanation recorded at the time is a hypothesis, not a finding.
-   Diagnose before trusting any reasoning about blast radius. A fix probably belongs in
-   `resolveSkipBody`, where the rule is already a confirmed candidate.
-2. **Unreachable-kind detection.** Still the most valuable unbuilt check, and now demonstrated
-   live: `WindowName` out-prioritised `ColId`, so every identifier in the language lexed as
-   `WindowName` while `ColId` sat allocated and dead with no guard firing. Diagnosed by hand over
-   several rounds; a check would have caught it instantly.
-3. **Generated output is not reproducible.** Two runs of the *same commit* emit different
-   `GLexer.java`: `Map.copyOf(textToKind)` at `DfaBuilder.java:912` has randomised iteration order
-   per JVM and `renderResolvers` iterates it. Pre-existing. It defeats any content-based staleness
-   check, including the stamping added in 0.7.2. Small fix (sort, or keep the `LinkedHashMap`).
+1. ~~**A guarded rule whose body names another guarded rule.**~~ **CLOSED 2026-08-22 — diagnosed,
+   and the premise was wrong. Do not "fix" this.**
+
+   The mechanism recorded was real: `resolveSkipBody` does refuse the body, because inlining
+   `ColId` drags its own `!ReservedKeyword` in and the DFA cannot compile lookahead. What was
+   never measured is the *consequence* — a silent fall back to PARSER — and **the PARSER reading
+   is correct**. Measured on the canonical shape: `hello` accepted, `partition` rejected by the
+   outer guard, `select` and `from` rejected by the inner one. Both guards fire, via token-level
+   lookahead instead of the DFA. There is no wrong output to fix.
+
+   The guard-composition change was re-applied and diagnosed. It breaks **36 tests through
+   exactly one rule**: `PlainTypeName <- !RestrictedTypeName Identifier` (`java25.peg:247`) is
+   this same shape, and promoting it to LEXER makes it out-prioritise `Identifier` (line 322),
+   which matches the same text. Every identifier in Java then lexes as `PlainTypeName`,
+   `Identifier` goes dead, and `CompilationUnit` fails at offset 0 — hence every failure reading
+   `trailing input not consumed`. The classification diff between the two builds is one line.
+
+   Promotion buys nothing and costs the grammar. `NestedGuardRuleTest` now pins the PARSER
+   classification with that reasoning attached, so a third attempt fails at the cause rather than
+   in 36 downstream assertions.
+
+   What *is* genuinely unavailable is fusion: a guarded rule cannot be absorbed into a larger
+   token: `Qualified <- < ColId '.' ColId >` still falls back to PARSER. **The silent half was
+   fixed in 0.7.3** — it now reports `grammar.token-boundary-ignored`, and a whole-body `< >`
+   over a compilable body is honoured rather than dropped. What remains is the genuine DFA
+   limit: a guarded rule's lookahead cannot be inlined into a larger token.
+2. ~~**Unreachable-kind detection.**~~ **BUILT 2026-08-22** (alongside `grammar.token-boundary-ignored`) — `grammar.unreachable-kind`, in the
+   Analyzer, behind `peglib:lint` / `peglib:check`. It earned itself immediately: it diagnoses
+   open item 1 above in one line (`Identifier` dead) where the original took several rounds by
+   hand. The design work was all in *not* firing on correct grammars — the naive form reports
+   five rules on `java25.peg`, so rules represented by their alias kinds or inlined into another
+   lexer rule are excused.
+3. ~~**Generated output is not reproducible.**~~ **FIXED 2026-08-22.** Confirmed first by
+   measurement — five fresh JVMs, four distinct hashes, all 108 differing lines were `.put(`
+   lines — then fixed by replacing `Map.copyOf` with an order-preserving `orderedCopy` across
+   every map in `TokenKindAssignment`. Ten runs, one hash. Note the test does NOT generate twice
+   and compare: the seed is per-JVM, so that test passes against the bug.
 4. **Lookahead unsupported** over anything but a character class (`&(Modifier* ClassKW)`), and
    nested inside a Choice alternative rather than trailing the whole body. This is why `java25.peg`
    still spells its `value` lookahead inline at four use sites — though `%parser` now rescues that
@@ -88,12 +110,37 @@ keyword literals and zero reference-only lexer rules. Eleven defects, plus two t
 
 ### Where to pick up, in order
 
-1. **Diagnose the 35 java25 failures** from the guard-composition attempt, then fix open item 1.
-2. **Unreachable-kind detection** — item 2.
-3. **Generator reproducibility** — item 3; small, and it makes "did the output change?" a
-   meaningful question again.
+Items 1-3 below are **done** (2026-08-22, on `release-0.7.3`). What is left:
 
-Nothing is release-blocked. 0.7.2 is out and `main` is clean.
+1. **Ship 0.7.3.** Everything below is done; nothing is outstanding.
+
+Corpus **re-measured 2026-08-22** rather than inherited — 99.45%, with the failure counts
+*identical* to baseline (21 false accepts, 10 false rejects). The +7 `AGREE_CLEAN` is corpus
+growth, not a fix. Re-running mattered because 0.7.3 changed the lexer path and the
+classification of whole-body token boundaries, even though `java25.peg` itself is untouched.
+
+One practical trap now recorded in `tools/langtools-corpus/README.md`: the `--filter=blob:none`
+clone fetches file contents lazily, so the FIRST differential run downloads ~5,700 blobs one at
+a time and looks like a hang — >10 min, against 7 s once warm. Warm the checkout before timing.
+
+### Session 14 — 0.7.3 (2026-08-22, in progress)
+
+`release-0.7.3` is branched from `main` at `d548f2a`. Four commits so far:
+
+| | |
+|---|---|
+| `chore: prepare release 0.7.3` | versions bumped across 6 poms, README, CHANGELOG section |
+| `feat: depth-counting scanner for nesting trivia via %nest` | **issue #45** — nested block comments |
+| `fix: preserve map order so generated sources are reproducible` | handover item 3 |
+| `feat: detect token kinds no input can produce` | handover item 2 — `grammar.unreachable-kind` |
+| `docs: close the nested-guard item as diagnosed, not defective` | handover item 1 — closed, not a defect |
+| `fix: honour a whole-body token boundary, or report that it could not be` | the `< >` silent-ignore found while diagnosing item 1 |
+
+Tests **696**, 0 failures, 0 skips, lint and format-check on (635 at 0.7.2 ship). Corpus 99.45%, re-measured.
+
+The three open items from session 13 are all resolved — two fixed, one closed as *not a defect*
+after diagnosis. See the rewritten item list above; the short version is that item 1's recorded
+premise was wrong, and the check built for item 2 is what proved it.
 
 ### Things worth not re-learning
 
@@ -142,13 +189,22 @@ Nothing is release-blocked. 0.7.2 is out and `main` is clean.
 ### Verification recipes
 
 ```bash
-mvn install                                    # full reactor, lint + format-check, 635 tests
+mvn install                                    # full reactor, lint + format-check, 696 tests
 mvn -q jbct:format                             # before committing new main-source code
 ```
 
-Corpus agreement (~6 s once fetched; never vendor the GPLv2 corpus):
-see `tools/langtools-corpus/README.md`. Last measured live 2026-08-14 at **99.45%**;
-`java25.peg` is unchanged since, so it still holds.
+Corpus agreement (~7 s once the blobs are warm; never vendor the GPLv2 corpus):
+see `tools/langtools-corpus/README.md`. **Re-measured live 2026-08-22 at 99.45%** on
+`release-0.7.3` — failure counts identical to baseline (21 false accepts, 10 false rejects).
+Note the first run after a `--filter=blob:none` clone fetches contents lazily and takes minutes,
+not seconds; warm the checkout before timing.
+
+Hot-path verification after any change to `LexerEngine.lex` or generated emit — prefer the
+identity proof in `docs/bench-results/0.7.3-java25-parse.md` over a timing comparison. The stored
+0.4.x baselines use a `(variant)` axis and are NOT comparable to the current `(fixture)` one, so a
+bare benchmark run has nothing to compare against. Generating `GLexer`/`GParser` from both
+revisions and diffing is exact and noise-free; 0.7.3 was verified that way (GParser
+byte-identical, GLexer differing only in `.put` ordering).
 
 `%memo` semantics after any change to `CstArrayBuilder` replay:
 `tools/memo-differential/README.md` — differential vs the same grammar without the directive.

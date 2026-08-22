@@ -69,7 +69,8 @@ public record Grammar(List<Rule> rules,
                       Map<String, Set<Character>> recoverSets,
                       Set<String> checkpointRules,
                       Set<String> memoRules,
-                      Set<String> parserRules) {
+                      Set<String> parserRules,
+                      List<NestingPair> nestingTrivia) {
     /**
      * Canonical compact constructor. Defensively copies every collection component so the
      * record is immutable regardless of how callers construct it.
@@ -88,6 +89,7 @@ public record Grammar(List<Rule> rules,
         checkpointRules = Set.copyOf(checkpointRules);
         memoRules = Set.copyOf(memoRules);
         parserRules = Set.copyOf(parserRules);
+        nestingTrivia = List.copyOf(nestingTrivia);
     }
 
     /**
@@ -202,6 +204,42 @@ public record Grammar(List<Rule> rules,
                                           Set<String> checkpointRules,
                                           Set<String> memoRules,
                                           Set<String> parserRules) {
+        return grammar(rules,
+                       startRule,
+                       whitespace,
+                       word,
+                       suggestRules,
+                       imports,
+                       recoverSets,
+                       checkpointRules,
+                       memoRules,
+                       parserRules,
+                       List.of());
+    }
+
+    /**
+     * @since 0.7.3 — accepts grammar-level {@code nestingTrivia} populated from
+     * {@code %nest '<open>' '<close>'} directives, each declaring one delimiter pair whose
+     * occurrences nest and which is therefore lexed by a depth-counting scanner rather than a
+     * DFA path.
+     *
+     * <p>Unlike the rule-name directives above, these ARE validated — by
+     * {@link GrammarParser}, which refuses an empty delimiter at parse time. An empty open
+     * delimiter would advance the scanner by zero characters and hang the lexer, so it is the
+     * one directive argument for which the relaxed "unknown names are inert" policy would be
+     * actively unsafe.
+     */
+    public static Result<Grammar> grammar(List<Rule> rules,
+                                          Option<String> startRule,
+                                          Option<Expression> whitespace,
+                                          Option<Expression> word,
+                                          List<String> suggestRules,
+                                          List<Import> imports,
+                                          Map<String, Set<Character>> recoverSets,
+                                          Set<String> checkpointRules,
+                                          Set<String> memoRules,
+                                          Set<String> parserRules,
+                                          List<NestingPair> nestingTrivia) {
         return validate(new Grammar(rules,
                                     startRule,
                                     whitespace,
@@ -211,7 +249,8 @@ public record Grammar(List<Rule> rules,
                                     recoverSets,
                                     checkpointRules,
                                     memoRules,
-                                    parserRules));
+                                    parserRules,
+                                    nestingTrivia));
     }
 
     /**
@@ -303,6 +342,39 @@ public record Grammar(List<Rule> rules,
              checkpointRules,
              memoRules,
              Set.of());
+    }
+
+    /**
+     * Backwards-compatible 10-arg canonical constructor. Defaults {@code nestingTrivia} to the
+     * empty list.
+     *
+     * <p>This is the shape every pre-0.7.3 caller writes, so it carries the whole existing
+     * call graph — the 7-, 8- and 9-arg constructors above all delegate here — and keeps
+     * "declares no {@code %nest}" as the default a grammar gets without asking.
+     *
+     * @since 0.7.3
+     */
+    public Grammar(List<Rule> rules,
+                   Option<String> startRule,
+                   Option<Expression> whitespace,
+                   Option<Expression> word,
+                   List<String> suggestRules,
+                   List<Import> imports,
+                   Map<String, Set<Character>> recoverSets,
+                   Set<String> checkpointRules,
+                   Set<String> memoRules,
+                   Set<String> parserRules) {
+        this(rules,
+             startRule,
+             whitespace,
+             word,
+             suggestRules,
+             imports,
+             recoverSets,
+             checkpointRules,
+             memoRules,
+             parserRules,
+             List.of());
     }
 
     /**

@@ -268,8 +268,8 @@ public final class CstArray {
      * checkpoint exists (offset outside the root span, or no ancestor's rule matches).
      *
      * <p>Used by the incremental engine to locate the smallest subtree that may need
-     * re-parsing after an edit (see {@link org.pragmatica.peg.incremental.IncrementalParser
-     * IncrementalParser}). The D.1.1 implementation of that engine still performs a full
+     * re-parsing after an edit (see {@code IncrementalParser}, which lives in peglib-core and so
+     * cannot be linked from this module). The D.1.1 implementation of that engine still performs a full
      * reparse; checkpoint-driven partial reparse is the D.1.2 follow-up.
      */
     public int findCheckpointAncestor(int offset, Set<String> checkpointRules) {

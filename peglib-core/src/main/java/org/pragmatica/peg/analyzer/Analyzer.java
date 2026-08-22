@@ -13,6 +13,7 @@ import org.pragmatica.lang.Option;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
+import org.pragmatica.peg.lexer.DfaBuilder;
 import org.pragmatica.peg.lexer.RuleClassifier;
 import org.pragmatica.peg.lexer.RuleKind;
 
@@ -46,6 +47,9 @@ import org.pragmatica.peg.lexer.RuleKind;
  *       LEXER or MIXED rule. Only PARSER rules are memoised. Severity: WARNING.</li>
  *   <li>{@code grammar.classification-failed} — rule classification failed, so kind-dependent
  *       checks could not run. Severity: ERROR.</li>
+ *   <li>{@code grammar.unreachable-kind} — a token kind allocated to a rule that no
+ *       input can produce, because a higher-priority rule matches the same text.
+ *       Severity: WARNING.</li>
  *   <li>{@code grammar.inert-directive} — a directive the grammar front-end accepts
  *       and stores but the generator never reads, so declaring it has no effect.
  *       Severity: WARNING.</li>
@@ -76,6 +80,8 @@ public final class Analyzer {
         findings.addAll(checkBackReferences());
         findings.addAll(checkMemoRules());
         findings.addAll(checkInertDirectives());
+        findings.addAll(checkUnreachableKinds());
+        findings.addAll(checkIgnoredTokenBoundaries());
         // Stable sort: by rule name, then tag, then severity. Ensures deterministic output.
         findings.sort(Comparator.<Finding, String> comparing(Finding::ruleName)
                                 .thenComparing(Finding::tag)
@@ -111,6 +117,75 @@ public final class Analyzer {
         }
 
         return findings;
+    }
+
+    // === Check 11: Unreachable token kinds ===
+    /**
+     * 0.7.3 — report token kinds that are allocated but which no input can produce.
+     *
+     * <p>The motivating defect took several rounds of hand diagnosis during the 0.7.2 migration:
+     * one rule out-prioritised another matching the same input, so every identifier in the
+     * language lexed as the wrong kind while the intended rule sat allocated and dead. Nothing
+     * failed — the grammar compiled, and parsed, and meant something else.
+     *
+     * <p>Requires the DFA, so this is the one check that builds one. That is cold-path work at
+     * lint time only and never touches parsing. Both failure modes are silent by design:
+     * classification failure is already reported by {@code grammar.classification-failed} in
+     * {@link #checkMemoRules}, and a DFA that will not build is reported by
+     * {@code fromGrammar} itself — neither is this check's to duplicate.
+     */
+    private List<Finding> checkUnreachableKinds() {
+        return RuleClassifier.classify(grammar)
+                             .flatMap(classification -> DfaBuilder.build(grammar, classification))
+                             .map(built -> DfaBuilder.unreachableKinds(built)
+                                                     .stream()
+                                                     .map(unreachable -> Finding.warning("grammar.unreachable-kind",
+                                                                                         unreachable.ruleName(),
+                                                                                         "rule '" + unreachable.ruleName()
+                                                                                        + "' is allocated token kind " + unreachable.kind()
+                                                                                        + " but " + unreachable.reason()))
+                                                     .toList())
+                             .or(List::of);
+    }
+
+    // === Check 12: Token boundary that could not be honoured ===
+    /**
+     * 0.7.3 — report a rule that wraps its whole body in {@code < >} and is classified PARSER
+     * anyway.
+     *
+     * <p>The token boundary is documented as an explicit override that is trusted: an author who
+     * writes {@code < IfKW NotKW ExistsKW >} has asked for the fused lexeme. When the classifier
+     * cannot deliver it the rule quietly becomes a sequence of separate tokens instead — which
+     * parses, so nothing fails, and the author's instruction is simply gone.
+     *
+     * <p>The usual reason is that the body names a rule carrying a keyword guard: inlining it
+     * drags a lookahead into the body, and the DFA has no lookahead mechanism. That is a real
+     * limit, not a bug — but it should be said out loud rather than inferred from a token stream.
+     *
+     * <p>The test is "did not become one token", i.e. NOT LEXER — a rule demoted to PARSER and a
+     * rule promoted to MIXED both failed to honour the boundary, and checking for PARSER alone
+     * silently skipped the MIXED half.
+     *
+     * <p>Only a boundary around the WHOLE body counts. {@code Literal <- < 'null' > / CharLit}
+     * wraps one alternative and is correctly a PARSER rule; flagging it would be noise.
+     */
+    private List<Finding> checkIgnoredTokenBoundaries() {
+        return RuleClassifier.classify(grammar)
+                             .map(classification -> grammar.rules()
+                                                           .stream()
+                                                           .filter(rule -> RuleClassifier.declaresWholeBodyTokenBoundary(rule.expression()))
+                                                           .filter(rule -> classification.kinds()
+                                                                                         .get(rule.name()) != RuleKind.LEXER)
+                                                           .map(rule -> Finding.warning("grammar.token-boundary-ignored",
+                                                                                        rule.name(),
+                                                                                        "rule '" + rule.name()
+                                                                                       + "' wraps its body in a token boundary, but could not be"
+                                                                                       + " compiled as one token and is parsed as a sequence of"
+                                                                                       + " separate tokens; the usual cause is a body naming a rule"
+                                                                                       + " that carries a keyword guard, whose lookahead the lexer"
+                                                                                       + " cannot compile"))
+                                                           .toList())
+                             .or(List::of);
     }
 
     private static void collectReferences(String ruleName, Map<String, Rule> ruleMap, Set<String> visited) {

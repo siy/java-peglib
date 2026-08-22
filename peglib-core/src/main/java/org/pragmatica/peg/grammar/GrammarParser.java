@@ -51,6 +51,7 @@ public final class GrammarParser {
         var checkpointRules = new LinkedHashSet<String>();
         var memoRules = new LinkedHashSet<String>();
         var parserRules = new LinkedHashSet<String>();
+        var nestingTrivia = new ArrayList<NestingPair>();
         Option<String> startRule = Option.none();
         Option<Expression> whitespace = Option.none();
         Option<Expression> word = Option.none();
@@ -157,6 +158,31 @@ public final class GrammarParser {
                     parserRules.add(result.unwrap());
                     continue;
                 }
+                // 0.7.3 — Grammar-level %nest '<open>' '<close>' declares one delimiter pair
+                // whose occurrences nest, lexed by a depth-counting scanner. Parsed specially
+                // because the argument is a pair of string literals rather than an expression:
+                // the recursive rule that would otherwise express nesting is refused as a
+                // %whitespace cycle, and a nested block is not a regular language, so no DFA
+                // path could match it however it were spelled.
+                //
+                // Unlike %memo and %parser above, this is NOT guarded on a lookahead at the
+                // expected argument shape. Those guards let a malformed directive fall through
+                // to the generic expression path, where an unrecognised name is silently
+                // dropped. %nest is new in 0.7.3 and has no other reading, so claiming the
+                // name unconditionally costs nothing and turns "%nest Foo" from a directive
+                // that quietly does nothing into a named parse error.
+                if ("nest".equals(directive.name())) {
+                    advance();
+                    var result = parseNestDirective();
+
+                    if (result instanceof Result.Failure<?> f) {
+                        return f.cause()
+                                .result();
+                    }
+
+                    nestingTrivia.add(result.unwrap());
+                    continue;
+                }
 
                 advance();
                 var result = parseDirective(directive);
@@ -196,6 +222,7 @@ public final class GrammarParser {
         var copiedCheckpoint = Set.copyOf(checkpointRules);
         var copiedMemo = Set.copyOf(memoRules);
         var copiedParser = Set.copyOf(parserRules);
+        var copiedNesting = List.copyOf(nestingTrivia);
         // 0.4.0 — when a grammar declares no imports, validate eagerly via the
         // parse-don't-validate factory. With imports, the root grammar may
         // legitimately reference rule names that only appear after %import
@@ -213,7 +240,8 @@ public final class GrammarParser {
                                    copiedRecover,
                                    copiedCheckpoint,
                                    copiedMemo,
-                                   copiedParser);
+                                   copiedParser,
+                                   copiedNesting);
         }
 
         return Result.success(new Grammar(rules,
@@ -225,7 +253,8 @@ public final class GrammarParser {
                                           copiedRecover,
                                           copiedCheckpoint,
                                           copiedMemo,
-                                          copiedParser));
+                                          copiedParser,
+                                          copiedNesting));
     }
 
     /** Result tuple for a parsed {@code %recover &lt;CharClass&gt; RuleName} directive. */
@@ -285,6 +314,56 @@ public final class GrammarParser {
      */
     private Result<String> parseMemoDirective() {
         return parseRuleNameArgument("%memo");
+    }
+
+    /**
+     * Parse the body of a top-level {@code %nest '<open>' '<close>'} directive. The
+     * {@code %nest} keyword has already been consumed.
+     *
+     * @since 0.7.3
+     */
+    private Result<NestingPair> parseNestDirective() {
+        var open = parseNestDelimiter("open");
+
+        if (open instanceof Result.Failure<?> f) {
+            return f.cause()
+                    .result();
+        }
+
+        var close = parseNestDelimiter("close");
+
+        if (close instanceof Result.Failure<?> f) {
+            return f.cause()
+                    .result();
+        }
+
+        return Result.success(new NestingPair(open.unwrap(), close.unwrap()));
+    }
+
+    /**
+     * Read one delimiter of a {@code %nest} pair.
+     *
+     * <p>An empty delimiter is refused here rather than tolerated. Every other directive
+     * argument in this grammar follows a relaxed policy — an unknown rule name is inert, not
+     * fatal — but an empty {@code %nest} open delimiter matches at every position and advances
+     * the counting scanner by zero characters, so accepting one would hang the lexer on the
+     * first input it saw. A grammar bug that refuses to compile is strictly better than one
+     * that compiles and never returns.
+     */
+    private Result<String> parseNestDelimiter(String role) {
+        if (! (peek() instanceof GrammarToken.StringLiteral literal)) {
+            return new ParseError.UnexpectedInput(peek().span().start(),
+                                                  tokenDescription(peek()),
+                                                  role + " delimiter string for '%nest'").result();
+        }
+
+        advance();
+        if (literal.value().isEmpty()) {
+            return new ParseError.SemanticError(literal.span().start(),
+                                                "'%nest' " + role + " delimiter must not be empty").result();
+        }
+
+        return Result.success(literal.value());
     }
 
     /** Read the single rule-name argument of a directive such as {@code %memo} or {@code %parser}. */

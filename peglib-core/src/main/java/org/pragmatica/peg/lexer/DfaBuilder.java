@@ -4,6 +4,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -142,6 +144,116 @@ public final class DfaBuilder {
     public record SkippedRule(String ruleName, String reason) {}
 
     public record Built(Dfa dfa, TokenKindAssignment kinds, List<SkippedRule> skipped) {}
+
+    /**
+     * A token kind that was allocated but which no input can ever produce.
+     *
+     * @param ruleName the rule that owns the kind
+     * @param kind     the allocated kind id
+     * @param reason   why it cannot be produced, phrased for a grammar author
+     *
+     * @since 0.7.3
+     */
+    public record UnreachableKind(String ruleName, int kind, String reason) {}
+
+    /**
+     * 0.7.3 — find allocated token kinds that no input can produce.
+     *
+     * <p>This is the check that would have caught the defect that cost several rounds of hand
+     * diagnosis during the 0.7.2 migration: a rule out-prioritised another matching the same
+     * input, so every identifier in the language lexed as the wrong kind while the intended rule
+     * sat allocated and dead, with no guard ever firing and no diagnostic anywhere. Compare the
+     * {@code IFNOTEXISTS} case recorded in CLAUDE.md — a fused lexeme spelled as no input
+     * contains it, allocated and never matched. Both are silent: the grammar compiles, parses
+     * something, and means the wrong thing.
+     *
+     * <h2>Producible kinds</h2>
+     *
+     * <p>Exactly two things write a token's kind: a DFA accepting state, and the post-match
+     * keyword resolution that remaps one kind to another. A kind reachable by neither cannot
+     * appear in any token stream.
+     *
+     * <h2>Why "not a DFA accept kind" is not on its own the answer</h2>
+     *
+     * <p>Because it is wrong on real grammars — measured, not assumed. The naive test reports
+     * five rules on {@code java25.peg}, which is corpus-validated at 99.45%: {@code Keyword},
+     * {@code Modifier}, {@code PrimType}, {@code RestrictedTypeName} and
+     * {@code IllegalLocalClassMod}. All five are literal-set rules whose individual literals
+     * each carry their own higher-priority kind, so the rule's own kind never wins — and that is
+     * correct behaviour, not a defect. A check that fires five times on the canonical grammar is
+     * noise, and noise gets ignored.
+     *
+     * <p>So a rule is excused when it is represented elsewhere:
+     * <ul>
+     *   <li>every kind in its {@code ruleNameToAliasKinds} entry is producible — the rule IS
+     *       lexed, under the kinds of the keywords it names;</li>
+     *   <li>it was inlined into another lexer rule, so it has no independent existence.</li>
+     * </ul>
+     *
+     * <p>A rule whose alias kinds are only <em>partly</em> producible is still reported, naming
+     * the count: that is a specific keyword being shadowed, which is exactly the interesting
+     * case and would otherwise hide behind its live siblings.
+     *
+     * <p>Verified against both grammars in the repository — zero findings — and against a rule
+     * deliberately shadowed by a higher-priority twin, which it reports.
+     *
+     * @since 0.7.3
+     */
+    public static List<UnreachableKind> unreachableKinds(Built built) {
+        var producible = new HashSet<Integer>();
+
+        for (int kind : built.dfa().acceptKinds()) {
+            if (kind != Dfa.NO_ACCEPT) {
+                producible.add(kind);
+            }
+        }
+
+        for (var resolution : built.kinds().keywordResolutions().values()) {
+            producible.addAll(resolution.textToKind().values());
+        }
+
+        var found = new ArrayList<UnreachableKind>();
+
+        for (var entry : built.kinds().ruleNameToKind().entrySet()) {
+            var ruleName = entry.getKey();
+            int kind = entry.getValue();
+
+            if (producible.contains(kind) || built.kinds().inlineExpansions().containsKey(ruleName)) {
+                continue;
+            }
+
+            var aliases = built.kinds().ruleNameToAliasKinds().get(ruleName);
+
+            if (aliases == null || aliases.length == 0) {
+                found.add(new UnreachableKind(ruleName,
+                                              kind,
+                                              "no lexer state can accept it — a higher-priority rule matches the same"
+                                             + " input, so this rule is allocated but never produced"));
+                continue;
+            }
+
+            int dead = 0;
+
+            for (int alias : aliases) {
+                if (!producible.contains(alias)) {
+                    dead++;
+                }
+            }
+
+            if (dead > 0) {
+                found.add(new UnreachableKind(ruleName,
+                                              kind,
+                                              dead
+                                             + " of the " + aliases.length
+                                             + " keyword kinds it names cannot be produced — those keywords are"
+                                             + " shadowed by a higher-priority rule matching the same text"));
+            }
+        }
+
+        found.sort(Comparator.comparing(UnreachableKind::ruleName));
+
+        return List.copyOf(found);
+    }
 
     public sealed interface DfaBuildError extends Cause {
         record UnsupportedExpression(String ruleName, String expressionKind, String detail) implements DfaBuildError {
@@ -358,15 +470,35 @@ public final class DfaBuilder {
                                                                classification,
                                                                ruleNameToKind,
                                                                inlineLiteralToKind);
-
-        return Result.success(new TokenKindAssignment(Map.copyOf(ruleNameToKind),
-                                                      Map.copyOf(inlineLiteralToKind),
-                                                      Map.copyOf(keywordResolutions),
-                                                      Map.copyOf(ruleNameToAliasKinds),
-                                                      Map.copyOf(identifierFallbackKinds),
-                                                      Map.copyOf(inlineExpansions),
+        // 0.7.3 — orderedCopy, not Map.copyOf. Every map in this record feeds code generation,
+        // and Map.copyOf returns an immutable map whose iteration order is randomised per JVM
+        // run. Emitting from one therefore produced a DIFFERENT GLexer.java for the same commit
+        // and the same grammar on every run, which defeats any content-based staleness check —
+        // including the generator stamping added in 0.7.2. Each of these was already built as a
+        // LinkedHashMap, so the order-preserving intent was there and Map.copyOf discarded it.
+        return Result.success(new TokenKindAssignment(orderedCopy(ruleNameToKind),
+                                                      orderedCopy(inlineLiteralToKind),
+                                                      orderedCopy(keywordResolutions),
+                                                      orderedCopy(ruleNameToAliasKinds),
+                                                      orderedCopy(identifierFallbackKinds),
+                                                      orderedCopy(inlineExpansions),
                                                       anyCharKind,
                                                       kindNames.toArray(new String[0])));
+    }
+
+    /**
+     * Immutable copy that preserves iteration order.
+     *
+     * <p>{@link Map#copyOf} is the obvious spelling and the wrong one anywhere the result is
+     * iterated to produce output: its iteration order is deliberately randomised per JVM run,
+     * so generated source built from it is not reproducible. This keeps the same immutability
+     * guarantee — a defensive copy behind an unmodifiable view — while leaving the order the
+     * caller established intact.
+     *
+     * @since 0.7.3
+     */
+    private static <K, V> Map<K, V> orderedCopy(Map<K, V> source) {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(source));
     }
 
     /**
@@ -1032,7 +1164,7 @@ public final class DfaBuilder {
                 textToKind.put(text, kw);
             }
 
-            result.put(identKind, new KeywordResolution(identKind, Map.copyOf(textToKind)));
+            result.put(identKind, new KeywordResolution(identKind, orderedCopy(textToKind)));
         }
 
         return result;
@@ -1310,8 +1442,27 @@ public final class DfaBuilder {
      * whitespace char-class — maps to {@link #KIND_WHITESPACE}.
      */
     private static int classifyWhitespaceAlternativeKind(Expression alternative) {
-        var prefix = leadingLiteralText(alternative);
+        return triviaKindForPrefix(leadingLiteralText(alternative));
+    }
 
+    /**
+     * Decide a trivia kind from a leading literal prefix.
+     *
+     * <p>Extracted in 0.7.3 so that {@code %whitespace} absorption and the {@code %nest}
+     * counting scanner cannot disagree about what a delimiter means. Both ask this method,
+     * so {@code '/*'} names the same kind whether the comment is matched by the DFA or by
+     * the depth counter — and a token's kind therefore does not depend on which of the two
+     * paths happened to consume it.
+     *
+     * <p>Note the deliberate precedence: {@code /**} is tested before {@code /*}, and
+     * {@code ///} before {@code //}, matching the longest-prefix order the post-match text
+     * sniff uses. Anything unrecognised — including a leading whitespace char class, or an
+     * open delimiter from a language whose comments peglib knows no doc convention for, such
+     * as Haskell's <code>{-</code> — maps to {@link #KIND_WHITESPACE}.
+     *
+     * @since 0.7.3
+     */
+    public static int triviaKindForPrefix(String prefix) {
         if (prefix.startsWith("/**")) {
             return KIND_DOC_BLOCK_COMMENT;
         }

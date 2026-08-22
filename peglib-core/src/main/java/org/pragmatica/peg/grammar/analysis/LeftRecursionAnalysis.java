@@ -26,8 +26,8 @@ import org.pragmatica.peg.grammar.Rule;
  * engine/generator. The {@link #findIndirectCycle(Grammar)} helper returns the
  * first such cycle found so callers can emit a hard-error with a clear message.
  *
- * <p>This analyzer is side-effect-free and reusable across {@link Grammar#validate()},
- * {@code PegEngine}, and {@code ParserGenerator}.
+ * <p>This analyzer is side-effect-free and reusable across {@link Grammar}'s validating
+ * factory, {@code PegEngine}, and {@code ParserGenerator}.
  */
 public final class LeftRecursionAnalysis {
     private LeftRecursionAnalysis() {}

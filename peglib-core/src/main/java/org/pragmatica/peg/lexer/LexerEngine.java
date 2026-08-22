@@ -1,8 +1,11 @@
 package org.pragmatica.peg.lexer;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import org.pragmatica.peg.grammar.NestingPair;
+import org.pragmatica.peg.token.NestingScanner;
 import org.pragmatica.peg.token.TokenArray;
 import org.pragmatica.peg.token.TokenArrayBuilder;
 
@@ -65,8 +68,17 @@ public final class LexerEngine {
     private final Dfa dfa;
     private final String[] kindNameTable;
     private final int whitespaceKind;
-
     private final Map<Integer, DfaBuilder.KeywordResolution> keywordResolutions;
+    // 0.7.3 — %nest delimiter pairs, flattened into parallel arrays and resolved to their
+    // trivia kinds once at construction. Flat arrays rather than a NestingPair[] so the
+    // per-token reject test touches one primitive array and no object header; `nestFirst`
+    // holds each open delimiter's first character so that test is a single char compare,
+    // and String.startsWith is reached only by a position that already matched it.
+    private final char[] nestFirst;
+    private final String[] nestOpen;
+    private final String[] nestClose;
+
+    private final int[] nestKind;
 
     /**
      * @param dfa                  compiled lexer DFA
@@ -80,6 +92,20 @@ public final class LexerEngine {
                        String[] kindNameTable,
                        int whitespaceKind,
                        Map<Integer, DfaBuilder.KeywordResolution> keywordResolutions) {
+        this(dfa, kindNameTable, whitespaceKind, keywordResolutions, List.of());
+    }
+
+    /**
+     * @param nestingTrivia {@code %nest} delimiter pairs; empty for a grammar that declares
+     *                      none, which is the case this constructor is tuned for
+     *
+     * @since 0.7.3
+     */
+    public LexerEngine(Dfa dfa,
+                       String[] kindNameTable,
+                       int whitespaceKind,
+                       Map<Integer, DfaBuilder.KeywordResolution> keywordResolutions,
+                       List<NestingPair> nestingTrivia) {
         // Internal constructor: callers (DfaBuilder pipeline, tests) pass validated
         // inputs. Defensive null checks omitted by JBCT policy.
         this.dfa = dfa;
@@ -88,6 +114,23 @@ public final class LexerEngine {
         this.keywordResolutions = keywordResolutions.isEmpty()
                                   ? Map.of()
                                   : Map.copyOf(keywordResolutions);
+        int nestCount = nestingTrivia.size();
+
+        this.nestFirst = new char[nestCount];
+        this.nestOpen = new String[nestCount];
+        this.nestClose = new String[nestCount];
+        this.nestKind = new int[nestCount];
+        for (int i = 0; i < nestCount; i++) {
+            var pair = nestingTrivia.get(i);
+
+            this.nestOpen[i] = pair.open();
+            this.nestClose[i] = pair.close();
+            this.nestFirst[i] = pair.open().charAt(0);
+            // Resolved here, not per token: the kind a %nest pair emits is a property of its
+            // open delimiter and never of the input. Asking DfaBuilder keeps it identical to
+            // the kind the equivalent %whitespace alternative would have been given.
+            this.nestKind[i] = DfaBuilder.triviaKindForPrefix(pair.open());
+        }
     }
 
     public int whitespaceKind() {
@@ -110,37 +153,58 @@ public final class LexerEngine {
         int pos = 0;
 
         while (pos < len) {
-            int state = Dfa.START_STATE;
             int lastAcceptEnd = -1;
             int lastAcceptKind = -1;
-            int cur = pos;
+            // 0.7.3 — nesting trivia. A %nest open delimiter at a token start is consumed by
+            // the depth counter INSTEAD OF the DFA, not in addition to it, so a nesting
+            // comment is scanned exactly once. Testing only at a token start is also what
+            // makes an open delimiter inside a string literal safe: the string rule's token
+            // starts at the quote and swallows the delimiter, so the scanner never sees it.
+            int nested = nestingOpenAt(input, pos);
 
-            while (cur < len) {
-                int ch = input.charAt(cur);
-                int next;
-
-                if (ch >= Dfa.ALPHABET_SIZE) {
-                    next = dfa.nonAsciiTransition(state);
-                } else {
-                    next = dfa.transition(state, ch);
+            if (nested >= 0) {
+                int end = NestingScanner.scanEnd(input, pos, nestOpen[nested], nestClose[nested]);
+                // An unterminated block falls through to the DFA rather than consuming to end
+                // of input. That keeps malformed input reading exactly as it did before the
+                // grammar declared %nest, so the directive can only change the reading of
+                // comments that actually balance.
+                if (end != NestingScanner.UNTERMINATED) {
+                    lastAcceptEnd = end;
+                    lastAcceptKind = nestKind[nested];
                 }
+            }
 
-                if (next == Dfa.NO_TRANSITION) {
-                    break;
-                }
+            if (lastAcceptEnd < 0) {
+                int state = Dfa.START_STATE;
+                int cur = pos;
 
-                state = next;
-                cur++;
-                int ak = dfa.acceptKind(state);
-                // A rule ending in a lookahead constrains the character after the match. A denied
-                // accept is simply not recorded, so maximal munch carries on from the last one that
-                // was — which is what lets a longer rule win where the guarded one is refused.
-                if (ak != Dfa.NO_ACCEPT && dfa.acceptAllowsFollower(state,
-                                                                    cur < len
-                                                                    ? input.charAt(cur)
-                                                                    : Dfa.EOF)) {
-                    lastAcceptEnd = cur;
-                    lastAcceptKind = ak;
+                while (cur < len) {
+                    int ch = input.charAt(cur);
+                    int next;
+
+                    if (ch >= Dfa.ALPHABET_SIZE) {
+                        next = dfa.nonAsciiTransition(state);
+                    } else {
+                        next = dfa.transition(state, ch);
+                    }
+
+                    if (next == Dfa.NO_TRANSITION) {
+                        break;
+                    }
+
+                    state = next;
+                    cur++;
+                    int ak = dfa.acceptKind(state);
+                    // A rule ending in a lookahead constrains the character after the match. A denied
+                    // accept is simply not recorded, so maximal munch carries on from the last one that
+                    // was — which is what lets a longer rule win where the guarded one is refused.
+                    if (ak != Dfa.NO_ACCEPT && dfa.acceptAllowsFollower(state,
+                                                                        cur < len
+                                                                        ? input.charAt(cur)
+                                                                        : Dfa.EOF)) {
+                        lastAcceptEnd = cur;
+                        lastAcceptKind = ak;
+                    }
                 }
             }
 
@@ -208,6 +272,34 @@ public final class LexerEngine {
         }
 
         return builder.build(kindNameTable);
+    }
+
+    /**
+     * Index of the {@code %nest} pair whose open delimiter sits at {@code pos}, or {@code -1}.
+     *
+     * <p>Cost matters here — this runs once per token, on the parse hot path. For a grammar
+     * that declares no {@code %nest} (every grammar before 0.7.3, and every Java one) the
+     * array is empty, the loop does not execute, and the whole method is a hoistable length
+     * compare. For a grammar that does declare one, a position is rejected on a single char
+     * compare against the delimiter's first character; {@code startsWith} is reached only
+     * where that character already matched, which for {@code /*} means only at a slash.
+     *
+     * @since 0.7.3
+     */
+    private int nestingOpenAt(String input, int pos) {
+        if (nestFirst.length == 0) {
+            return -1;
+        }
+
+        char c = input.charAt(pos);
+
+        for (int i = 0; i < nestFirst.length; i++) {
+            if (nestFirst[i] == c && input.startsWith(nestOpen[i], pos)) {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     /**
