@@ -1,7 +1,7 @@
 # peglib 0.6.0 — Architecture Spec
 
 **Status:** **implemented and shipped in 0.6.0**; retained as the design rationale for the
-current architecture, which README and CLAUDE.md both link here for. Written as a forward-
+current architecture, to which both README and CLAUDE.md link. Written as a forward-
 looking spec from the 2026-05-09 session, so it is phrased in the future tense throughout —
 read that as "what was decided", not "what is pending". Where it and the code disagree, the
 code is authoritative.

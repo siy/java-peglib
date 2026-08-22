@@ -122,7 +122,7 @@ agreement: 99.45% (5611/5642 scored, 24 excluded)
 
 Re-measured 2026-08-22 on `release-0.7.3` (5,673 files; the corpus grows over time):
 
-```
+```text
 AGREE_CLEAN           5432
 AGREE_REJECT           186
 EXCLUDED_ORACLE_OLD     24

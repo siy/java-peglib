@@ -117,9 +117,39 @@ class NestingTriviaTest {
 
     @Test
     void openDelimiterInsideAContentTokenIsNotAComment() {
-        // The scanner is consulted only at a token start. A grammar whose words cannot contain
-        // '/' gives the DFA the whole word first, so a delimiter can never be found mid-token.
-        assertThat(words(NESTING, "a b")).containsExactly("a", "b");
+        // The scanner is consulted only at a token start, so a delimiter that falls INSIDE a
+        // token must not open a comment. That needs a grammar whose words can actually contain
+        // '/' and '*' — with a word class that excludes them the input cannot express the case
+        // at all, and the test would assert nothing.
+        var grammar = """
+            Program     <- Word+
+            Word        <- < [a-zA-Z0-9_/*]+ >
+            %whitespace <- [ \\t\\r\\n]*
+            %nest '/*' '*/'
+            """;
+
+        assertThat(words(grammar, "x/*text*/y")).containsExactly("x/*text*/y");
+    }
+
+    @Test
+    void anApostropheDelimiterEmitsValidJava() {
+        // The generated lexer holds each open delimiter's first character as a Java char
+        // literal. Escaping it as if it were string content emits three apostrophes in a row,
+        // which does not compile — so the grammar would parse and then fail to build. Unusual
+        // input, but "the generated source is valid Java for every grammar that parses" is not
+        // a property to leave to chance.
+        var grammar = """
+            Program     <- Word+
+            Word        <- < [a-z]+ >
+            %whitespace <- [ \\t\\r\\n]*
+            %nest "'x" "x'"
+            """;
+
+        assertThat(PegParser.fromGrammar(grammar)
+                            .isSuccess())
+        .withFailMessage("a %nest delimiter starting with an apostrophe must still generate compilable Java")
+        .isTrue();
+        assertThat(words(grammar, "a 'x inside x' b")).containsExactly("a", "b");
     }
 
     @Test

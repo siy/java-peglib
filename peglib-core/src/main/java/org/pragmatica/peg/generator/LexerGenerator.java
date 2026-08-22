@@ -187,7 +187,7 @@ public final class LexerGenerator {
                 kind.append(", ");
             }
 
-            first.append("'").append(escapeJavaString(String.valueOf(pair.open().charAt(0)))).append("'");
+            first.append("'").append(escapeJavaChar(pair.open().charAt(0))).append("'");
             open.append("\"").append(escapeJavaString(pair.open())).append("\"");
             close.append("\"").append(escapeJavaString(pair.close())).append("\"");
             kind.append(DfaBuilder.triviaKindForPrefix(pair.open()));
@@ -552,6 +552,33 @@ public final class LexerGenerator {
         sb.append("        }\n");
         sb.append("        return builder.build(KIND_NAMES);\n");
         sb.append("    }\n");
+    }
+
+    /**
+     * Escape one character for emission inside a Java CHARACTER literal.
+     *
+     * <p>Not the same job as {@link #escapeJavaString}, which escapes the double quote because
+     * its output lands inside a string literal, and deliberately leaves the apostrophe alone.
+     * Passing an apostrophe through that one and wrapping the result in single quotes emits
+     * three apostrophes in a row, which does not compile. A {@code %nest} delimiter beginning
+     * with an apostrophe is unusual but perfectly legal, and the generated lexer has to be
+     * valid Java for every grammar that parses.
+     *
+     * @since 0.7.3
+     */
+    private static String escapeJavaChar(char c) {
+        return switch (c) {
+            case '\\' -> "\\\\";
+            case '\'' -> "\\'";
+            case '\n' -> "\\n";
+            case '\r' -> "\\r";
+            case '\t' -> "\\t";
+            case '\b' -> "\\b";
+            case '\f' -> "\\f";
+            default -> (c < 0x20 || c == 0x7f)
+                       ? String.format("\\u%04x", (int) c)
+                       : String.valueOf(c);
+        };
     }
 
     private static String escapeJavaString(String s) {

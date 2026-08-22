@@ -160,6 +160,30 @@ class TokenBoundaryOverrideTest {
     }
 
     @Test
+    void aBoundaryOnARuleThatEndsUpMixedIsAlsoReported() {
+        // The question the check asks is "did this become one token?", so the test is NOT LEXER
+        // rather than == PARSER. A rule can be promoted to MIXED instead of demoted to PARSER
+        // and still have failed to honour its boundary; checking only for PARSER skipped that
+        // half silently, which is the same class of miss the check exists to catch.
+        var grammar = """
+            Doc   <- Q ';'
+            Q     <- < Pair [a-z] >
+            Pair  <- Left Right
+            Left  <- < [a-z]+ >
+            Right <- < [0-9]+ >
+            %whitespace <- [ \\t\\r\\n]*
+            """;
+
+        assertThat(RuleClassifier.classify(GrammarParser.parse(grammar)
+                                                        .unwrap())
+                                 .unwrap()
+                                 .kinds())
+        .withFailMessage("fixture must actually produce a MIXED rule, or this asserts nothing")
+        .containsEntry("Q", RuleKind.MIXED);
+        assertThat(boundaryFindings(analyze(grammar))).contains("Q");
+    }
+
+    @Test
     void java25ReportsNoIgnoredBoundaries() throws Exception {
         // The gate, same discipline as grammar.unreachable-kind: java25.peg is corpus-validated,
         // so any finding here is a false positive by definition.

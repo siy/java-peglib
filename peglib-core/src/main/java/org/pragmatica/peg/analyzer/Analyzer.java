@@ -162,6 +162,10 @@ public final class Analyzer {
      * drags a lookahead into the body, and the DFA has no lookahead mechanism. That is a real
      * limit, not a bug — but it should be said out loud rather than inferred from a token stream.
      *
+     * <p>The test is "did not become one token", i.e. NOT LEXER — a rule demoted to PARSER and a
+     * rule promoted to MIXED both failed to honour the boundary, and checking for PARSER alone
+     * silently skipped the MIXED half.
+     *
      * <p>Only a boundary around the WHOLE body counts. {@code Literal <- < 'null' > / CharLit}
      * wraps one alternative and is correctly a PARSER rule; flagging it would be noise.
      */
@@ -171,7 +175,7 @@ public final class Analyzer {
                                                            .stream()
                                                            .filter(rule -> RuleClassifier.declaresWholeBodyTokenBoundary(rule.expression()))
                                                            .filter(rule -> classification.kinds()
-                                                                                         .get(rule.name()) == RuleKind.PARSER)
+                                                                                         .get(rule.name()) != RuleKind.LEXER)
                                                            .map(rule -> Finding.warning("grammar.token-boundary-ignored",
                                                                                         rule.name(),
                                                                                         "rule '" + rule.name()
