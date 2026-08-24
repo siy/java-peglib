@@ -127,22 +127,61 @@ a time and looks like a hang — >10 min, against 7 s once warm. Warm the checko
 
 ## Session 14 — 0.7.3 (2026-08-22) — SHIPPED
 
-`release-0.7.3` is branched from `main` at `d548f2a`. Four commits so far:
+| | |
+|---|---|
+| **Ship state** | **SHIPPED.** Maven Central deployment `60fe059a`, verified by fetching concrete artifacts from repo1 — all 6 modules plus sources, javadoc and GPG signatures, every one 200. |
+| **Merged / tagged** | PR #46 → `main` at `6688343`, CI green on the final commit; tag `v0.7.3`; GitHub release cut and marked Latest |
+| **Build** | `mvn install` — BUILD SUCCESS, lint + format-check on, 0 lint errors, 0 format issues |
+| **Tests** | **698** across 5 modules, 0 failures, 0 skips (635 at 0.7.2 ship) |
+| **Corpus** | **99.45%, re-measured** — failure counts identical to the 0.7.1 baseline (21 false accepts, 10 false rejects); the +7 `AGREE_CLEAN` is corpus growth, not a fix |
+| **Javadoc** | 27 warnings → **0**; the tool had been emitting "diagnostic markers for invalid input" into the published javadoc jar |
+| **Downstream** | `cdm` bumped 0.7.1 → 0.7.3, 86 tests green, unchanged from its 0.7.1 baseline |
+
+Eleven commits from `d548f2a`:
 
 | | |
 |---|---|
-| `chore: prepare release 0.7.3` | versions bumped across 6 poms, README, CHANGELOG section |
+| `chore: prepare release 0.7.3` | versions across 6 poms, README, CHANGELOG section |
 | `feat: depth-counting scanner for nesting trivia via %nest` | **issue #45** — nested block comments |
-| `fix: preserve map order so generated sources are reproducible` | handover item 3 |
-| `feat: detect token kinds no input can produce` | handover item 2 — `grammar.unreachable-kind` |
-| `docs: close the nested-guard item as diagnosed, not defective` | handover item 1 — closed, not a defect |
+| `fix: preserve map order so generated sources are reproducible` | session-13 item 3 |
+| `feat: detect token kinds no input can produce` | session-13 item 2 — `grammar.unreachable-kind` |
+| `docs: close the nested-guard item as diagnosed, not defective` | session-13 item 1 — closed, NOT a defect |
 | `fix: honour a whole-body token boundary, or report that it could not be` | the `< >` silent-ignore found while diagnosing item 1 |
+| `docs: record the re-measured corpus agreement for 0.7.3` | |
+| `test: pin both directions of the issue #45 nesting divergence` | after the reporter corrected the ticket's own examples |
+| `docs: reconcile documentation with the 0.7.3 release state` | 20 doc sites; see below |
+| `fix: escape a nest delimiter as a char literal and report ignored boundaries on MIXED rules` | **from CodeRabbit review** |
+| `docs: record 0.7.3 as shipped` | |
 
-Tests **696**, 0 failures, 0 skips, lint and format-check on (635 at 0.7.2 ship). Corpus 99.45%, re-measured.
+All three session-13 open items resolved — two fixed, one closed as *not a defect* after
+diagnosis. Item 1's recorded premise was wrong, and the check built for item 2 is what proved it.
 
-The three open items from session 13 are all resolved — two fixed, one closed as *not a defect*
-after diagnosis. See the rewritten item list above; the short version is that item 1's recorded
-premise was wrong, and the check built for item 2 is what proved it.
+### Downstream verification — `cdm`
+
+Bumped 0.7.1 → 0.7.3 (`ac417e2`, **local, unpushed at time of writing**). A baseline build was
+taken at 0.7.1 first, so "86 tests, 0 failures" means *unchanged*, not merely *passing*.
+
+Two things it demonstrated that no in-tree test could:
+
+- **Version-aware staleness detection works on a real consumer.** At 0.7.1 the plugin printed
+  `skipped (up-to-date)`; at 0.7.3, `wrote JsonLexer.java, ...`. The existing generated files
+  carried no stamp, so the 0.7.2 fix correctly refused to trust them. Without it `cdm` would have
+  gone on compiling stale 0.7.1 output while believing it was on 0.7.3.
+- **0.7.2's one-kind-per-lexeme fix changed a downstream CST.** At 0.7.1 `cdm` allocated *two*
+  kinds for `null` — the `Null` rule's own kind and a synthetic `INLINE_null` — and the parser
+  matched the synthetic one, leaving the rule's kind permanently unreachable. `Null` names ONE
+  literal so it now adopts that kind; `Boolean` names two, so it keeps its alias kinds. The new
+  `grammar.unreachable-kind` check reports 0 dead kinds for that grammar.
+
+It was invisible to `cdm` only because its reader selects by grammatical **position**
+(`firstTokenAt` → `textAt`), never by kind name — which is exactly what the README tells consumers
+to do. A consumer matching `"INLINE_null"` would have broken silently. **When a release changes
+kind adoption, that is the breakage to warn about.**
+
+Two stale claims in `cdm` surfaced from the bump: its D-07 justified fully-inlined token rules
+with "peglib lexer rules may not reference other rules" (removed in 0.7.2), and its README told
+contributors peglib was not on Maven Central (it is; `core` and `jbct-maven-plugin` 1.0.0-rc3 are
+the ones that are not). **A downstream doc can preserve a limitation years after we remove it.**
 
 ### Things worth not re-learning
 
@@ -208,7 +247,7 @@ premise was wrong, and the check built for item 2 is what proved it.
 ### Verification recipes
 
 ```bash
-mvn install                                    # full reactor, lint + format-check, 696 tests
+mvn install                                    # full reactor, lint + format-check, 698 tests
 mvn -q jbct:format                             # before committing new main-source code
 ```
 

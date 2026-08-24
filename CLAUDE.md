@@ -456,7 +456,7 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**696 tests across 5 modules**, 0 failures, 0 skips (0.7.3; 635 at 0.7.2, 576 at 0.7.1). The
+**698 tests across 5 modules**, 0 failures, 0 skips (0.7.3; 635 at 0.7.2, 576 at 0.7.1). The
 count dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were
 deleted, not because coverage was lost.
 

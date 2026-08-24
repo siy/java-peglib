@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.3] - 2026-08-22
 
-696 tests across 5 modules, 0 failures, 0 skips. Corpus agreement re-measured at 99.45%.
+698 tests across 5 modules, 0 failures, 0 skips. Corpus agreement re-measured at 99.45%.
 
 ### Fixed
 
