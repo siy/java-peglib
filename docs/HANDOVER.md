@@ -1,129 +1,9 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-22 — **0.7.3 SHIPPED**
+**Last updated:** 2026-08-27 — **0.7.3 SHIPPED** (2026-08-22). Newest session first; the
+current starting point is **Where to pick up**, immediately after the Session 14 record.
 
 ---
-
-## Session 13 — 0.7.2 (2026-08-18 → 08-21) — SHIPPED
-
-### State at a glance
-
-| | |
-|---|---|
-| **Ship state** | **SHIPPED.** `org.pragmatica-lite:peglib:0.7.2` on Maven Central with signatures, verified by fetch. Announced 2026-08-21. |
-| **Merged / tagged** | PR #44 → `main` at `6fd769b`, CI green; tag `v0.7.2`; GitHub release cut (first since v0.4.3 — practice resumed deliberately) |
-| **Build** | `mvn install` — BUILD SUCCESS, lint + format-check on |
-| **Tests** | **635** across 5 modules, 0 failures, 0 skips (605 at session start) |
-| **Grammar** | `java25.peg` **unchanged**, so the 99.45% javac agreement carries over untouched |
-| **Downstream** | `aether/pg-tools` green on 0.7.2 — 811 tests, 0 failures, 34/34 real schema files parsing |
-
-The deploy was clean: deployment `43e982c6` published without the `UnrecognizedPropertyException`
-that made 0.7.0 report BUILD FAILURE for a publish that had in fact succeeded. **Keep the
-`central-publishing` 0.11.0 pin** — it is doing its job. `autoPublish=true` with
-`waitUntil=published` still means no staging gate and immutable artifacts, so a mistake ships the
-next version.
-
-### What this release was
-
-0.7.2 is the release where peglib stopped being a Java parser generator that happened to be
-general. Every fix below was found by one downstream consumer — `aether/pg-tools`, a 753-line
-PostgreSQL grammar — and **none was reachable from `java25.peg`**, which has zero case-insensitive
-keyword literals and zero reference-only lexer rules. Eleven defects, plus two tooling fixes.
-
-**Lexing and classification**
-
-- **Identifier fallback works for case-insensitive grammars.** It was gated on a `/cs` key suffix
-  reasoning "Java keywords are case-sensitive" — a Java assumption compiled into a general
-  library. Keyword containment now folds both sides.
-- **A lexer rule may reference another lexer rule.** References are substituted before DFA
-  compilation, cycles refused. This is what makes "guard plus named alternatives" expressible.
-- **A rule that can match only the empty string is PARSER.** *Always-empty*, not *nullable* —
-  `Word <- [a-z]*` is nullable and stays a legitimate lexer rule.
-- **`< >` is load-bearing for classification.** A reference-only body spanning more than one token
-  is a parser rule unless a token boundary declares otherwise.
-- **Trailing character-class lookahead compiles** — `X ![c]` becomes a constraint on the accepting
-  state. This is what multi-word lexemes need.
-- **Several leading keyword guards** on one rule; a single-keyword rule counts as a literal set.
-- **`%parser RuleName`** pins a rule to PARSER, overriding inference.
-- **A rule named from `%whitespace` is trivia.** Such alternatives could not compile (no call
-  stack in a DFA) and were *silently dropped*, so the standalone rule matched the same text under
-  an ordinary kind and the first `--` comment in a file ended the parse. 18 of 34 real files.
-- **A lexeme gets one kind, named after the rule that names it.** A second synthetic `INLINE_*`
-  kind for the same text left the rule's kind unreachable and the keyword anonymous in the CST.
-- **Adoption runs before alias arrays are built.** Interleaving them made the result depend on
-  declaration order — `ReservedKeyword` before `CaseKW` broke, after `CreateKW` worked.
-- **A guard's own reserved words are no longer offered as identifier fallbacks.** The `*KW`
-  rule-name half of the fold was never case-folded, so `ColId` accepted `CREATE` and `SELECT` as
-  column names. Latent while those kinds were unreachable; live the moment adoption landed.
-
-**Tooling**
-
-- **`%import` works end to end**, plus all three mojos; **Base64 DFA tables** lifting a ~1100-state
-  ceiling (both from session 12).
-- **The generator stamp identifies the build, not the version.** A same-version rebuild — the
-  normal case for an entire unreleased version — was invisible to consumers, who kept stale
-  generated sources and measured a parser that no longer matched the library.
-
-### Open items
-
-1. ~~**A guarded rule whose body names another guarded rule.**~~ **CLOSED 2026-08-22 — diagnosed,
-   and the premise was wrong. Do not "fix" this.**
-
-   The mechanism recorded was real: `resolveSkipBody` does refuse the body, because inlining
-   `ColId` drags its own `!ReservedKeyword` in and the DFA cannot compile lookahead. What was
-   never measured is the *consequence* — a silent fall back to PARSER — and **the PARSER reading
-   is correct**. Measured on the canonical shape: `hello` accepted, `partition` rejected by the
-   outer guard, `select` and `from` rejected by the inner one. Both guards fire, via token-level
-   lookahead instead of the DFA. There is no wrong output to fix.
-
-   The guard-composition change was re-applied and diagnosed. It breaks **36 tests through
-   exactly one rule**: `PlainTypeName <- !RestrictedTypeName Identifier` (`java25.peg:247`) is
-   this same shape, and promoting it to LEXER makes it out-prioritise `Identifier` (line 322),
-   which matches the same text. Every identifier in Java then lexes as `PlainTypeName`,
-   `Identifier` goes dead, and `CompilationUnit` fails at offset 0 — hence every failure reading
-   `trailing input not consumed`. The classification diff between the two builds is one line.
-
-   Promotion buys nothing and costs the grammar. `NestedGuardRuleTest` now pins the PARSER
-   classification with that reasoning attached, so a third attempt fails at the cause rather than
-   in 36 downstream assertions.
-
-   What *is* genuinely unavailable is fusion: a guarded rule cannot be absorbed into a larger
-   token: `Qualified <- < ColId '.' ColId >` still falls back to PARSER. **The silent half was
-   fixed in 0.7.3** — it now reports `grammar.token-boundary-ignored`, and a whole-body `< >`
-   over a compilable body is honoured rather than dropped. What remains is the genuine DFA
-   limit: a guarded rule's lookahead cannot be inlined into a larger token.
-2. ~~**Unreachable-kind detection.**~~ **BUILT 2026-08-22** (alongside `grammar.token-boundary-ignored`) — `grammar.unreachable-kind`, in the
-   Analyzer, behind `peglib:lint` / `peglib:check`. It earned itself immediately: it diagnoses
-   open item 1 above in one line (`Identifier` dead) where the original took several rounds by
-   hand. The design work was all in *not* firing on correct grammars — the naive form reports
-   five rules on `java25.peg`, so rules represented by their alias kinds or inlined into another
-   lexer rule are excused.
-3. ~~**Generated output is not reproducible.**~~ **FIXED 2026-08-22.** Confirmed first by
-   measurement — five fresh JVMs, four distinct hashes, all 108 differing lines were `.put(`
-   lines — then fixed by replacing `Map.copyOf` with an order-preserving `orderedCopy` across
-   every map in `TokenKindAssignment`. Ten runs, one hash. Note the test does NOT generate twice
-   and compare: the seed is per-JVM, so that test passes against the bug.
-4. **Lookahead unsupported** over anything but a character class (`&(Modifier* ClassKW)`), and
-   nested inside a Choice alternative rather than trailing the whole body. This is why `java25.peg`
-   still spells its `value` lookahead inline at four use sites — though `%parser` now rescues that
-   shape (verified), so switching it is possible and needs only a corpus re-run to justify.
-
-### Where to pick up, in order
-
-Items 1-3 below are **done** (2026-08-22, on `release-0.7.3`). What is left:
-
-1. **Nothing is outstanding.** 0.7.3 shipped 2026-08-22: PR #46 merged at `6688343`, tag
-   `v0.7.3`, GitHub release cut, Maven Central deployment `60fe059a` verified by fetching
-   concrete artifacts from repo1 — all 6 modules plus sources, javadoc and GPG signatures.
-
-Corpus **re-measured 2026-08-22** rather than inherited — 99.45%, with the failure counts
-*identical* to baseline (21 false accepts, 10 false rejects). The +7 `AGREE_CLEAN` is corpus
-growth, not a fix. Re-running mattered because 0.7.3 changed the lexer path and the
-classification of whole-body token boundaries, even though `java25.peg` itself is untouched.
-
-One practical trap now recorded in `tools/langtools-corpus/README.md`: the `--filter=blob:none`
-clone fetches file contents lazily, so the FIRST differential run downloads ~5,700 blobs one at
-a time and looks like a hang — >10 min, against 7 s once warm. Warm the checkout before timing.
 
 ## Session 14 — 0.7.3 (2026-08-22) — SHIPPED
 
@@ -266,6 +146,143 @@ byte-identical, GLexer differing only in `.put` ordering).
 
 `%memo` semantics after any change to `CstArrayBuilder` replay:
 `tools/memo-differential/README.md` — differential vs the same grammar without the directive.
+
+---
+
+### Where to pick up
+
+**0.7.3 is shipped and nothing is release-blocked.** Ship details are in the Session 14 table
+below; they are not repeated here.
+
+1. **`cdm` carries an unpushed commit** — `ac417e2` ("chore: bump peglib to 0.7.3"), committed
+   locally and verified green (86 tests, unchanged from its 0.7.1 baseline) but never pushed.
+   Push it or drop it; do not leave it to rot as a local-only delta.
+
+2. **The one real remaining lexer limitation: a guarded rule cannot be fused into a larger
+   token.** `Qualified <- < ColId '.' ColId >` where `ColId` carries a keyword guard falls back
+   to PARSER, because inlining `ColId` drags its lookahead into the body and the DFA has none.
+   0.7.3 removed the *silence* — it now reports `grammar.token-boundary-ignored` — but not the
+   limit. This is the honest scope of the problem; see Session 13's item 1 below for why the
+   adjacent "guarded rule naming another guarded rule" case is NOT a defect and must not be
+   "fixed".
+
+3. **Cosmetic doc items, deliberately skipped during the release** and still open:
+   `docs/ARCHITECTURE-0.6.0.md` mixes `Visitor<T>` and `GVisitor<T>` for the same emitted type,
+   and `docs/GRAMMAR-DSL.md`'s intro scopes the document more narrowly than its actual contents.
+   Neither is wrong in a way that misleads about behaviour.
+
+**Two figure discrepancies were chased and are NOT errors — do not re-chase them.** README's
+0.7.1 corpus figure `(5,614/5,645)` is dated 2026-08-14 while `tools/langtools-corpus/README.md`
+records `5611/5642` as of 2026-08-06: exactly three more files in both numerator and denominator,
+i.e. one week of corpus growth. The corpus-size figures that vary across that file (~5,700 /
+5,667 / 5,666 / 5,673) are the same phenomenon plus one unreadable file. The corpus grows; date
+every measurement and compare only same-dated ones.
+
+---
+
+## Session 13 — 0.7.2 (2026-08-18 → 08-21) — SHIPPED
+
+### State at a glance
+
+| | |
+|---|---|
+| **Ship state** | **SHIPPED.** `org.pragmatica-lite:peglib:0.7.2` on Maven Central with signatures, verified by fetch. Announced 2026-08-21. |
+| **Merged / tagged** | PR #44 → `main` at `6fd769b`, CI green; tag `v0.7.2`; GitHub release cut (first since v0.4.3 — practice resumed deliberately) |
+| **Build** | `mvn install` — BUILD SUCCESS, lint + format-check on |
+| **Tests** | **635** across 5 modules, 0 failures, 0 skips (605 at session start) |
+| **Grammar** | `java25.peg` **unchanged**, so the 99.45% javac agreement carries over untouched |
+| **Downstream** | `aether/pg-tools` green on 0.7.2 — 811 tests, 0 failures, 34/34 real schema files parsing |
+
+The deploy was clean: deployment `43e982c6` published without the `UnrecognizedPropertyException`
+that made 0.7.0 report BUILD FAILURE for a publish that had in fact succeeded. **Keep the
+`central-publishing` 0.11.0 pin** — it is doing its job. `autoPublish=true` with
+`waitUntil=published` still means no staging gate and immutable artifacts, so a mistake ships the
+next version.
+
+### What this release was
+
+0.7.2 is the release where peglib stopped being a Java parser generator that happened to be
+general. Every fix below was found by one downstream consumer — `aether/pg-tools`, a 753-line
+PostgreSQL grammar — and **none was reachable from `java25.peg`**, which has zero case-insensitive
+keyword literals and zero reference-only lexer rules. Eleven defects, plus two tooling fixes.
+
+**Lexing and classification**
+
+- **Identifier fallback works for case-insensitive grammars.** It was gated on a `/cs` key suffix
+  reasoning "Java keywords are case-sensitive" — a Java assumption compiled into a general
+  library. Keyword containment now folds both sides.
+- **A lexer rule may reference another lexer rule.** References are substituted before DFA
+  compilation, cycles refused. This is what makes "guard plus named alternatives" expressible.
+- **A rule that can match only the empty string is PARSER.** *Always-empty*, not *nullable* —
+  `Word <- [a-z]*` is nullable and stays a legitimate lexer rule.
+- **`< >` is load-bearing for classification.** A reference-only body spanning more than one token
+  is a parser rule unless a token boundary declares otherwise.
+- **Trailing character-class lookahead compiles** — `X ![c]` becomes a constraint on the accepting
+  state. This is what multi-word lexemes need.
+- **Several leading keyword guards** on one rule; a single-keyword rule counts as a literal set.
+- **`%parser RuleName`** pins a rule to PARSER, overriding inference.
+- **A rule named from `%whitespace` is trivia.** Such alternatives could not compile (no call
+  stack in a DFA) and were *silently dropped*, so the standalone rule matched the same text under
+  an ordinary kind and the first `--` comment in a file ended the parse. 18 of 34 real files.
+- **A lexeme gets one kind, named after the rule that names it.** A second synthetic `INLINE_*`
+  kind for the same text left the rule's kind unreachable and the keyword anonymous in the CST.
+- **Adoption runs before alias arrays are built.** Interleaving them made the result depend on
+  declaration order — `ReservedKeyword` before `CaseKW` broke, after `CreateKW` worked.
+- **A guard's own reserved words are no longer offered as identifier fallbacks.** The `*KW`
+  rule-name half of the fold was never case-folded, so `ColId` accepted `CREATE` and `SELECT` as
+  column names. Latent while those kinds were unreachable; live the moment adoption landed.
+
+**Tooling**
+
+- **`%import` works end to end**, plus all three mojos; **Base64 DFA tables** lifting a ~1100-state
+  ceiling (both from session 12).
+- **The generator stamp identifies the build, not the version.** A same-version rebuild — the
+  normal case for an entire unreleased version — was invisible to consumers, who kept stale
+  generated sources and measured a parser that no longer matched the library.
+
+### Open items
+
+1. ~~**A guarded rule whose body names another guarded rule.**~~ **CLOSED 2026-08-22 — diagnosed,
+   and the premise was wrong. Do not "fix" this.**
+
+   The mechanism recorded was real: `resolveSkipBody` does refuse the body, because inlining
+   `ColId` drags its own `!ReservedKeyword` in and the DFA cannot compile lookahead. What was
+   never measured is the *consequence* — a silent fall back to PARSER — and **the PARSER reading
+   is correct**. Measured on the canonical shape: `hello` accepted, `partition` rejected by the
+   outer guard, `select` and `from` rejected by the inner one. Both guards fire, via token-level
+   lookahead instead of the DFA. There is no wrong output to fix.
+
+   The guard-composition change was re-applied and diagnosed. It breaks **36 tests through
+   exactly one rule**: `PlainTypeName <- !RestrictedTypeName Identifier` (`java25.peg:247`) is
+   this same shape, and promoting it to LEXER makes it out-prioritise `Identifier` (line 322),
+   which matches the same text. Every identifier in Java then lexes as `PlainTypeName`,
+   `Identifier` goes dead, and `CompilationUnit` fails at offset 0 — hence every failure reading
+   `trailing input not consumed`. The classification diff between the two builds is one line.
+
+   Promotion buys nothing and costs the grammar. `NestedGuardRuleTest` now pins the PARSER
+   classification with that reasoning attached, so a third attempt fails at the cause rather than
+   in 36 downstream assertions.
+
+   What *is* genuinely unavailable is fusion: a guarded rule cannot be absorbed into a larger
+   token: `Qualified <- < ColId '.' ColId >` still falls back to PARSER. **The silent half was
+   fixed in 0.7.3** — it now reports `grammar.token-boundary-ignored`, and a whole-body `< >`
+   over a compilable body is honoured rather than dropped. What remains is the genuine DFA
+   limit: a guarded rule's lookahead cannot be inlined into a larger token.
+2. ~~**Unreachable-kind detection.**~~ **BUILT 2026-08-22** (alongside `grammar.token-boundary-ignored`) — `grammar.unreachable-kind`, in the
+   Analyzer, behind `peglib:lint` / `peglib:check`. It earned itself immediately: it diagnoses
+   open item 1 above in one line (`Identifier` dead) where the original took several rounds by
+   hand. The design work was all in *not* firing on correct grammars — the naive form reports
+   five rules on `java25.peg`, so rules represented by their alias kinds or inlined into another
+   lexer rule are excused.
+3. ~~**Generated output is not reproducible.**~~ **FIXED 2026-08-22.** Confirmed first by
+   measurement — five fresh JVMs, four distinct hashes, all 108 differing lines were `.put(`
+   lines — then fixed by replacing `Map.copyOf` with an order-preserving `orderedCopy` across
+   every map in `TokenKindAssignment`. Ten runs, one hash. Note the test does NOT generate twice
+   and compare: the seed is per-JVM, so that test passes against the bug.
+4. **Lookahead unsupported** over anything but a character class (`&(Modifier* ClassKW)`), and
+   nested inside a Choice alternative rather than trailing the whole body. This is why `java25.peg`
+   still spells its `value` lookahead inline at four use sites — though `%parser` now rescues that
+   shape (verified), so switching it is possible and needs only a corpus re-run to justify.
 
 ---
 
