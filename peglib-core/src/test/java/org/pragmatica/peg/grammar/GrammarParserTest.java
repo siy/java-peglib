@@ -217,4 +217,18 @@ class GrammarParserTest {
         var message = result.fold(cause -> cause.message(), g -> "");
         assertTrue(message.contains("Undefined rule reference: 'Bar'"), message);
     }
+
+    /** Newlines were counted twice before 0.7.4, so every line after the first read roughly double. */
+    @Test
+    void ruleSpans_countEachNewlineOnce() {
+        var text = "A <- 'a'\n\n# comment\nB <- 'b'\r\nC <- 'c'\n";
+        var lines = GrammarParser.parse(text)
+                                 .unwrap()
+                                 .rules()
+                                 .stream()
+                                 .map(rule -> rule.span().start().line())
+                                 .toList();
+
+        org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of(1, 4, 5), lines);
+    }
 }
