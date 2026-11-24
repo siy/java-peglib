@@ -66,10 +66,20 @@ public final class Analyzer {
      * Analyze a grammar and return a report of findings.
      */
     public static AnalyzerReport analyze(Grammar grammar) {
-        return new Analyzer(grammar).run();
+        return analyze(grammar, grammar);
     }
 
-    private AnalyzerReport run() {
+    /**
+     * Analyze a grammar composed from {@code root} and its imports. Findings on imported rules carry
+     * no line: their positions refer to another file.
+     *
+     * @since 0.7.4
+     */
+    public static AnalyzerReport analyze(Grammar composed, Grammar root) {
+        return new Analyzer(composed).run(root.ruleMap());
+    }
+
+    private AnalyzerReport run(Map<String, Rule> locatedRules) {
         var findings = new ArrayList<Finding>();
 
         findings.addAll(checkUnreachableRules());
@@ -82,6 +92,8 @@ public final class Analyzer {
         findings.addAll(checkInertDirectives());
         findings.addAll(checkUnreachableKinds());
         findings.addAll(checkIgnoredTokenBoundaries());
+        findings.addAll(CharLevelChecks.check(grammar));
+        findings.replaceAll(finding -> locate(finding, locatedRules));
         // Stable sort: by rule name, then tag, then severity. Ensures deterministic output.
         findings.sort(Comparator.<Finding, String> comparing(Finding::ruleName)
                                 .thenComparing(Finding::tag)
@@ -89,6 +101,18 @@ public final class Analyzer {
                                                      .name()));
 
         return new AnalyzerReport(List.copyOf(findings));
+    }
+
+    private static Finding locate(Finding finding, Map<String, Rule> locatedRules) {
+        var rule = locatedRules.get(finding.ruleName());
+
+        if (rule == null) {
+            return finding.atLine(Finding.NO_LINE);
+        }
+
+        return finding.line() == Finding.NO_LINE
+               ? finding.atLine(rule.span().start().line())
+               : finding;
     }
 
     // === Check 1: Unreachable rules ===
@@ -354,7 +378,8 @@ public final class Analyzer {
                 findings.add(new Finding(severity,
                                          "grammar.nullable-rule",
                                          rule.name(),
-                                         "rule '" + rule.name() + "' can match the empty string" + suffix));
+                                         "rule '" + rule.name() + "' can match the empty string" + suffix,
+                                         Finding.NO_LINE));
             }
         }
 

@@ -54,6 +54,29 @@ class MojoIntegrationTest {
     }
 
     @Test
+    void generateMojo_failsOnAnalyzerError_namingRuleAndLine(@TempDir Path tempDir) throws Exception {
+        var grammarFile = tempDir.resolve("dead.peg")
+                                 .toFile();
+        Files.writeString(grammarFile.toPath(),
+                          "Start <- T ';'\nT <- 'a' [ \\t]+ 'b' M?\nM <- '(' ')'\n%whitespace <- [ \\t]+\n");
+        var outDir = tempDir.resolve("out")
+                            .toFile();
+        var mojo = new GenerateMojo();
+        mojo.setGrammarFile(grammarFile);
+        mojo.setOutputDirectory(outDir);
+        mojo.setPackageName("com.example.gen");
+        mojo.setLexerClassName("GLexer");
+        mojo.setParserClassName("GParser");
+        mojo.setVisitorClassName("GVisitor");
+
+        assertThatThrownBy(mojo::execute).isInstanceOf(MojoFailureException.class)
+                                         .hasMessageContaining("grammar.char-class-never-matches")
+                                         .hasMessageContaining("dead.peg:2: T");
+        assertThat(outDir.toPath()
+                         .resolve("com/example/gen/GParser.java")).doesNotExist();
+    }
+
+    @Test
     void generateMojo_writesLexerParserVisitor(@TempDir Path tempDir) throws Exception {
         var grammarFile = tempDir.resolve("gen.peg")
                                  .toFile();

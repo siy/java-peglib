@@ -26,6 +26,10 @@ public record AnalyzerReport(List<Finding> findings) {
                        .anyMatch(f -> f.severity() == Finding.Severity.WARNING);
     }
 
+    public AnalyzerReport errorsOnly() {
+        return new AnalyzerReport(findings.stream().filter(f -> f.severity() == Finding.Severity.ERROR).toList());
+    }
+
     public long count(Finding.Severity severity) {
         return findings.stream()
                        .filter(f -> f.severity() == severity)
@@ -57,6 +61,10 @@ public record AnalyzerReport(List<Finding> findings) {
               .append(f.message())
               .append('\n');
             sb.append("  --> ").append(grammarPath);
+            if (f.line() != Finding.NO_LINE) {
+                sb.append(':').append(f.line());
+            }
+
             if (!f.ruleName().isEmpty()) {
                 sb.append(": ").append(f.ruleName());
             }

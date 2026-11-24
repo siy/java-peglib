@@ -340,7 +340,7 @@ class AnalyzerTest {
             var report = analyze(grammar);
             var out = report.formatRustStyle("test.peg");
             assertThat(out).contains("error[grammar.duplicate-literal]:");
-            assertThat(out).contains("--> test.peg: Start");
+            assertThat(out).contains("--> test.peg:1: Start");
             assertThat(out).contains("analyzer: 1 error");
         }
     }
