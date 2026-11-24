@@ -102,6 +102,10 @@ public record Diagnostic(Severity severity,
 }
 ```
 
+Since 0.7.4 the position is the **furthest failure** of the attempt, or the token parsing stopped at
+if nothing got further. `offset`, `length` and `found` all describe that one token, and positions
+strictly increase through the list, so recovery does not report one mistake twice.
+
 Positions are **byte offsets into the input**, not line/column pairs. The 0.5.x `Diagnostic`
 carried a `SourceSpan` with `line()` / `column()` accessors; those types are gone. Offsets are
 cheaper to produce and lossless, and line/column is a presentation concern — see

@@ -1,7 +1,34 @@
 # peglib — Handover
 
-**Last updated:** 2026-08-27 — **0.7.3 SHIPPED** (2026-08-22). Newest session first; the
-current starting point is **Where to pick up**, immediately after the Session 14 record.
+**Last updated:** 2026-11-24 — **0.7.4 built and gated on `release-0.7.4`, NOT shipped** (not pushed,
+no PR, no Central deploy). Newest session first.
+
+---
+
+## Session 15 — 0.7.4 (2026-11-24) — NOT SHIPPED
+
+Triggered by two reports from pragmatica's PostgreSQL grammar: whitespace classes that silently never
+match (issue #48) and parse errors reported at 1:1 (issue #47).
+
+| | |
+|---|---|
+| **Tests** | **733** across 5 modules, 0 failures, 0 skips; `clean verify` with lint and format on |
+| **Corpus** | identical to the released 0.7.3 jar on the same checkout, file for file (99.44%; see `tools/langtools-corpus/README.md`) |
+| **0.7.3 vs 0.7.4, corpus + corruptions** | 22,732 parses, 8,628 of them broken: acceptance and CST identical on all; diagnostics 664,295 → 288,681; no broken parse lost all its diagnostics |
+| **Generated source** | `GLexer` and `GVisitor` byte-identical on `java25.peg` and `postgres.peg` |
+| **Parse time** | interleaved A/B/A on the 40k-line fixture, 8 forks per arm, loaded machine: p50 71.4 / **62.6** / 70.8 ms (0.7.3 / 0.7.4 / 0.7.3). Comparison only, not a baseline |
+| **Mutation** | 33 author mutants, one survivor; the verifier added one more (`chars.set(NON_ASCII)` in `CharLevelChecks`, contrived to expose, untested). The author survivor is the `subtree.diagnostics()` guard in `IncrementalParser`, which no input found reaches; it is kept because returning an empty diagnostic list depends on it |
+
+- **The incremental parser could report a broken file as clean, and had been able to since 0.7.3 or
+  earlier.** Nobody looked, because every incremental test compared valid edits. A seeded
+  incremental-vs-fresh differential found it in seconds. Widening the first guard by position was the
+  wrong fix; the invariant (clean to clean, outside tokens unchanged) replaced the merge code.
+- **`spliceLex` is still unsound beyond one token (issue #49, open).** Options and rough costs are in
+  the issue; choosing is a speed/correctness decision for the owner.
+- **`%memo` had to carry the furthest failure.** Once lookaheads stopped recording failures, replay
+  was no longer equivalent to re-parsing.
+- **The independent verifier found the wrong ERROR** (optional whitespace class in a pinned rule) that
+  the author's tests and mutants did not. Generate fails on ERROR now, so a false one breaks a build.
 
 ---
 
@@ -151,13 +178,10 @@ byte-identical, GLexer differing only in `.put` ordering).
 
 ### Where to pick up
 
-**0.7.3 is shipped and nothing is release-blocked.** Ship details are in the Session 14 table
+**0.7.3 is shipped; 0.7.4 awaits the owner (push, PR, Central).** Ship details are in the Session 14 table
 below; they are not repeated here.
 
-1. **`cdm` carries an unpushed commit** — `ac417e2` ("chore: bump peglib to 0.7.3"), committed
-   locally and verified green (86 tests, unchanged from its 0.7.1 baseline) but never pushed.
-   Push it or drop it; do not leave it to rot as a local-only delta.
-
+1. ~~**`cdm` carries an unpushed commit.**~~ **CLOSED** — `ac417e2` is in `~/IdeaProjects/tenon` and pushed.
 2. **The one real remaining lexer limitation: a guarded rule cannot be fused into a larger
    token.** `Qualified <- < ColId '.' ColId >` where `ColId` carries a keyword guard falls back
    to PARSER, because inlining `ColId` drags its lookahead into the body and the DFA has none.
