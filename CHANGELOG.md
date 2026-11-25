@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 0.7.5, built, not published
+## [0.7.5] - 2026-11-25
 
 ### Fixed
 
@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ResumableLexFn` and `TokenStop`: a lexer that starts at a token boundary and stops early. The generated
+  lexer (`lex(input, from, stop)`), `LexerEngine` and the compiled lexer returned by `Parser.lexer()`
+  implement it, so a splice re-lexes the real input; a plain `LexFn` is re-lexed over windows of it.
 - `TokenArrayBuilder.append(kind, start, end, reach)`, `TokenArray.hasScanReach()`, `Parser.lex(String)`.
 - `SpliceLexBenchmark`: the lex half of an edit, spliced and whole.
 
