@@ -1,11 +1,11 @@
 # peglib — Handover
 
-**Last updated:** 2026-11-24 — **0.7.4 built and gated on `release-0.7.4`, NOT shipped** (not pushed,
-no PR, no Central deploy). Newest session first.
+**Last updated:** 2026-11-25 — **0.7.4 is MERGED to `main` and NOT RELEASED. Publishing was cancelled
+by the owner; do not deploy, tag or cut a release without a new go-ahead.** Newest session first.
 
 ---
 
-## Session 15 — 0.7.4 (2026-11-24) — NOT SHIPPED
+## Session 15 — 0.7.4 (2026-11-24/25) — MERGED, NOT RELEASED
 
 Triggered by two reports from pragmatica's PostgreSQL grammar: whitespace classes that silently never
 match (issue #48) and parse errors reported at 1:1 (issue #47).
@@ -19,17 +19,36 @@ match (issue #48) and parse errors reported at 1:1 (issue #47).
 | **Parse time** | NOT MEASURED. A timing was taken on a contended machine against the rules and is withdrawn; run the JMH suite interleaved with 0.7.3 on a quiet one. Touched hot path: `fail()`, `emitNot` save/restore, the `%memo` wrapper |
 | **Mutation** | 33 author mutants, one survivor; the verifier added one more (`chars.set(NON_ASCII)` in `CharLevelChecks`, contrived to expose, untested). The author survivor is the `subtree.diagnostics()` guard in `IncrementalParser`, which no input found reaches; it is kept because returning an empty diagnostic list depends on it |
 
-**Checkpoint 2026-11-25.** Done: all code, tests and docs, committed locally on `release-0.7.4`
-(6 commits on `a88c848`, plus this checkpoint). The branch is not on the remote. No 0.7.4 peglib
-artifact is in `~/.m2` or on Central. No process is left running.
+**State 2026-11-25.**
+- PR #50 merged as `585badd` (head `f28a748`, same tree; CI green on both). Issues #47 and #48 closed.
+- Central: **all six 0.7.4 poms 404** after the attempt (control: 0.7.3 is 200). Deployment
+  `f893778d-9909-45ba-83a2-fd02fb10d479` was uploaded and REJECTED by validation; a failed entry may
+  still be listed in the portal for the owner to drop.
+- No `v0.7.4` tag, no GitHub release, no peglib 0.7.4 in `~/.m2`, no process left running.
+- The owner approved the release, then said "cancel publishing". The reason is not recorded.
 
-Waits for the owner, each needing its own go-ahead:
-1. Push and open the PR; then merge, tag, Central deploy (immutable).
-2. Whether #49 holds up 0.7.4 (recommendation: no; the CHANGELOG states the limit).
-3. Local install: needs the owner to touch `~/.m2/ALLOW_AGENT_WRITE`.
+**Why Central rejected it.** The bundle held seven `maven-metadata-local.xml` files ("content that does
+NOT have a .pom file"); the artifacts and signatures were complete. Suspected, NOT confirmed: the
+session's isolated repo with `-Dmaven.repo.local.tail`, since the release profile is the one that
+shipped 0.7.3. The confirming run (standalone repo, no tail, `-DskipPublishing=true`) did not finish:
+it failed in peglib-core and its result was lost. `skipPublishing` also skips per artifact, so check
+that it builds a bundle at all before relying on it. Inspect the bundle for `maven-metadata` before
+any upload.
 
-Then: set the CHANGELOG date, tell the CTO session the version. The final gate predates only documentation
-commits; the probe scripts and the isolated Maven repo live in a session scratchpad and may be gone.
+**Decisions.** #49 goes to the next patch version. The benchmark does not hold up the release.
+Local install was approved but the marker was not fresh (dated 2026-10-12), so nothing was installed.
+
+**PR #50 review.** Two analyzer gaps fixed (an elided class in a non-last choice alternative; trivia
+starting after a nullable element), five tests, five mutants killed. The third finding, a predicate or
+earlier alternative above the checkpoint, is open and stated in the CHANGELOG: 43 wrong of 18,017 edits
+over grammars built to hit it, against 2,227 on 0.7.3; 12 of the 43 were right on 0.7.3. No issue is
+filed for it yet.
+
+**Waits for the owner:** whether and when to release; pushing the commit that carries this section (it
+also marks 0.7.4 unreleased again in CHANGELOG and README); `origin/release-0.7.4` can be deleted.
+
+**Not redone after the review fixes:** the corpus run, the parse differential and the verifier pass.
+The fixes touch only the analyzer, which the generated parser does not use.
 
 - **The incremental parser could report a broken file as clean, and had been able to since 0.7.3 or
   earlier.** Nobody looked, because every incremental test compared valid edits. A seeded
@@ -190,7 +209,7 @@ byte-identical, GLexer differing only in `.put` ordering).
 
 ### Where to pick up
 
-**0.7.3 is shipped; 0.7.4 awaits the owner (push, PR, Central).** Ship details are in the Session 14 table
+**0.7.3 is the latest release; 0.7.4 is merged and unreleased (publishing cancelled).** Ship details are in the Session 14 table
 below; they are not repeated here.
 
 1. ~~**`cdm` carries an unpushed commit.**~~ **CLOSED** — `ac417e2` is in `~/IdeaProjects/tenon` and pushed.
