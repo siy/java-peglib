@@ -16,8 +16,20 @@ match (issue #48) and parse errors reported at 1:1 (issue #47).
 | **Corpus** | identical to the released 0.7.3 jar on the same checkout, file for file (99.44%; see `tools/langtools-corpus/README.md`) |
 | **0.7.3 vs 0.7.4, corpus + corruptions** | 22,732 parses, 8,628 of them broken: acceptance and CST identical on all; diagnostics 664,295 → 288,681; no broken parse lost all its diagnostics |
 | **Generated source** | `GLexer` and `GVisitor` byte-identical on `java25.peg` and `postgres.peg` |
-| **Parse time** | interleaved A/B/A on the 40k-line fixture, 8 forks per arm, loaded machine: p50 71.4 / **62.6** / 70.8 ms (0.7.3 / 0.7.4 / 0.7.3). Comparison only, not a baseline |
+| **Parse time** | NOT MEASURED. A timing was taken on a contended machine against the rules and is withdrawn; run the JMH suite interleaved with 0.7.3 on a quiet one. Touched hot path: `fail()`, `emitNot` save/restore, the `%memo` wrapper |
 | **Mutation** | 33 author mutants, one survivor; the verifier added one more (`chars.set(NON_ASCII)` in `CharLevelChecks`, contrived to expose, untested). The author survivor is the `subtree.diagnostics()` guard in `IncrementalParser`, which no input found reaches; it is kept because returning an empty diagnostic list depends on it |
+
+**Checkpoint 2026-11-25.** Done: all code, tests and docs, committed locally on `release-0.7.4`
+(6 commits on `a88c848`, plus this checkpoint). The branch is not on the remote. No 0.7.4 peglib
+artifact is in `~/.m2` or on Central. No process is left running.
+
+Waits for the owner, each needing its own go-ahead:
+1. Push and open the PR; then merge, tag, Central deploy (immutable).
+2. Whether #49 holds up 0.7.4 (recommendation: no; the CHANGELOG states the limit).
+3. Local install: needs the owner to touch `~/.m2/ALLOW_AGENT_WRITE`.
+
+Then: set the CHANGELOG date, tell the CTO session the version. The final gate predates only documentation
+commits; the probe scripts and the isolated Maven repo live in a session scratchpad and may be gone.
 
 - **The incremental parser could report a broken file as clean, and had been able to since 0.7.3 or
   earlier.** Nobody looked, because every incremental test compared valid edits. A seeded
