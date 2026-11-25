@@ -6,7 +6,7 @@
 
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-parent</artifactId>
-    <version>0.7.4</version>
+    <version>0.7.5</version>
     <packaging>pom</packaging>
 
     <name>Peglib Parent</name>
@@ -213,8 +213,13 @@
                              correctly, then the plugin threw
                              UnrecognizedPropertyException: Unrecognized field "warnings"
                              while polling for confirmation, reporting BUILD FAILURE for a
-                             release that had in fact succeeded. -->
-                        <version>0.11.0</version>
+                             release that had in fact succeeded.
+                             0.12.0: under Maven 3.10.0, 0.11.0 and 0.11.1 put seven
+                             maven-metadata-local.xml files in the bundle and Central rejected
+                             it (0.7.4's first deployment). 0.12.0 bundles the same 22 artifacts
+                             and none of them (rehearsal against a dead URL, 2026-11-25). Its
+                             upload and status polling are not yet exercised against Central. -->
+                        <version>0.12.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>

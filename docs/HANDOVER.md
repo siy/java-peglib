@@ -1,6 +1,64 @@
 # peglib — Handover
 
-**Last updated:** 2026-11-25 — **0.7.4 SHIPPED to Maven Central.** Newest session first.
+**Last updated:** 2026-11-25 — **0.7.4 SHIPPED to Maven Central**; 0.7.5 built on `release-0.7.5`, NOT published (awaiting the owner's decision on the #49 measurement). Newest session first.
+
+---
+
+## Session 16b — 0.7.5 built for #49, NOT published (2026-11-25)
+
+Owner (via CTO): build and measure 0.7.5 with #49 fixed, do not publish; file the checkpoint-context
+issue (filed as **#51**). Branch `release-0.7.5`, local, not pushed; it contains `fix/playground-pom`.
+
+**Fix.** Each lexer records per token how far its scan looked (`reach`, end of input = `len`). The
+splice re-lexes from the first token whose reach passed the edit, and stops at the first new token
+starting past the edit where an old token started. The generated lexer and `LexerEngine` have a resumable
+entry `lex(input, from, TokenStop)` (`ResumableLexFn`), so the re-lex runs over the real input. A plain
+`LexFn` gets doubling windows instead, which is correct but slow when one token outgrows a window.
+A second divergence of the same class was fixed: the incremental path lexed without the Unicode-escape
+pre-pass. A source containing an escape is now lexed whole via `Parser.lex`.
+
+**Correctness.** `SpliceLexDifferentialTest`: about 64,000 seeded splices compared token for token with a
+fresh lex. It covers four grammars, both lexers, both paths, and short and multi-window inputs, plus a
+Java + Unicode-escape incremental differential. All of it was red on the old splice. 13 mutants, all
+killed; the control is green. `clean install`: 746 testcases, 0 failures, 1 skip (the #51 assertion,
+`@Disabled` beside its enabled tripwire).
+
+**Speed, 0.7.4 → 0.7.5.** JMH medians of 3 interleaved rounds. Load average 3.2–8.2 on 4 performance
+cores, so the box was contended and these are indicative only.
+
+| | 0.7.4 | 0.7.5 | full re-lex (0.7.5) |
+|---|---|---|---|
+| splice, insert char, 40k-line selfhost | 0.83 ms | 0.95 ms | 10.7 ms |
+| splice, insert char, 1.9k-line reference | 46 µs | 51 µs | 0.65 ms |
+| splice, open `/*`, selfhost | 0.83 ms (**wrong tokens**) | 3.29 ms | 9.5 ms |
+| splice, open `/*`, reference | 50 µs (**wrong tokens**) | 211 µs | 0.88 ms |
+| splice, open `/*`, selfhost, plain `LexFn` (windows) | — | 14.2 ms | |
+| incremental edit p50, reference | ~648 µs | ~696 µs (+7%) | |
+| incremental edit p50, selfhost | ~18.5 ms | ~18.5 ms (noise) | |
+| full parse, reference / selfhost | 2.5 / 62.3 ms | 2.6 / 61.7 ms (noise) | |
+
+The +12–14% on an ordinary splice is the fifth array copied per splice. The splice was already O(n) in
+array copies before this change. Full lex alone measured +3% to +14%, which is not visible in full
+parse. Open: none of this was measured on a quiet machine.
+
+---
+
+## Session 16 — post-0.7.4 housekeeping (2026-11-25)
+
+Branch `fix/playground-pom`, local, not pushed. Both changes are for the next release.
+
+- **Playground pom.** `createDependencyReducedPom=false`. Installed into a scratch repo: the pom lists
+  `peglib` once with the fix, zero times on `main` (control).
+- **Publishing plugin 0.12.0.** Rehearsal under Maven 3.10.0 against a dead URL, bundles counted:
+  0.11.0 → 147 entries, 7 `maven-metadata` (reproduces the rejection); 0.11.1 → same; 0.12.0 → 110,
+  0 metadata, all 22 artifacts each with 4 checksums. `-Dgpg.skip=true`, so no `.asc` in any of them.
+  Upload and status polling against Central are untested; keep Maven 3.9.x as the fallback until a
+  release has gone through on 0.12.0.
+- Local `release-0.7.4` deleted (merged). Remote `release-0.7.2/3/4` are merged into `origin/main` but
+  deleting them was refused by the session's permission check; left for the owner.
+- Still open: #49 (owner's speed/correctness call); filing the checkpoint-context issue (public write,
+  needs owner authorization); the JMH comparison with 0.7.3 (box load ~2.3 with other sessions running,
+  so not measured).
 
 ---
 

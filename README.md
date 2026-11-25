@@ -3,7 +3,7 @@
 A PEG (Parsing Expression Grammar) parser library for Java. Tokens-first lex-then-parse
 architecture, flat int[] CST, visitor pattern, true incremental reparse.
 
-Maven Central: `org.pragmatica-lite:peglib:0.7.4`
+Maven Central: `org.pragmatica-lite:peglib:0.7.5`
 
 Migrating from 0.5.x? See [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md).
 Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
@@ -29,7 +29,7 @@ Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.7.4</version>
+    <version>0.7.5</version>
 </dependency>
 ```
 
@@ -312,7 +312,7 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.7.4</version>
+    <version>0.7.5</version>
     <executions>
         <execution>
             <goals><goal>generate</goal></goals>
@@ -402,6 +402,7 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 | Version | Date | What |
 |---|---|---|
+| **0.7.5** | 2026-11-25 | Incremental edits lex exactly as a fresh parse does (#49). The splice used to re-lex one token either side of an edit, so typing `/` before `/*`, or closing a comment opened far earlier, left stale tokens; it now re-lexes from the first token whose scan reached the edit until the token boundaries line up again. Regenerate `GLexer`. The playground pom lists `peglib` again. 746 tests |
 | **0.7.4** | 2026-11-25 | Errors where the mistake is. A diagnostic points at the furthest failure and one mistake is reported once, instead of every token from 1:1 when the start rule can match empty. The analyzer reports character-level constructs that a token-level rule silently ignores, with grammar line numbers, and `peglib:generate` fails on analyzer errors. Two ways an incremental reparse could report a broken file as clean are gone. 738 tests |
 | **0.7.3** | 2026-08-22 | Grammars whose comments nest. `%nest '<open>' '<close>'` lexes a nesting delimiter pair with a depth-counting scanner, because a nested block comment is not a regular language and no DFA path can match one — the old reading closed at the first `*/` and leaked the remainder into the token stream, sometimes as a *silently different* program. Two new analyzer checks: `grammar.unreachable-kind` (a rule allocated a token kind no input can produce) and `grammar.token-boundary-ignored` (a `< >` the classifier could not honour). A whole-body `< >` now outranks the terminals-and-references rule instead of being dropped in silence, and generated sources are reproducible across JVM runs. Corpus agreement re-measured at 99.45%, unchanged. 698 tests. |
 | **0.7.2** | 2026-08-19 | Grammars that are not Java-shaped. Identifier fallback works for case-insensitive keywords; a lexer rule may reference another lexer rule, end in a character-class lookahead, or carry several leading keyword guards; `%parser` pins classification the inference gets wrong; `< >` decides whether a reference-only rule is one token. Plus `%import` end to end, Base64 DFA tables (lifting a ~1100-state ceiling), case-folded literal keys, and generator-version stamping. 635 tests. |

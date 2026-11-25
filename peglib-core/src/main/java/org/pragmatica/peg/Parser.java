@@ -39,6 +39,15 @@ public final class Parser {
     }
 
     /**
+     * Lex {@code input} exactly as {@link #parse(String)} does, Unicode-escape pre-pass included.
+     *
+     * @since 0.7.5
+     */
+    public TokenArray lex(String input) {
+        return lexTranslated(input);
+    }
+
+    /**
      * Lex {@code input}, applying Java's Unicode-escape pre-pass (JLS 3.3) when the source
      * contains one.
      *

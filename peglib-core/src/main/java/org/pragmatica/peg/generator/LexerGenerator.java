@@ -129,6 +129,7 @@ public final class LexerGenerator {
 
         sb.append("import org.pragmatica.peg.token.TokenArray;\n");
         sb.append("import org.pragmatica.peg.token.TokenArrayBuilder;\n");
+        sb.append("import org.pragmatica.peg.token.TokenStop;\n");
         if (hasNesting) {
             sb.append("import org.pragmatica.peg.token.NestingScanner;\n");
         }
@@ -176,6 +177,7 @@ public final class LexerGenerator {
         var open = new StringBuilder();
         var close = new StringBuilder();
         var kind = new StringBuilder();
+        int probe = 0;
 
         for (int i = 0; i < nestingTrivia.size(); i++) {
             var pair = nestingTrivia.get(i);
@@ -191,12 +193,15 @@ public final class LexerGenerator {
             open.append("\"").append(escapeJavaString(pair.open())).append("\"");
             close.append("\"").append(escapeJavaString(pair.close())).append("\"");
             kind.append(DfaBuilder.triviaKindForPrefix(pair.open()));
+            probe = Math.max(probe,
+                             pair.open().length());
         }
 
         sb.append("    private static final char[] NEST_FIRST = {").append(first).append("};\n");
         sb.append("    private static final String[] NEST_OPEN = {").append(open).append("};\n");
         sb.append("    private static final String[] NEST_CLOSE = {").append(close).append("};\n");
-        sb.append("    private static final int[] NEST_KIND = {").append(kind).append("};\n\n");
+        sb.append("    private static final int[] NEST_KIND = {").append(kind).append("};\n");
+        sb.append("    private static final int NEST_PROBE = ").append(probe).append(";\n\n");
         // Reject on a single char compare; startsWith is reached only at a position whose
         // first character already matched a delimiter.
         sb.append("    private static int nestingOpenAt(String input, int pos) {\n");
@@ -441,14 +446,20 @@ public final class LexerGenerator {
                                         boolean hasFollowConstraints,
                                         boolean hasNesting) {
         sb.append("    public static TokenArray lex(String input) {\n");
+        sb.append("        return lex(input, 0, null);\n");
+        sb.append("    }\n\n");
+        // 0.7.5 — resumable entry for TokenArray.spliceLex: start at a token boundary, stop where the
+        // re-lex resynchronises with the old token stream.
+        sb.append("    public static TokenArray lex(String input, int from, TokenStop stop) {\n");
         // No defensive null check on input: the only caller path is
         // CompiledLexer.lex(String), which is invoked from Parser.parse(String)
         // after the parser's own null discipline; passing null here is a
         // programmer error that the JVM's NPE on input.length() catches.
         sb.append("        TokenArrayBuilder builder = new TokenArrayBuilder(input);\n");
         sb.append("        int len = input.length();\n");
-        sb.append("        int pos = 0;\n");
+        sb.append("        int pos = from;\n");
         sb.append("        while (pos < len) {\n");
+        sb.append("            if (stop != null && stop.stopBefore(pos)) break;\n");
         if (hasNesting) {
             // Mirrors LexerEngine.lex: a %nest open delimiter at a token start is consumed by
             // the depth counter INSTEAD OF the DFA, so a nesting comment is scanned once. An
@@ -456,12 +467,18 @@ public final class LexerGenerator {
             // which keeps malformed input reading exactly as it did without the directive.
             sb.append("            int lastAcceptEnd = -1;\n");
             sb.append("            int lastAcceptKind = -1;\n");
+            // reach: one past the last position examined for this token (end of input = len),
+            // the bound TokenArray.spliceLex relies on. Mirrors LexerEngine.lex.
+            sb.append("            int reach = Math.min(pos + NEST_PROBE, len + 1);\n");
             sb.append("            int nested = nestingOpenAt(input, pos);\n");
             sb.append("            if (nested >= 0) {\n");
             sb.append("                int nestEnd = NestingScanner.scanEnd(input, pos, NEST_OPEN[nested], NEST_CLOSE[nested]);\n");
             sb.append("                if (nestEnd != NestingScanner.UNTERMINATED) {\n");
             sb.append("                    lastAcceptEnd = nestEnd;\n");
             sb.append("                    lastAcceptKind = NEST_KIND[nested];\n");
+            sb.append("                    reach = Math.max(reach, Math.min(nestEnd + NEST_PROBE, len + 1));\n");
+            sb.append("                } else {\n");
+            sb.append("                    reach = len + 1;\n");
             sb.append("                }\n");
             sb.append("            }\n");
             sb.append("            if (lastAcceptEnd < 0) {\n");
@@ -495,6 +512,10 @@ public final class LexerGenerator {
         sb.append("                    lastAcceptKind = ak;\n");
         sb.append("                }\n");
         sb.append("            }\n");
+        // The DFA loop stopped on the character at cur, or on end of input when cur == len.
+        sb.append(hasNesting
+                  ? "            reach = Math.max(reach, cur + 1);\n"
+                  : "            int reach = cur + 1;\n");
         if (hasNesting) {
             // Close the `if (lastAcceptEnd < 0)` that skips the DFA when the counting scanner
             // already produced a token.
@@ -505,7 +526,7 @@ public final class LexerGenerator {
         // Matches the recovery contract LexerEngine.lex() uses for the
         // interpreted (non-codegen) path.
         sb.append("            if (lastAcceptEnd <= pos) {\n");
-        sb.append("                builder.append(TokenArray.KIND_WHITESPACE, pos, pos + 1);\n");
+        sb.append("                builder.append(TokenArray.KIND_WHITESPACE, pos, pos + 1, reach);\n");
         sb.append("                pos++;\n");
         sb.append("                continue;\n");
         sb.append("            }\n");
@@ -547,7 +568,7 @@ public final class LexerGenerator {
         sb.append("                    }\n");
         sb.append("                }\n");
         sb.append("            }\n");
-        sb.append("            builder.append(lastAcceptKind, pos, lastAcceptEnd);\n");
+        sb.append("            builder.append(lastAcceptKind, pos, lastAcceptEnd, reach);\n");
         sb.append("            pos = lastAcceptEnd;\n");
         sb.append("        }\n");
         sb.append("        return builder.build(KIND_NAMES);\n");

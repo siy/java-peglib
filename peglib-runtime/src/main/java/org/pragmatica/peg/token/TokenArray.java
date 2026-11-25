@@ -52,7 +52,15 @@ public final class TokenArray {
      * vs the cost of subtle overflow bugs under {@code byte}.
      */
     private final int[] kinds;
+
     private final int count;
+
+    /**
+     * Per token, one past the last input position its scan examined (end of input counts as
+     * position {@code input.length()}); {@code null} when the lexer did not record it. Read only
+     * by {@link #spliceLex}.
+     */
+    private final int[] reaches;
 
     private final String[] kindNameTable;
 
@@ -67,11 +75,15 @@ public final class TokenArray {
      */
     private final int[] nextNonTriviaTable;
 
-    TokenArray(String input, int[] starts, int[] ends, int[] kinds, int count, String[] kindNameTable) {
+    /** First re-lex window, in characters; it doubles until the re-lex resynchronises. */
+    private static final int MIN_WINDOW = 256;
+
+    TokenArray(String input, int[] starts, int[] ends, int[] kinds, int[] reaches, int count, String[] kindNameTable) {
         this.input = input;
         this.starts = starts;
         this.ends = ends;
         this.kinds = kinds;
+        this.reaches = reaches;
         this.count = count;
         this.kindNameTable = kindNameTable;
         this.nextNonTriviaTable = computeNextNonTrivia(kinds, count);
@@ -117,8 +129,8 @@ public final class TokenArray {
             newStarts[i] = mapOffset(offsetMap, starts[i]);
             newEnds[i] = mapOffset(offsetMap, ends[i]);
         }
-
-        return new TokenArray(originalInput, newStarts, newEnds, kinds, count, kindNameTable);
+        // Extents measured over the translated text do not carry over; splicing re-lexes whole.
+        return new TokenArray(originalInput, newStarts, newEnds, kinds, null, count, kindNameTable);
     }
 
     private static int mapOffset(int[] offsetMap, int offset) {
@@ -186,170 +198,179 @@ public final class TokenArray {
     }
 
     /**
-     * Phase D.0.1 — windowed re-lex.
+     * Whether every token carries its scan extent, so {@link #spliceLex} can re-lex a window
+     * instead of the whole input.
      *
-     * <p>Identifies the token range affected by the edit, conservatively expands by one
-     * token on each side (covers merge/split cases at the boundary), re-lexes only the
-     * affected window through {@code lexFn}, and splices the unaffected prefix/suffix
-     * token spans (with offsets shifted by {@code newText.length() - oldLen}) around the
-     * re-lexed window.
+     * @since 0.7.5
+     */
+    public boolean hasScanReach() {
+        return reaches != null;
+    }
+
+    /**
+     * Re-lex after an edit replacing {@code input[offset, offset + oldLen)} with {@code newText}.
      *
-     * <p>Correctness invariant: the returned {@code TokenArray} equals
-     * {@code lexFn.lex(newInput)} byte-for-byte (same input string, same kinds[],
-     * same starts[], same ends[]). Verified by
-     * {@code TokenArraySpliceTest#splice_isByteForByteEqualToFreshLex} and the
-     * additional parity test added in D.1.1.
-     *
-     * <p>Algorithm tolerates the standard edge cases:
+     * <p>The result equals {@code lexFn.lex(newInput)} token for token. That is the whole contract
+     * (issue #49); the window below is only how it is met cheaply. Lexing is deterministic and
+     * restarts from scratch at every token start, so a token can change only if its scan examined
+     * the edited text:
      * <ul>
-     *   <li>Edit at start: {@code reLexStart = 0}.</li>
-     *   <li>Edit at end (insertion past last byte): {@code reLexEnd = count}.</li>
-     *   <li>Insert into empty token array: re-lex {@code newText} only.</li>
-     *   <li>Delete entire content: result has zero tokens (re-lex of empty string).</li>
+     *   <li><b>Start.</b> Re-lexing starts at the first token whose scan reached {@code offset}.
+     *       Every earlier token examined only unchanged text. A scan can look far past its own
+     *       token: an unterminated {@code /*} scans to end of input and then falls back to
+     *       {@code /}, so closing it anywhere later changes that token. The reach recorded by
+     *       the lexer is what makes this exact.</li>
+     *   <li><b>Stop.</b> Re-lexing stops at the first new token that starts past the edited text
+     *       at a position where an old token also started (shifted by the edit). From there the
+     *       lexer sees the same suffix as before, so it produces the same tokens.</li>
      * </ul>
      *
+     * <p>A {@link ResumableLexFn} lexes the new input itself, from the start token to the stop. A
+     * plain {@link LexFn} can only lex a whole string, so it is given windows of the new input that
+     * double in size; a token whose scan examined the end of a window is not trusted (it may have
+     * seen the artificial end of input) and is re-lexed in the next window. An array without scan
+     * extents, from a lexer generated before 0.7.5 or re-expressed by {@link #remapOffsets}, is
+     * re-lexed whole.
      */
     public TokenArray spliceLex(LexFn lexFn, int offset, int oldLen, String newText) {
         // Caller (IncrementalParser) validates edit coordinates; defensive checks omitted.
         var newInput = input.substring(0, offset) + newText + input.substring(offset + oldLen);
-        var netDelta = newText.length() - oldLen;
-        // Empty token array — fall back to plain lex of the resulting input.
-        if (count == 0) {
+
+        if (reaches == null || count == 0) {
             return lexFn.lex(newInput);
         }
-        // Locate affected range [firstAffected, lastAffected] in OLD tokens.
-        //   firstAffected = smallest i such that ends[i] > offset (first token reaching into the edit)
-        //   lastAffected  = largest i such that starts[i] < offset+oldLen (last token starting before edit ends)
-        // For oldLen == 0, lastAffected uses (offset + 0) so we get the last token starting strictly
-        // before offset. The +/-1 conservative expansion below picks up the boundary tokens.
-        var firstAffected = firstTokenWithEndAfter(offset);
-        var lastAffected = lastTokenWithStartBefore(offset + oldLen);
-        int reLexStart;
-        int reLexEnd;
-        // exclusive in OLD token index space
-        if (firstAffected >= count && lastAffected < 0) {
-            // No old token overlaps the edit; pure boundary insertion outside any token.
-            reLexStart = Math.max(0, firstAffected);
-            reLexEnd = reLexStart;
-        } else {
-            var first = (firstAffected >= count)
-                        ? count - 1
-                        : firstAffected;
-            var last = (lastAffected < 0)
-                       ? 0
-                       : lastAffected;
-            // Conservative expansion: back up by 1 and forward by 1 (handles merge/split).
-            reLexStart = Math.max(0, first - 1);
-            reLexEnd = Math.min(count, last + 2);
-        }
-        // Byte ranges in the OLD input that the window covers. With covered token streams
-        // (every input byte is part of some token, including whitespace), the conservative
-        // expansion above guarantees the window encloses [offset, offset+oldLen) fully.
-        int oldByteStart;
-        int oldByteEnd;
 
-        if (reLexEnd <= reLexStart) {
-            // Window collapsed (no enclosed tokens). Use the edit range itself; the
-            // surrounding prefix/suffix (if any) already covers the needed context via
-            // the +/- 1 token expansion further up. This branch fires only when the edit
-            // sits in a region with no tokens at all (degenerate; shouldn't happen with
-            // covered streams but is handled defensively).
-            oldByteStart = offset;
-            oldByteEnd = offset + oldLen;
-        } else {
-            oldByteStart = starts[reLexStart];
-            oldByteEnd = ends[reLexEnd - 1];
-        }
-        // Construct the windowed input from the NEW input (so the edit is already applied).
-        var newWindowEnd = oldByteEnd + netDelta;
-        var windowedInput = newInput.substring(oldByteStart, newWindowEnd);
-        // Re-lex only the window.
-        var windowTokens = lexFn.lex(windowedInput);
-        // Build the merged TokenArray:
-        //   prefix [0, reLexStart)         — kinds/starts/ends copied verbatim from OLD
-        //   window tokens                  — kinds copied; starts/ends shifted by +oldByteStart
-        //   suffix [reLexEnd, count)       — kinds copied; starts/ends shifted by +netDelta
-        var winCount = windowTokens.count();
-        var totalCount = reLexStart + winCount + (count - reLexEnd);
-        var newKinds = new int[totalCount];
-        var newStarts = new int[totalCount];
-        var newEnds = new int[totalCount];
+        int delta = newText.length() - oldLen;
+        int editEndNew = offset + newText.length();
+        int newLen = newInput.length();
+        int first = 0;
 
-        if (reLexStart > 0) {
-            System.arraycopy(kinds, 0, newKinds, 0, reLexStart);
-            System.arraycopy(starts, 0, newStarts, 0, reLexStart);
-            System.arraycopy(ends, 0, newEnds, 0, reLexStart);
+        while (first < count && reaches[first] <= offset) {
+            first++;
         }
 
-        for (var i = 0; i < winCount; i++) {
-            newKinds[reLexStart + i] = windowTokens.kindAt(i);
-            newStarts[reLexStart + i] = windowTokens.startAt(i) + oldByteStart;
-            newEnds[reLexStart + i] = windowTokens.endAt(i) + oldByteStart;
+        int pos = first < count
+                  ? starts[first]
+                  : ends[count - 1];
+
+        if (lexFn instanceof ResumableLexFn resumable) {
+            int[] resumeAt = {count};
+            var lexed = resumable.lexFrom(newInput, pos, start -> resyncAt(start, editEndNew, delta, resumeAt));
+
+            return lexed.reaches == null
+                   ? lexFn.lex(newInput)
+                   : assemble(newInput, first, lexed, resumeAt[0], delta);
         }
 
-        var suffixBase = reLexStart + winCount;
+        var middle = new TokenArrayBuilder(newInput);
+        int resume = count;
+        int[] resumeHolder = {count};
+        int window = Math.max(MIN_WINDOW, editEndNew - pos + MIN_WINDOW);
 
-        for (var i = reLexEnd; i < count; i++) {
-            newKinds[suffixBase + (i - reLexEnd)] = kinds[i];
-            newStarts[suffixBase + (i - reLexEnd)] = starts[i] + netDelta;
-            newEnds[suffixBase + (i - reLexEnd)] = ends[i] + netDelta;
+        outer : while (pos < newLen) {
+            int end = (int) Math.min(newLen, (long) pos + window);
+            int limit = end - pos;
+            boolean trueEnd = end == newLen;
+            var chunk = lexFn.lex(newInput.substring(pos, end));
+
+            if (chunk.reaches == null) {
+                return lexFn.lex(newInput);
+            }
+
+            int base = pos;
+
+            for (int j = 0; j < chunk.count; j++) {
+                if (!trueEnd && chunk.reaches[j]> limit) {
+                    break;
+                }
+
+                int start = chunk.starts[j] + base;
+
+                if (resyncAt(start, editEndNew, delta, resumeHolder)) {
+                    resume = resumeHolder[0];
+                    break outer;
+                }
+
+                middle.append(chunk.kinds[j], start, chunk.ends[j] + base, chunk.reaches[j] + base);
+                pos = chunk.ends[j] + base;
+            }
+
+            window = window > Integer.MAX_VALUE / 2
+                     ? Integer.MAX_VALUE
+                     : window * 2;
         }
 
-        return new TokenArray(newInput, newStarts, newEnds, newKinds, totalCount, kindNameTable);
+        return assemble(newInput, first, middle.build(kindNameTable), resume, delta);
     }
 
     /**
-     * Smallest token index {@code i} such that {@code ends[i] > byteOffset}, i.e. the
-     * first token whose span reaches strictly past {@code byteOffset}. Returns
-     * {@code count} when every token ends at or before {@code byteOffset} (the offset
-     * is at or past the end of the token stream).
-     *
-     * <p>Binary search relies on {@code ends} being monotonically non-decreasing across
-     * tokens (a property of the maximal-munch lexer: token {@code i+1} starts at the
-     * end of token {@code i}, so its end is &ge; that).
+     * Whether a new token starting at {@code start} resynchronises with the old stream: it starts past
+     * the edited text, where an old token also started. Stores that old token's index in {@code resume}.
      */
-    private int firstTokenWithEndAfter(int byteOffset) {
-        var lo = 0;
-        var hi = count;
-
-        while (lo < hi) {
-            var mid = (lo + hi) >>> 1;
-
-            if (ends[mid] <= byteOffset) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
+    private boolean resyncAt(int start, int editEndNew, int delta, int[] resume) {
+        if (start < editEndNew) {
+            return false;
         }
 
-        return lo;
+        int old = indexOfStart(start - delta);
+
+        if (old < 0) {
+            return false;
+        }
+
+        resume[0] = old;
+
+        return true;
     }
 
-    /**
-     * Largest token index {@code i} such that {@code starts[i] < byteOffset}, i.e. the
-     * last token whose span begins strictly before {@code byteOffset}. Returns
-     * {@code -1} when no token starts before {@code byteOffset} (offset is at or before
-     * the first token's start).
-     */
-    private int lastTokenWithStartBefore(int byteOffset) {
-        if (count == 0) {
-            return -1;
+    /** Old tokens before {@code first}, then {@code mid}, then old tokens from {@code resume} shifted by {@code delta}. */
+    private TokenArray assemble(String newInput, int first, TokenArray mid, int resume, int delta) {
+        int midCount = mid.count;
+        int tail = count - resume;
+        int total = first + midCount + tail;
+        var newKinds = new int[total];
+        var newStarts = new int[total];
+        var newEnds = new int[total];
+        var newReaches = new int[total];
+
+        System.arraycopy(kinds, 0, newKinds, 0, first);
+        System.arraycopy(starts, 0, newStarts, 0, first);
+        System.arraycopy(ends, 0, newEnds, 0, first);
+        System.arraycopy(reaches, 0, newReaches, 0, first);
+        System.arraycopy(mid.kinds, 0, newKinds, first, midCount);
+        System.arraycopy(mid.starts, 0, newStarts, first, midCount);
+        System.arraycopy(mid.ends, 0, newEnds, first, midCount);
+        System.arraycopy(mid.reaches, 0, newReaches, first, midCount);
+        int at = first + midCount;
+
+        System.arraycopy(kinds, resume, newKinds, at, tail);
+        for (int i = 0; i < tail; i++) {
+            newStarts[at + i] = starts[resume + i] + delta;
+            newEnds[at + i] = ends[resume + i] + delta;
+            newReaches[at + i] = reaches[resume + i] + delta;
         }
 
-        var lo = 0;
-        var hi = count;
+        return new TokenArray(newInput, newStarts, newEnds, newKinds, newReaches, total, kindNameTable);
+    }
 
-        while (lo < hi) {
-            var mid = (lo + hi) >>> 1;
+    /** Index of the token starting exactly at {@code position}, or {@code -1}. Starts strictly increase. */
+    private int indexOfStart(int position) {
+        int lo = 0;
+        int hi = count - 1;
 
-            if (starts[mid]< byteOffset) {
+        while (lo <= hi) {
+            int mid = (lo + hi) >>> 1;
+
+            if (starts[mid]< position) {
                 lo = mid + 1;
+            } else if (starts[mid]> position) {
+                hi = mid - 1;
             } else {
-                hi = mid;
+                return mid;
             }
         }
 
-        return lo - 1;
+        return -1;
     }
 
     private static boolean isTriviaKind(int k) {
