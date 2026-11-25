@@ -75,18 +75,24 @@ class SpliceLexDifferentialTest {
     void issue49_slashTypedBeforeABlockComment_relexesTheRestOfTheLine() {
         var parser = PegParser.fromGrammar(COMMENTS).unwrap();
         var input = "a = 1; b = 2; /* c/*/ c = 3;";
-        LexFn lexFn = parser.lexer()::lex;
-        var spliced = lexFn.lex(input).spliceLex(lexFn, 14, 0, "/");
-        var fresh = lexFn.lex(spliced.input());
+        var lexer = parser.lexer();
 
-        assertThat(fresh.count()).isEqualTo(15);
-        assertThat(tokens(spliced)).isEqualTo(tokens(fresh));
+        for (var lexFn : new LexFn[]{lexer, lexer::lex}) {
+            var spliced = lexFn.lex(input).spliceLex(lexFn, 14, 0, "/");
+            var fresh = lexFn.lex(spliced.input());
+
+            assertThat(fresh.count()).isEqualTo(15);
+            assertThat(tokens(spliced)).isEqualTo(tokens(fresh));
+        }
     }
 
     /** Testing for a %nest opener reads further past a token start than the DFA does. */
     @Test
     void lastCharacterOfANestOpener_relexesTheTokenItCompletes() {
-        for (var lexFn : new LexFn[]{PegParser.fromGrammar(NEST_ONLY).unwrap().lexer()::lex, engine(NEST_ONLY)}) {
+        var lexer = PegParser.fromGrammar(NEST_ONLY).unwrap().lexer();
+        var engine = engine(NEST_ONLY);
+
+        for (var lexFn : new LexFn[]{lexer, lexer::lex, engine, engine::lex}) {
             var spliced = lexFn.lex("a {- b #-} c").spliceLex(lexFn, 4, 0, "#");
             var fresh = lexFn.lex("a {-# b #-} c");
 
@@ -99,14 +105,17 @@ class SpliceLexDifferentialTest {
     void closingACommentOpenedFarEarlier_relexesFromWhereItOpened() {
         var parser = PegParser.fromGrammar(COMMENTS).unwrap();
         var input = "a = 1; /* b = 2; c = 3; d = 4; e = 5; f = 6;";
-        LexFn lexFn = parser.lexer()::lex;
-        var spliced = lexFn.lex(input).spliceLex(lexFn, input.length(), 0, " */");
+        var lexer = parser.lexer();
 
-        assertThat(tokens(spliced)).isEqualTo(tokens(lexFn.lex(spliced.input())));
+        for (var lexFn : new LexFn[]{lexer, lexer::lex}) {
+            var spliced = lexFn.lex(input).spliceLex(lexFn, input.length(), 0, " */");
+
+            assertThat(tokens(spliced)).isEqualTo(tokens(lexFn.lex(spliced.input())));
+        }
     }
 
     /** The interpreted lexer, which must record scan extents the same way the generated one does. */
-    private static LexFn engine(String grammarText) {
+    private static LexerEngine engine(String grammarText) {
         var grammar = GrammarParser.parse(grammarText).unwrap();
         var classification = RuleClassifier.classify(grammar).unwrap();
         var built = DfaBuilder.build(grammar, classification).unwrap();
@@ -115,22 +124,27 @@ class SpliceLexDifferentialTest {
                                built.kinds().kindNameTable(),
                                DfaBuilder.KIND_WHITESPACE,
                                built.kinds().keywordResolutions(),
-                               grammar.nestingTrivia())::lex;
+                               grammar.nestingTrivia());
     }
 
+    // Each lexer twice: as itself, which is resumable, and as a plain LexFn, which takes the windowed path.
     @Test
     void seededEdits_generatedLexer_spliceEqualsFreshLex() {
         for (var grammar : new String[]{COMMENTS, NESTED, NEST_ONLY, GUARDED}) {
-            LexFn lexFn = PegParser.fromGrammar(grammar).unwrap().lexer()::lex;
+            var lexer = PegParser.fromGrammar(grammar).unwrap().lexer();
 
-            assertSeededEditsMatch(lexFn);
+            assertSeededEditsMatch(lexer);
+            assertSeededEditsMatch(lexer::lex);
         }
     }
 
     @Test
     void seededEdits_interpretedLexer_spliceEqualsFreshLex() {
         for (var grammar : new String[]{COMMENTS, NESTED, NEST_ONLY, GUARDED}) {
-            assertSeededEditsMatch(engine(grammar));
+            var engine = engine(grammar);
+
+            assertSeededEditsMatch(engine);
+            assertSeededEditsMatch(engine::lex);
         }
     }
 

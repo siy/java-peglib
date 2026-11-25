@@ -165,13 +165,15 @@ class NestingLexerParityTest {
         // %nest emission is threaded through renderSource, so a stray unconditional newline or
         // reordering would silently rewrite every existing grammar's generated source. Consumers
         // detect staleness by comparing that source, so churn has a real cost. Two builds of the
-        // same non-nesting grammar must agree, and must match the shape 0.7.2 emitted: the lex
-        // loop opening with `int state = 0;` immediately after `while (pos < len) {`.
+        // same non-nesting grammar must agree, and must match the non-nesting shape: the lex loop
+        // opening with `int state = 0;` right after the resync check. 0.7.5 changed that shape on
+        // purpose (issue #49 added the TokenStop import and the stop check); %nest must still add nothing.
         var source = build(NO_NESTING).source();
 
-        assertThat(source).contains("import org.pragmatica.peg.token.TokenArrayBuilder;\n\npublic final class");
+        assertThat(source).contains("import org.pragmatica.peg.token.TokenStop;\n\npublic final class");
         assertThat(source).contains("""
                                         while (pos < len) {
+                                                    if (stop != null && stop.stopBefore(pos)) break;
                                                     int state = 0;
                                                     int lastAcceptEnd = -1;
                                                     int lastAcceptKind = -1;

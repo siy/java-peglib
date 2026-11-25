@@ -225,10 +225,12 @@ public final class TokenArray {
      *       lexer sees the same suffix as before, so it produces the same tokens.</li>
      * </ul>
      *
-     * <p>The re-lex runs over windows of the new input that double in size. A token whose scan
-     * examined the end of a window is not trusted (it may have seen the artificial end of input)
-     * and is re-lexed in the next window. An array without scan extents, from a lexer generated
-     * before 0.7.5 or re-expressed by {@link #remapOffsets}, is re-lexed whole.
+     * <p>A {@link ResumableLexFn} lexes the new input itself, from the start token to the stop. A
+     * plain {@link LexFn} can only lex a whole string, so it is given windows of the new input that
+     * double in size; a token whose scan examined the end of a window is not trusted (it may have
+     * seen the artificial end of input) and is re-lexed in the next window. An array without scan
+     * extents, from a lexer generated before 0.7.5 or re-expressed by {@link #remapOffsets}, is
+     * re-lexed whole.
      */
     public TokenArray spliceLex(LexFn lexFn, int offset, int oldLen, String newText) {
         // Caller (IncrementalParser) validates edit coordinates; defensive checks omitted.
@@ -250,8 +252,19 @@ public final class TokenArray {
         int pos = first < count
                   ? starts[first]
                   : ends[count - 1];
+
+        if (lexFn instanceof ResumableLexFn resumable) {
+            int[] resumeAt = {count};
+            var lexed = resumable.lexFrom(newInput, pos, start -> resyncAt(start, editEndNew, delta, resumeAt));
+
+            return lexed.reaches == null
+                   ? lexFn.lex(newInput)
+                   : assemble(newInput, first, lexed, resumeAt[0], delta);
+        }
+
         var middle = new TokenArrayBuilder(newInput);
         int resume = count;
+        int[] resumeHolder = {count};
         int window = Math.max(MIN_WINDOW, editEndNew - pos + MIN_WINDOW);
 
         outer : while (pos < newLen) {
@@ -273,13 +286,9 @@ public final class TokenArray {
 
                 int start = chunk.starts[j] + base;
 
-                if (start >= editEndNew) {
-                    int old = indexOfStart(start - delta);
-
-                    if (old >= 0) {
-                        resume = old;
-                        break outer;
-                    }
+                if (resyncAt(start, editEndNew, delta, resumeHolder)) {
+                    resume = resumeHolder[0];
+                    break outer;
                 }
 
                 middle.append(chunk.kinds[j], start, chunk.ends[j] + base, chunk.reaches[j] + base);
@@ -290,7 +299,32 @@ public final class TokenArray {
                      ? Integer.MAX_VALUE
                      : window * 2;
         }
-        var mid = middle.build(kindNameTable);
+
+        return assemble(newInput, first, middle.build(kindNameTable), resume, delta);
+    }
+
+    /**
+     * Whether a new token starting at {@code start} resynchronises with the old stream: it starts past
+     * the edited text, where an old token also started. Stores that old token's index in {@code resume}.
+     */
+    private boolean resyncAt(int start, int editEndNew, int delta, int[] resume) {
+        if (start < editEndNew) {
+            return false;
+        }
+
+        int old = indexOfStart(start - delta);
+
+        if (old < 0) {
+            return false;
+        }
+
+        resume[0] = old;
+
+        return true;
+    }
+
+    /** Old tokens before {@code first}, then {@code mid}, then old tokens from {@code resume} shifted by {@code delta}. */
+    private TokenArray assemble(String newInput, int first, TokenArray mid, int resume, int delta) {
         int midCount = mid.count;
         int tail = count - resume;
         int total = first + midCount + tail;

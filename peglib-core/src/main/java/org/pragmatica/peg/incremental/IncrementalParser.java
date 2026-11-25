@@ -129,7 +129,8 @@ public final class IncrementalParser {
         // adapter) rather than reaching into Parser internals.
         // A source with a Unicode escape is lexed over translated text (JLS 3.3), which a window of
         // raw text cannot reproduce, so it is lexed whole, exactly as Parser.parse lexes it.
-        LexFn lexFn = parser.lexer()::lex;
+        // The compiled lexer itself, not a method reference: it is resumable, which spliceLex uses.
+        LexFn lexFn = parser.lexer();
         var splicedTokens = UnicodeEscapes.translate(newInput).isPresent()
                             ? parser.lex(newInput)
                             : tokens.spliceLex(lexFn, offset, oldLen, newText);

@@ -19,7 +19,9 @@ import java.util.Map;
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Option;
 import org.pragmatica.lang.Result;
+import org.pragmatica.peg.token.ResumableLexFn;
 import org.pragmatica.peg.token.TokenArray;
+import org.pragmatica.peg.token.TokenStop;
 
 
 /**
@@ -61,11 +63,21 @@ public final class LexerCompiler {
         }
     }
 
-    public record CompiledLexer(Class<?> lexerClass, Method lexMethod) {
+    /** {@code lexFromMethod} is the 0.7.5 resumable entry {@code lex(String, int, TokenStop)}. */
+    public record CompiledLexer(Class<?> lexerClass, Method lexMethod, Method lexFromMethod) implements ResumableLexFn {
+        @Override
         public TokenArray lex(String input) {
             return Result.lift(t -> (Cause) new LexerCompileError.InvocationFailed(lexerClass.getName(),
                                                                                    unwrapCause(t)),
                                () -> (TokenArray) lexMethod.invoke(null, input))
+                         .unwrap();
+        }
+
+        @Override
+        public TokenArray lexFrom(String input, int from, TokenStop stop) {
+            return Result.lift(t -> (Cause) new LexerCompileError.InvocationFailed(lexerClass.getName(),
+                                                                                   unwrapCause(t)),
+                               () -> (TokenArray) lexFromMethod.invoke(null, input, from, stop))
                          .unwrap();
         }
 
@@ -115,10 +127,12 @@ public final class LexerCompiler {
             var classLoader = new InMemoryClassLoader(compiled.fileManager(), LexerCompiler.class.getClassLoader());
             var clazz = classLoader.loadClass(compiled.fullyQualifiedName());
             var method = clazz.getDeclaredMethod("lex", String.class);
+            var fromMethod = clazz.getDeclaredMethod("lex", String.class, int.class, TokenStop.class);
 
             method.setAccessible(true);
+            fromMethod.setAccessible(true);
 
-            return Result.success(new CompiledLexer(clazz, method));
+            return Result.success(new CompiledLexer(clazz, method, fromMethod));
         } catch (ClassNotFoundException | NoSuchMethodException e) {
             return new LexerCompileError.LoadFailed(compiled.fullyQualifiedName(), e).result();
         }

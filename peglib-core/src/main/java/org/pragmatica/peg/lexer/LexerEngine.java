@@ -6,8 +6,10 @@ import java.util.Map;
 
 import org.pragmatica.peg.grammar.NestingPair;
 import org.pragmatica.peg.token.NestingScanner;
+import org.pragmatica.peg.token.ResumableLexFn;
 import org.pragmatica.peg.token.TokenArray;
 import org.pragmatica.peg.token.TokenArrayBuilder;
+import org.pragmatica.peg.token.TokenStop;
 
 
 /**
@@ -64,7 +66,7 @@ import org.pragmatica.peg.token.TokenArrayBuilder;
  * from peglib-core/) rather than assuming either direction.
  */
 @SuppressWarnings({"JBCT-PAT-01", "JBCT-UTIL-02"})
-public final class LexerEngine {
+public final class LexerEngine implements ResumableLexFn {
     private final Dfa dfa;
     private final String[] kindNameTable;
     private final int whitespaceKind;
@@ -156,12 +158,28 @@ public final class LexerEngine {
      * surfaces such bytes as trailing-input diagnostics. Phase A has no formal recovery;
      * deeper recovery is Phase B.
      */
+    @Override
     public TokenArray lex(String input) {
+        return lexFrom(input, 0, null);
+    }
+
+    /**
+     * Lex from token start {@code from} until end of input or until {@code stop} (nullable) answers
+     * true at a token start.
+     *
+     * @since 0.7.5
+     */
+    @Override
+    public TokenArray lexFrom(String input, int from, TokenStop stop) {
         var builder = new TokenArrayBuilder(input);
         int len = input.length();
-        int pos = 0;
+        int pos = from;
 
         while (pos < len) {
+            if (stop != null && stop.stopBefore(pos)) {
+                break;
+            }
+
             int lastAcceptEnd = -1;
             int lastAcceptKind = -1;
             // 0.7.5 — one past the last position examined for this token, end of input counting as

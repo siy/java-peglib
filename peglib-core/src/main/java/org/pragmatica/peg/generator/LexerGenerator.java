@@ -129,6 +129,7 @@ public final class LexerGenerator {
 
         sb.append("import org.pragmatica.peg.token.TokenArray;\n");
         sb.append("import org.pragmatica.peg.token.TokenArrayBuilder;\n");
+        sb.append("import org.pragmatica.peg.token.TokenStop;\n");
         if (hasNesting) {
             sb.append("import org.pragmatica.peg.token.NestingScanner;\n");
         }
@@ -445,14 +446,20 @@ public final class LexerGenerator {
                                         boolean hasFollowConstraints,
                                         boolean hasNesting) {
         sb.append("    public static TokenArray lex(String input) {\n");
+        sb.append("        return lex(input, 0, null);\n");
+        sb.append("    }\n\n");
+        // 0.7.5 — resumable entry for TokenArray.spliceLex: start at a token boundary, stop where the
+        // re-lex resynchronises with the old token stream.
+        sb.append("    public static TokenArray lex(String input, int from, TokenStop stop) {\n");
         // No defensive null check on input: the only caller path is
         // CompiledLexer.lex(String), which is invoked from Parser.parse(String)
         // after the parser's own null discipline; passing null here is a
         // programmer error that the JVM's NPE on input.length() catches.
         sb.append("        TokenArrayBuilder builder = new TokenArrayBuilder(input);\n");
         sb.append("        int len = input.length();\n");
-        sb.append("        int pos = 0;\n");
+        sb.append("        int pos = from;\n");
         sb.append("        while (pos < len) {\n");
+        sb.append("            if (stop != null && stop.stopBefore(pos)) break;\n");
         if (hasNesting) {
             // Mirrors LexerEngine.lex: a %nest open delimiter at a token start is consumed by
             // the depth counter INSTEAD OF the DFA, so a nesting comment is scanned once. An
