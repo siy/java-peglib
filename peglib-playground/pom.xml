@@ -85,6 +85,10 @@
                         <configuration>
                             <shadedArtifactAttached>true</shadedArtifactAttached>
                             <shadedClassifierName>uber</shadedClassifierName>
+                            <!-- The uber jar is attached under a classifier, so the main artifact
+                                 is the plain jar and its pom must keep listing peglib. Shade's
+                                 reduced pom dropped it (published 0.7.3 and 0.7.4). -->
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>org.pragmatica.peg.playground.PlaygroundServer</mainClass>
