@@ -46,7 +46,8 @@ over grammars built to hit it, against 2,227 on 0.7.3; 12 of the 43 were right o
 filed for it yet.
 
 **Open:** #49 (next patch version); an issue for the checkpoint-context limit above; the release plugin
-against Maven 3.10; the JMH comparison with 0.7.3; `origin/release-0.7.2`, `-0.7.3` and `-0.7.4` are merged
+against Maven 3.10; the published `peglib-playground` pom is shade's dependency-reduced one and does not
+list `peglib`, so the plain playground jar does not pull it in (same in 0.7.3); the JMH comparison with 0.7.3; `origin/release-0.7.2`, `-0.7.3` and `-0.7.4` are merged
 and can be deleted; the portal may still list the failed deployment.
 
 **Not redone after the review fixes:** the corpus run, the parse differential and the verifier pass.
