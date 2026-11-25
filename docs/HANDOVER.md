@@ -1,10 +1,31 @@
 # peglib — Handover
 
-**Last updated:** 2026-11-25 — **0.7.4 SHIPPED to Maven Central**; 0.7.5 built on `release-0.7.5`, NOT published (awaiting the owner's decision on the #49 measurement). Newest session first.
+**Last updated:** 2026-11-25 — **0.7.5 SHIPPED to Maven Central** (deployment `9178650d`). Newest session first.
 
 ---
 
-## Session 16b — 0.7.5 built for #49, NOT published (2026-11-25)
+## Session 16c — 0.7.5 shipped (2026-11-25)
+
+The owner said to release without the idle-host re-measure the CTO had asked for. PR #52 was merged as
+`b0db773` with CI green, and #49 closed. Tag `v0.7.5`, GitHub release marked Latest. Central deployment
+`9178650d-0fb6-4d53-9390-d53f54bd65ac`, verified by fetch from repo1: 44 of 44 files byte-identical to
+`target/central-staging`, 22 of 22 signatures good, and the playground pom lists `peglib`.
+
+- **Deploy over IPv4.** Two uploads failed mid-transfer ("Broken pipe", then "No route to host"), with no
+  deployment ID returned, so nothing was published. From this machine IPv6 to `central.sonatype.com`
+  does not connect (`curl -6` exit 7) while IPv4 does. `MAVEN_OPTS=-Djava.net.preferIPv4Stack=true`
+  made the third attempt succeed. Credentials were not the cause: an authenticated status call answered
+  404, not 401.
+- Maven 3.9.11 from `~/.m2/wrapper/dists` with plugin 0.12.0. The 3.10.0 + 0.12.0 combination has been
+  rehearsed only, never uploaded.
+- Review (CodeRabbit) on #52: the escaped-input partial-path case is #51 and stays there. Added
+  `localEditInALongInput_lexesNearTheEditOnly`, which counts the lexer's work, because neither token
+  parity nor `hasScanReach()` can tell a splice from a whole re-lex. It kills three perf mutants: a forced
+  full re-lex, no resync on the windowed path, and no stop in `LexerEngine`. 747 tests.
+- Not installed into the shared `~/.m2`, because the ALLOW_AGENT_WRITE marker is stale.
+- Remote `release-0.7.2` through `release-0.7.5` are merged and can be deleted (owner).
+
+## Session 16b — 0.7.5 built for #49 (2026-11-25)
 
 Owner (via CTO): build and measure 0.7.5 with #49 fixed, do not publish; file the checkpoint-context
 issue (filed as **#51**). Branch `release-0.7.5`, local, not pushed; it contains `fix/playground-pom`.

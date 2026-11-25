@@ -2,10 +2,15 @@
 
 ## Project Status
 
-**0.7.4 is the latest shipped release** (Maven Central, 2026-11-25; deployment `5335239e`, verified by
-fetch). Errors are reported at the furthest failure, once; the analyzer reports character-level
-constructs a token-level rule ignores, and `peglib:generate` fails on analyzer errors. Release with Maven
-3.9.x, not 3.10.0 (see the handover).
+**0.7.5 is the latest shipped release** (Maven Central, 2026-11-25; deployment `9178650d`, verified by
+fetch: 44 of 44 files byte-identical to staging, 22 signatures good). An incremental re-lex now equals a
+fresh lex (#49): each lexer records how far each token's scan looked, and the generated lexer has a
+resumable entry `lex(input, from, TokenStop)`. Regenerate `GLexer`. Deploy with Maven 3.9.x and
+`MAVEN_OPTS=-Djava.net.preferIPv4Stack=true` (see the handover).
+
+**0.7.4** (Maven Central, 2026-11-25; deployment `5335239e`). Errors are reported at the furthest
+failure, once; the analyzer reports character-level constructs a token-level rule ignores, and
+`peglib:generate` fails on analyzer errors.
 
 **0.7.3** (Maven Central, 2026-08-22; deployment `60fe059a`,
 verified by fetching concrete artifacts from repo1 rather than trusting the plugin). It adds `%nest` for nested block
@@ -462,7 +467,7 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**738 tests across 5 modules**, 0 failures, 0 skips (0.7.4; 698 at 0.7.3, 635 at 0.7.2, 576 at 0.7.1). The
+**747 tests across 5 modules**, 0 failures, 1 skip — the `@Disabled` #51 assertion beside its tripwire (0.7.5; 738 at 0.7.4, 698 at 0.7.3, 635 at 0.7.2, 576 at 0.7.1). The
 count dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were
 deleted, not because coverage was lost.
 
