@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The published `peglib-playground` pom lists `peglib` again. Shade's dependency-reduced pom had
+  replaced it, so depending on the plain playground jar did not pull in the parser (0.7.3, 0.7.4).
+- `central-publishing-maven-plugin` 0.11.0 → 0.12.0: under Maven 3.10.0 the older plugin bundled
+  `maven-metadata-local.xml` files, which Central rejects.
+
 ## [0.7.4] - 2026-11-25
 
 738 tests across 5 modules, 0 failures, 0 skips. On the same 5,696-file langtools corpus, 0.7.3 and

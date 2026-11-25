@@ -1,6 +1,25 @@
 # peglib — Handover
 
-**Last updated:** 2026-11-25 — **0.7.4 SHIPPED to Maven Central.** Newest session first.
+**Last updated:** 2026-11-25 — **0.7.4 SHIPPED to Maven Central**; session 16 fixes on `fix/playground-pom`. Newest session first.
+
+---
+
+## Session 16 — post-0.7.4 housekeeping (2026-11-25)
+
+Branch `fix/playground-pom`, local, not pushed. Both changes are for the next release.
+
+- **Playground pom.** `createDependencyReducedPom=false`. Installed into a scratch repo: the pom lists
+  `peglib` once with the fix, zero times on `main` (control).
+- **Publishing plugin 0.12.0.** Rehearsal under Maven 3.10.0 against a dead URL, bundles counted:
+  0.11.0 → 147 entries, 7 `maven-metadata` (reproduces the rejection); 0.11.1 → same; 0.12.0 → 110,
+  0 metadata, all 22 artifacts each with 4 checksums. `-Dgpg.skip=true`, so no `.asc` in any of them.
+  Upload and status polling against Central are untested; keep Maven 3.9.x as the fallback until a
+  release has gone through on 0.12.0.
+- Local `release-0.7.4` deleted (merged). Remote `release-0.7.2/3/4` are merged into `origin/main` but
+  deleting them was refused by the session's permission check; left for the owner.
+- Still open: #49 (owner's speed/correctness call); filing the checkpoint-context issue (public write,
+  needs owner authorization); the JMH comparison with 0.7.3 (box load ~2.3 with other sessions running,
+  so not measured).
 
 ---
 
