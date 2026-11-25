@@ -176,6 +176,54 @@ class SpliceLexDifferentialTest {
         }
     }
 
+    /**
+     * Token parity cannot tell a splice from a whole re-lex, and neither can {@code hasScanReach()}: a fresh
+     * lex carries scan extents too. Count what the lexer is actually asked to do for a local edit.
+     */
+    @Test
+    void localEditInALongInput_lexesNearTheEditOnly() {
+        var engine = engine(COMMENTS);
+        var input = "a = 1; b = 2;\n".repeat(2000);
+        int offset = input.length() / 2;
+        var tokens = engine.lex(input);
+        var resumedFrom = new java.util.ArrayList<Integer>();
+        var resumedTokens = new java.util.ArrayList<Integer>();
+        var plainLengths = new java.util.ArrayList<Integer>();
+        var resumable = new ResumableLexFn() {
+            @Override
+            public TokenArray lex(String text) {
+                plainLengths.add(text.length());
+                return engine.lex(text);
+            }
+
+            @Override
+            public TokenArray lexFrom(String text, int from, TokenStop stop) {
+                resumedFrom.add(from);
+                var lexed = engine.lexFrom(text, from, stop);
+                resumedTokens.add(lexed.count());
+                return lexed;
+            }
+        };
+        LexFn plain = text -> {
+            plainLengths.add(text.length());
+            return engine.lex(text);
+        };
+
+        var spliced = tokens.spliceLex(resumable, offset, 0, " ");
+
+        assertThat(tokens(spliced)).isEqualTo(tokens(engine.lex(spliced.input())));
+        assertThat(plainLengths).as("the resumable path never lexes the whole input").isEmpty();
+        assertThat(resumedFrom).hasSize(1);
+        assertThat(resumedFrom.getFirst()).isBetween(offset - 16, offset);
+        assertThat(resumedTokens.getFirst()).as("the re-lex stops once boundaries line up again").isLessThan(10);
+
+        tokens.spliceLex(plain, offset, 0, " ");
+
+        assertThat(plainLengths).as("the windowed path lexes windows, not the input").isNotEmpty();
+        assertThat(plainLengths.stream().mapToInt(Integer::intValue).sum()).as("characters lexed in all windows")
+                                                                        .isLessThan(2048);
+    }
+
     /** The incremental parser must lex as {@link Parser#parse} does, Unicode-escape pre-pass included. */
     @Test
     void javaEditsIntroducingUnicodeEscapes_matchAFreshParse() throws Exception {
