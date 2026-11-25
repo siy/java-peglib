@@ -1,11 +1,10 @@
 # peglib — Handover
 
-**Last updated:** 2026-11-25 — **0.7.4 is MERGED to `main` and NOT RELEASED. Publishing was cancelled
-by the owner; do not deploy, tag or cut a release without a new go-ahead.** Newest session first.
+**Last updated:** 2026-11-25 — **0.7.4 SHIPPED to Maven Central.** Newest session first.
 
 ---
 
-## Session 15 — 0.7.4 (2026-11-24/25) — MERGED, NOT RELEASED
+## Session 15 — 0.7.4 (2026-11-24/25) — SHIPPED
 
 Triggered by two reports from pragmatica's PostgreSQL grammar: whitespace classes that silently never
 match (issue #48) and parse errors reported at 1:1 (issue #47).
@@ -20,20 +19,22 @@ match (issue #48) and parse errors reported at 1:1 (issue #47).
 | **Mutation** | 33 author mutants, one survivor; the verifier added one more (`chars.set(NON_ASCII)` in `CharLevelChecks`, contrived to expose, untested). The author survivor is the `subtree.diagnostics()` guard in `IncrementalParser`, which no input found reaches; it is kept because returning an empty diagnostic list depends on it |
 
 **State 2026-11-25.**
-- PR #50 merged as `585badd` (head `f28a748`, same tree; CI green on both). Issues #47 and #48 closed.
-- Central: **all six 0.7.4 poms 404** after the attempt (control: 0.7.3 is 200). Deployment
-  `f893778d-9909-45ba-83a2-fd02fb10d479` was uploaded and REJECTED by validation; a failed entry may
-  still be listed in the portal for the owner to drop.
-- No `v0.7.4` tag, no GitHub release, no peglib 0.7.4 in `~/.m2`, no process left running.
-- The owner approved the release, then said "cancel publishing". The reason is not recorded.
+- Central deployment `5335239e-3d0e-4dc8-95ba-87e808a53d99`, verified by fetch from repo1: 44 of 44
+  files 200, 22 of 22 signatures good, the five jars byte-identical to the tested build.
+- PR #50 merged as `585badd`, CI green. Deployed from and tagged `v0.7.4` at `5734021` (main, docs-only
+  after the merge). Issues #47 and #48 closed.
+- The owner cancelled publishing once after a first attempt was rejected, then said to try again.
 
-**Why Central rejected it.** The bundle held seven `maven-metadata-local.xml` files ("content that does
-NOT have a .pom file"); the artifacts and signatures were complete. Suspected, NOT confirmed: the
-session's isolated repo with `-Dmaven.repo.local.tail`, since the release profile is the one that
-shipped 0.7.3. The confirming run (standalone repo, no tail, `-DskipPublishing=true`) did not finish:
-it failed in peglib-core and its result was lost. `skipPublishing` also skips per artifact, so check
-that it builds a bundle at all before relying on it. Inspect the bundle for `maven-metadata` before
-any upload.
+**RELEASE WITH MAVEN 3.9.x, NOT 3.10.0, until this is fixed.** The first deployment
+(`f893778d-9909-45ba-83a2-fd02fb10d479`) was rejected: "content that does NOT have a .pom file", seven
+`maven-metadata-local.xml` files. Cause isolated with the same commit and repo: Maven 3.10.0 with
+`central-publishing-maven-plugin` 0.11.0 puts them in the bundle (7), Maven 3.9.11 does not (0).
+Homebrew upgraded to 3.10.0 on 2026-10-23, after 0.7.3 shipped. The first suspect, the session's chained
+local repo, was refuted: the files appear without it. Plugin 0.11.1 and 0.12.0 exist and are untested.
+- Rehearse without upload: `mvn -Prelease clean deploy -DcentralBaseUrl=http://127.0.0.1:9`, then check
+  `unzip -Z1 target/central-publishing/central-bundle.zip | grep -c maven-metadata` is 0.
+  `-DskipPublishing=true` is no use: it skips staging, so no bundle is built.
+- A grep after Maven in a script hides its exit code: the failed deploy was reported as exit 0.
 
 **Decisions.** #49 goes to the next patch version. The benchmark does not hold up the release.
 Local install was approved but the marker was not fresh (dated 2026-10-12), so nothing was installed.
@@ -44,8 +45,9 @@ earlier alternative above the checkpoint, is open and stated in the CHANGELOG: 4
 over grammars built to hit it, against 2,227 on 0.7.3; 12 of the 43 were right on 0.7.3. No issue is
 filed for it yet.
 
-**Waits for the owner:** whether and when to release; pushing the commit that carries this section (it
-also marks 0.7.4 unreleased again in CHANGELOG and README); `origin/release-0.7.4` can be deleted.
+**Open:** #49 (next patch version); an issue for the checkpoint-context limit above; the release plugin
+against Maven 3.10; the JMH comparison with 0.7.3; `origin/release-0.7.2`, `-0.7.3` and `-0.7.4` are merged
+and can be deleted; the portal may still list the failed deployment.
 
 **Not redone after the review fixes:** the corpus run, the parse differential and the verifier pass.
 The fixes touch only the analyzer, which the generated parser does not use.
@@ -209,7 +211,7 @@ byte-identical, GLexer differing only in `.put` ordering).
 
 ### Where to pick up
 
-**0.7.3 is the latest release; 0.7.4 is merged and unreleased (publishing cancelled).** Ship details are in the Session 14 table
+**0.7.4 is shipped and nothing is release-blocked.** Ship details are in Session 15
 below; they are not repeated here.
 
 1. ~~**`cdm` carries an unpushed commit.**~~ **CLOSED** — `ac417e2` is in `~/IdeaProjects/tenon` and pushed.

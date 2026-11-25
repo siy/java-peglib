@@ -2,7 +2,12 @@
 
 ## Project Status
 
-**0.7.3 is the latest shipped release** (Maven Central, 2026-08-22; deployment `60fe059a`,
+**0.7.4 is the latest shipped release** (Maven Central, 2026-11-25; deployment `5335239e`, verified by
+fetch). Errors are reported at the furthest failure, once; the analyzer reports character-level
+constructs a token-level rule ignores, and `peglib:generate` fails on analyzer errors. Release with Maven
+3.9.x, not 3.10.0 (see the handover).
+
+**0.7.3** (Maven Central, 2026-08-22; deployment `60fe059a`,
 verified by fetching concrete artifacts from repo1 rather than trusting the plugin). It adds `%nest` for nested block
 comments (issue #45), the `grammar.unreachable-kind` and `grammar.token-boundary-ignored`
 analyzer checks, reproducible generated sources, and honours a whole-body `< >` token boundary
