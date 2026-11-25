@@ -12,6 +12,7 @@ import org.pragmatica.peg.Parser;
 import org.pragmatica.peg.cst.CstArray;
 import org.pragmatica.peg.cst.ParseResult;
 import org.pragmatica.peg.diagnostic.Diagnostic;
+import org.pragmatica.peg.lexer.UnicodeEscapes;
 import org.pragmatica.peg.token.LexFn;
 import org.pragmatica.peg.token.TokenArray;
 
@@ -126,8 +127,12 @@ public final class IncrementalParser {
         // Windowed re-lex — the lex half of the incremental update is real.
         // The bridge to the compiled lexer goes through LexFn (a String -> TokenArray
         // adapter) rather than reaching into Parser internals.
+        // A source with a Unicode escape is lexed over translated text (JLS 3.3), which a window of
+        // raw text cannot reproduce, so it is lexed whole, exactly as Parser.parse lexes it.
         LexFn lexFn = parser.lexer()::lex;
-        var splicedTokens = tokens.spliceLex(lexFn, offset, oldLen, newText);
+        var splicedTokens = UnicodeEscapes.translate(newInput).isPresent()
+                            ? parser.lex(newInput)
+                            : tokens.spliceLex(lexFn, offset, oldLen, newText);
         // Locate the smallest enclosing checkpoint subtree.
         var checkpointNode = cst.findCheckpointAncestor(offset, checkpointRules);
         var partialOpt = tryPartialReparse(checkpointNode, splicedTokens, offset, oldLen, newText);

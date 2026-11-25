@@ -77,8 +77,11 @@ public final class LexerEngine {
     private final char[] nestFirst;
     private final String[] nestOpen;
     private final String[] nestClose;
-
     private final int[] nestKind;
+
+    // Longest %nest open delimiter; 0 without %nest. Testing for an open delimiter at a token
+    // start reads up to this many characters, so it bounds what that test can have examined.
+    private final int nestProbe;
 
     /**
      * @param dfa                  compiled lexer DFA
@@ -120,6 +123,8 @@ public final class LexerEngine {
         this.nestOpen = new String[nestCount];
         this.nestClose = new String[nestCount];
         this.nestKind = new int[nestCount];
+        int probe = 0;
+
         for (int i = 0; i < nestCount; i++) {
             var pair = nestingTrivia.get(i);
 
@@ -130,7 +135,11 @@ public final class LexerEngine {
             // open delimiter and never of the input. Asking DfaBuilder keeps it identical to
             // the kind the equivalent %whitespace alternative would have been given.
             this.nestKind[i] = DfaBuilder.triviaKindForPrefix(pair.open());
+            probe = Math.max(probe,
+                             pair.open().length());
         }
+
+        this.nestProbe = probe;
     }
 
     public int whitespaceKind() {
@@ -155,6 +164,10 @@ public final class LexerEngine {
         while (pos < len) {
             int lastAcceptEnd = -1;
             int lastAcceptKind = -1;
+            // 0.7.5 — one past the last position examined for this token, end of input counting as
+            // position len. TokenArray.spliceLex relies on it being an upper bound: an edit at or
+            // after it cannot change this token. Every read below must stay inside it.
+            int reach = Math.min(pos + nestProbe, len + 1);
             // 0.7.3 — nesting trivia. A %nest open delimiter at a token start is consumed by
             // the depth counter INSTEAD OF the DFA, not in addition to it, so a nesting
             // comment is scanned exactly once. Testing only at a token start is also what
@@ -171,6 +184,10 @@ public final class LexerEngine {
                 if (end != NestingScanner.UNTERMINATED) {
                     lastAcceptEnd = end;
                     lastAcceptKind = nestKind[nested];
+                    // The scanner tests for an open delimiter at the close's position too.
+                    reach = Math.max(reach, Math.min(end + nestProbe, len + 1));
+                } else {
+                    reach = len + 1;
                 }
             }
 
@@ -206,13 +223,15 @@ public final class LexerEngine {
                         lastAcceptKind = ak;
                     }
                 }
+                // The loop stopped on the character at cur, or on end of input when cur == len.
+                reach = Math.max(reach, cur + 1);
             }
 
             if (lastAcceptEnd <= pos) {
                 // No DFA-recognised token at this position. Emit a 1-char synthetic
                 // WHITESPACE token so the input is fully covered and lexing can
                 // progress; the parser will surface this as a trailing-input error.
-                builder.append(TokenArray.KIND_WHITESPACE, pos, pos + 1);
+                builder.append(TokenArray.KIND_WHITESPACE, pos, pos + 1, reach);
                 pos++;
                 continue;
             }
@@ -267,7 +286,7 @@ public final class LexerEngine {
                 }
             }
 
-            builder.append(lastAcceptKind, pos, lastAcceptEnd);
+            builder.append(lastAcceptKind, pos, lastAcceptEnd, reach);
             pos = lastAcceptEnd;
         }
 

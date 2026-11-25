@@ -7,7 +7,13 @@ import java.util.Arrays;
  * Append-style mutable builder for {@link TokenArray}. Single-shot: one call to
  * {@link #build(String[])} produces the array; subsequent calls fail fast.
  *
- * <p>Storage uses three parallel {@code int[]} arrays grown by doubling.
+ * <p>Storage uses parallel {@code int[]} arrays grown by doubling.
+ *
+ * <p>Since 0.7.5 a lexer also records, per token, how far its scan looked: one past the last
+ * position it examined, where examining end of input counts as position {@code input.length()}.
+ * {@link TokenArray#spliceLex} needs it to know which tokens an edit can change. A lexer that
+ * appends without it (one generated before 0.7.5) produces an array that splices by re-lexing
+ * the whole input, which is always correct.
  *
  * <p>This builder is an internal hot-path helper invoked from generated lexer code and
  * a small number of trusted Java callers. Defensive validation is intentionally omitted:
@@ -35,6 +41,8 @@ public final class TokenArrayBuilder {
     private int[] starts;
     private int[] ends;
     private int[] kinds;
+    private int[] reaches;
+    private boolean reachKnown;
     private int size;
     private boolean built;
 
@@ -49,16 +57,33 @@ public final class TokenArrayBuilder {
         this.starts = new int[cap];
         this.ends = new int[cap];
         this.kinds = new int[cap];
+        this.reaches = new int[cap];
+        this.reachKnown = true;
         this.size = 0;
         this.built = false;
     }
 
+    /** Append a token whose scan extent is unknown; the built array then splices by full re-lex. */
     @SuppressWarnings("JBCT-RET-01")
     public void append(int kind, int start, int end) {
+        reachKnown = false;
+        append(kind, start, end, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Append a token together with its scan extent.
+     *
+     * @param reach one past the last position the lexer examined to produce this token; examining
+     *              end of input counts as examining position {@code input.length()}
+     * @since 0.7.5
+     */
+    @SuppressWarnings("JBCT-RET-01")
+    public void append(int kind, int start, int end, int reach) {
         ensureCapacity(size + 1);
         starts[size] = start;
         ends[size] = end;
         kinds[size] = kind;
+        reaches[size] = reach;
         size++;
     }
 
@@ -74,14 +99,18 @@ public final class TokenArrayBuilder {
         var trimmedStarts = trim(starts, size);
         var trimmedEnds = trim(ends, size);
         var trimmedKinds = trim(kinds, size);
+        var trimmedReaches = reachKnown
+                             ? trim(reaches, size)
+                             : null;
         var nameTableCopy = kindNameTable.clone();
 
         built = true;
         starts = null;
         ends = null;
         kinds = null;
+        reaches = null;
 
-        return new TokenArray(input, trimmedStarts, trimmedEnds, trimmedKinds, size, nameTableCopy);
+        return new TokenArray(input, trimmedStarts, trimmedEnds, trimmedKinds, trimmedReaches, size, nameTableCopy);
     }
 
     private void ensureCapacity(int required) {
@@ -101,6 +130,7 @@ public final class TokenArrayBuilder {
         starts = Arrays.copyOf(starts, newCap);
         ends = Arrays.copyOf(ends, newCap);
         kinds = Arrays.copyOf(kinds, newCap);
+        reaches = Arrays.copyOf(reaches, newCap);
     }
 
     private static int[] trim(int[] src, int length) {
