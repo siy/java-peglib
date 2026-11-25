@@ -103,6 +103,48 @@ class CharLevelChecksTest {
         assertOnly(grammar, Severity.WARNING, "grammar.char-class-never-matches", "T", 2);
     }
 
+    /** The elided class always succeeds, so the alternatives after it are never tried. */
+    @Test
+    void whitespaceClassBeforeAnotherAlternativeInPinnedParserRule_killsIt_soIsAnError() {
+        var grammar = "Start <- T ';'\nT <- Id ([ \\t] / Num)?\n%parser T\n" + TAIL;
+
+        assertThat(accepts(grammar, "a 1;")).isFalse();
+        assertOnly(grammar, Severity.ERROR, "grammar.char-class-no-op", "T", 2);
+    }
+
+    @Test
+    void whitespaceClassAsLastAlternativeInPinnedParserRule_isHarmless_soOnlyAWarning() {
+        var grammar = "Start <- T ';'\nT <- Id (Num / [ \\t])?\n%parser T\n" + TAIL;
+
+        assertThat(accepts(grammar, "a 1;")).isTrue();
+        assertThat(accepts(grammar, "a ;")).isTrue();
+        assertOnly(grammar, Severity.WARNING, "grammar.char-class-never-matches", "T", 2);
+    }
+
+    /** A MIXED class that cannot match fails, so the next alternative is tried as written. */
+    @Test
+    void optionalWhitespaceClassBeforeAnotherAlternativeInMixedRule_isHarmless_soOnlyAWarning() {
+        var grammar = "Start <- T ';'\nT <- Id ([ \\t] / Num)? M?\n" + TAIL;
+
+        assertThat(accepts(grammar, "a 1;")).isTrue();
+        assertOnly(grammar, Severity.WARNING, "grammar.char-class-never-matches", "T", 2);
+    }
+
+    @Test
+    void triviaStartingAfterANullableElement_isWhitespaceToo() {
+        var grammar = "Start <- T ';'\nT <- 'a' ![\\n] 'b' M?\nM <- '(' Num ')'\nNum <- [0-9]+\n%whitespace <- [ \\t]* [\\r\\n]+\n";
+
+        assertThat(accepts(grammar, "a\nb;")).isTrue();
+        assertOnly(grammar, Severity.WARNING, "grammar.whitespace-lookahead", "T", 2);
+    }
+
+    @Test
+    void triviaAfterARequiredElement_cannotStartIt_soIsNotReported() {
+        var grammar = "Start <- T ';'\nT <- 'a' ![\\n] 'b' M?\nM <- '(' Num ')'\nNum <- [0-9]+\n%whitespace <- [ \\t]+ [\\r\\n]*\n";
+
+        assertThat(findings(grammar)).isEmpty();
+    }
+
     @Test
     void optionalContentClassInPinnedParserRule_dropsWhatItShouldAccept_soStaysAnError() {
         var grammar = "Start <- T ';'\nT <- Id [0-9]*\n%parser T\n" + TAIL;

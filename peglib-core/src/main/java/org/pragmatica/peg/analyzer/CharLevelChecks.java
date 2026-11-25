@@ -12,6 +12,7 @@ import org.pragmatica.peg.generator.ParserGenerator;
 import org.pragmatica.peg.grammar.Expression;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.Rule;
+import org.pragmatica.peg.grammar.analysis.WidthAnalysis;
 import org.pragmatica.peg.lexer.Dfa;
 import org.pragmatica.peg.lexer.DfaBuilder;
 import org.pragmatica.peg.lexer.RuleClassifier;
@@ -82,7 +83,7 @@ final class CharLevelChecks {
             case Expression.Sequence seq -> seq.elements().forEach(e -> visit(rule,
                                                                               e,
                                                                               optional && seq.elements().size() == 1));
-            case Expression.Choice choice -> choice.alternatives().forEach(e -> visit(rule, e, optional));
+            case Expression.Choice choice -> visitChoice(rule, choice, optional);
             case Expression.ZeroOrMore zom -> visit(rule, zom.expression(), true);
             case Expression.Optional opt -> visit(rule, opt.expression(), true);
             case Expression.Repetition rep -> visit(rule, rep.expression(), optional || rep.min() == 0);
@@ -94,6 +95,14 @@ final class CharLevelChecks {
             case Expression.Group grp -> visit(rule, grp.expression(), optional);
             case Expression.Any _, Expression.Reference _, Expression.BackReference _, Expression.Dictionary _, Expression.Cut _ -> {}
         }
+    }
+
+    /** A class elided from a parser rule always succeeds, so it hides every alternative after it. */
+    private void visitChoice(Rule rule, Expression.Choice choice, boolean optional) {
+        var last = choice.alternatives().getLast();
+        boolean elided = classification.kinds().get(rule.name()) == RuleKind.PARSER;
+
+        choice.alternatives().forEach(e -> visit(rule, e, optional && (!elided || e == last)));
     }
 
     /** A purely character-level lookahead is elided by the generator; any other is emitted. */
@@ -237,7 +246,12 @@ final class CharLevelChecks {
     private static BitSet triviaWhitespace(Grammar grammar) {
         var first = new BitSet(SLOTS);
 
-        grammar.whitespace().onPresent(ws -> addFirstChars(ws, grammar.ruleMap(), new HashSet<>(), first));
+        grammar.whitespace()
+               .onPresent(ws -> addFirstChars(ws,
+                                              grammar.ruleMap(),
+                                              WidthAnalysis.computeNullable(grammar.ruleMap()),
+                                              new HashSet<>(),
+                                              first));
         for (int c = 0; c < SLOTS; c++) {
             if (c == NON_ASCII || !Character.isWhitespace(c)) {
                 first.clear(c);
@@ -247,30 +261,53 @@ final class CharLevelChecks {
         return first;
     }
 
-    private static void addFirstChars(Expression expr, Map<String, Rule> rules, Set<String> visited, BitSet out) {
+    private static void addFirstChars(Expression expr,
+                                      Map<String, Rule> rules,
+                                      Map<String, Boolean> nullable,
+                                      Set<String> visited,
+                                      BitSet out) {
         switch (expr) {
             case Expression.CharClass cc -> out.or(matchedChars(cc));
             case Expression.Literal lit -> lit.text().chars().limit(1).filter(c -> c < NON_ASCII).forEach(out::set);
-            case Expression.Choice choice -> choice.alternatives().forEach(e -> addFirstChars(e, rules, visited, out));
-            case Expression.Sequence seq -> seq.elements().stream().filter(e -> !(e instanceof Expression.Not || e instanceof Expression.And)).limit(1).forEach(e -> addFirstChars(e,
-                                                                                                                                                                                   rules,
-                                                                                                                                                                                   visited,
-                                                                                                                                                                                   out));
-            case Expression.ZeroOrMore zom -> addFirstChars(zom.expression(), rules, visited, out);
-            case Expression.OneOrMore oom -> addFirstChars(oom.expression(), rules, visited, out);
-            case Expression.Optional opt -> addFirstChars(opt.expression(), rules, visited, out);
-            case Expression.Repetition rep -> addFirstChars(rep.expression(), rules, visited, out);
-            case Expression.TokenBoundary tb -> addFirstChars(tb.expression(), rules, visited, out);
-            case Expression.Ignore ig -> addFirstChars(ig.expression(), rules, visited, out);
-            case Expression.Group grp -> addFirstChars(grp.expression(), rules, visited, out);
+            case Expression.Choice choice -> choice.alternatives().forEach(e -> addFirstChars(e,
+                                                                                              rules,
+                                                                                              nullable,
+                                                                                              visited,
+                                                                                              out));
+            case Expression.Sequence seq -> addFirstCharsOfSequence(seq, rules, nullable, visited, out);
+            case Expression.ZeroOrMore zom -> addFirstChars(zom.expression(), rules, nullable, visited, out);
+            case Expression.OneOrMore oom -> addFirstChars(oom.expression(), rules, nullable, visited, out);
+            case Expression.Optional opt -> addFirstChars(opt.expression(), rules, nullable, visited, out);
+            case Expression.Repetition rep -> addFirstChars(rep.expression(), rules, nullable, visited, out);
+            case Expression.TokenBoundary tb -> addFirstChars(tb.expression(), rules, nullable, visited, out);
+            case Expression.Ignore ig -> addFirstChars(ig.expression(), rules, nullable, visited, out);
+            case Expression.Group grp -> addFirstChars(grp.expression(), rules, nullable, visited, out);
             case Expression.Reference ref -> {
                 var rule = rules.get(ref.ruleName());
 
                 if (rule != null && visited.add(ref.ruleName())) {
-                    addFirstChars(rule.expression(), rules, visited, out);
+                    addFirstChars(rule.expression(), rules, nullable, visited, out);
                 }
             }
             default -> {}
+        }
+    }
+
+    /** Every element up to and including the first that must consume can contribute the first character. */
+    private static void addFirstCharsOfSequence(Expression.Sequence seq,
+                                                Map<String, Rule> rules,
+                                                Map<String, Boolean> nullable,
+                                                Set<String> visited,
+                                                BitSet out) {
+        for (var element : seq.elements()) {
+            if (element instanceof Expression.Not || element instanceof Expression.And) {
+                continue;
+            }
+
+            addFirstChars(element, rules, nullable, visited, out);
+            if (!WidthAnalysis.isNullable(element, nullable)) {
+                return;
+            }
         }
     }
 
