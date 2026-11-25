@@ -23,7 +23,7 @@ The owner said to release without the idle-host re-measure the CTO had asked for
   parity nor `hasScanReach()` can tell a splice from a whole re-lex. It kills three perf mutants: a forced
   full re-lex, no resync on the windowed path, and no stop in `LexerEngine`. 747 tests.
 - Not installed into the shared `~/.m2`, because the ALLOW_AGENT_WRITE marker is stale.
-- Remote `release-0.7.2` through `release-0.7.5` are merged and can be deleted (owner).
+- Remote `release-0.7.2` through `release-0.7.5` deleted after an ancestry check (owner request).
 
 ## Session 16b — 0.7.5 built for #49 (2026-11-25)
 
