@@ -93,7 +93,7 @@ Configure `peglib-maven-plugin` in your `pom.xml`:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.7.3</version>
+    <version>0.7.4</version>
     <executions>
         <execution>
             <goals><goal>generate</goal></goals>

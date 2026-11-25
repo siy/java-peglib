@@ -137,6 +137,22 @@ classification of whole-body token boundaries. **The failure counts are identica
 baseline**: same 21 false accepts, same 10 false rejects. The +7 `AGREE_CLEAN` is corpus growth,
 not a fix.
 
+Re-measured 2026-11-24 on `release-0.7.4` (5,696 files, JDK commit `c3b9d08d`), with the released
+0.7.3 jar run over the same checkout as the control:
+
+```text
+                      0.7.3   0.7.4
+AGREE_CLEAN            5452    5452
+AGREE_REJECT            186     186
+EXCLUDED_ORACLE_OLD      26      26
+FALSE_ACCEPT             22      22
+FALSE_REJECT             10      10
+agreement            99.44%  99.44%
+```
+
+The disagreement lists are identical file for file. The 22nd false accept is a file added to the
+corpus since August.
+
 Treat a drop below that as a regression. **Re-run after every grammar change** — each
 false-accept fix tightens the grammar and can create new false rejects; several candidate fixes
 were backed out precisely because the differential showed them net-negative.

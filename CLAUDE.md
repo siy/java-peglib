@@ -97,6 +97,7 @@ peglib-core/src/main/java/org/pragmatica/peg/
 │   ├── Analyzer.java                grammar linter behind peglib:lint / peglib:check;
 │   │                                grammar.unreachable-kind and
 │   │                                grammar.token-boundary-ignored added 0.7.3
+│   ├── CharLevelChecks.java         char-level constructs a token-level rule cannot honour (0.7.4)
 │   ├── AnalyzerMain.java            CLI entry point
 │   ├── AnalyzerReport.java, Finding.java
 │   ├── LeftRecursionDetector.java   rejects at fromGrammar with witness
@@ -456,7 +457,7 @@ Async-profiler at `/opt/homebrew/lib/libasyncProfiler.dylib`. Use via JMH `-prof
 
 ## Tests
 
-**698 tests across 5 modules**, 0 failures, 0 skips (0.7.3; 635 at 0.7.2, 576 at 0.7.1). The
+**738 tests across 5 modules**, 0 failures, 0 skips (0.7.4; 698 at 0.7.3, 635 at 0.7.2, 576 at 0.7.1). The
 count dropped from 1445 in 0.6.3 because the 0.5.x interpreter and its parity suites were
 deleted, not because coverage was lost.
 
@@ -475,6 +476,10 @@ Notable test classes for verification gates:
   that byte-equal reconstruction alone would pass
 - `FactoryClassGeneratorDiagTest` — real-world 1900-LOC parse (0 diagnostics)
 - `Java25BisectTest` — minimal-snippet bisection helper for grammar triage
+- `FurthestFailureReportingTest` / `CharLevelChecksTest` — 0.7.4 diagnostics and analyzer checks,
+  mutation-checked
+- `IncrementalDiagnosticsDifferentialTest` — seeded edits, incremental vs fresh parse; must keep
+  exercising the partial path (it asserts that it does)
 - `MemoInteractionTest` — `%memo` against per-rule `%recover` and incremental reparse; all three
   memo suites are mutation-checked, so breaking the replay position guard turns them red
 - `IncrementalEditBenchmark` — edit latency p50/p99 in `src/jmh/`

@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-11-25
+
+738 tests across 5 modules, 0 failures, 0 skips. On the same 5,696-file langtools corpus, 0.7.3 and
+0.7.4 agree with javac identically (99.44%, the same 32 disagreements; one false accept is new to the
+corpus, not to the parser).
+
+### Fixed
+
+- **A diagnostic points at the furthest failure, and one mistake is reported once** (issue #47). When
+  the start rule could match the empty string, every parse error was reported at the first token and
+  repeated for each following one; a later statement's error was reported at the start of that
+  statement. `offset`, `length` and `found` could also describe two different tokens. All reporting
+  paths now share one rule: the site is the furthest token a failure was recorded at, or the token
+  parsing stopped at if nothing got further; all three fields are read from that token; and sites
+  strictly advance, so recovery does not report a mistake again. A failure inside a negative lookahead
+  no longer counts, since that is the predicate succeeding. Which input is accepted, the CST, and the
+  default recovery are unchanged. `%recover` selects its sync set by the furthest failure, so where that
+  used to lie inside a negative lookahead a different sync set can now apply.
+
+- **`%memo` replay reports what a re-parse would.** Replaying a subtree skipped the failures its
+  parse had recorded. The memo now carries the furthest one.
+
+- **Incremental reparse no longer reports a broken file as clean in the two ways found.** Found by a new seeded differential
+  test; on 0.7.3 the same 4,800 edits produced 170 wrong diagnostic lists, 28 of which reported a
+  broken file as clean, and 147 trees of the wrong size. Two causes: diagnostics were patched subtree
+  by subtree although recovery is decided by the whole attempt, and a token inserted at a subtree's
+  edge was skipped. A partial reparse is now taken only from a clean tree to a clean subtree, and only
+  when every token outside the subtree is unchanged. Cost: while a file has errors, each edit is a full
+  reparse. Still not covered (of 18,017
+  edits over five grammars built to hit it, 0.7.3 got 2,227 wrong and 0.7.4 gets 43, 12 of which 0.7.3 got
+  right): an edit that makes an earlier alternative *above* the checkpoint match, or that a lookahead outside the
+  checkpoint inspects; and the windowed re-lex looking one token to each side, so an edit that changes
+  tokens further away (opening a comment, for example) can differ from a full parse (issue #49).
+
+- **Grammar line numbers.** Newlines between rules were counted twice, so positions in grammar errors
+  read roughly double.
+
+### Added
+
+- **The analyzer reports character-level constructs a token-level rule cannot honour** (issue #48).
+  They compiled in silence and did nothing, or never matched: `grammar.char-class-no-op`,
+  `grammar.char-class-never-matches`, `grammar.char-class-whole-token`,
+  `grammar.whitespace-lookahead`, `grammar.whitespace-literal`. Word-boundary guards such as
+  `![a-zA-Z0-9_$]` are exempt: the lexer already enforces them. See `docs/GRAMMAR-DSL.md`.
+- **Findings carry a line.** `Finding.line()`, printed as `path:line: Rule`; `0` for a rule that came
+  from an import.
+
+### Changed
+
+- **`peglib:generate` fails on analyzer errors**, and logs the number of warnings. Previously only
+  `peglib:lint` and `peglib:check` ran the analyzer, and a build binding neither saw nothing.
+- `Finding` has a new `line` component.
+
 ## [0.7.3] - 2026-08-22
 
 698 tests across 5 modules, 0 failures, 0 skips. Corpus agreement re-measured at 99.45%.

@@ -3,7 +3,7 @@
 A PEG (Parsing Expression Grammar) parser library for Java. Tokens-first lex-then-parse
 architecture, flat int[] CST, visitor pattern, true incremental reparse.
 
-Maven Central: `org.pragmatica-lite:peglib:0.7.3`
+Maven Central: `org.pragmatica-lite:peglib:0.7.4`
 
 Migrating from 0.5.x? See [`docs/MIGRATION-0.5-TO-0.6.md`](docs/MIGRATION-0.5-TO-0.6.md).
 Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
@@ -29,7 +29,7 @@ Design rationale: [`docs/ARCHITECTURE-0.6.0.md`](docs/ARCHITECTURE-0.6.0.md).
 <dependency>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib</artifactId>
-    <version>0.7.3</version>
+    <version>0.7.4</version>
 </dependency>
 ```
 
@@ -287,7 +287,7 @@ When no `%checkpoint` directives are present, a sensible default set is used
 (`Stmt`, `Statement`, `MethodDecl`, `TypeDecl`, `ClassMember`, `Block`).
 
 Edits inside a checkpoint subtree take the partial-reparse path (sub-millisecond p50);
-edits that span checkpoints fall back to full reparse.
+edits that span checkpoints, and any edit while the file has errors, fall back to full reparse.
 
 ---
 
@@ -312,7 +312,7 @@ pre-compiled classes — no `fromGrammar` cost at runtime:
 <plugin>
     <groupId>org.pragmatica-lite</groupId>
     <artifactId>peglib-maven-plugin</artifactId>
-    <version>0.7.3</version>
+    <version>0.7.4</version>
     <executions>
         <execution>
             <goals><goal>generate</goal></goals>
@@ -367,7 +367,7 @@ finds `Shared.peg` beside it with no configuration.
   measurement** — the 0.5.x A/B benchmarks were deleted with the legacy path in 0.7.0, so it
   can no longer be reproduced in-tree.
 - Memory: ~32 bytes per CST node (flat `int[]`), ~10x less than 0.5.x record-based CST.
-- Incremental edit p50 sub-millisecond when the edit lies inside a `%checkpoint` subtree.
+- Incremental edit p50 sub-millisecond when the edit lies inside a `%checkpoint` subtree of an error-free file.
 
 Concrete numbers shift with each release; see [`CHANGELOG.md`](CHANGELOG.md) and
 [`docs/BENCHMARKING.md`](docs/BENCHMARKING.md) for the reproduction harness and current
@@ -402,6 +402,7 @@ Full history in [`CHANGELOG.md`](CHANGELOG.md).
 
 | Version | Date | What |
 |---|---|---|
+| **0.7.4** | 2026-11-25 | Errors where the mistake is. A diagnostic points at the furthest failure and one mistake is reported once, instead of every token from 1:1 when the start rule can match empty. The analyzer reports character-level constructs that a token-level rule silently ignores, with grammar line numbers, and `peglib:generate` fails on analyzer errors. Two ways an incremental reparse could report a broken file as clean are gone. 738 tests |
 | **0.7.3** | 2026-08-22 | Grammars whose comments nest. `%nest '<open>' '<close>'` lexes a nesting delimiter pair with a depth-counting scanner, because a nested block comment is not a regular language and no DFA path can match one — the old reading closed at the first `*/` and leaked the remainder into the token stream, sometimes as a *silently different* program. Two new analyzer checks: `grammar.unreachable-kind` (a rule allocated a token kind no input can produce) and `grammar.token-boundary-ignored` (a `< >` the classifier could not honour). A whole-body `< >` now outranks the terminals-and-references rule instead of being dropped in silence, and generated sources are reproducible across JVM runs. Corpus agreement re-measured at 99.45%, unchanged. 698 tests. |
 | **0.7.2** | 2026-08-19 | Grammars that are not Java-shaped. Identifier fallback works for case-insensitive keywords; a lexer rule may reference another lexer rule, end in a character-class lookahead, or carry several leading keyword guards; `%parser` pins classification the inference gets wrong; `< >` decides whether a reference-only rule is one token. Plus `%import` end to end, Base64 DFA tables (lifting a ~1100-state ceiling), case-folded literal keys, and generator-version stamping. 635 tests. |
 | **0.7.1** | 2026-08-14 | Java grammar validated against javac's own parse phase over OpenJDK's langtools suite: agreement 95.55% → **99.45%** (5,614/5,645). Engine fixes: nullable start rules, trailing-input reporting, Unicode escape translation (JLS 3.3), hex escapes in character classes. New `%memo` directive plus a first-token guard and link-on-success CST building, holding parse throughput within ~1% of 0.7.0 despite the JLS 14.8 statement-expression restriction. The `*Probe` gates now actually execute. 576 tests. |

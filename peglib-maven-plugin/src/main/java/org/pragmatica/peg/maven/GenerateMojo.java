@@ -10,6 +10,9 @@ import java.util.List;
 import org.pragmatica.lang.Cause;
 import org.pragmatica.lang.Result;
 import org.pragmatica.lang.utils.Causes;
+import org.pragmatica.peg.analyzer.Analyzer;
+import org.pragmatica.peg.analyzer.AnalyzerReport;
+import org.pragmatica.peg.analyzer.Finding;
 import org.pragmatica.peg.grammar.Grammar;
 import org.pragmatica.peg.grammar.GrammarParser;
 import org.pragmatica.peg.grammar.GrammarResolver;
@@ -132,12 +135,36 @@ public class GenerateMojo extends AbstractMojo {
      */
     private Result<GeneratedBundle> buildAll(String grammarText) {
         return GrammarParser.parse(grammarText)
-                            .flatMap(root -> GrammarResolver.resolve(root,
-                                                                     importSource()))
+                            .flatMap(this::resolveAndAnalyze)
                             .flatMap(grammar -> RuleClassifier.classify(grammar).flatMap(classification -> DfaBuilder.build(grammar,
                                                                                                                             classification).flatMap(built -> generateBundle(grammar,
                                                                                                                                                                             classification,
                                                                                                                                                                             built))));
+    }
+
+    /**
+     * 0.7.4 — a build may run only this goal, so analyzer ERRORs fail it here and not just in
+     * {@code peglib:check}. Warnings are counted, not listed: {@code peglib:lint} lists them.
+     */
+    private Result<Grammar> resolveAndAnalyze(Grammar root) {
+        return GrammarResolver.resolve(root, importSource()).flatMap(composed -> rejectErrors(composed,
+                                                                                              Analyzer.analyze(composed,
+                                                                                                               root)));
+    }
+
+    private Result<Grammar> rejectErrors(Grammar composed, AnalyzerReport report) {
+        if (report.hasErrors()) {
+            return Causes.cause("peglib:generate failed — analyzer reported errors\n" + report.errorsOnly()
+                                                                                              .formatRustStyle(grammarFile.toString())).result();
+        }
+
+        if (report.hasWarnings()) {
+            getLog().warn("peglib:generate: " + report.count(Finding.Severity.WARNING)
+                         + " analyzer warning(s) in " + grammarFile
+                         + "; run peglib:lint to list them");
+        }
+
+        return Result.success(composed);
     }
 
     /**

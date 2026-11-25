@@ -89,7 +89,7 @@ public class LintMojo extends AbstractMojo {
         // directly. Lint targets standalone grammar files, so we don't run the
         // resolver here.
         return readGrammar(grammarFile.toPath()).flatMap(this::parseGrammar)
-                          .map(Analyzer::analyze);
+                          .flatMap(this::analyzeResolved);
     }
 
     /** Resolution failures are labelled for their own stage — they are not parse errors. */
@@ -98,9 +98,11 @@ public class LintMojo extends AbstractMojo {
     }
 
     private Result<Grammar> parseGrammar(String text) {
-        return GrammarParser.parse(text)
-                            .mapError(c -> Causes.cause("Grammar parse failed: " + c.message()))
-                            .flatMap(this::resolveImports);
+        return GrammarParser.parse(text).mapError(c -> Causes.cause("Grammar parse failed: " + c.message()));
+    }
+
+    private Result<AnalyzerReport> analyzeResolved(Grammar root) {
+        return resolveImports(root).map(composed -> Analyzer.analyze(composed, root));
     }
 
     private GrammarSource importSource() {

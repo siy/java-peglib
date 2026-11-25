@@ -184,6 +184,19 @@ public final class ParserGenerator {
     }
 
     /** Render the full parser source. Stateful to keep helper methods readable. */
+    /**
+     * Whether a lookahead over {@code expr} is elided by the generator. Public so the analyzer
+     * judges a grammar by the generator's own rule instead of a copy of it.
+     */
+    public static boolean isCharLevelOnly(Expression expr) {
+        return Renderer.isCharLevelOnly(expr);
+    }
+
+    /** Inclusive ranges a character-class pattern lists, exactly as the generated test expands them. */
+    public static int[][] charClassRanges(String pattern, boolean caseInsensitive) {
+        return Renderer.parseCharClassRanges(pattern, caseInsensitive);
+    }
+
     private static final class Renderer {
         private final Grammar grammar;
         private final RuleClassifier.Classification classification;
@@ -536,9 +549,14 @@ public final class ParserGenerator {
             // Phase 0.6.0-perf — mutable furthest-failure state. fail() updates
             // these; emitRecoveryError reads them. Replaces the throw-on-fail
             // ParseException control flow.
-            sb.append("    private int errorPos;\n");
+            sb.append("    private int errorTok;\n");
             sb.append("    private String expected;\n");
-            sb.append("    private int found;\n");
+            sb.append("    private int lastReportedTok;\n");
+            if (!memoRules.isEmpty()) {
+                sb.append("    private int memoErrorTok = -1;\n");
+                sb.append("    private String memoExpected;\n");
+                sb.append("    private int memoFailedRuleKind = -1;\n");
+            }
             // 0.6.1 — Item B — rule-kind of the enclosing rule at the deepest
             // recorded failure. Used by syncForRule() at recovery time to pick
             // the appropriate SYNC_<RuleName> array.
@@ -566,9 +584,9 @@ public final class ParserGenerator {
             sb.append("        this.cst = new CstArrayBuilder(tokens.input(), tokens, RULE_TABLE);\n");
             sb.append("        this.diagnostics = new ArrayList<>();\n");
             sb.append("        this.pos = tokens.nextNonTrivia(0);\n");
-            sb.append("        this.errorPos = -1;\n");
+            sb.append("        this.errorTok = -1;\n");
             sb.append("        this.expected = null;\n");
-            sb.append("        this.found = -1;\n");
+            sb.append("        this.lastReportedTok = -1;\n");
             sb.append("        this.lastFailedRuleKind = -1;\n");
             // Negative cap = no cap (Integer.MAX_VALUE). 0 is honored as zero.
             sb.append("        this.maxDiagnostics = maxDiagnostics < 0 ? Integer.MAX_VALUE : maxDiagnostics;\n");
@@ -619,18 +637,7 @@ public final class ParserGenerator {
             sb.append("        int rootIdx = p.cst.beginNode(RULE_ROOT_KIND, rootFirstTok, -1);\n");
             sb.append("        boolean ok = parseByKind(p, ruleKind, rootIdx);\n");
             sb.append("        if (!ok) {\n");
-            sb.append("            // Mirror the full-parse recovery contract: emit an Error node\n");
-            sb.append("            // covering the failing token plus a diagnostic.\n");
-            sb.append("            int failedTok = p.pos < tokens.count() ? p.pos : tokens.count() - 1;\n");
-            sb.append("            int diagOffset = failedTok >= 0 && failedTok < tokens.count()\n");
-            sb.append("                ? tokens.startAt(failedTok) : tokens.input().length();\n");
-            sb.append("            int diagLen = failedTok >= 0 && failedTok < tokens.count()\n");
-            sb.append("                ? Math.max(1, tokens.endAt(failedTok) - tokens.startAt(failedTok)) : 1;\n");
-            sb.append("            String foundText = failedTok >= 0 && failedTok < tokens.count()\n");
-            sb.append("                ? String.valueOf(tokens.textAt(failedTok)) : \"<end-of-input>\";\n");
-            sb.append("            String expectedText = p.expected != null ? p.expected : \"valid input\";\n");
-            sb.append("            p.diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
-            sb.append("                \"syntax error\", expectedText, foundText));\n");
+            sb.append("            p.reportFailure(true, p.pos);\n");
             sb.append("        }\n");
             sb.append("        int rootLastTok;\n");
             sb.append("        if (tokens.count() == 0) {\n");
@@ -716,9 +723,8 @@ public final class ParserGenerator {
             sb.append("                // a nullable start rule that consumes nothing must not be retried.\n");
             sb.append("                if (firstAttempt) {\n");
             sb.append("                    int beforeNodesEmpty = cst.currentNodeCount();\n");
-            sb.append("                    errorPos = -1;\n");
+            sb.append("                    errorTok = -1;\n");
             sb.append("                    expected = null;\n");
-            sb.append("                    found = -1;\n");
             sb.append("                    lastFailedRuleKind = -1;\n");
             sb.append("                    if (!parse").append(startName).append("(root)) {\n");
             sb.append("                        cst.truncate(beforeNodesEmpty);\n");
@@ -737,9 +743,8 @@ public final class ParserGenerator {
             sb.append("            int beforePos = pos;\n");
             sb.append("            // Phase 0.6.0-perf — reset furthest-failure tracker before each\n");
             sb.append("            // attempt so the recorded diagnostic reflects this iteration.\n");
-            sb.append("            errorPos = -1;\n");
+            sb.append("            errorTok = -1;\n");
             sb.append("            expected = null;\n");
-            sb.append("            found = -1;\n");
             sb.append("            lastFailedRuleKind = -1;\n");
             sb.append("            boolean parsedOk = parse").append(startName).append("(root);\n");
             sb.append("            if (!parsedOk) {\n");
@@ -765,15 +770,7 @@ public final class ParserGenerator {
             sb.append("                // source from the tree depend on full coverage.\n");
             sb.append("                int trailTok = pos;\n");
             sb.append("                while (trailTok < tokens.count() && tokens.isTrivia(trailTok)) trailTok++;\n");
-            sb.append("                if (trailTok < tokens.count() && diagnostics.size() < maxDiagnostics) {\n");
-            sb.append("                    int tStart = tokens.startAt(trailTok);\n");
-            sb.append("                    int tEnd = tokens.endAt(trailTok);\n");
-            sb.append("                    int tLen = tEnd - tStart;\n");
-            sb.append("                    if (tLen < 1) tLen = 1;\n");
-            sb.append("                    diagnostics.add(Diagnostic.error(tStart, tLen,\n");
-            sb.append("                        \"trailing input not consumed\", \"end of input\",\n");
-            sb.append("                        tokens.input().substring(tStart, tEnd)));\n");
-            sb.append("                }\n");
+            sb.append("                if (trailTok < tokens.count()) reportFailure(false, trailTok);\n");
             sb.append("            }\n");
             sb.append("            if (!parsedOk && pos == beforePos) {\n");
             sb.append("                // Recovery couldn't move past the failing token (no sync, no EOF\n");
@@ -806,8 +803,7 @@ public final class ParserGenerator {
             sb.append("    }\n\n");
             // Recovery-error helper: emit Error node spanning [failedTok..syncTok]
             // and record a Diagnostic. Used by parseWithRecovery on a false return
-            // from the start rule. Reads furthest-failure context (errorPos /
-            // expected / found) recorded by fail() during the failed parse attempt.
+            // from the start rule. The Diagnostic comes from reportFailure.
             sb.append("    private void emitRecoveryError(int parent, int beforePos) {\n");
             sb.append("        int failedTok = pos < tokens.count() ? pos : tokens.count() - 1;\n");
             sb.append("        int syncTok = nextSyncToken(pos);\n");
@@ -827,34 +823,7 @@ public final class ParserGenerator {
             sb.append("            cst.endNode(errIdx, skipLast);\n");
             sb.append("            cst.setFlag(errIdx, CstArray.FLAG_ERROR);\n");
             sb.append("        }\n");
-            sb.append("        int diagOffset;\n");
-            sb.append("        if (errorPos >= 0) {\n");
-            sb.append("            diagOffset = errorPos;\n");
-            sb.append("        } else if (failedTok >= 0 && failedTok < tokens.count()) {\n");
-            sb.append("            diagOffset = tokens.startAt(failedTok);\n");
-            sb.append("        } else {\n");
-            sb.append("            diagOffset = tokens.input().length();\n");
-            sb.append("        }\n");
-            sb.append("        int diagLen;\n");
-            sb.append("        if (skipFirst >= 0 && skipFirst < tokens.count() && skipLast < tokens.count()) {\n");
-            sb.append("            diagLen = tokens.endAt(skipLast) - tokens.startAt(skipFirst);\n");
-            sb.append("            if (diagLen < 1) diagLen = 1;\n");
-            sb.append("        } else {\n");
-            sb.append("            diagLen = 1;\n");
-            sb.append("        }\n");
-            sb.append("        String foundText;\n");
-            sb.append("        if (failedTok >= 0 && failedTok < tokens.count()) {\n");
-            sb.append("            foundText = String.valueOf(tokens.textAt(failedTok));\n");
-            sb.append("        } else {\n");
-            sb.append("            foundText = \"<end-of-input>\";\n");
-            sb.append("        }\n");
-            sb.append("        String expectedText = expected != null ? expected : \"valid input\";\n");
-            // 0.6.1 — Item G — guard diagnostic record by the cap. Position is
-            // still advanced unconditionally so the loop terminates correctly.
-            sb.append("        if (diagnostics.size() < maxDiagnostics) {\n");
-            sb.append("            diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
-            sb.append("                \"syntax error\", expectedText, foundText));\n");
-            sb.append("        }\n");
+            sb.append("        reportFailure(true, failedTok);\n");
             sb.append("        pos = newPos;\n");
             sb.append("    }\n\n");
             // Forced-advance helper: when the start rule succeeded but consumed no
@@ -866,17 +835,30 @@ public final class ParserGenerator {
             sb.append("        int errIdx = cst.beginNode(RULE_ERROR_KIND, atPos, parent);\n");
             sb.append("        cst.endNode(errIdx, atPos);\n");
             sb.append("        cst.setFlag(errIdx, CstArray.FLAG_ERROR);\n");
-            sb.append("        int diagOffset = tokens.startAt(atPos);\n");
-            sb.append("        int diagLen = tokens.endAt(atPos) - tokens.startAt(atPos);\n");
-            sb.append("        if (diagLen < 1) diagLen = 1;\n");
-            sb.append("        String foundText = String.valueOf(tokens.textAt(atPos));\n");
-            // 0.6.1 — Item G — guard diagnostic record by the cap. Position is
-            // still advanced unconditionally so the loop terminates correctly.
-            sb.append("        if (diagnostics.size() < maxDiagnostics) {\n");
-            sb.append("            diagnostics.add(Diagnostic.error(diagOffset, diagLen,\n");
+            sb.append("        reportFailure(false, atPos);\n");
+            sb.append("        pos = tokens.nextNonTrivia(atPos + 1);\n");
+            sb.append("    }\n\n");
+            // 0.7.4 — the one place a parse diagnostic is built (issue #47). Its site is the furthest
+            // failure when that lies beyond `reached`, the first unconsumed token; offset, length,
+            // expected and found are all read from that one token. Sites strictly advance: an
+            // attempt that fails no further than an already reported token is a consequence of
+            // recovery restarting inside the same mistake, and is not a second mistake.
+            sb.append("    private void reportFailure(boolean startFailed, int reached) {\n");
+            sb.append("        boolean beyond = errorTok > reached;\n");
+            sb.append("        int tok = beyond ? errorTok : reached;\n");
+            sb.append("        if (tok <= lastReportedTok || diagnostics.size() >= maxDiagnostics) return;\n");
+            sb.append("        lastReportedTok = tok;\n");
+            sb.append("        boolean atEnd = tok >= tokens.count();\n");
+            sb.append("        int offset = atEnd ? tokens.input().length() : tokens.startAt(tok);\n");
+            sb.append("        int length = atEnd ? 1 : Math.max(1, tokens.endAt(tok) - offset);\n");
+            sb.append("        String foundText = atEnd ? \"<end-of-input>\" : String.valueOf(tokens.textAt(tok));\n");
+            sb.append("        if (startFailed || beyond) {\n");
+            sb.append("            diagnostics.add(Diagnostic.error(offset, length, \"syntax error\",\n");
+            sb.append("                expected != null ? expected : \"valid input\", foundText));\n");
+            sb.append("        } else {\n");
+            sb.append("            diagnostics.add(Diagnostic.error(offset, length,\n");
             sb.append("                \"trailing input not consumed\", \"end of input\", foundText));\n");
             sb.append("        }\n");
-            sb.append("        pos = tokens.nextNonTrivia(atPos + 1);\n");
             sb.append("    }\n\n");
             // Helpers used by the recovery loop. nextSyncToken walks forward from
             // {@code from} through content tokens (skipping trivia) returning the
@@ -929,11 +911,9 @@ public final class ParserGenerator {
             // alternatives explored beyond an earlier failure usually yield more
             // useful diagnostics. Replaces the old throwing error() helper.
             sb.append("    private boolean fail(String expectedText, int ruleKind) {\n");
-            sb.append("        int offset = pos < tokens.count() ? tokens.startAt(pos) : tokens.input().length();\n");
-            sb.append("        if (offset >= errorPos) {\n");
-            sb.append("            errorPos = offset;\n");
+            sb.append("        if (pos >= errorTok) {\n");
+            sb.append("            errorTok = pos;\n");
             sb.append("            expected = expectedText;\n");
-            sb.append("            found = peek();\n");
             sb.append("            lastFailedRuleKind = ruleKind;\n");
             sb.append("        }\n");
             sb.append("        return false;\n");
@@ -1058,7 +1038,7 @@ public final class ParserGenerator {
                 sb.append("        int memoEnd = cst.memoTryReplay(RULE_")
                   .append(rule.name())
                   .append("_KIND, pos, parent);\n");
-                sb.append("        if (memoEnd >= 0) { pos = memoEnd; return true; }\n");
+                emitMemoisedCall(sb, rule.name());
             }
 
             sb.append("        int firstTok = pos;\n");
@@ -1079,16 +1059,49 @@ public final class ParserGenerator {
             sb.append("        if (lastTok >= tokens.count()) lastTok = tokens.count() - 1;\n");
             sb.append("        if (lastTok < firstTok) lastTok = firstTok;\n");
             sb.append("        cst.endNode(self, lastTok);\n");
-            if (memoised) {
-                sb.append("        cst.memoArm(RULE_")
-                  .append(rule.name())
-                  .append("_KIND, savedPos, pos, savedNodes);\n");
-            }
-
             sb.append("        return true;\n");
             sb.append("    }\n");
 
             return Result.success(sb.toString());
+        }
+
+        /**
+         * Close the memoised rule's entry method and open its body method. Replaying a subtree skips the
+         * parse that recorded failures inside it, so the memo carries the furthest one: without it, a
+         * mistake first met inside a negative lookahead (which discards failures) would be reported
+         * somewhere else with {@code %memo} than without.
+         */
+        private static void emitMemoisedCall(StringBuilder sb, String ruleName) {
+            sb.append("        if (memoEnd >= 0) {\n");
+            sb.append("            pos = memoEnd;\n");
+            sb.append("            if (memoErrorTok >= 0 && memoErrorTok >= errorTok) {\n");
+            sb.append("                errorTok = memoErrorTok;\n");
+            sb.append("                expected = memoExpected;\n");
+            sb.append("                lastFailedRuleKind = memoFailedRuleKind;\n");
+            sb.append("            }\n");
+            sb.append("            return true;\n");
+            sb.append("        }\n");
+            sb.append("        int memoPos = pos;\n");
+            sb.append("        int memoNodes = cst.currentNodeCount();\n");
+            sb.append("        int outerErrorTok = errorTok;\n");
+            sb.append("        String outerExpected = expected;\n");
+            sb.append("        int outerFailedRuleKind = lastFailedRuleKind;\n");
+            sb.append("        errorTok = -1;\n");
+            sb.append("        boolean matched = parse").append(ruleName).append("$body(parent);\n");
+            sb.append("        if (matched) {\n");
+            sb.append("            cst.memoArm(RULE_").append(ruleName).append("_KIND, memoPos, pos, memoNodes);\n");
+            sb.append("            memoErrorTok = errorTok;\n");
+            sb.append("            memoExpected = expected;\n");
+            sb.append("            memoFailedRuleKind = lastFailedRuleKind;\n");
+            sb.append("        }\n");
+            sb.append("        if (errorTok < outerErrorTok) {\n");
+            sb.append("            errorTok = outerErrorTok;\n");
+            sb.append("            expected = outerExpected;\n");
+            sb.append("            lastFailedRuleKind = outerFailedRuleKind;\n");
+            sb.append("        }\n");
+            sb.append("        return matched;\n");
+            sb.append("    }\n");
+            sb.append("    private boolean parse").append(ruleName).append("$body(int parent) {\n");
         }
 
         /**
@@ -2029,6 +2042,14 @@ public final class ParserGenerator {
                   .append("int savedNodes_")
                   .append(label)
                   .append(" = cst.currentNodeCount();\n");
+            // A failure inside a negative lookahead is the predicate SUCCEEDING, so it must not
+            // become the reported furthest failure.
+            ctx.sb.append(indent(body.depth)).append("int savedErrorTok_").append(label).append(" = errorTok;\n");
+            ctx.sb.append(indent(body.depth)).append("String savedExpected_").append(label).append(" = expected;\n");
+            ctx.sb.append(indent(body.depth))
+                  .append("int savedFailedKind_")
+                  .append(label)
+                  .append(" = lastFailedRuleKind;\n");
             ctx.sb.append(indent(body.depth)).append("boolean notMatched_").append(label).append(" = false;\n");
             ctx.sb.append(indent(body.depth)).append("do {\n");
             var inner2 = body.indentedWithFailAction(EmitContext.BREAK_FAIL_ACTION);
@@ -2042,6 +2063,12 @@ public final class ParserGenerator {
             ctx.sb.append(indent(body.depth)).append("} while (false);\n");
             ctx.sb.append(indent(body.depth)).append("pos = savedPos_").append(label).append(";\n");
             ctx.sb.append(indent(body.depth)).append("cst.truncate(savedNodes_").append(label).append(");\n");
+            ctx.sb.append(indent(body.depth)).append("errorTok = savedErrorTok_").append(label).append(";\n");
+            ctx.sb.append(indent(body.depth)).append("expected = savedExpected_").append(label).append(";\n");
+            ctx.sb.append(indent(body.depth))
+                  .append("lastFailedRuleKind = savedFailedKind_")
+                  .append(label)
+                  .append(";\n");
             ctx.sb.append(indent(body.depth))
                   .append("if (notMatched_")
                   .append(label)

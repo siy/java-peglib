@@ -1,6 +1,5 @@
 package org.pragmatica.peg.incremental;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -171,7 +170,9 @@ public final class IncrementalParser {
                                                   int offset,
                                                   int oldLen,
                                                   String newText) {
-        if (checkpointNode == CstArray.NO_NODE) {
+        // Error recovery is decided by the whole attempt, not by one subtree, so neither the tree nor
+        // the diagnostics of a broken file can be patched locally. Only clean to clean is spliced.
+        if (checkpointNode == CstArray.NO_NODE || !diagnostics.isEmpty()) {
             return Option.none();
         }
 
@@ -198,42 +199,21 @@ public final class IncrementalParser {
         var oldTokenCount = tokens.count();
         var newTokenCount = splicedTokens.count();
         var tokenDelta = newTokenCount - oldTokenCount;
-        // Map the checkpoint's first-token byte offset into the new token stream.
-        // Tokens before the edit keep their byte position; the first token of the
-        // checkpoint is always at-or-before the edit (we just verified the edit is
-        // inside the checkpoint span), so its new index is simply oldFirstToken
-        // when the edit is strictly inside, since prefix tokens are preserved
-        // verbatim by spliceLex. We still scan defensively to find a token whose
-        // start matches the old start (lex may merge boundary tokens).
-        var oldStartByte = oldFirstToken < oldTokenCount
-                           ? tokens.startAt(oldFirstToken)
-                           : 0;
-        // When the edit lies at-or-before the checkpoint's first token byte position,
-        // the first token has shifted by (newText.length() - oldLen). When the edit
-        // lies strictly inside the checkpoint (after the first token), the first
-        // token's byte position is unchanged. Try both candidates with hint-based
-        // scan to handle either case.
-        var editByteDelta = newText.length() - oldLen;
-        var primaryStart = offset <= oldStartByte
-                           ? oldStartByte + editByteDelta
-                           : oldStartByte;
-        var mappedFirst = findTokenStartingAt(splicedTokens, primaryStart, oldFirstToken);
-
-        if (mappedFirst < 0 && primaryStart != oldStartByte) {
-            mappedFirst = findTokenStartingAt(splicedTokens, oldStartByte, oldFirstToken);
-        }
-
-        if (mappedFirst < 0) {
+        // No room left for the subtree's own tokens, or an empty subtree with no token to anchor to.
+        if (oldLastToken < oldFirstToken || oldLastToken + tokenDelta < oldFirstToken) {
             return Option.none();
         }
-
-        final var newFirstToken = mappedFirst;
-        // Drive the generated parser into the checkpoint rule starting at the
-        // mapped token. The result's CST has a synthetic _ROOT wrapping the
+        // The subtree is reparsed in place, so every token outside it must be the one the surrounding
+        // tree was built from: text inserted at either edge can add a token there or change a neighbour.
+        if (!sameOutside(tokens, splicedTokens, oldFirstToken, oldLastToken, tokenDelta)) {
+            return Option.none();
+        }
+        // Drive the generated parser into the checkpoint rule starting at its
+        // first token. The result's CST has a synthetic _ROOT wrapping the
         // parsed subtree as its first child. Any reflection failure becomes a
         // Result.failure that we map back to Option.none().
         var subtreeOpt = Result.lift(PartialReparseFailed::new,
-                                     () -> parser.parseRuleFrom(splicedTokens, newFirstToken, ruleKind))
+                                     () -> parser.parseRuleFrom(splicedTokens, oldFirstToken, ruleKind))
                                .option();
 
         if (subtreeOpt.isEmpty()) {
@@ -241,6 +221,11 @@ public final class IncrementalParser {
         }
 
         var subtree = subtreeOpt.unwrap();
+
+        if (!subtree.diagnostics().isEmpty()) {
+            return Option.none();
+        }
+
         var subCst = subtree.cst();
         var subRoot = subCst.rootIndex();
 
@@ -253,12 +238,13 @@ public final class IncrementalParser {
         if (grafted == CstArray.NO_NODE) {
             return Option.none();
         }
-        // The grafted subtree must end exactly where it should — at the token
+        // The grafted subtree must start at the same token (whitespace inserted at its edge moves it, and
+        // its ancestors with it) and end exactly where it should — at the token
         // that corresponds to the old checkpoint's last token plus the delta.
         var subLast = subCst.lastTokenAt(grafted);
         var expectedLast = oldLastToken + tokenDelta;
 
-        if (subLast != expectedLast) {
+        if (subCst.firstTokenAt(grafted) != oldFirstToken || subLast != expectedLast) {
             // The partial parse stopped short or overshot: bail to full reparse
             // so we don't produce a CST whose siblings now overlap the parsed
             // region.
@@ -270,77 +256,31 @@ public final class IncrementalParser {
         }
 
         var newCst = cst.spliceSubtree(checkpointNode, subCst, grafted, splicedTokens, tokenDelta, true);
-        // Diagnostics: keep diagnostics that apply outside the old checkpoint
-        // span (with byte offsets shifted past the edit); merge in the partial
-        // parse's diagnostics (which have correct byte offsets relative to the
-        // new input because parseRuleFrom received splicedTokens whose input is
-        // the post-edit string).
-        var byteDelta = newText.length() - oldLen;
-        var mergedDiagnostics = mergeDiagnostics(diagnostics, subtree.diagnostics(), cpStart, cpEnd, byteDelta);
 
-        return Option.some(new ParseResult(newCst, mergedDiagnostics));
+        return Option.some(new ParseResult(newCst, List.of()));
     }
 
-    /**
-     * Return the token index in {@code arr} whose start byte equals
-     * {@code targetStart}. The hint is used to seed a small linear scan; if no
-     * token matches we fall back to a wider scan and finally return -1.
-     */
-    private static int findTokenStartingAt(TokenArray arr, int targetStart, int hint) {
-        var n = arr.count();
-
-        if (n == 0) {
-            return -1;
-        }
-        // Hint search window: scan +/- 4 around the hint first.
-        var lo = Math.max(0, hint - 4);
-        var hi = Math.min(n, hint + 5);
-
-        for (var i = lo; i < hi; i++) {
-            if (arr.startAt(i) == targetStart) {
-                return i;
-            }
-        }
-        // Full scan fallback.
-        for (var i = 0; i < n; i++) {
-            if (arr.startAt(i) == targetStart) {
-                return i;
+    /** Whether the tokens before {@code first} and after {@code last} keep their kind, order and text boundaries. */
+    private static boolean sameOutside(TokenArray before, TokenArray after, int first, int last, int tokenDelta) {
+        for (var i = 0; i < first; i++) {
+            if (before.kindAt(i) != after.kindAt(i) || before.startAt(i) != after.startAt(i)) {
+                return false;
             }
         }
 
-        return -1;
-    }
+        if (before.startAt(first) != after.startAt(first)) {
+            return false;
+        }
 
-    /**
-     * Merge old diagnostics that fall outside the spliced byte range with the
-     * partial parse's diagnostics. Old diagnostics whose offset is past
-     * {@code oldEnd} get shifted by {@code byteDelta}; ones inside
-     * {@code [oldStart, oldEnd)} are dropped (they were superseded by the
-     * partial parse, which produced its own diagnostics for that region).
-     */
-    private static List<Diagnostic> mergeDiagnostics(List<Diagnostic> oldDiagnostics,
-                                                     List<Diagnostic> subDiagnostics,
-                                                     int oldStart,
-                                                     int oldEnd,
-                                                     int byteDelta) {
-        var out = new ArrayList<Diagnostic>(oldDiagnostics.size() + subDiagnostics.size());
+        var byteDelta = after.input().length() - before.input().length();
 
-        for (var d : oldDiagnostics) {
-            if (d.offset() < oldStart) {
-                out.add(d);
-            } else if (d.offset() >= oldEnd) {
-                out.add(new Diagnostic(d.severity(),
-                                       d.offset() + byteDelta,
-                                       d.length(),
-                                       d.message(),
-                                       d.expected(),
-                                       d.found()));
+        for (var i = last + 1; i < before.count(); i++) {
+            if (before.kindAt(i) != after.kindAt(i + tokenDelta) || before.startAt(i) + byteDelta != after.startAt(i + tokenDelta)) {
+                return false;
             }
         }
 
-        out.addAll(subDiagnostics);
-
-        return out;
+        return true;
     }
 
     /** D.1.2 telemetry — number of partial-reparse paths taken since construction. */

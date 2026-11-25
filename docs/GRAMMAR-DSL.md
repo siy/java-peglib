@@ -435,6 +435,11 @@ Each finding has a stable tag for tooling integration. The full catalog:
 | `grammar.inert-directive` | WARNING | A directive the front-end accepts but the generator never reads (`%word`, rule-level `%expected` / `%recover` / `%tag`) — declaring it has no effect |
 | `grammar.unreachable-kind` | WARNING | A rule was allocated a token kind that no input can produce, because a higher-priority rule matches the same text *(0.7.3)* |
 | `grammar.token-boundary-ignored` | WARNING | A rule wraps its whole body in `< >` but could not be compiled as one token, so it is parsed as separate tokens *(0.7.3)* |
+| `grammar.char-class-no-op` | ERROR | A consuming character class in a PARSER rule (pinned with `%parser`) is never evaluated. An optional class that no content token can start with is harmless and reported as `char-class-never-matches` instead *(0.7.4)* |
+| `grammar.char-class-never-matches` | ERROR / WARNING | A character class in a MIXED rule that no content token can start with, typically whitespace. WARNING where it is optional (`[ \t]*`), since skipping it is harmless *(0.7.4)* |
+| `grammar.char-class-whole-token` | WARNING | A character class in a MIXED rule can match a token longer than one character, and consumes all of it *(0.7.4)* |
+| `grammar.whitespace-lookahead` | WARNING | `&[ \t]` / `![ \t]` outside a lexer rule always passes *(0.7.4)* |
+| `grammar.whitespace-literal` | WARNING | A whitespace-only literal outside a lexer rule becomes a content token, taking that exact text from trivia grammar-wide *(0.7.4)* |
 
 The ambiguous-choice check is conservative: it flags only choices where
 *every* alternative has a fixed literal prefix. Rule-reference-prefixed or
@@ -450,17 +455,18 @@ Output format (Rust-`cargo check` style):
 
 ```text
 warning[grammar.ambiguous-choice]: choice alternatives at positions [0, 1] share first char 'f' (potential ambiguity)
-  --> grammar.peg: Start
+  --> grammar.peg:1: Start
 
 error[grammar.duplicate-literal]: rule 'Start' has duplicate literal 'foo' in Choice
-  --> grammar.peg: Start
+  --> grammar.peg:1: Start
 
 analyzer: 1 error, 1 warning, 0 info
 ```
 
 The CLI exits with status `0` when no errors, `1` when errors found,
 `2` on I/O or grammar-parse failure. Warnings/info alone do not fail
-the CLI — only `ERROR` findings do.
+the CLI — only `ERROR` findings do. Since 0.7.4 `peglib:generate` fails on `ERROR` findings too. A
+finding on an imported rule has no line: its position belongs to another file.
 
 ### `grammar.unreachable-kind` — a rule that is allocated but never produced
 
@@ -490,6 +496,29 @@ its live siblings. This is the shape of the `IFNOTEXISTS` failure — a fused le
 as no input contains it, allocated and never matched.
 
 Run it with `peglib:lint` or `peglib:check`.
+
+### Character-level constructs outside a lexer rule
+
+*(0.7.4)* The parser sees tokens, and trivia between them is already skipped. What a consuming
+`[...]` does therefore depends on how the rule containing it is classified:
+
+| Rule | A consuming `[...]` |
+|---|---|
+| LEXER | matches characters, as written |
+| MIXED (a class beside a reference to another rule) | consumes one whole token if the token's *first* character is in the class |
+| PARSER (pinned with `%parser`) | is not evaluated and consumes nothing |
+
+```peg
+NumericType <- < 'double'i [ \t]+ 'precision'i > TypeModifiers?   # never matches: MIXED
+NumericType <- DoublePrecision TypeModifiers?                     # matches
+DoublePrecision <- < 'double'i [ \t]+ 'precision'i >              # LEXER
+```
+
+Whether a class can match is decided from the lexer DFA, not from whether it looks like whitespace: a
+grammar in which a newline is a content token may test for `[\n]`, and is not reported.
+
+A lookahead over characters is likewise not evaluated outside a lexer rule. Word-boundary guards
+(`'var' ![a-zA-Z0-9_$]`) are not reported, because the lexer already enforces the boundary.
 
 ## Actions were removed in 0.6.0
 

@@ -350,12 +350,8 @@ public final class GrammarLexer {
         while (!isAtEnd()) {
             char c = peek();
 
-            if (c == ' ' || c == '\t' || c == '\r') {
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
                 advance();
-            } else if (c == '\n') {
-                advance();
-                line++;
-                column = 1;
             } else if (c == '#') {
                 // Line comment
                 while (!isAtEnd() && peek() != '\n') {

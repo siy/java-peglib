@@ -82,6 +82,43 @@ class MemoInteractionTest {
         .isNotEmpty();
     }
 
+    /** A replayed subtree skips the parse that recorded the furthest failure, so the memo carries it. */
+    @Test
+    void replayAfterNegativeLookahead_reportsTheSameSiteAsReparsing() {
+        var plain = """
+                Start <- !(Args '!') Args ';'
+                Args  <- Pair (',' Pair)*
+                Pair  <- Name '=' Num
+                Name  <- [a-z]+
+                Num   <- [0-9]+
+                %whitespace <- [ ]+
+                """;
+        var input = "a = 1, b = c;";
+        var memo = PegParser.fromGrammar(plain + "%memo Args\n").unwrap().parse(input).diagnostics();
+
+        assertThat(memo).isEqualTo(PegParser.fromGrammar(plain).unwrap().parse(input).diagnostics());
+        assertThat(memo.getFirst().offset()).isEqualTo(input.indexOf("c"));
+    }
+
+    /** The far failure of the first alternative must survive the memoised rule parsed after it. */
+    @Test
+    void memoisedRule_keepsAFartherFailureRecordedBeforeIt() {
+        var plain = """
+                Start <- Name '=' Num ';' Name '!' / Args '.'
+                Args  <- Pair (',' Pair)*
+                Pair  <- Name '=' Num
+                Name  <- [a-z]+
+                Num   <- [0-9]+
+                %whitespace <- [ ]+
+                """;
+        var input = "a = 1; b ?";
+        var query = "Q <- '?'\n";
+        var memo = PegParser.fromGrammar(plain + query + "%memo Args\n").unwrap().parse(input).diagnostics();
+
+        assertThat(memo).isEqualTo(PegParser.fromGrammar(plain + query).unwrap().parse(input).diagnostics());
+        assertThat(memo.getFirst().offset()).isEqualTo(input.indexOf("?"));
+    }
+
     @Test
     void incrementalEdit_withMemoActive_matchesFullReparse() {
         var parser = PegParser.fromGrammar(INCREMENTAL_MEMO)
