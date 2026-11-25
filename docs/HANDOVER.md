@@ -12,7 +12,7 @@ match (issue #48) and parse errors reported at 1:1 (issue #47).
 
 | | |
 |---|---|
-| **Tests** | **733** across 5 modules, 0 failures, 0 skips; `clean verify` with lint and format on |
+| **Tests** | **738** across 5 modules, 0 failures, 0 skips; `clean verify` with lint and format on |
 | **Corpus** | identical to the released 0.7.3 jar on the same checkout, file for file (99.44%; see `tools/langtools-corpus/README.md`) |
 | **0.7.3 vs 0.7.4, corpus + corruptions** | 22,732 parses, 8,628 of them broken: acceptance and CST identical on all; diagnostics 664,295 → 288,681; no broken parse lost all its diagnostics |
 | **Generated source** | `GLexer` and `GVisitor` byte-identical on `java25.peg` and `postgres.peg` |

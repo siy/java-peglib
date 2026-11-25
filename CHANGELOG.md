@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.4] - 2026-11-25
 
-733 tests across 5 modules, 0 failures, 0 skips. On the same 5,696-file langtools corpus, 0.7.3 and
+738 tests across 5 modules, 0 failures, 0 skips. On the same 5,696-file langtools corpus, 0.7.3 and
 0.7.4 agree with javac identically (99.44%, the same 32 disagreements; one false accept is new to the
 corpus, not to the parser).
 
@@ -33,8 +33,9 @@ corpus, not to the parser).
   by subtree although recovery is decided by the whole attempt, and a token inserted at a subtree's
   edge was skipped. A partial reparse is now taken only from a clean tree to a clean subtree, and only
   when every token outside the subtree is unchanged. Cost: while a file has errors, each edit is a full
-  reparse. Not covered, as before: an
-  edit that makes an earlier alternative *above* the checkpoint match, or that a lookahead outside the
+  reparse. Still not covered (of 18,017
+  edits over five grammars built to hit it, 0.7.3 got 2,227 wrong and 0.7.4 gets 43, 12 of which 0.7.3 got
+  right): an edit that makes an earlier alternative *above* the checkpoint match, or that a lookahead outside the
   checkpoint inspects; and the windowed re-lex looking one token to each side, so an edit that changes
   tokens further away (opening a comment, for example) can differ from a full parse (issue #49).
 
